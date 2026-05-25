@@ -1,0 +1,130 @@
+use ard/decode
+use ard/maybe
+
+use linear-cli/linear/client
+use linear-cli/util
+use vaxis
+
+fn text_or_dash(value: Str?) Str {
+  match value {
+    v => v,
+    _ => "-",
+  }
+}
+
+fn nullable_name(obj: Dynamic, field: Str) Str? {
+  let nested = decode::run(
+    obj,
+    decode::field(field, decode::nullable(decode::dynamic)),
+  ).expect("Missing nested field")
+
+  match nested {
+    value => {
+      let name = decode::run(value, decode::field("name", decode::string)).expect("Missing nested name")
+      maybe::some(name)
+    },
+    _ => maybe::none(),
+  }
+}
+
+fn draw_header(vx: vaxis::Vaxis, name: Str, email: Str, count: Int) Void {
+  vaxis::draw_text(vx, 2, 1, "Linear TUI")
+  vaxis::draw_text(vx, 2, 2, "User: {name} <{email}>")
+  vaxis::draw_text(vx, 2, 3, "Open issues assigned to you: {count.to_str()}")
+  vaxis::draw_text(vx, 2, 4, "Press r to refresh, q to quit")
+  vaxis::draw_text(vx, 2, 6, "ID          State          Team        Project              Title")
+  vaxis::draw_text(
+    vx,
+    2,
+    7,
+    "────────────────────────────────────────────────────────────────────────────────",
+  )
+}
+
+fn draw_issue(vx: vaxis::Vaxis, node: Dynamic, row: Int) Void {
+  let identifier = decode::run(node, decode::field("identifier", decode::string)).expect("Missing 'identifier'")
+  let title = decode::run(node, decode::field("title", decode::string)).expect("Missing 'title'")
+  let state = text_or_dash(nullable_name(node, "state"))
+
+  let team_obj = decode::run(node, decode::field("team", decode::nullable(decode::dynamic))).expect("Missing 'team'")
+
+  let team = match team_obj {
+    t => decode::run(t, decode::field("key", decode::string)).expect("Missing 'team.key'"),
+    _ => "-",
+  }
+
+  let project = text_or_dash(nullable_name(node, "project"))
+  vaxis::draw_text(vx, 2, row, "{identifier}  {state}  {team}  {project}  {title}")
+}
+
+fn fetch_board(api_key: Str) Dynamic!Str {
+  let viewer_data = try client::graphql(api_key, "query \{ viewer \{ id name email \} \}")
+
+  let viewer = decode::run(viewer_data, decode::field("viewer", decode::dynamic)).expect("Missing 'viewer'")
+  let my_id = decode::run(viewer, decode::field("id", decode::string)).expect("Missing viewer id")
+
+  let query = "query \{ issues(first: 50, filter: \{ assignee: \{ id: \{ eq: \"{my_id}\" \} \}, state: \{ type: \{ nin: [\"completed\", \"canceled\"] \} \} \}) \{ nodes \{ id identifier title state \{ name type \} team \{ name key \} project \{ name \} priority \} \} \}"
+  let data = try client::graphql(api_key, query)
+
+  Result::ok(Dynamic::object(["viewer": viewer, "issues": data]))
+}
+
+fn draw_board(vx: vaxis::Vaxis, board: Dynamic, message: Str) Void!Str {
+  vaxis::clear(vx)
+
+  let viewer = decode::run(board, decode::field("viewer", decode::dynamic)).expect("Missing board viewer")
+  let name = decode::run(viewer, decode::field("name", decode::string)).expect("Missing viewer name")
+  let email = decode::run(viewer, decode::field("email", decode::string)).expect("Missing viewer email")
+  let issues = decode::run(
+    board,
+    decode::path(["issues", "issues", "nodes"], decode::list(decode::dynamic)),
+  ).expect("Missing issues")
+
+  draw_header(vx, name, email, issues.size())
+
+  for issue, idx in issues {
+    if idx < 20 {
+      draw_issue(vx, issue, idx + 8)
+    }
+  }
+
+  if issues.size() == 0 {
+    vaxis::draw_text(vx, 2, 9, "No open assigned issues 🎉")
+  }
+
+  vaxis::draw_text(vx, 2, 30, message)
+  try vaxis::render(vx)
+  Result::ok(())
+}
+
+fn run_loop(api_key: Str, vx: vaxis::Vaxis, board: Dynamic) Void!Str {
+  mut current = board
+  mut message = "Loaded."
+  mut running = true
+
+  while running {
+    try draw_board(vx, current, message)
+    let key = try vaxis::read_key(vx)
+
+    if key == "q" {
+      running = false
+    } else if key == "r" {
+      current = try fetch_board(api_key)
+      message = "Refreshed."
+    } else if key == "redraw" {
+      message = "Redrawn."
+    } else {
+      message = "Press r to refresh, q to quit."
+    }
+  }
+
+  Result::ok(())
+}
+
+fn run(args: [Str]) {
+  let api_key = util::get_api_key().expect("Failed to load API key")
+  let board = fetch_board(api_key).expect("Failed to query board")
+  let vx = vaxis::new("Linear CLI").expect("open terminal")
+  run_loop(api_key, vx, board).expect("run TUI")
+  vaxis::close(vx).expect("close terminal")
+}

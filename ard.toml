@@ -1,2 +1,5 @@
 name = "linear-cli"
 ard = ">= 0.13.0"
+
+[dependencies]
+vaxis = { git = "git@github.com:akonwi/vaxis-ard.git", commit = "76f7c1bcb3a8243d2b569e8d9947b85b3ae64fae" }
