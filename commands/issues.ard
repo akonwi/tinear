@@ -35,7 +35,7 @@ fn run(args: [Str]) {
 
   let filter_str = build_filter_part(team_filter, status_filter)
 
-  let query = "query \{ issues(first: 50{filter_str}) \{ nodes \{ id identifier title state \{ name \} team \{ name key \} assignee \{ name \} priority \} \} \}"
+  let query = "query \{ issues(first: 50{filter_str}) \{ nodes \{ id identifier title state \{ name \} team \{ name key \} project \{ name \} assignee \{ name \} priority \} \} \}"
 
   let data = client::graphql(api_key, query).expect("Failed to query issues")
   let nodes = decode::run(data, decode::path(["issues", "nodes"], decode::list(decode::dynamic)))
@@ -58,6 +58,16 @@ fn run(args: [Str]) {
         _ => maybe::none(),
       }
 
+      let project_obj = decode::run(node, decode::field("project", decode::nullable(decode::dynamic)))
+        .expect("Missing 'project'")
+      let project = match project_obj {
+        p => {
+          let name = decode::run(p, decode::field("name", decode::string)).expect("Missing 'project.name'")
+          maybe::some(name)
+        },
+        _ => maybe::none(),
+      }
+
       let assignee_obj = decode::run(node, decode::field("assignee", decode::nullable(decode::dynamic)))
         .expect("Missing 'assignee'")
       let assignee = match assignee_obj {
@@ -72,11 +82,15 @@ fn run(args: [Str]) {
         s => s,
         _ => "-",
       }
+      let project_str = match project {
+        p => p,
+        _ => "-",
+      }
       let assignee_str = match assignee {
         a => a,
         _ => "-",
       }
-      io::print("{identifier}  {title}  [{state_str}]  {assignee_str}")
+      io::print("{identifier}  {title}  [{state_str}]  {project_str}  {assignee_str}")
     }
   }
 }

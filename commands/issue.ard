@@ -11,7 +11,7 @@ fn run_inner(args: [Str]) Void!Str {
   let api_key = util::get_api_key().expect("Failed to load API key")
   let json_mode = util::has_flag(args, "--json")
 
-  let query = "query \{ issue(id: \"{issue_id}\") \{ id identifier title description state \{ id name type \} team \{ id name key \} assignee \{ id name email \} priority labels \{ nodes \{ name \} \} url \} \}"
+  let query = "query \{ issue(id: \"{issue_id}\") \{ id identifier title description state \{ id name type \} team \{ id name key \} project \{ id name \} assignee \{ id name email \} priority labels \{ nodes \{ name \} \} url \} \}"
 
   let data = client::graphql(api_key, query).expect("Failed to query issue")
   let issue = decode::run(data, decode::field("issue", decode::dynamic))
@@ -36,6 +36,16 @@ fn run_inner(args: [Str]) Void!Str {
   let team = match team_obj {
     t => {
       let name = decode::run(t, decode::field("name", decode::string)).expect("Missing 'team.name'")
+      maybe::some(name)
+    },
+    _ => maybe::none(),
+  }
+
+  let project_obj = decode::run(issue, decode::field("project", decode::nullable(decode::dynamic)))
+    .expect("Missing 'project'")
+  let project = match project_obj {
+    p => {
+      let name = decode::run(p, decode::field("name", decode::string)).expect("Missing 'project.name'")
       maybe::some(name)
     },
     _ => maybe::none(),
@@ -93,6 +103,11 @@ fn run_inner(args: [Str]) Void!Str {
       _ => "-",
     }
     io::print("  Team:       {team_str}")
+    let project_str = match project {
+      p => p,
+      _ => "-",
+    }
+    io::print("  Project:    {project_str}")
     let assignee_str = match assignee {
       a => a,
       _ => "-",
