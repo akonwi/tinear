@@ -1,0 +1,36 @@
+use ard/argv
+use ard/io
+use ard/list as List
+use linear-cli/commands/me
+use linear-cli/commands/teams
+use linear-cli/commands/issues
+use linear-cli/commands/issue
+use linear-cli/commands/create
+use linear-cli/commands/update
+use linear-cli/util
+
+fn main() {
+  let args = argv::load()
+
+  let cmd = match args.arguments.size() {
+    0 => "help",
+    _ => args.arguments.at(0),
+  }
+
+  let cmd_args = List::drop(from: args.arguments, till: 1)
+
+  match cmd {
+    "me" => me::run(cmd_args),
+    "teams" => teams::run(cmd_args),
+    "issues" => issues::run(cmd_args),
+    "issue" => issue::run(cmd_args),
+    "create-issue" => create::run(cmd_args),
+    "update-issue" => update::run(cmd_args),
+    "help" => util::print_usage(),
+    _ => {
+      io::print("Unknown command: {cmd}")
+      io::print("")
+      util::print_usage()
+    },
+  }
+}

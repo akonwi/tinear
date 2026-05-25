@@ -1,0 +1,93 @@
+use ard/io
+use ard/json
+use ard/maybe
+use linear-cli/config
+
+fn get_api_key() Str!Str {
+  let cfg = try config::load()
+  Result::ok(cfg.api_key)
+}
+
+fn has_flag(args: [Str], flag: Str) Bool {
+  mut found = false
+  for arg in args {
+    if arg == flag {
+      found = true
+    }
+  }
+  found
+}
+
+fn join_strs(items: [Str], separator: Str) Str {
+  mut result = ""
+  for item, idx in items {
+    if idx > 0 {
+      result =+ separator
+    }
+    result =+ item
+  }
+  result
+}
+
+fn positional_arg(args: [Str]) Str? {
+  mut result: Str? = maybe::none()
+  for arg in args {
+    if result.is_none() and not arg.starts_with("--") {
+      result = maybe::some(arg)
+    }
+  }
+  result
+}
+
+fn flag_value(args: [Str], flag: Str) Str? {
+  mut found = false
+  mut result: Str? = maybe::none()
+  for arg in args {
+    if found and result.is_none() {
+      result = maybe::some(arg)
+    }
+    if arg == flag {
+      found = true
+    }
+  }
+  result
+}
+
+fn require_opt(opt: Str?, msg: Str) Str!Str {
+  match opt {
+    v => Result::ok(v),
+    _ => Result::err(msg),
+  }
+}
+
+fn require_flag(args: [Str], flag: Str, usage: Str) Str!Str {
+  match flag_value(args, flag) {
+    val => Result::ok(val),
+    _ => {
+      io::print("Error: {flag} is required")
+      io::print("Usage: {usage}")
+      Result::err("missing {flag}")
+    },
+  }
+}
+
+fn print_usage() {
+  io::print("linear-cli -- CLI for Linear")
+  io::print("")
+  io::print("Usage: linear-cli <command> [options]")
+  io::print("")
+  io::print("Commands:")
+  io::print("  me                              Show current user")
+  io::print("  teams [--json]                  List teams")
+  io::print("  issues [--team <key>] [--status <name>] [--json]")
+  io::print("                                  List issues")
+  io::print("  issue <id> [--json]             View issue details")
+  io::print("  create-issue --team <key> --title <title> [--description <desc>]")
+  io::print("                                  Create an issue")
+  io::print("  update-issue <id> --status <name>")
+  io::print("                                  Update issue status")
+  io::print("  help                            Show this help")
+  io::print("")
+  io::print("API key is read from ~/.linear-cli/config as JSON:")
+  io::print("with an api_key field")
+}

@@ -1,0 +1,33 @@
+use ard/io
+use ard/json
+use ard/decode
+use linear-cli/linear/client
+use linear-cli/util
+
+fn run(args: [Str]) {
+  let api_key = util::get_api_key().expect("Failed to load API key")
+  let json_mode = util::has_flag(args, "--json")
+
+  let data = client::graphql(
+    api_key,
+    "query \{ teams \{ nodes \{ id name key description \} \} \}",
+  ).expect("Failed to query teams")
+
+  let nodes = decode::run(data, decode::path(["teams", "nodes"], decode::list(decode::dynamic)))
+    .expect("Missing 'teams.nodes' in response")
+
+  if json_mode {
+    io::print(json::encode(nodes).expect("encode JSON"))
+  } else {
+    for node in nodes {
+      let key = decode::run(node, decode::field("key", decode::string)).expect("Missing 'key'")
+      let name = decode::run(node, decode::field("name", decode::string)).expect("Missing 'name'")
+      let desc = decode::run(node, decode::field("description", decode::nullable(decode::string)))
+        .expect("Missing 'description'")
+      match desc {
+        d => io::print("{key}  {name}  {d}"),
+        _ => io::print("{key}  {name}"),
+      }
+    }
+  }
+}
