@@ -86,6 +86,7 @@ fn print_usage() {
   io::print("                                  Create an issue")
   io::print("  update-issue <id> --status <name>")
   io::print("                                  Update issue status")
+  io::print("  my-board [--json]               List your open issues")
   io::print("  login                           Save an API key to ~/.linear-cli/config")
   io::print("  help                            Show this help")
   io::print("")

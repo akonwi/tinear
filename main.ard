@@ -8,6 +8,7 @@ use linear-cli/commands/issue
 use linear-cli/commands/create
 use linear-cli/commands/update
 use linear-cli/commands/login
+use linear-cli/commands/my_board
 use linear-cli/util
 
 fn main() {
@@ -28,6 +29,7 @@ fn main() {
     "create-issue" => create::run(cmd_args),
     "update-issue" => update::run(cmd_args),
     "login" => login::run(cmd_args),
+    "my-board" => my_board::run(cmd_args),
     "help" => util::print_usage(),
     _ => {
       io::print("Unknown command: {cmd}")

@@ -31,6 +31,7 @@ ard run main.ard         # run directly
 - `me` — viewer query, plain text = `Name <email>`
 - `teams` — lists all teams
 - `issues [--team <key>] [--status <name>] [--json]` — lists issues, filter args optional
+- `my-board [--json]` — lists open issues assigned to you
 - `issue <id> [--json]` — detail view with labels, description
 - `create-issue --team <key> --title <title> [--description <desc>]` — resolves team key to ID
 - `update-issue <id> --status <name>` — resolves issue team, looks up state by name
