@@ -86,8 +86,9 @@ fn print_usage() {
   io::print("                                  Create an issue")
   io::print("  update-issue <id> --status <name>")
   io::print("                                  Update issue status")
+  io::print("  login                           Save an API key to ~/.linear-cli/config")
   io::print("  help                            Show this help")
   io::print("")
-  io::print("API key is read from ~/.linear-cli/config as JSON:")
-  io::print("with an api_key field")
+  io::print("API key from LINEAR_API_KEY env var or ~/.linear-cli/config (JSON)")
+  io::print("Run 'login' to set it up interactively")
 }

@@ -34,6 +34,7 @@ ard run main.ard         # run directly
 - `issue <id> [--json]` — detail view with labels, description
 - `create-issue --team <key> --title <title> [--description <desc>]` — resolves team key to ID
 - `update-issue <id> --status <name>` — resolves issue team, looks up state by name
+- `login` — prompts for API key, validates via `viewer` query, saves to `~/.linear-cli/config`
 
 ## Ard Language Notes
 

@@ -1,0 +1,70 @@
+use ard/io
+use ard/fs
+use ard/json
+use ard/env
+use ard/decode
+use linear-cli/linear/client
+use linear-cli/util
+
+struct LoginConfig {
+  api_key: Str,
+}
+
+fn get_home_dir() Str!Str {
+  match env::get("HOME") {
+    h => Result::ok(h),
+    _ => Result::err("HOME is not set"),
+  }
+}
+
+fn require_non_empty(s: Str, msg: Str) Str!Str {
+  match s.is_empty() {
+    false => Result::ok(s),
+    true => Result::err(msg),
+  }
+}
+
+fn run_inner(args: [Str]) Void!Str {
+  io::print("Linear CLI Login")
+  io::print("")
+  io::print("Get your API key from Linear Settings -> API -> Personal API keys.")
+  io::print("")
+
+  io::print("Enter your API key:")
+  let raw_key = try io::read_line()
+  let api_key = try require_non_empty(raw_key, "API key cannot be empty")
+
+  io::print("Validating...")
+  match client::graphql(api_key, "query \{ viewer \{ id name email \} \}") {
+    ok(data) => {
+      let viewer = decode::run(data, decode::field("viewer", decode::dynamic)).expect("Missing viewer")
+      let name = decode::run(viewer, decode::field("name", decode::string)).expect("Missing name")
+      let email = decode::run(viewer, decode::field("email", decode::string)).expect("Missing email")
+
+      let home = try get_home_dir()
+      let config_dir = "{home}/.linear-cli"
+
+      match fs::exists(config_dir) {
+        false => try fs::create_dir(config_dir),
+        true => (),
+      }
+
+      let config_content = json::encode(LoginConfig{api_key: api_key}).expect("encode config")
+      let config_path = "{config_dir}/config"
+      try fs::write(config_path, config_content)
+
+      io::print("")
+      io::print("Logged in as {name} <{email}>")
+      io::print("API key saved to {config_path}")
+      Result::ok(())
+    },
+    err(e) => Result::err("Invalid API key: {e}"),
+  }
+}
+
+fn run(args: [Str]) {
+  match run_inner(args) {
+    ok(_) => (),
+    err(e) => io::print("Error: {e}"),
+  }
+}
