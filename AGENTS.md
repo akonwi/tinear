@@ -5,6 +5,9 @@ CLI for [Linear](https://linear.app/) built with [Ard](https://ard.run).
 ## Build & Run
 
 ```bash
+# After editing vaxis/ bindings, sync to vendor first:
+./scripts/sync-vaxis.sh
+
 ard check main.ard      # type-check
 ard build main.ard       # build -> ard-out/go/main
 ard run main.ard         # run directly
@@ -19,6 +22,17 @@ ard run main.ard         # run directly
 | `util.ard` | Flag parsing, error helpers, usage printer |
 | `linear/client.ard` | Shared GraphQL client (one `graphql()` function) |
 | `commands/*.ard` | One file per subcommand, each exports `fn run(args: [Str])` |
+| `vaxis/` | Terminal UI bindings (FFI + Ard extern declarations) |
+
+## Vaxis Module
+
+`vaxis/` is a first-class project module imported as:
+```ard
+use linear-cli/vaxis/vaxis as vaxis
+```
+
+The `ffi/` subdirectory contains the Go host functions. The module is
+self-contained and extractable as a standalone package later.
 
 ## Key Patterns
 

@@ -3,7 +3,7 @@ use ard/maybe
 
 use linear-cli/linear/client
 use linear-cli/util
-use vaxis
+use linear-cli/vaxis
 
 fn text_or_dash(value: Str?) Str {
   match value {

@@ -1,0 +1,23 @@
+# linear-cli docs
+
+Architecture Decision Records (ADRs) and project documentation.
+
+## ADRs
+
+[Architecture Decision Records](adrs/) capture important decisions about
+the project's architecture, tooling, conventions, and design. Each ADR is a
+short, lightweight document explaining the context, the decision, and its
+consequences.
+
+### How to add an ADR
+
+```bash
+# Copy the template
+cp docs/adrs/0001-record-architecture-decisions.md docs/adrs/NNNN-title-of-decision.md
+
+# Edit, filling in Status, Context, Decision, Consequences
+# Use the next sequential number
+```
+
+See [0001: Record Architecture Decisions](adrs/0001-record-architecture-decisions.md)
+for the full template and conventions.
