@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted — Phase 1 implemented
 
 ## Context
 

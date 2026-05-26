@@ -5,116 +5,234 @@ use linear-cli/linear/client
 use linear-cli/util
 use linear-cli/vaxis
 
-fn text_or_dash(value: Str?) Str {
-  match value {
-    v => v,
-    _ => "-",
+struct AppState {
+  api_key: Str,
+  vx: vaxis::Vaxis,
+  notifications: [Dynamic],
+  cursor: Int,
+  viewer_name: Str,
+  viewer_email: Str,
+  message: Str,
+  running: Bool,
+  tabs: [Str],
+  active_tab: Int,
+}
+
+fn format_type(n_type: Str) Str {
+  match n_type {
+    "issueAssignedToYou" => "Assigned",
+    "issueComment" => "Comment",
+    "issueStatusChanged" => "Status",
+    "issuePriorityChanged" => "Priority",
+    "issueAddedToView" => "Added",
+    "issueAddedToProject" => "Project",
+    "projectUpdate" => "Update",
+    _ => n_type,
   }
 }
 
-fn nullable_name(obj: Dynamic, field: Str) Str? {
-  let nested = decode::run(
-    obj,
-    decode::field(field, decode::nullable(decode::dynamic)),
-  ).expect("Missing nested field")
-
-  match nested {
-    value => {
-      let name = decode::run(value, decode::field("name", decode::string)).expect("Missing nested name")
-      maybe::some(name)
+fn pad_str(s: Str, width: Int) Str {
+  let len = s.size()
+  match len >= width {
+    true => s,
+    false => {
+      mut result = s
+      let pads = width - len - 1
+      for i in 0..pads {
+        result =+ " "
+      }
+      result
     },
-    _ => maybe::none(),
   }
 }
 
-fn draw_header(vx: vaxis::Vaxis, name: Str, email: Str, count: Int) Void {
-  vaxis::draw_text(vx, 2, 1, "Linear TUI")
-  vaxis::draw_text(vx, 2, 2, "User: {name} <{email}>")
-  vaxis::draw_text(vx, 2, 3, "Open issues assigned to you: {count.to_str()}")
-  vaxis::draw_text(vx, 2, 4, "Press r to refresh, q to quit")
-  vaxis::draw_text(vx, 2, 6, "ID          State          Team        Project              Title")
-  vaxis::draw_text(
-    vx,
-    2,
-    7,
-    "────────────────────────────────────────────────────────────────────────────────",
-  )
-}
-
-fn draw_issue(vx: vaxis::Vaxis, node: Dynamic, row: Int) Void {
-  let identifier = decode::run(node, decode::field("identifier", decode::string)).expect("Missing 'identifier'")
-  let title = decode::run(node, decode::field("title", decode::string)).expect("Missing 'title'")
-  let state = text_or_dash(nullable_name(node, "state"))
-
-  let team_obj = decode::run(node, decode::field("team", decode::nullable(decode::dynamic))).expect("Missing 'team'")
-
-  let team = match team_obj {
-    t => decode::run(t, decode::field("key", decode::string)).expect("Missing 'team.key'"),
-    _ => "-",
-  }
-
-  let project = text_or_dash(nullable_name(node, "project"))
-  vaxis::draw_text(vx, 2, row, "{identifier}  {state}  {team}  {project}  {title}")
-}
-
-fn fetch_board(api_key: Str) Dynamic!Str {
-  let viewer_data = try client::graphql(api_key, "query \{ viewer \{ id name email \} \}")
-
-  let viewer = decode::run(viewer_data, decode::field("viewer", decode::dynamic)).expect("Missing 'viewer'")
-  let my_id = decode::run(viewer, decode::field("id", decode::string)).expect("Missing viewer id")
-
-  let query = "query \{ issues(first: 50, filter: \{ assignee: \{ id: \{ eq: \"{my_id}\" \} \}, state: \{ type: \{ nin: [\"completed\", \"canceled\"] \} \} \}) \{ nodes \{ id identifier title state \{ name type \} team \{ name key \} project \{ name \} priority \} \} \}"
-  let data = try client::graphql(api_key, query)
-
-  Result::ok(Dynamic::object(["viewer": viewer, "issues": data]))
-}
-
-fn draw_board(vx: vaxis::Vaxis, board: Dynamic, message: Str) Void!Str {
-  vaxis::clear(vx)
-
-  let viewer = decode::run(board, decode::field("viewer", decode::dynamic)).expect("Missing board viewer")
-  let name = decode::run(viewer, decode::field("name", decode::string)).expect("Missing viewer name")
-  let email = decode::run(viewer, decode::field("email", decode::string)).expect("Missing viewer email")
-  let issues = decode::run(
-    board,
-    decode::path(["issues", "issues", "nodes"], decode::list(decode::dynamic)),
-  ).expect("Missing issues")
-
-  draw_header(vx, name, email, issues.size())
-
-  for issue, idx in issues {
-    if idx < 20 {
-      draw_issue(vx, issue, idx + 8)
+fn unread_count(items: [Dynamic]) Int {
+  mut count = 0
+  for item in items {
+    let read_at = decode::run(item, decode::field("readAt", decode::nullable(decode::string)))
+      .expect("Missing readAt")
+    if read_at.is_none() {
+      count = count + 1
     }
   }
-
-  if issues.size() == 0 {
-    vaxis::draw_text(vx, 2, 9, "No open assigned issues 🎉")
-  }
-
-  vaxis::draw_text(vx, 2, 30, message)
-  try vaxis::render(vx)
-  Result::ok(())
+  count
 }
 
-fn run_loop(api_key: Str, vx: vaxis::Vaxis, board: Dynamic) Void!Str {
-  mut current = board
+fn term_height(vx: vaxis::Vaxis) Int {
+  let win = vaxis::root(vx)
+  vaxis::window_height(win)
+}
+
+fn status_bar_y(vx: vaxis::Vaxis) Int {
+  let h = term_height(vx)
+  h - 1
+}
+
+fn content_height(vx: vaxis::Vaxis) Int {
+  term_height(vx) - 4
+}
+
+fn fetch_inbox(api_key: Str) [Dynamic]!Str {
+  let query = "query \{ notifications(first: 50) \{ nodes \{ id type createdAt readAt ... on IssueNotification \{ issue \{ id identifier title \} \} actor \{ id name \} \} \} \}"
+  let data = try client::graphql(api_key, query)
+  let nodes = decode::run(data, decode::path(["notifications", "nodes"], decode::list(decode::dynamic)))
+    .expect("Missing notifications nodes")
+  Result::ok(nodes)
+}
+
+fn fetch_viewer(api_key: Str) Dynamic!Str {
+  let data = try client::graphql(api_key, "query \{ viewer \{ id name email \} \}")
+  let viewer = decode::run(data, decode::field("viewer", decode::dynamic)).expect("Missing viewer")
+  Result::ok(viewer)
+}
+
+fn draw_tab_bar(vx: vaxis::Vaxis, tabs: [Str], active: Int) Void {
+  mut x = 1
+  for tab, idx in tabs {
+    let label = " {tab} "
+    if idx == active {
+      vaxis::draw_text(vx, x, 0, "[" + tab + "]")
+      x = x + tab.size() + 2 + 1
+    } else {
+      vaxis::draw_text(vx, x, 0, label)
+      x = x + label.size()
+    }
+  }
+  // Separator line below tabs
+  let win = vaxis::root(vx)
+  let w = vaxis::window_width(win)
+  mut sep = ""
+  for i in 0..(w - 1) {
+    sep =+ "─"
+  }
+  vaxis::draw_text(vx, 0, 1, sep)
+}
+
+fn draw_column_headers(vx: vaxis::Vaxis, y: Int) Void {
+  vaxis::draw_text(vx, 2, y, pad_str("Type", 14) + " " + pad_str("Issue", 10) + " " + pad_str("Actor", 16) + " When")
+  vaxis::draw_text(vx, 2, y + 1, "────────────── ────────── ──────────────── ────────────")
+}
+
+fn draw_inbox_screen(state: AppState) Void {
+  let vx = state.vx
+  vaxis::clear(vx)
+
+  // Tab bar
+  draw_tab_bar(vx, state.tabs, state.active_tab)
+
+  // Header line
+  let unread = unread_count(state.notifications)
+  vaxis::draw_text(vx, 1, 2, "{unread} unread")
+
+  // Column headers
+  draw_column_headers(vx, 4)
+
+  // Notification rows
+  let max_rows = content_height(vx) - 6
+  for notif, idx in state.notifications {
+    if idx >= max_rows {
+      break
+    }
+
+    let n_type = decode::run(notif, decode::field("type", decode::string)).expect("Missing type")
+    let type_label = format_type(n_type)
+
+    let read_at = decode::run(notif, decode::field("readAt", decode::nullable(decode::string)))
+      .expect("Missing readAt")
+    let indicator = match read_at {
+      val => "○",
+      _ => "●",
+    }
+
+    let issue_obj = decode::run(notif, decode::field("issue", decode::nullable(decode::dynamic)))
+      .expect("Missing issue")
+    let issue_id = match issue_obj {
+      iss => decode::run(iss, decode::field("identifier", decode::string)).expect("Missing issue identifier"),
+      _ => "-",
+    }
+
+    let actor_obj = decode::run(notif, decode::field("actor", decode::nullable(decode::dynamic)))
+      .expect("Missing actor")
+    let actor_name = match actor_obj {
+      act => decode::run(act, decode::field("name", decode::string)).expect("Missing actor name"),
+      _ => "-",
+    }
+
+    let cursor_mark = match idx == state.cursor {
+      true => "▸",
+      false => " ",
+    }
+
+    let row = 6 + idx
+    let line = "{cursor_mark} {indicator} {pad_str(type_label, 12)} {pad_str(issue_id, 10)} {pad_str(actor_name, 16)}"
+    vaxis::draw_text(vx, 2, row, line)
+  }
+
+  // Message
+  vaxis::draw_text(vx, 2, max_rows + 6, state.message)
+
+  // Status bar (last row)
+  let sb_y = status_bar_y(vx)
+  vaxis::draw_text(vx, 1, sb_y, "↑↓ select · r refresh · : command · q quit")
+
+  vaxis::render(vx).expect("render")
+}
+
+fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
+  let viewer = try fetch_viewer(api_key)
+  let name = decode::run(viewer, decode::field("name", decode::string)).expect("Missing name")
+  let email = decode::run(viewer, decode::field("email", decode::string)).expect("Missing email")
+
+  let initial_notifs = try fetch_inbox(api_key)
+  mut notifs = initial_notifs
+  mut cursor = 0
   mut message = "Loaded."
   mut running = true
 
   while running {
-    try draw_board(vx, current, message)
+    let tabs = ["Inbox"]
+    let state = AppState{
+      api_key: api_key,
+      vx: vx,
+      notifications: notifs,
+      cursor: cursor,
+      viewer_name: name,
+      viewer_email: email,
+      message: message,
+      running: running,
+      tabs: tabs,
+      active_tab: 0,
+    }
+    draw_inbox_screen(state)
+
     let key = try vaxis::read_key(vx)
 
     if key == "q" {
       running = false
     } else if key == "r" {
-      current = try fetch_board(api_key)
-      message = "Refreshed."
+      match fetch_inbox(api_key) {
+        ok(nodes) => {
+          notifs = nodes
+          cursor = 0
+          message = "Refreshed."
+        },
+        err(e) => {
+          message = "Error: {e}"
+        },
+      }
+    } else if key == "up" {
+      if cursor > 0 {
+        cursor = cursor - 1
+      }
+    } else if key == "down" {
+      let max = notifs.size() - 1
+      if cursor < max {
+        cursor = cursor + 1
+      }
     } else if key == "redraw" {
-      message = "Redrawn."
+      message = ""
     } else {
-      message = "Press r to refresh, q to quit."
+      message = "↑↓ navigate · r refresh · q quit"
     }
   }
 
@@ -123,8 +241,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis, board: Dynamic) Void!Str {
 
 fn run(args: [Str]) {
   let api_key = util::get_api_key().expect("Failed to load API key")
-  let board = fetch_board(api_key).expect("Failed to query board")
   let vx = vaxis::new("Linear CLI").expect("open terminal")
-  run_loop(api_key, vx, board).expect("run TUI")
+  run_loop(api_key, vx).expect("run TUI")
   vaxis::close(vx).expect("close terminal")
 }

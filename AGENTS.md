@@ -50,6 +50,7 @@ self-contained and extractable as a standalone package later.
 - `create-issue --team <key> --title <title> [--description <desc>]` — resolves team key to ID
 - `update-issue <id> --status <name>` — resolves issue team, looks up state by name
 - `login` — prompts for API key, validates via `viewer` query, saves to `~/.linear-cli/config`
+- `tui` — interactive TUI (inbox as default tab, tab bar, status bar with keybinding hints)
 
 ## Ard Language Notes
 
