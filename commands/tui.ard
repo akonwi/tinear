@@ -7,10 +7,18 @@ use linear-cli/os
 use linear-cli/util
 use linear-cli/vaxis
 
+struct BoardColumn {
+  name: Str,
+  state_type: Str,
+  position: Float,
+  issues: [Dynamic],
+}
+
 struct AppState {
   api_key: Str,
   vx: vaxis::Vaxis,
   notifications: [Dynamic],
+  columns: [BoardColumn],
   cursor: Int,
   comment_cursor: Int,
   viewer_name: Str,
@@ -105,6 +113,119 @@ fn archive_notification(api_key: Str, id: Str) Void!Str {
   let mutation = "mutation \{ notificationArchive(id: \"{id}\") \{ success \} \}"
   let _ = try client::graphql(api_key, mutation)
   Result::ok(())
+}
+
+// Workflow rank for a Linear state type. Lower is earlier in the flow.
+// We sort columns primarily by this so cross-team merged states land
+// in a predictable order regardless of which team's position came
+// first.
+fn state_type_rank(state_type: Str) Int {
+  match state_type {
+    "triage" => 0,
+    "backlog" => 1,
+    "unstarted" => 2,
+    "started" => 3,
+    "completed" => 4,
+    _ => 5,
+  }
+}
+
+// Sort board columns by workflow type, then by position within type.
+fn sort_columns_by_position(cols: [BoardColumn]) [BoardColumn] {
+  let n = cols.size()
+  if n < 2 {
+    cols
+  } else {
+    mut result = cols
+    // Bubble sort — fine for the handful of states a team has.
+    for i in 0..(n - 2) {
+      for j in 0..(n - 2 - i) {
+        let a = result.at(j)
+        let b = result.at(j + 1)
+        let ra = state_type_rank(a.state_type)
+        let rb = state_type_rank(b.state_type)
+        let swap = match ra == rb {
+          true => a.position > b.position,
+          false => ra > rb,
+        }
+        if swap {
+          result.set(j, b)
+          result.set(j + 1, a)
+        }
+      }
+    }
+    result
+  }
+}
+
+// State names to exclude from the board view. These are typically
+// dead-end states whose issues shouldn't clutter the active workflow.
+fn is_hidden_state(name: Str) Bool {
+  name == "Duplicate"
+}
+
+// Build the board: issues assigned to me grouped by workflow state.
+// Excludes canceled states. Caps `completed` columns to the first 10
+// issues returned by the API.
+fn fetch_board(api_key: Str, my_id: Str) [BoardColumn]!Str {
+  let query = "query \{ issues(first: 200, filter: \{ assignee: \{ id: \{ eq: \"{my_id}\" \} \}, state: \{ type: \{ nin: [\"canceled\"] \} \} \}) \{ nodes \{ id identifier title priority state \{ id name type position \} \} \} \}"
+  let data = try client::graphql(api_key, query)
+  let issues = decode::run(data, decode::path(["issues", "nodes"], decode::list(decode::dynamic)))
+    .expect("Missing issues.nodes")
+
+  // First pass: collect unique state names. Each team has its own set
+  // of workflow states, but states with the same name across teams
+  // (e.g. "Backlog") should share a column. Type and position come
+  // from the first state encountered for that name.
+  mut state_names: [Str] = []
+  mut state_types: [Str] = []
+  mut state_positions: [Float] = []
+  for issue in issues {
+    let state = decode::run(issue, decode::field("state", decode::dynamic)).expect("Missing state")
+    let sname = decode::run(state, decode::field("name", decode::string)).expect("Missing state.name")
+    if (not is_hidden_state(sname)) {
+      mut seen = false
+      for existing in state_names {
+        if existing == sname {
+          seen = true
+        }
+      }
+      if (not seen) {
+        state_names.push(sname)
+        state_types.push(decode::run(state, decode::field("type", decode::string)).expect("Missing state.type"))
+        state_positions.push(decode::run(state, decode::field("position", decode::float)).expect("Missing state.position"))
+      }
+    }
+  }
+
+  // Second pass: build columns, filtering issues into the right one
+  // and capping completed at 10.
+  mut columns: [BoardColumn] = []
+  for sname, idx in state_names {
+    let is_completed = state_types.at(idx) == "completed"
+    let cap = match is_completed {
+      true => 10,
+      false => 200,
+    }
+    mut col_issues: [Dynamic] = []
+    mut count = 0
+    for issue in issues {
+      let iss_name = decode::run(issue, decode::path(["state", "name"], decode::string))
+        .expect("Missing state.name on issue")
+      if iss_name == sname and count < cap {
+        col_issues.push(issue)
+        count = count + 1
+      }
+    }
+    columns.push(BoardColumn{
+      name: sname,
+      state_type: state_types.at(idx),
+      position: state_positions.at(idx),
+      issues: col_issues,
+    })
+  }
+
+  Result::ok(sort_columns_by_position(columns))
 }
 
 fn fetch_inbox(api_key: Str) [Dynamic]!Str {
@@ -626,13 +747,41 @@ fn draw_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int,
 
 }
 
+// Width of a single column in the board view, including its right gap.
+fn board_column_width() Int { 22 }
+fn board_column_gap() Int { 3 }
+
 fn draw_board_content(state: AppState) Void {
   let vx = state.vx
-  vaxis::draw_text(vx, 2, 3, "My Board")
-  vaxis::draw_text(vx, 2, 4, "(coming soon)")
-
   let sb_y = status_bar_y(vx)
-  vaxis::draw_text(vx, 1, sb_y, "Tab switch · r refresh")
+
+  if state.columns.size() == 0 {
+    vaxis::draw_text(vx, 1, 3, "No issues assigned to you.")
+    vaxis::draw_text(vx, 1, sb_y, "Tab switch · r refresh")
+  } else {
+    let col_w = board_column_width()
+    let gap = board_column_gap()
+    mut x = 1
+    for col in state.columns {
+      // Header: name + count, with "· last 10" for completed columns.
+      let suffix = match col.state_type == "completed" {
+        true => " · last 10",
+        false => "",
+      }
+      let header = "{col.name} ({col.issues.size()}){suffix}"
+      vaxis::draw_text(vx, x, 3, truncate_with_ellipsis(header, col_w))
+
+      // Divider under header.
+      mut divider = ""
+      for i in 0..(col_w - 2) {
+        divider =+ "─"
+      }
+      vaxis::draw_text(vx, x, 4, divider)
+
+      x = x + col_w + gap
+    }
+    vaxis::draw_text(vx, 1, sb_y, "Tab switch · r refresh")
+  }
 }
 
 fn draw_inbox_content(state: AppState) Void {
@@ -712,11 +861,18 @@ fn draw_screen(state: AppState) Void {
 
 fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
   let viewer = try fetch_viewer(api_key)
+  let viewer_id = decode::run(viewer, decode::field("id", decode::string)).expect("Missing id")
   let name = decode::run(viewer, decode::field("name", decode::string)).expect("Missing name")
   let email = decode::run(viewer, decode::field("email", decode::string)).expect("Missing email")
 
   let initial_notifs = try fetch_inbox(api_key)
+  // Board fetch is best-effort; if it fails we still want the inbox.
+  let initial_columns: [BoardColumn] = match fetch_board(api_key, viewer_id) {
+    ok(cols) => cols,
+    err(_) => [],
+  }
   mut notifs = initial_notifs
+  mut columns = initial_columns
   mut cursor = 0
   mut comment_cursor = 0
   mut detail_mode = false
@@ -729,6 +885,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
       api_key: api_key,
       vx: vx,
       notifications: notifs,
+      columns: columns,
       cursor: cursor,
       comment_cursor: comment_cursor,
       viewer_name: name,
