@@ -2,6 +2,7 @@ use ard/http
 use ard/json
 use ard/decode
 use ard/maybe
+use ard/dynamic
 
 fn send_query(api_key: Str, body: Str) Dynamic!Str {
   let req = http::Request{
@@ -11,7 +12,7 @@ fn send_query(api_key: Str, body: Str) Dynamic!Str {
       "Content-Type": "application/json",
       "Authorization": api_key,
     ],
-    body: maybe::some(body),
+    body: maybe::some(dynamic::from_str(body)),
   }
   let res = try http::send(req, 30)
 
