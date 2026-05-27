@@ -1,5 +1,4 @@
 use ard/decode
-use ard/maybe
 
 use linear-cli/linear/client
 use linear-cli/util
@@ -12,7 +11,7 @@ struct AppState {
   cursor: Int,
   viewer_name: Str,
   viewer_email: Str,
-  message: Str,
+
   running: Bool,
   tabs: [Str],
   active_tab: Int,
@@ -20,13 +19,15 @@ struct AppState {
 
 fn format_type(n_type: Str) Str {
   match n_type {
-    "issueAssignedToYou" => "Assigned",
-    "issueComment" => "Comment",
-    "issueStatusChanged" => "Status",
-    "issuePriorityChanged" => "Priority",
-    "issueAddedToView" => "Added",
-    "issueAddedToProject" => "Project",
-    "projectUpdate" => "Update",
+    "issueAssignedToYou" => "assigned",
+    "issueNewComment" => "commented",
+    "issueCommentMention" => "mentioned",
+    "issueMention" => "mentioned",
+    "issueCommentReaction" => "reacted",
+    "issueEmojiReaction" => "reacted",
+    "issueStatusChanged" => "changed status",
+    "issueThreadResolved" => "resolved",
+    "issueUnassignedFromYou" => "unassigned",
     _ => n_type,
   }
 }
@@ -46,17 +47,7 @@ fn pad_str(s: Str, width: Int) Str {
   }
 }
 
-fn unread_count(items: [Dynamic]) Int {
-  mut count = 0
-  for item in items {
-    let read_at = decode::run(item, decode::field("readAt", decode::nullable(decode::string)))
-      .expect("Missing readAt")
-    if read_at.is_none() {
-      count = count + 1
-    }
-  }
-  count
-}
+
 
 fn term_height(vx: vaxis::Vaxis) Int {
   let win = vaxis::root(vx)
@@ -73,7 +64,7 @@ fn content_height(vx: vaxis::Vaxis) Int {
 }
 
 fn fetch_inbox(api_key: Str) [Dynamic]!Str {
-  let query = "query \{ notifications(first: 50) \{ nodes \{ id type createdAt readAt ... on IssueNotification \{ issue \{ id identifier title \} \} actor \{ id name \} \} \} \}"
+  let query = "query \{ notifications(first: 50) \{ nodes \{ id type createdAt ... on IssueNotification \{ issue \{ id identifier title \} \} actor \{ id name \} \} \} \}"
   let data = try client::graphql(api_key, query)
   let nodes = decode::run(data, decode::path(["notifications", "nodes"], decode::list(decode::dynamic)))
     .expect("Missing notifications nodes")
@@ -108,11 +99,6 @@ fn draw_tab_bar(vx: vaxis::Vaxis, tabs: [Str], active: Int) Void {
   vaxis::draw_text(vx, 0, 1, sep)
 }
 
-fn draw_column_headers(vx: vaxis::Vaxis, y: Int) Void {
-  vaxis::draw_text(vx, 2, y, pad_str("Type", 14) + " " + pad_str("Issue", 10) + " " + pad_str("Actor", 16) + " When")
-  vaxis::draw_text(vx, 2, y + 1, "────────────── ────────── ──────────────── ────────────")
-}
-
 fn draw_inbox_screen(state: AppState) Void {
   let vx = state.vx
   vaxis::clear(vx)
@@ -120,15 +106,8 @@ fn draw_inbox_screen(state: AppState) Void {
   // Tab bar
   draw_tab_bar(vx, state.tabs, state.active_tab)
 
-  // Header line
-  let unread = unread_count(state.notifications)
-  vaxis::draw_text(vx, 1, 2, "{unread} unread")
-
-  // Column headers
-  draw_column_headers(vx, 4)
-
-  // Notification rows
-  let max_rows = content_height(vx) - 6
+  // Compact card rows
+  let max_rows = content_height(vx) - 4
   for notif, idx in state.notifications {
     if idx >= max_rows {
       break
@@ -137,25 +116,23 @@ fn draw_inbox_screen(state: AppState) Void {
     let n_type = decode::run(notif, decode::field("type", decode::string)).expect("Missing type")
     let type_label = format_type(n_type)
 
-    let read_at = decode::run(notif, decode::field("readAt", decode::nullable(decode::string)))
-      .expect("Missing readAt")
-    let indicator = match read_at {
-      val => "○",
-      _ => "●",
-    }
-
     let issue_obj = decode::run(notif, decode::field("issue", decode::nullable(decode::dynamic)))
       .expect("Missing issue")
     let issue_id = match issue_obj {
       iss => decode::run(iss, decode::field("identifier", decode::string)).expect("Missing issue identifier"),
-      _ => "-",
+      _ => "—",
+    }
+
+    let issue_title = match issue_obj {
+      iss => decode::run(iss, decode::field("title", decode::string)).expect("Missing issue title"),
+      _ => "",
     }
 
     let actor_obj = decode::run(notif, decode::field("actor", decode::nullable(decode::dynamic)))
       .expect("Missing actor")
     let actor_name = match actor_obj {
       act => decode::run(act, decode::field("name", decode::string)).expect("Missing actor name"),
-      _ => "-",
+      _ => "",
     }
 
     let cursor_mark = match idx == state.cursor {
@@ -163,13 +140,11 @@ fn draw_inbox_screen(state: AppState) Void {
       false => " ",
     }
 
-    let row = 6 + idx
-    let line = "{cursor_mark} {indicator} {pad_str(type_label, 12)} {pad_str(issue_id, 10)} {pad_str(actor_name, 16)}"
-    vaxis::draw_text(vx, 2, row, line)
+    // Compact card line
+    let row = 3 + idx
+    let line = "{cursor_mark} {issue_id}  {issue_title}  · {actor_name} {type_label}"
+    vaxis::draw_text(vx, 1, row, line)
   }
-
-  // Message
-  vaxis::draw_text(vx, 2, max_rows + 6, state.message)
 
   // Status bar (last row)
   let sb_y = status_bar_y(vx)
@@ -186,7 +161,6 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
   let initial_notifs = try fetch_inbox(api_key)
   mut notifs = initial_notifs
   mut cursor = 0
-  mut message = "Loaded."
   mut running = true
 
   while running {
@@ -198,7 +172,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
       cursor: cursor,
       viewer_name: name,
       viewer_email: email,
-      message: message,
+
       running: running,
       tabs: tabs,
       active_tab: 0,
@@ -214,10 +188,10 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
         ok(nodes) => {
           notifs = nodes
           cursor = 0
-          message = "Refreshed."
+          ()
         },
         err(e) => {
-          message = "Error: {e}"
+          ()
         },
       }
     } else if key == "up" {
@@ -230,9 +204,9 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
         cursor = cursor + 1
       }
     } else if key == "redraw" {
-      message = ""
+      ()
     } else {
-      message = "↑↓ navigate · r refresh · q quit"
+      ()
     }
   }
 
