@@ -357,6 +357,11 @@ func ReadEvent(term *vaxis.Vaxis) (vaxis.Event, error) {
 		if k, ok := ev.(vaxis.Key); ok && k.EventType != vaxis.EventPress {
 			continue
 		}
+		// vaxis needs to be told the new size before subsequent draws
+		// pick it up; otherwise it keeps drawing at the old dimensions.
+		if r, ok := ev.(vaxis.Resize); ok {
+			term.Resize(r)
+		}
 		return ev, nil
 	}
 	return vaxis.QuitEvent{}, nil
