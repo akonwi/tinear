@@ -96,6 +96,23 @@ fn fetch_inbox(api_key: Str) [Dynamic]!Str {
   Result::ok(nodes)
 }
 
+// Returns the named field as an Option<Dynamic>. Treats both a missing
+// field (e.g. a GraphQL inline fragment that didn't match) and an
+// explicit null value as None. Use this in place of
+// `decode::field(name, decode::nullable(...))` whenever the field may
+// be absent from the JSON.
+fn optional_field(data: Dynamic, name: Str) Dynamic? {
+  match decode::run(data, decode::field(name, decode::dynamic)) {
+    ok(v) => {
+      match decode::is_void(v) {
+        true => maybe::none(),
+        false => maybe::some(v),
+      }
+    },
+    err(_) => maybe::none(),
+  }
+}
+
 fn is_comment_type(n_type: Str) Bool {
   n_type == "issueNewComment" or n_type == "issueCommentMention" or n_type == "issueCommentReaction"
 }
@@ -108,8 +125,7 @@ struct StatusTransition {
 // Find the most recent status transition from the issue's history.
 // Returns empty strings if none is recorded.
 fn last_status_transition(notif: Dynamic) StatusTransition {
-  let issue_obj = decode::run(notif, decode::field("issue", decode::nullable(decode::dynamic)))
-    .expect("Missing issue")
+  let issue_obj = optional_field(notif, "issue")
   let entries: [Dynamic] = match issue_obj {
     iss => {
       let nodes_res = decode::run(iss, decode::path(["history", "nodes"], decode::list(decode::dynamic)))
@@ -133,10 +149,8 @@ fn last_status_transition(notif: Dynamic) StatusTransition {
   mut to_name = ""
   for entry in entries {
     if from_name.is_empty() {
-      let from_obj = decode::run(entry, decode::field("fromState", decode::nullable(decode::dynamic)))
-        .expect("Missing fromState")
-      let to_obj = decode::run(entry, decode::field("toState", decode::nullable(decode::dynamic)))
-        .expect("Missing toState")
+      let from_obj = optional_field(entry, "fromState")
+      let to_obj = optional_field(entry, "toState")
       let f = match from_obj {
         v => decode::run(v, decode::field("name", decode::string)).expect("Missing fromState.name"),
         _ => "",
@@ -156,8 +170,7 @@ fn last_status_transition(notif: Dynamic) StatusTransition {
 
 fn notif_comments(notif: Dynamic) [Dynamic] {
   let empty: [Dynamic] = []
-  let issue_obj = decode::run(notif, decode::field("issue", decode::nullable(decode::dynamic)))
-    .expect("Missing issue")
+  let issue_obj = optional_field(notif, "issue")
   match issue_obj {
     iss => {
       let nodes_res = decode::run(iss, decode::path(["comments", "nodes"], decode::list(decode::dynamic)))
@@ -171,8 +184,7 @@ fn notif_comments(notif: Dynamic) [Dynamic] {
 }
 
 fn trigger_comment_index(notif: Dynamic) Int {
-  let trigger_obj = decode::run(notif, decode::field("comment", decode::nullable(decode::dynamic)))
-    .expect("Missing comment")
+  let trigger_obj = optional_field(notif, "comment")
   let trigger_id = match trigger_obj {
     c => decode::run(c, decode::field("id", decode::string)).expect("Missing comment id"),
     _ => "",
@@ -232,15 +244,13 @@ fn draw_card_row(vx: vaxis::Vaxis, notif: Dynamic, idx: Int, cursor: Int, width:
   let n_type = decode::run(notif, decode::field("type", decode::string)).expect("Missing type")
   let type_label = format_type(n_type)
 
-  let actor_obj = decode::run(notif, decode::field("actor", decode::nullable(decode::dynamic)))
-    .expect("Missing actor")
+  let actor_obj = optional_field(notif, "actor")
   let actor_name = match actor_obj {
     act => decode::run(act, decode::field("name", decode::string)).expect("Missing actor name"),
     _ => "—",
   }
 
-  let issue_obj = decode::run(notif, decode::field("issue", decode::nullable(decode::dynamic)))
-    .expect("Missing issue")
+  let issue_obj = optional_field(notif, "issue")
   let issue_id = match issue_obj {
     iss => decode::run(iss, decode::field("identifier", decode::string)).expect("Missing issue identifier"),
     _ => "—",
@@ -285,8 +295,7 @@ fn draw_comment(vx: vaxis::Vaxis, comment: Dynamic, x: Int, y: Int, panel_width:
   let body = decode::run(comment, decode::field("body", decode::string)).expect("Missing body")
   let created = decode::run(comment, decode::field("createdAt", decode::nullable(decode::string)))
     .expect("Missing createdAt")
-  let user_obj = decode::run(comment, decode::field("user", decode::nullable(decode::dynamic)))
-    .expect("Missing user")
+  let user_obj = optional_field(comment, "user")
   let user_name = match user_obj {
     u => decode::run(u, decode::field("name", decode::string)).expect("Missing user name"),
     _ => "—",
@@ -314,15 +323,13 @@ fn draw_comment(vx: vaxis::Vaxis, comment: Dynamic, x: Int, y: Int, panel_width:
 fn draw_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int, comment_cursor: Int) Void {
   let n_type = decode::run(notif, decode::field("type", decode::string)).expect("Missing type")
 
-  let trigger_comment_obj = decode::run(notif, decode::field("comment", decode::nullable(decode::dynamic)))
-    .expect("Missing comment")
+  let trigger_comment_obj = optional_field(notif, "comment")
   let trigger_comment_id = match trigger_comment_obj {
     c => decode::run(c, decode::field("id", decode::string)).expect("Missing comment id"),
     _ => "",
   }
 
-  let issue_obj = decode::run(notif, decode::field("issue", decode::nullable(decode::dynamic)))
-    .expect("Missing issue")
+  let issue_obj = optional_field(notif, "issue")
   let issue_id = match issue_obj {
     iss => decode::run(iss, decode::field("identifier", decode::string)).expect("Missing issue identifier"),
     _ => "—",
@@ -343,8 +350,7 @@ fn draw_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int,
   }
 
   let state_obj = match issue_obj {
-    iss => decode::run(iss, decode::field("state", decode::nullable(decode::dynamic)))
-      .expect("Missing state"),
+    iss => optional_field(iss, "state"),
     _ => maybe::none(),
   }
   let state_name = match state_obj {
@@ -353,8 +359,7 @@ fn draw_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int,
   }
 
   let team_obj = match issue_obj {
-    iss => decode::run(iss, decode::field("team", decode::nullable(decode::dynamic)))
-      .expect("Missing team"),
+    iss => optional_field(iss, "team"),
     _ => maybe::none(),
   }
   let team_name = match team_obj {
@@ -363,8 +368,7 @@ fn draw_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int,
   }
 
   let project_obj = match issue_obj {
-    iss => decode::run(iss, decode::field("project", decode::nullable(decode::dynamic)))
-      .expect("Missing project"),
+    iss => optional_field(iss, "project"),
     _ => maybe::none(),
   }
   let project_name = match project_obj {
@@ -373,8 +377,7 @@ fn draw_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int,
   }
 
   let assignee_obj = match issue_obj {
-    iss => decode::run(iss, decode::field("assignee", decode::nullable(decode::dynamic)))
-      .expect("Missing assignee"),
+    iss => optional_field(iss, "assignee"),
     _ => maybe::none(),
   }
   let assignee_name = match assignee_obj {
