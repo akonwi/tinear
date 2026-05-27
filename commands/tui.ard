@@ -2,6 +2,7 @@ use ard/decode
 use ard/maybe
 
 use linear-cli/linear/client
+use linear-cli/os
 use linear-cli/util
 use linear-cli/vaxis
 
@@ -31,6 +32,16 @@ fn format_type(n_type: Str) Str {
     "issueStatusChanged" => "changed status",
     "issueThreadResolved" => "resolved",
     "issueUnassignedFromYou" => "unassigned",
+    "pullRequestApproved" => "approved",
+    "pullRequestChangesRequested" => "requested changes",
+    "pullRequestChecksFailed" => "checks failed",
+    "pullRequestComment" => "commented",
+    "pullRequestCommented" => "commented",
+    "pullRequestCommentMention" => "mentioned",
+    "pullRequestMention" => "mentioned",
+    "pullRequestReviewRequested" => "requested review",
+    "pullRequestReviewRerequested" => "re-requested review",
+    "pullRequestRemovedFromMergeQueue" => "removed from queue",
     _ => n_type,
   }
 }
@@ -89,7 +100,7 @@ fn content_height(vx: vaxis::Vaxis) Int {
 }
 
 fn fetch_inbox(api_key: Str) [Dynamic]!Str {
-  let query = "query \{ notifications(first: 50) \{ nodes \{ id type createdAt ... on IssueNotification \{ comment \{ id body createdAt user \{ name \} \} issue \{ id identifier title description priority state \{ name \} team \{ name key \} project \{ name \} assignee \{ name \} comments(first: 30) \{ nodes \{ id body createdAt user \{ name \} \} \} history(first: 10) \{ nodes \{ id createdAt fromState \{ name \} toState \{ name \} \} \} \} \} actor \{ id name \} \} \} \}"
+  let query = "query \{ notifications(first: 50) \{ nodes \{ id type createdAt title subtitle url ... on IssueNotification \{ comment \{ id body createdAt user \{ name \} \} issue \{ id identifier title description priority state \{ name \} team \{ name key \} project \{ name \} assignee \{ name \} comments(first: 30) \{ nodes \{ id body createdAt user \{ name \} \} \} history(first: 10) \{ nodes \{ id createdAt fromState \{ name \} toState \{ name \} \} \} \} \} ... on PullRequestNotification \{ pullRequestCommentId pullRequest \{ id number title url status sourceBranch targetBranch openedAt creator \{ name \} \} \} actor \{ id name \} \} \} \}"
   let data = try client::graphql(api_key, query)
   let nodes = decode::run(data, decode::path(["notifications", "nodes"], decode::list(decode::dynamic)))
     .expect("Missing notifications nodes")
@@ -115,6 +126,14 @@ fn optional_field(data: Dynamic, name: Str) Dynamic? {
 
 fn is_comment_type(n_type: Str) Bool {
   n_type == "issueNewComment" or n_type == "issueCommentMention" or n_type == "issueCommentReaction"
+}
+
+fn is_pr_type(n_type: Str) Bool {
+  n_type.starts_with("pullRequest")
+}
+
+fn is_pr_comment_type(n_type: Str) Bool {
+  n_type == "pullRequestComment" or n_type == "pullRequestCommented" or n_type == "pullRequestCommentMention"
 }
 
 struct StatusTransition {
@@ -240,6 +259,46 @@ fn sidebar_width(vx: vaxis::Vaxis) Int {
   }
 }
 
+struct IdTitle {
+  id: Str,
+  title: Str,
+}
+
+// For a notification, return its display identifier and title. PR
+// notifications use #<number> and PR title; issue notifications use
+// the issue identifier and issue title.
+fn notif_id_and_title(notif: Dynamic, n_type: Str) IdTitle {
+  match is_pr_type(n_type) {
+    true => {
+      let pr_obj = optional_field(notif, "pullRequest")
+      let id = match pr_obj {
+        pr => {
+          let num = decode::run(pr, decode::field("number", decode::int)).expect("Missing PR number")
+          "PR #{num.to_str()}"
+        },
+        _ => "—",
+      }
+      let title = match pr_obj {
+        pr => decode::run(pr, decode::field("title", decode::string)).expect("Missing PR title"),
+        _ => "",
+      }
+      IdTitle{id: id, title: title}
+    },
+    false => {
+      let issue_obj = optional_field(notif, "issue")
+      let id = match issue_obj {
+        iss => decode::run(iss, decode::field("identifier", decode::string)).expect("Missing issue identifier"),
+        _ => "—",
+      }
+      let title = match issue_obj {
+        iss => decode::run(iss, decode::field("title", decode::string)).expect("Missing issue title"),
+        _ => "",
+      }
+      IdTitle{id: id, title: title}
+    },
+  }
+}
+
 fn draw_card_row(vx: vaxis::Vaxis, notif: Dynamic, idx: Int, cursor: Int, width: Int) Void {
   let n_type = decode::run(notif, decode::field("type", decode::string)).expect("Missing type")
   let type_label = format_type(n_type)
@@ -250,24 +309,15 @@ fn draw_card_row(vx: vaxis::Vaxis, notif: Dynamic, idx: Int, cursor: Int, width:
     _ => "—",
   }
 
-  let issue_obj = optional_field(notif, "issue")
-  let issue_id = match issue_obj {
-    iss => decode::run(iss, decode::field("identifier", decode::string)).expect("Missing issue identifier"),
-    _ => "—",
-  }
-
-  let issue_title = match issue_obj {
-    iss => decode::run(iss, decode::field("title", decode::string)).expect("Missing issue title"),
-    _ => "",
-  }
+  let info = notif_id_and_title(notif, n_type)
 
   let cursor_mark = match idx == cursor {
     true => "▸",
     false => " ",
   }
 
-  let id_part = pad_str(issue_id, 8)
-  let line = "{cursor_mark} {id_part} {actor_name} {type_label}  {issue_title}"
+  let id_part = pad_str(info.id, 10)
+  let line = "{cursor_mark} {id_part} {actor_name} {type_label}  {info.title}"
   let row = 2 + idx
   vaxis::draw_text(vx, 1, row, truncate_with_ellipsis(line, width))
 }
@@ -290,6 +340,125 @@ fn priority_label(p: Int?) Str {
 fn draw_label_row(vx: vaxis::Vaxis, x: Int, y: Int, label: Str, value: Str) Void {
   vaxis::draw_text(vx, x, y, pad_str(label, 10) + value)
 }
+fn draw_pr_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int) Void {
+  let n_type = decode::run(notif, decode::field("type", decode::string)).expect("Missing type")
+  let type_label = format_type(n_type)
+
+  let actor_obj = optional_field(notif, "actor")
+  let actor_name = match actor_obj {
+    act => decode::run(act, decode::field("name", decode::string)).expect("Missing actor name"),
+    _ => "—",
+  }
+
+  let created = decode::run(notif, decode::field("createdAt", decode::nullable(decode::string)))
+    .expect("Missing createdAt")
+  let created_str = match created {
+    t => format_date(t),
+    _ => "",
+  }
+
+  let pr_obj = optional_field(notif, "pullRequest")
+
+  let pr_number = match pr_obj {
+    pr => decode::run(pr, decode::field("number", decode::int)).expect("Missing PR number"),
+    _ => 0,
+  }
+  let pr_title = match pr_obj {
+    pr => decode::run(pr, decode::field("title", decode::string)).expect("Missing PR title"),
+    _ => "",
+  }
+  let pr_status = match pr_obj {
+    pr => decode::run(pr, decode::field("status", decode::string)).expect("Missing PR status"),
+    _ => "—",
+  }
+  let pr_source = match pr_obj {
+    pr => decode::run(pr, decode::field("sourceBranch", decode::string)).expect("Missing source branch"),
+    _ => "—",
+  }
+  let pr_target = match pr_obj {
+    pr => decode::run(pr, decode::field("targetBranch", decode::string)).expect("Missing target branch"),
+    _ => "—",
+  }
+  let pr_url = match pr_obj {
+    pr => decode::run(pr, decode::field("url", decode::string)).expect("Missing PR url"),
+    _ => "",
+  }
+  let pr_opened = match pr_obj {
+    pr => format_date(decode::run(pr, decode::field("openedAt", decode::string)).expect("Missing openedAt")),
+    _ => "—",
+  }
+  let pr_creator = match pr_obj {
+    pr => {
+      let creator_obj = optional_field(pr, "creator")
+      match creator_obj {
+        c => decode::run(c, decode::field("name", decode::string)).expect("Missing creator name"),
+        _ => "—",
+      }
+    },
+    _ => "—",
+  }
+
+  // Header: PR #number — title
+  let id_str = "PR #{pr_number.to_str()}"
+  let header_title = truncate_with_ellipsis(pr_title, panel_width - id_str.size() - 3)
+  let header = "{id_str} — {header_title}"
+  vaxis::draw_text(vx, x, 2, header)
+
+  // Separator under header
+  mut sep = ""
+  for i in 0..(panel_width - 1) {
+    sep =+ "─"
+  }
+  vaxis::draw_text(vx, x, 3, sep)
+
+  // PR details block
+  draw_label_row(vx, x, 5, "Status",   pr_status)
+  draw_label_row(vx, x, 6, "Branch",   "{pr_source} → {pr_target}")
+  draw_label_row(vx, x, 7, "Author",   pr_creator)
+  draw_label_row(vx, x, 8, "Opened",   pr_opened)
+
+  // Latest event
+  let content_y = 10
+  let section_title = match is_pr_comment_type(n_type) {
+    true => "Comment",
+    false => "Latest event",
+  }
+  vaxis::draw_text(vx, x, content_y, section_title)
+  mut sep2 = ""
+  for i in 0..(panel_width - 1) {
+    sep2 =+ "─"
+  }
+  vaxis::draw_text(vx, x, content_y + 1, sep2)
+
+  vaxis::draw_text(vx, x + 2, content_y + 3, "{actor_name} · {created_str}")
+
+  if is_pr_comment_type(n_type) {
+    // Linear stores a short preview of the comment in `subtitle`.
+    let subtitle = decode::run(notif, decode::field("subtitle", decode::nullable(decode::string)))
+      .expect("Missing subtitle")
+    let body = match subtitle {
+      s => s,
+      _ => "(comment body not available)",
+    }
+    let body_truncated = truncate_with_ellipsis(body, panel_width - 3)
+    vaxis::draw_text(vx, x + 2, content_y + 5, body_truncated)
+  } else {
+    vaxis::draw_text(vx, x + 2, content_y + 4, type_label)
+  }
+
+  // URL
+  match pr_url.is_empty() {
+    true => (),
+    false => {
+      let url_y = match is_pr_comment_type(n_type) {
+        true => content_y + 7,
+        false => content_y + 6,
+      }
+      vaxis::draw_text(vx, x, url_y, truncate_with_ellipsis(pr_url, panel_width - 1))
+    },
+  }
+}
+
 
 fn draw_comment(vx: vaxis::Vaxis, comment: Dynamic, x: Int, y: Int, panel_width: Int, is_cursor: Bool, is_trigger: Bool) Int {
   let body = decode::run(comment, decode::field("body", decode::string)).expect("Missing body")
@@ -498,11 +667,20 @@ fn draw_inbox_screen(state: AppState) Void {
 
     // Detail panel
     let selected = state.notifications.at(state.cursor)
-    draw_detail_panel(vx, selected, detail_x, detail_w, state.comment_cursor)
+    let sel_type = decode::run(selected, decode::field("type", decode::string)).expect("Missing type")
+    if is_pr_type(sel_type) {
+      draw_pr_detail_panel(vx, selected, detail_x, detail_w)
+    } else {
+      draw_detail_panel(vx, selected, detail_x, detail_w, state.comment_cursor)
+    }
 
     // Status bar
     let sb_y = status_bar_y(vx)
-    vaxis::draw_text(vx, 1, sb_y, "↑↓ · ↵ select · Esc back · r refresh")
+    let hints = match is_pr_comment_type(sel_type) {
+      true => "↑↓ · ↵ select · Esc back · o open · r refresh",
+      false => "↑↓ · ↵ select · Esc back · r refresh",
+    }
+    vaxis::draw_text(vx, 1, sb_y, hints)
   } else {
     // Full-width list
     let max_rows = content_height(vx) - 4
@@ -583,6 +761,36 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
           comment_cursor = trigger_comment_index(notifs.at(cursor))
         } else if k.name == "Escape" {
           detail_mode = false
+        } else if k.name == "o" and detail_mode {
+          let selected = notifs.at(cursor)
+          let sel_type = decode::run(selected, decode::field("type", decode::string)).expect("Missing type")
+          if is_pr_comment_type(sel_type) {
+            // Build the GitHub comment permalink from the PR URL and
+            // comment id, since Linear's notification.url just points
+            // back to the Linear inbox.
+            let pr_obj = optional_field(selected, "pullRequest")
+            let pr_url = match pr_obj {
+              pr => decode::run(pr, decode::field("url", decode::string)).expect("Missing PR url"),
+              _ => "",
+            }
+            let cid_opt = decode::run(selected, decode::field("pullRequestCommentId", decode::nullable(decode::string)))
+              .expect("Missing pullRequestCommentId")
+            let cid = match cid_opt {
+              c => c,
+              _ => "",
+            }
+            let target = match pr_url.is_empty() {
+              true => "",
+              false => match cid.is_empty() {
+                true => pr_url,
+                false => "{pr_url}#issuecomment-{cid}",
+              },
+            }
+            if not target.is_empty() {
+              let _ = os::open_url(target)
+              ()
+            }
+          }
         } else if k.name == "Up" or k.name == "k" {
           if detail_mode {
             if comment_cursor > 0 {

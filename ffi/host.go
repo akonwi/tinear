@@ -1,12 +1,28 @@
 package ffi
 
 import (
+	"os/exec"
+	"runtime"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"git.sr.ht/~rockorager/vaxis"
 )
+
+// OpenURL launches the system's default browser/handler for the given URL.
+func OpenURL(url string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("cmd", "/c", "start", "", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	return cmd.Start()
+}
 
 func New(title string) (*vaxis.Vaxis, error) {
 	vx, err := vaxis.New(vaxis.Options{DisableKittyKeyboard: true})
