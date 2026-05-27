@@ -1,4 +1,5 @@
 use ard/decode
+use ard/maybe
 
 use linear-cli/linear/client
 use linear-cli/util
@@ -9,12 +10,14 @@ struct AppState {
   vx: vaxis::Vaxis,
   notifications: [Dynamic],
   cursor: Int,
+  comment_cursor: Int,
   viewer_name: Str,
   viewer_email: Str,
 
   running: Bool,
   tabs: [Str],
   active_tab: Int,
+  detail_mode: Bool,
 }
 
 fn format_type(n_type: Str) Str {
@@ -47,7 +50,29 @@ fn pad_str(s: Str, width: Int) Str {
   }
 }
 
+fn truncate(s: Str, max: Int) Str {
+  mut result = s
+  while result.size() > max {
+    result = vaxis::text_backspace(result)
+  }
+  result
+}
 
+fn truncate_with_ellipsis(s: Str, max: Int) Str {
+  match s.size() <= max {
+    true => s,
+    false => truncate(s, max - 1) + "…",
+  }
+}
+
+fn first_n(s: Str, n: Int) Str {
+  truncate(s, n)
+}
+
+fn format_date(iso: Str) Str {
+  // "2026-05-26T20:17:01.313Z" -> "2026-05-26"
+  first_n(iso, 10)
+}
 
 fn term_height(vx: vaxis::Vaxis) Int {
   let win = vaxis::root(vx)
@@ -64,11 +89,48 @@ fn content_height(vx: vaxis::Vaxis) Int {
 }
 
 fn fetch_inbox(api_key: Str) [Dynamic]!Str {
-  let query = "query \{ notifications(first: 50) \{ nodes \{ id type createdAt ... on IssueNotification \{ issue \{ id identifier title \} \} actor \{ id name \} \} \} \}"
+  let query = "query \{ notifications(first: 50) \{ nodes \{ id type createdAt ... on IssueNotification \{ comment \{ id body createdAt user \{ name \} \} issue \{ id identifier title description priority state \{ name \} team \{ name key \} project \{ name \} assignee \{ name \} comments(first: 30) \{ nodes \{ id body createdAt user \{ name \} \} \} \} \} actor \{ id name \} \} \} \}"
   let data = try client::graphql(api_key, query)
   let nodes = decode::run(data, decode::path(["notifications", "nodes"], decode::list(decode::dynamic)))
     .expect("Missing notifications nodes")
   Result::ok(nodes)
+}
+
+fn is_comment_type(n_type: Str) Bool {
+  n_type == "issueNewComment" or n_type == "issueCommentMention" or n_type == "issueCommentReaction"
+}
+
+fn notif_comments(notif: Dynamic) [Dynamic] {
+  let empty: [Dynamic] = []
+  let issue_obj = decode::run(notif, decode::field("issue", decode::nullable(decode::dynamic)))
+    .expect("Missing issue")
+  match issue_obj {
+    iss => {
+      let nodes_res = decode::run(iss, decode::path(["comments", "nodes"], decode::list(decode::dynamic)))
+      match nodes_res {
+        ok(nodes) => nodes,
+        err(_) => empty,
+      }
+    },
+    _ => empty,
+  }
+}
+
+fn trigger_comment_index(notif: Dynamic) Int {
+  let trigger_obj = decode::run(notif, decode::field("comment", decode::nullable(decode::dynamic)))
+    .expect("Missing comment")
+  let trigger_id = match trigger_obj {
+    c => decode::run(c, decode::field("id", decode::string)).expect("Missing comment id"),
+    _ => "",
+  }
+  mut found = 0
+  for c, idx in notif_comments(notif) {
+    let cid = decode::run(c, decode::field("id", decode::string)).expect("Missing comment id")
+    if cid == trigger_id {
+      found = idx
+    }
+  }
+  found
 }
 
 fn fetch_viewer(api_key: Str) Dynamic!Str {
@@ -99,56 +161,291 @@ fn draw_tab_bar(vx: vaxis::Vaxis, tabs: [Str], active: Int) Void {
   vaxis::draw_text(vx, 0, 1, sep)
 }
 
+fn sidebar_width(vx: vaxis::Vaxis) Int {
+  let win = vaxis::root(vx)
+  let w = vaxis::window_width(win)
+  let s = w * 35 / 100
+  match s < 28 {
+    true => 28,
+    false => match s > 44 {
+      true => 44,
+      false => s,
+    },
+  }
+}
+
+fn draw_card_row(vx: vaxis::Vaxis, notif: Dynamic, idx: Int, cursor: Int, width: Int) Void {
+  let n_type = decode::run(notif, decode::field("type", decode::string)).expect("Missing type")
+  let type_label = format_type(n_type)
+
+  let actor_obj = decode::run(notif, decode::field("actor", decode::nullable(decode::dynamic)))
+    .expect("Missing actor")
+  let actor_name = match actor_obj {
+    act => decode::run(act, decode::field("name", decode::string)).expect("Missing actor name"),
+    _ => "—",
+  }
+
+  let issue_obj = decode::run(notif, decode::field("issue", decode::nullable(decode::dynamic)))
+    .expect("Missing issue")
+  let issue_id = match issue_obj {
+    iss => decode::run(iss, decode::field("identifier", decode::string)).expect("Missing issue identifier"),
+    _ => "—",
+  }
+
+  let issue_title = match issue_obj {
+    iss => decode::run(iss, decode::field("title", decode::string)).expect("Missing issue title"),
+    _ => "",
+  }
+
+  let cursor_mark = match idx == cursor {
+    true => "▸",
+    false => " ",
+  }
+
+  let id_part = pad_str(issue_id, 8)
+  let line = "{cursor_mark} {id_part} {actor_name} {type_label}  {issue_title}"
+  let row = 2 + idx
+  vaxis::draw_text(vx, 1, row, truncate_with_ellipsis(line, width))
+}
+
+fn priority_label(p: Int?) Str {
+  match p {
+    n => {
+      match n {
+        1 => "Urgent",
+        2 => "High",
+        3 => "Medium",
+        4 => "Low",
+        _ => "—",
+      }
+    },
+    _ => "—",
+  }
+}
+
+fn draw_label_row(vx: vaxis::Vaxis, x: Int, y: Int, label: Str, value: Str) Void {
+  vaxis::draw_text(vx, x, y, pad_str(label, 10) + value)
+}
+
+fn draw_comment(vx: vaxis::Vaxis, comment: Dynamic, x: Int, y: Int, panel_width: Int, is_cursor: Bool, is_trigger: Bool) Int {
+  let body = decode::run(comment, decode::field("body", decode::string)).expect("Missing body")
+  let created = decode::run(comment, decode::field("createdAt", decode::nullable(decode::string)))
+    .expect("Missing createdAt")
+  let user_obj = decode::run(comment, decode::field("user", decode::nullable(decode::dynamic)))
+    .expect("Missing user")
+  let user_name = match user_obj {
+    u => decode::run(u, decode::field("name", decode::string)).expect("Missing user name"),
+    _ => "—",
+  }
+  let date_str = match created {
+    t => format_date(t),
+    _ => "",
+  }
+
+  let cursor_mark = match is_cursor {
+    true => "▸",
+    false => " ",
+  }
+  let trigger_mark = match is_trigger {
+    true => "*",
+    false => " ",
+  }
+  let head = "{cursor_mark}{trigger_mark} {user_name} · {date_str}"
+  vaxis::draw_text(vx, x, y, head)
+  let body_truncated = truncate_with_ellipsis(body, panel_width - 4)
+  vaxis::draw_text(vx, x + 3, y + 1, body_truncated)
+  y + 3
+}
+
+fn draw_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int, comment_cursor: Int) Void {
+  let n_type = decode::run(notif, decode::field("type", decode::string)).expect("Missing type")
+
+  let trigger_comment_obj = decode::run(notif, decode::field("comment", decode::nullable(decode::dynamic)))
+    .expect("Missing comment")
+  let trigger_comment_id = match trigger_comment_obj {
+    c => decode::run(c, decode::field("id", decode::string)).expect("Missing comment id"),
+    _ => "",
+  }
+
+  let issue_obj = decode::run(notif, decode::field("issue", decode::nullable(decode::dynamic)))
+    .expect("Missing issue")
+  let issue_id = match issue_obj {
+    iss => decode::run(iss, decode::field("identifier", decode::string)).expect("Missing issue identifier"),
+    _ => "—",
+  }
+  let issue_title = match issue_obj {
+    iss => decode::run(iss, decode::field("title", decode::string)).expect("Missing issue title"),
+    _ => "",
+  }
+  let description = match issue_obj {
+    iss => decode::run(iss, decode::field("description", decode::nullable(decode::string)))
+      .expect("Missing description"),
+    _ => maybe::none(),
+  }
+  let priority = match issue_obj {
+    iss => decode::run(iss, decode::field("priority", decode::nullable(decode::int)))
+      .expect("Missing priority"),
+    _ => maybe::none(),
+  }
+
+  let state_obj = match issue_obj {
+    iss => decode::run(iss, decode::field("state", decode::nullable(decode::dynamic)))
+      .expect("Missing state"),
+    _ => maybe::none(),
+  }
+  let state_name = match state_obj {
+    s => decode::run(s, decode::field("name", decode::string)).expect("Missing state name"),
+    _ => "—",
+  }
+
+  let team_obj = match issue_obj {
+    iss => decode::run(iss, decode::field("team", decode::nullable(decode::dynamic)))
+      .expect("Missing team"),
+    _ => maybe::none(),
+  }
+  let team_name = match team_obj {
+    t => decode::run(t, decode::field("name", decode::string)).expect("Missing team name"),
+    _ => "—",
+  }
+
+  let project_obj = match issue_obj {
+    iss => decode::run(iss, decode::field("project", decode::nullable(decode::dynamic)))
+      .expect("Missing project"),
+    _ => maybe::none(),
+  }
+  let project_name = match project_obj {
+    p => decode::run(p, decode::field("name", decode::string)).expect("Missing project name"),
+    _ => "—",
+  }
+
+  let assignee_obj = match issue_obj {
+    iss => decode::run(iss, decode::field("assignee", decode::nullable(decode::dynamic)))
+      .expect("Missing assignee"),
+    _ => maybe::none(),
+  }
+  let assignee_name = match assignee_obj {
+    a => decode::run(a, decode::field("name", decode::string)).expect("Missing assignee name"),
+    _ => "—",
+  }
+
+  // Header: identifier — title
+  let header_title = truncate_with_ellipsis(issue_title, panel_width - issue_id.size() - 3)
+  let header = "{issue_id} — {header_title}"
+  vaxis::draw_text(vx, x, 2, header)
+
+  // Separator under header
+  mut sep = ""
+  for i in 0..(panel_width - 1) {
+    sep =+ "─"
+  }
+  vaxis::draw_text(vx, x, 3, sep)
+
+  // Issue details block
+  draw_label_row(vx, x, 5, "Status",   state_name)
+  draw_label_row(vx, x, 6, "Team",     team_name)
+  draw_label_row(vx, x, 7, "Project",  project_name)
+  draw_label_row(vx, x, 8, "Assignee", assignee_name)
+  draw_label_row(vx, x, 9, "Priority", priority_label(priority))
+
+  // Comments thread (for comment-type notifications) or Description
+  let content_y = 11
+  let max_y = status_bar_y(vx) - 1
+
+  if is_comment_type(n_type) {
+    vaxis::draw_text(vx, x, content_y, "Comments")
+    mut sep2 = ""
+    for i in 0..(panel_width - 1) {
+      sep2 =+ "─"
+    }
+    vaxis::draw_text(vx, x, content_y + 1, sep2)
+
+    let empty: [Dynamic] = []
+    let comments = match issue_obj {
+      iss => {
+        let nodes_res = decode::run(iss, decode::path(["comments", "nodes"], decode::list(decode::dynamic)))
+        match nodes_res {
+          ok(nodes) => nodes,
+          err(_) => empty,
+        }
+      },
+      _ => empty,
+    }
+
+    mut y = content_y + 3
+    for c, idx in comments {
+      if y + 2 < max_y {
+        let cid = decode::run(c, decode::field("id", decode::string)).expect("Missing comment id")
+        let is_trigger = cid == trigger_comment_id
+        let is_cursor = idx == comment_cursor
+        y = draw_comment(vx, c, x, y, panel_width, is_cursor, is_trigger)
+      }
+    }
+  } else {
+    match description {
+      desc => {
+        vaxis::draw_text(vx, x, content_y, "Description")
+        let desc_truncated = truncate_with_ellipsis(desc, panel_width - 3)
+        vaxis::draw_text(vx, x + 2, content_y + 1, desc_truncated)
+      },
+      _ => (),
+    }
+  }
+
+}
+
 fn draw_inbox_screen(state: AppState) Void {
   let vx = state.vx
+  let win = vaxis::root(vx)
+  let term_w = vaxis::window_width(win)
   vaxis::clear(vx)
 
   // Tab bar
   draw_tab_bar(vx, state.tabs, state.active_tab)
 
-  // Compact card rows
-  let max_rows = content_height(vx) - 4
-  for notif, idx in state.notifications {
-    if idx >= max_rows {
-      break
+  if state.detail_mode {
+    // Split layout: sidebar + detail
+    let s_w = sidebar_width(vx)
+    let divider_x = s_w + 1
+    let detail_x = s_w + 3
+    let detail_w = term_w - detail_x - 1
+
+    // Sidebar: notification cards (truncated to fit)
+    let max_rows = content_height(vx) - 4
+    for notif, idx in state.notifications {
+      if idx >= max_rows {
+        break
+      }
+      draw_card_row(vx, notif, idx, state.cursor, s_w - 2)
     }
 
-    let n_type = decode::run(notif, decode::field("type", decode::string)).expect("Missing type")
-    let type_label = format_type(n_type)
-
-    let issue_obj = decode::run(notif, decode::field("issue", decode::nullable(decode::dynamic)))
-      .expect("Missing issue")
-    let issue_id = match issue_obj {
-      iss => decode::run(iss, decode::field("identifier", decode::string)).expect("Missing issue identifier"),
-      _ => "—",
+    // Vertical divider
+    let div_y_start = 2
+    let div_y_end = status_bar_y(vx) - 1
+    for row in div_y_start..div_y_end {
+      vaxis::draw_text(vx, divider_x, row, "│")
     }
 
-    let issue_title = match issue_obj {
-      iss => decode::run(iss, decode::field("title", decode::string)).expect("Missing issue title"),
-      _ => "",
+    // Detail panel
+    let selected = state.notifications.at(state.cursor)
+    draw_detail_panel(vx, selected, detail_x, detail_w, state.comment_cursor)
+
+    // Status bar
+    let sb_y = status_bar_y(vx)
+    vaxis::draw_text(vx, 1, sb_y, "↑↓ · ↵ select · ⌫ back · r refresh · q quit")
+  } else {
+    // Full-width list
+    let max_rows = content_height(vx) - 4
+    for notif, idx in state.notifications {
+      if idx >= max_rows {
+        break
+      }
+      draw_card_row(vx, notif, idx, state.cursor, term_w - 2)
     }
 
-    let actor_obj = decode::run(notif, decode::field("actor", decode::nullable(decode::dynamic)))
-      .expect("Missing actor")
-    let actor_name = match actor_obj {
-      act => decode::run(act, decode::field("name", decode::string)).expect("Missing actor name"),
-      _ => "",
-    }
-
-    let cursor_mark = match idx == state.cursor {
-      true => "▸",
-      false => " ",
-    }
-
-    // Compact card line
-    let row = 3 + idx
-    let line = "{cursor_mark} {issue_id}  {issue_title}  · {actor_name} {type_label}"
-    vaxis::draw_text(vx, 1, row, line)
+    // Status bar
+    let sb_y = status_bar_y(vx)
+    vaxis::draw_text(vx, 1, sb_y, "↑↓ · ↵ select · r refresh · q quit")
   }
-
-  // Status bar (last row)
-  let sb_y = status_bar_y(vx)
-  vaxis::draw_text(vx, 1, sb_y, "↑↓ select · r refresh · : command · q quit")
 
   vaxis::render(vx).expect("render")
 }
@@ -161,6 +458,8 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
   let initial_notifs = try fetch_inbox(api_key)
   mut notifs = initial_notifs
   mut cursor = 0
+  mut comment_cursor = 0
+  mut detail_mode = false
   mut running = true
 
   while running {
@@ -170,12 +469,14 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
       vx: vx,
       notifications: notifs,
       cursor: cursor,
+      comment_cursor: comment_cursor,
       viewer_name: name,
       viewer_email: email,
 
       running: running,
       tabs: tabs,
       active_tab: 0,
+      detail_mode: detail_mode,
     }
     draw_inbox_screen(state)
 
@@ -188,20 +489,40 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
         ok(nodes) => {
           notifs = nodes
           cursor = 0
+          comment_cursor = 0
+          detail_mode = false
           ()
         },
         err(e) => {
           ()
         },
       }
+    } else if key == "select" {
+      detail_mode = true
+      comment_cursor = trigger_comment_index(notifs.at(cursor))
+    } else if key == "backspace" {
+      detail_mode = false
     } else if key == "up" {
-      if cursor > 0 {
-        cursor = cursor - 1
+      if detail_mode {
+        if comment_cursor > 0 {
+          comment_cursor = comment_cursor - 1
+        }
+      } else {
+        if cursor > 0 {
+          cursor = cursor - 1
+        }
       }
     } else if key == "down" {
-      let max = notifs.size() - 1
-      if cursor < max {
-        cursor = cursor + 1
+      if detail_mode {
+        let max = notif_comments(notifs.at(cursor)).size() - 1
+        if comment_cursor < max {
+          comment_cursor = comment_cursor + 1
+        }
+      } else {
+        let max = notifs.size() - 1
+        if cursor < max {
+          cursor = cursor + 1
+        }
       }
     } else if key == "redraw" {
       ()
