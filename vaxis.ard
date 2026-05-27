@@ -41,7 +41,143 @@ extern fn notify(vx: Vaxis, title: Str, body: Str) Void = "Notify"
 
 extern fn clipboard_push(vx: Vaxis, text: Str) Void = "ClipboardPush"
 
-extern fn read_key(vx: Vaxis) Str!Str = "ReadKey"
+// ---- Events ---------------------------------------------------------
+
+// Key press event. `name` is the plain key name without modifier
+// prefixes, taken from vaxis.Key.String() with modifiers cleared.
+// Examples: "Escape", "Enter", "Up", "Tab", "Space", "BackSpace",
+// "a", "F1".
+struct KeyEvent {
+  name: Str,
+  ctrl: Bool,
+  shift: Bool,
+  alt: Bool,
+  meta: Bool,
+}
+
+// Mouse event. `button` is one of: "left", "middle", "right", "none",
+// "wheel_up", "wheel_down", "wheel_left", "wheel_right".
+// `kind` is one of: "press", "release", "motion".
+struct MouseEvent {
+  col: Int,
+  row: Int,
+  button: Str,
+  kind: Str,
+  ctrl: Bool,
+  shift: Bool,
+  alt: Bool,
+}
+
+// Terminal was resized. cols/rows are the new dimensions in cells.
+struct ResizeEvent {
+  cols: Int,
+  rows: Int,
+}
+
+// Terminal gained or lost focus. focused = true means FocusIn.
+struct FocusEvent {
+  focused: Bool,
+}
+
+// Bracketed-paste boundary. started = true marks the beginning of a
+// paste; false marks the end. Keys within a paste arrive as KeyEvent.
+struct PasteEvent {
+  started: Bool,
+}
+
+// Vaxis asked the app to redraw (e.g. after a SyncFunc).
+struct RedrawEvent {}
+
+// Application is shutting down.
+struct QuitEvent {}
+
+type Event = KeyEvent | MouseEvent | ResizeEvent | FocusEvent | PasteEvent | RedrawEvent | QuitEvent
+
+// Low-level event FFI. Ideally `read_event` would return an opaque
+// `RawEvent` handle that gets passed back into accessor functions, but
+// blocked by https://github.com/akonwi/ard/issues/153 — the compiler
+// emits JSON encoder helpers for the extern type into main.go without
+// the corresponding Go import. Even wrapping the handle in a struct
+// (KeyEvent{raw: RawEvent}) and adding a dummy function in main.ard
+// to force the reference doesn't add the import. As a workaround the
+// FFI stores the most-recently-read event in package-level state and
+// the accessors are nullary. The Ard-side `next_event` wrapper hides
+// this.
+extern fn read_event_kind(vx: Vaxis) Str!Str = "ReadEvent"
+
+extern fn last_key_name() Str = "EventKeyName"
+extern fn last_key_ctrl() Bool = "EventKeyCtrl"
+extern fn last_key_shift() Bool = "EventKeyShift"
+extern fn last_key_alt() Bool = "EventKeyAlt"
+extern fn last_key_meta() Bool = "EventKeyMeta"
+
+extern fn last_mouse_col() Int = "EventMouseCol"
+extern fn last_mouse_row() Int = "EventMouseRow"
+extern fn last_mouse_button() Str = "EventMouseButton"
+extern fn last_mouse_kind() Str = "EventMouseKind"
+extern fn last_mouse_ctrl() Bool = "EventMouseCtrl"
+extern fn last_mouse_shift() Bool = "EventMouseShift"
+extern fn last_mouse_alt() Bool = "EventMouseAlt"
+
+extern fn last_resize_cols() Int = "EventResizeCols"
+extern fn last_resize_rows() Int = "EventResizeRows"
+
+extern fn last_focus_focused() Bool = "EventFocusFocused"
+extern fn last_paste_started() Bool = "EventPasteStarted"
+
+// Blocking call: read the next event from the terminal and return it
+// as one of the Event variants.
+fn next_event(vx: Vaxis) Event!Str {
+  let kind = try read_event_kind(vx)
+  match kind {
+    "key" => {
+      let ev: Event = KeyEvent{
+        name: last_key_name(),
+        ctrl: last_key_ctrl(),
+        shift: last_key_shift(),
+        alt: last_key_alt(),
+        meta: last_key_meta(),
+      }
+      Result::ok(ev)
+    },
+    "mouse" => {
+      let ev: Event = MouseEvent{
+        col: last_mouse_col(),
+        row: last_mouse_row(),
+        button: last_mouse_button(),
+        kind: last_mouse_kind(),
+        ctrl: last_mouse_ctrl(),
+        shift: last_mouse_shift(),
+        alt: last_mouse_alt(),
+      }
+      Result::ok(ev)
+    },
+    "resize" => {
+      let ev: Event = ResizeEvent{
+        cols: last_resize_cols(),
+        rows: last_resize_rows(),
+      }
+      Result::ok(ev)
+    },
+    "focus" => {
+      let ev: Event = FocusEvent{focused: last_focus_focused()}
+      Result::ok(ev)
+    },
+    "paste" => {
+      let ev: Event = PasteEvent{started: last_paste_started()}
+      Result::ok(ev)
+    },
+    "redraw" => {
+      let ev: Event = RedrawEvent{}
+      Result::ok(ev)
+    },
+    "quit" => {
+      let ev: Event = QuitEvent{}
+      Result::ok(ev)
+    },
+    _ => Result::err("unknown event kind: {kind}"),
+  }
+}
 
 extern fn root(vx: Vaxis) Window = "Root"
 

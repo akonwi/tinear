@@ -480,54 +480,66 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
     }
     draw_inbox_screen(state)
 
-    let key = try vaxis::read_key(vx)
+    let event = try vaxis::next_event(vx)
 
-    if key == "q" {
-      running = false
-    } else if key == "r" {
-      match fetch_inbox(api_key) {
-        ok(nodes) => {
-          notifs = nodes
-          cursor = 0
-          comment_cursor = 0
+    match event {
+      QuitEvent(_) => {
+        running = false
+      },
+      ResizeEvent(_) => (),
+      RedrawEvent(_) => (),
+      FocusEvent(_) => (),
+      PasteEvent(_) => (),
+      MouseEvent(_) => (),
+      KeyEvent(k) => {
+        if k.ctrl and k.name == "c" {
+          running = false
+        } else if k.name == "q" {
+          running = false
+        } else if k.name == "r" {
+          match fetch_inbox(api_key) {
+            ok(nodes) => {
+              notifs = nodes
+              cursor = 0
+              comment_cursor = 0
+              detail_mode = false
+              ()
+            },
+            err(e) => {
+              ()
+            },
+          }
+        } else if k.name == "Enter" or k.name == "Space" {
+          detail_mode = true
+          comment_cursor = trigger_comment_index(notifs.at(cursor))
+        } else if k.name == "Escape" {
           detail_mode = false
+        } else if k.name == "Up" or k.name == "k" {
+          if detail_mode {
+            if comment_cursor > 0 {
+              comment_cursor = comment_cursor - 1
+            }
+          } else {
+            if cursor > 0 {
+              cursor = cursor - 1
+            }
+          }
+        } else if k.name == "Down" or k.name == "j" {
+          if detail_mode {
+            let max = notif_comments(notifs.at(cursor)).size() - 1
+            if comment_cursor < max {
+              comment_cursor = comment_cursor + 1
+            }
+          } else {
+            let max = notifs.size() - 1
+            if cursor < max {
+              cursor = cursor + 1
+            }
+          }
+        } else {
           ()
-        },
-        err(e) => {
-          ()
-        },
-      }
-    } else if key == "select" {
-      detail_mode = true
-      comment_cursor = trigger_comment_index(notifs.at(cursor))
-    } else if key == "escape" {
-      detail_mode = false
-    } else if key == "up" {
-      if detail_mode {
-        if comment_cursor > 0 {
-          comment_cursor = comment_cursor - 1
         }
-      } else {
-        if cursor > 0 {
-          cursor = cursor - 1
-        }
-      }
-    } else if key == "down" {
-      if detail_mode {
-        let max = notif_comments(notifs.at(cursor)).size() - 1
-        if comment_cursor < max {
-          comment_cursor = comment_cursor + 1
-        }
-      } else {
-        let max = notifs.size() - 1
-        if cursor < max {
-          cursor = cursor + 1
-        }
-      }
-    } else if key == "redraw" {
-      ()
-    } else {
-      ()
+      },
     }
   }
 
