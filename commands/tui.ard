@@ -499,7 +499,7 @@ fn draw_inbox_screen(state: AppState) Void {
 
     // Status bar
     let sb_y = status_bar_y(vx)
-    vaxis::draw_text(vx, 1, sb_y, "↑↓ · ↵ select · Esc back · r refresh · q quit")
+    vaxis::draw_text(vx, 1, sb_y, "↑↓ · ↵ select · Esc back · r refresh")
   } else {
     // Full-width list
     let max_rows = content_height(vx) - 4
@@ -512,7 +512,7 @@ fn draw_inbox_screen(state: AppState) Void {
 
     // Status bar
     let sb_y = status_bar_y(vx)
-    vaxis::draw_text(vx, 1, sb_y, "↑↓ · ↵ select · r refresh · q quit")
+    vaxis::draw_text(vx, 1, sb_y, "↑↓ · ↵ select · r refresh")
   }
 
   vaxis::render(vx).expect("render")
@@ -561,8 +561,6 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
       MouseEvent(_) => (),
       KeyEvent(k) => {
         if k.ctrl and k.name == "c" {
-          running = false
-        } else if k.name == "q" {
           running = false
         } else if k.name == "r" {
           match fetch_inbox(api_key) {
