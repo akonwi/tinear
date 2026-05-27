@@ -89,7 +89,7 @@ fn content_height(vx: vaxis::Vaxis) Int {
 }
 
 fn fetch_inbox(api_key: Str) [Dynamic]!Str {
-  let query = "query \{ notifications(first: 50) \{ nodes \{ id type createdAt ... on IssueNotification \{ comment \{ id body createdAt user \{ name \} \} issue \{ id identifier title description priority state \{ name \} team \{ name key \} project \{ name \} assignee \{ name \} comments(first: 30) \{ nodes \{ id body createdAt user \{ name \} \} \} \} \} actor \{ id name \} \} \} \}"
+  let query = "query \{ notifications(first: 50) \{ nodes \{ id type createdAt ... on IssueNotification \{ comment \{ id body createdAt user \{ name \} \} issue \{ id identifier title description priority state \{ name \} team \{ name key \} project \{ name \} assignee \{ name \} comments(first: 30) \{ nodes \{ id body createdAt user \{ name \} \} \} history(first: 10) \{ nodes \{ id createdAt fromState \{ name \} toState \{ name \} \} \} \} \} actor \{ id name \} \} \} \}"
   let data = try client::graphql(api_key, query)
   let nodes = decode::run(data, decode::path(["notifications", "nodes"], decode::list(decode::dynamic)))
     .expect("Missing notifications nodes")
@@ -98,6 +98,60 @@ fn fetch_inbox(api_key: Str) [Dynamic]!Str {
 
 fn is_comment_type(n_type: Str) Bool {
   n_type == "issueNewComment" or n_type == "issueCommentMention" or n_type == "issueCommentReaction"
+}
+
+struct StatusTransition {
+  from: Str,
+  to: Str,
+}
+
+// Find the most recent status transition from the issue's history.
+// Returns empty strings if none is recorded.
+fn last_status_transition(notif: Dynamic) StatusTransition {
+  let issue_obj = decode::run(notif, decode::field("issue", decode::nullable(decode::dynamic)))
+    .expect("Missing issue")
+  let entries: [Dynamic] = match issue_obj {
+    iss => {
+      let nodes_res = decode::run(iss, decode::path(["history", "nodes"], decode::list(decode::dynamic)))
+      match nodes_res {
+        ok(nodes) => nodes,
+        err(_) => {
+          let empty: [Dynamic] = []
+          empty
+        },
+      }
+    },
+    _ => {
+      let empty: [Dynamic] = []
+      empty
+    },
+  }
+
+  // history(first: N) returns most-recent-first; first entry with both
+  // fromState and toState is our transition.
+  mut from_name = ""
+  mut to_name = ""
+  for entry in entries {
+    if from_name.is_empty() {
+      let from_obj = decode::run(entry, decode::field("fromState", decode::nullable(decode::dynamic)))
+        .expect("Missing fromState")
+      let to_obj = decode::run(entry, decode::field("toState", decode::nullable(decode::dynamic)))
+        .expect("Missing toState")
+      let f = match from_obj {
+        v => decode::run(v, decode::field("name", decode::string)).expect("Missing fromState.name"),
+        _ => "",
+      }
+      let t = match to_obj {
+        v => decode::run(v, decode::field("name", decode::string)).expect("Missing toState.name"),
+        _ => "",
+      }
+      if not f.is_empty() and not t.is_empty() {
+        from_name = f
+        to_name = t
+      }
+    }
+  }
+  StatusTransition{from: from_name, to: to_name}
 }
 
 fn notif_comments(notif: Dynamic) [Dynamic] {
@@ -379,6 +433,20 @@ fn draw_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int,
         let is_cursor = idx == comment_cursor
         y = draw_comment(vx, c, x, y, panel_width, is_cursor, is_trigger)
       }
+    }
+  } else if n_type == "issueStatusChanged" {
+    vaxis::draw_text(vx, x, content_y, "Status change")
+    mut sep3 = ""
+    for i in 0..(panel_width - 1) {
+      sep3 =+ "─"
+    }
+    vaxis::draw_text(vx, x, content_y + 1, sep3)
+
+    let trans = last_status_transition(notif)
+    if trans.from.is_empty() {
+      vaxis::draw_text(vx, x + 2, content_y + 3, "(no transition recorded)")
+    } else {
+      vaxis::draw_text(vx, x + 2, content_y + 3, "{trans.from}  →  {trans.to}")
     }
   } else {
     match description {
