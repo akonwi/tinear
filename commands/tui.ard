@@ -1,4 +1,5 @@
 use ard/decode
+use ard/list as List
 use ard/maybe
 
 use linear-cli/linear/client
@@ -97,6 +98,13 @@ fn status_bar_y(vx: vaxis::Vaxis) Int {
 
 fn content_height(vx: vaxis::Vaxis) Int {
   term_height(vx) - 4
+}
+
+// Archive (delete from inbox) a single notification.
+fn archive_notification(api_key: Str, id: Str) Void!Str {
+  let mutation = "mutation \{ notificationArchive(id: \"{id}\") \{ success \} \}"
+  let _ = try client::graphql(api_key, mutation)
+  Result::ok(())
 }
 
 fn fetch_inbox(api_key: Str) [Dynamic]!Str {
@@ -662,8 +670,8 @@ fn draw_inbox_screen(state: AppState) Void {
     // Status bar
     let sb_y = status_bar_y(vx)
     let hints = match is_pr_comment_type(sel_type) {
-      true => "↑↓ · ↵ select · Esc back · o open · r refresh",
-      false => "↑↓ · ↵ select · Esc back · r refresh",
+      true => "↑↓ · ↵ select · Esc back · ⌫ delete · o open · r refresh",
+      false => "↑↓ · ↵ select · Esc back · ⌫ delete · r refresh",
     }
     vaxis::draw_text(vx, 1, sb_y, hints)
   } else {
@@ -678,7 +686,7 @@ fn draw_inbox_screen(state: AppState) Void {
 
     // Status bar
     let sb_y = status_bar_y(vx)
-    vaxis::draw_text(vx, 1, sb_y, "↑↓ · ↵ select · r refresh")
+    vaxis::draw_text(vx, 1, sb_y, "↑↓ · ↵ select · ⌫ delete · r refresh")
   }
 
   vaxis::render(vx).expect("render")
@@ -746,6 +754,30 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
           comment_cursor = trigger_comment_index(notifs.at(cursor))
         } else if k.name == "Escape" {
           detail_mode = false
+        } else if k.name == "BackSpace" {
+          if notifs.size() > 0 {
+            let target = notifs.at(cursor)
+            let target_id = decode::run(target, decode::field("id", decode::string))
+              .expect("Missing id")
+            match archive_notification(api_key, target_id) {
+              ok(_) => {
+                notifs = List::keep(notifs, fn(n: Dynamic) Bool {
+                  let nid = decode::run(n, decode::field("id", decode::string)).expect("Missing id")
+                  not (nid == target_id)
+                })
+                if cursor >= notifs.size() {
+                  if notifs.size() > 0 {
+                    cursor = notifs.size() - 1
+                  } else {
+                    cursor = 0
+                  }
+                }
+                detail_mode = false
+                comment_cursor = 0
+              },
+              err(_) => (),
+            }
+          }
         } else if k.name == "o" and detail_mode {
           let selected = notifs.at(cursor)
           let sel_type = decode::run(selected, decode::field("type", decode::string)).expect("Missing type")
