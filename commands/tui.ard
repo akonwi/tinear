@@ -626,14 +626,19 @@ fn draw_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int,
 
 }
 
-fn draw_inbox_screen(state: AppState) Void {
+fn draw_board_content(state: AppState) Void {
+  let vx = state.vx
+  vaxis::draw_text(vx, 2, 3, "My Board")
+  vaxis::draw_text(vx, 2, 4, "(coming soon)")
+
+  let sb_y = status_bar_y(vx)
+  vaxis::draw_text(vx, 1, sb_y, "Tab switch · r refresh")
+}
+
+fn draw_inbox_content(state: AppState) Void {
   let vx = state.vx
   let win = vaxis::root(vx)
   let term_w = vaxis::window_width(win)
-  vaxis::clear(vx)
-
-  // Tab bar
-  draw_tab_bar(vx, state.tabs, state.active_tab)
 
   if state.detail_mode {
     // Split layout: sidebar + detail
@@ -686,7 +691,20 @@ fn draw_inbox_screen(state: AppState) Void {
 
     // Status bar
     let sb_y = status_bar_y(vx)
-    vaxis::draw_text(vx, 1, sb_y, "↑↓ · ↵ select · ⌫ delete · r refresh")
+    vaxis::draw_text(vx, 1, sb_y, "↑↓ · ↵ select · Tab · ⌫ delete · r refresh")
+  }
+}
+
+fn draw_screen(state: AppState) Void {
+  let vx = state.vx
+  vaxis::clear(vx)
+
+  draw_tab_bar(vx, state.tabs, state.active_tab)
+
+  if state.active_tab == 0 {
+    draw_inbox_content(state)
+  } else {
+    draw_board_content(state)
   }
 
   vaxis::render(vx).expect("render")
@@ -702,10 +720,11 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
   mut cursor = 0
   mut comment_cursor = 0
   mut detail_mode = false
+  mut active_tab = 0
   mut running = true
 
   while running {
-    let tabs = ["Inbox"]
+    let tabs = ["Inbox", "My Board"]
     let state = AppState{
       api_key: api_key,
       vx: vx,
@@ -717,10 +736,10 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
 
       running: running,
       tabs: tabs,
-      active_tab: 0,
+      active_tab: active_tab,
       detail_mode: detail_mode,
     }
-    draw_inbox_screen(state)
+    draw_screen(state)
 
     let event = try vaxis::next_event(vx)
 
@@ -736,6 +755,23 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
       KeyEvent(k) => {
         if k.ctrl and k.name == "c" {
           running = false
+        } else if k.name == "Tab" {
+          let last = tabs.size() - 1
+          if k.shift {
+            active_tab = match active_tab == 0 {
+              true => last,
+              false => active_tab - 1,
+            }
+          } else {
+            active_tab = match active_tab == last {
+              true => 0,
+              false => active_tab + 1,
+            }
+          }
+          detail_mode = false
+        } else if not (active_tab == 0) {
+          // Other keys only apply to the inbox tab right now.
+          ()
         } else if k.name == "r" {
           match fetch_inbox(api_key) {
             ok(nodes) => {
