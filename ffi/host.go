@@ -265,49 +265,9 @@ func firstCharacter(text string) string {
 	return " "
 }
 
-// rawEvent holds the most-recently read vaxis event so the Ard side
-// can query its fields via the nullary accessors below.
-//
-// Ideally ReadEvent would return a *RawEvent handle that gets passed
-// back into each accessor (optionally with Ard-side struct wrappers
-// and methods for clean field access), but blocked by
-// https://github.com/akonwi/ard/issues/153 — the compiler doesn't add
-// the projectffi import to main.go when emitting code that references
-// the extern type. The Ard wrapper in vaxis.ard reads the kind then
-// queries each accessor
-// before the next ReadEvent call, so the package-level state is safe
-// for the current single-threaded TUI loop.
-type rawEvent struct {
-	kind string
-
-	// Key
-	keyName  string
-	keyCtrl  bool
-	keyShift bool
-	keyAlt   bool
-	keyMeta  bool
-
-	// Mouse
-	mouseCol    int
-	mouseRow    int
-	mouseButton string
-	mouseKind   string
-	mouseCtrl   bool
-	mouseShift  bool
-	mouseAlt    bool
-
-	// Resize
-	resizeCols int
-	resizeRows int
-
-	// Focus
-	focusFocused bool
-
-	// Paste
-	pasteStarted bool
-}
-
-var lastEvent rawEvent
+// Event accessors take a vaxis.Event (interface{}) and type-assert to
+// the concrete variant. No wrapper struct is needed — we pass the
+// vaxis event itself across the FFI boundary.
 
 // keyName returns the plain key name without modifier prefixes.
 func keyName(k vaxis.Key) string {
@@ -351,91 +311,139 @@ func mouseKindName(t vaxis.EventType) string {
 	}
 }
 
-// ReadEvent blocks until the next event and stores its details in
-// lastEvent. Returns the event kind as a string.
-func ReadEvent(term *vaxis.Vaxis) (string, error) {
+// ReadEvent blocks until the next event from the terminal and returns
+// it. Non-press key events are filtered out at this layer.
+func ReadEvent(term *vaxis.Vaxis) (vaxis.Event, error) {
 	if term == nil {
-		lastEvent = rawEvent{kind: "quit"}
-		return lastEvent.kind, nil
+		return vaxis.QuitEvent{}, nil
 	}
 	for ev := range term.Events() {
-		switch ev := ev.(type) {
-		case vaxis.Key:
-			if ev.EventType != vaxis.EventPress {
-				continue
-			}
-			lastEvent = rawEvent{
-				kind:     "key",
-				keyName:  keyName(ev),
-				keyCtrl:  ev.Modifiers&vaxis.ModCtrl != 0,
-				keyShift: ev.Modifiers&vaxis.ModShift != 0,
-				keyAlt:   ev.Modifiers&vaxis.ModAlt != 0,
-				keyMeta:  ev.Modifiers&vaxis.ModMeta != 0,
-			}
-			return lastEvent.kind, nil
-		case vaxis.Mouse:
-			lastEvent = rawEvent{
-				kind:        "mouse",
-				mouseCol:    ev.Col,
-				mouseRow:    ev.Row,
-				mouseButton: mouseButtonName(ev.Button),
-				mouseKind:   mouseKindName(ev.EventType),
-				mouseCtrl:   ev.Modifiers&vaxis.ModCtrl != 0,
-				mouseShift:  ev.Modifiers&vaxis.ModShift != 0,
-				mouseAlt:    ev.Modifiers&vaxis.ModAlt != 0,
-			}
-			return lastEvent.kind, nil
-		case vaxis.Resize:
-			lastEvent = rawEvent{
-				kind:       "resize",
-				resizeCols: ev.Cols,
-				resizeRows: ev.Rows,
-			}
-			return lastEvent.kind, nil
-		case vaxis.Redraw:
-			lastEvent = rawEvent{kind: "redraw"}
-			return lastEvent.kind, nil
-		case vaxis.FocusIn:
-			lastEvent = rawEvent{kind: "focus", focusFocused: true}
-			return lastEvent.kind, nil
-		case vaxis.FocusOut:
-			lastEvent = rawEvent{kind: "focus", focusFocused: false}
-			return lastEvent.kind, nil
-		case vaxis.PasteStartEvent:
-			lastEvent = rawEvent{kind: "paste", pasteStarted: true}
-			return lastEvent.kind, nil
-		case vaxis.PasteEndEvent:
-			lastEvent = rawEvent{kind: "paste", pasteStarted: false}
-			return lastEvent.kind, nil
-		case vaxis.QuitEvent:
-			lastEvent = rawEvent{kind: "quit"}
-			return lastEvent.kind, nil
+		if k, ok := ev.(vaxis.Key); ok && k.EventType != vaxis.EventPress {
+			continue
 		}
+		return ev, nil
 	}
-	lastEvent = rawEvent{kind: "quit"}
-	return lastEvent.kind, nil
+	return vaxis.QuitEvent{}, nil
 }
 
-// Accessors. Each returns a field of the most-recently-read event.
-func EventKeyName() string  { return lastEvent.keyName }
-func EventKeyCtrl() bool    { return lastEvent.keyCtrl }
-func EventKeyShift() bool   { return lastEvent.keyShift }
-func EventKeyAlt() bool     { return lastEvent.keyAlt }
-func EventKeyMeta() bool    { return lastEvent.keyMeta }
+// EventKind returns a string discriminator the Ard side uses to dispatch
+// to the right Event variant constructor.
+func EventKind(e vaxis.Event) string {
+	switch e.(type) {
+	case vaxis.Key:
+		return "key"
+	case vaxis.Mouse:
+		return "mouse"
+	case vaxis.Resize:
+		return "resize"
+	case vaxis.Redraw:
+		return "redraw"
+	case vaxis.FocusIn, vaxis.FocusOut:
+		return "focus"
+	case vaxis.PasteStartEvent, vaxis.PasteEndEvent:
+		return "paste"
+	case vaxis.QuitEvent:
+		return "quit"
+	default:
+		return "unknown"
+	}
+}
 
-func EventMouseCol() int       { return lastEvent.mouseCol }
-func EventMouseRow() int       { return lastEvent.mouseRow }
-func EventMouseButton() string { return lastEvent.mouseButton }
-func EventMouseKind() string   { return lastEvent.mouseKind }
-func EventMouseCtrl() bool     { return lastEvent.mouseCtrl }
-func EventMouseShift() bool    { return lastEvent.mouseShift }
-func EventMouseAlt() bool      { return lastEvent.mouseAlt }
+func EventKeyName(e vaxis.Event) string {
+	if k, ok := e.(vaxis.Key); ok {
+		return keyName(k)
+	}
+	return ""
+}
+func EventKeyCtrl(e vaxis.Event) bool {
+	if k, ok := e.(vaxis.Key); ok {
+		return k.Modifiers&vaxis.ModCtrl != 0
+	}
+	return false
+}
+func EventKeyShift(e vaxis.Event) bool {
+	if k, ok := e.(vaxis.Key); ok {
+		return k.Modifiers&vaxis.ModShift != 0
+	}
+	return false
+}
+func EventKeyAlt(e vaxis.Event) bool {
+	if k, ok := e.(vaxis.Key); ok {
+		return k.Modifiers&vaxis.ModAlt != 0
+	}
+	return false
+}
+func EventKeyMeta(e vaxis.Event) bool {
+	if k, ok := e.(vaxis.Key); ok {
+		return k.Modifiers&vaxis.ModMeta != 0
+	}
+	return false
+}
 
-func EventResizeCols() int { return lastEvent.resizeCols }
-func EventResizeRows() int { return lastEvent.resizeRows }
+func EventMouseCol(e vaxis.Event) int {
+	if m, ok := e.(vaxis.Mouse); ok {
+		return m.Col
+	}
+	return 0
+}
+func EventMouseRow(e vaxis.Event) int {
+	if m, ok := e.(vaxis.Mouse); ok {
+		return m.Row
+	}
+	return 0
+}
+func EventMouseButton(e vaxis.Event) string {
+	if m, ok := e.(vaxis.Mouse); ok {
+		return mouseButtonName(m.Button)
+	}
+	return ""
+}
+func EventMouseKind(e vaxis.Event) string {
+	if m, ok := e.(vaxis.Mouse); ok {
+		return mouseKindName(m.EventType)
+	}
+	return ""
+}
+func EventMouseCtrl(e vaxis.Event) bool {
+	if m, ok := e.(vaxis.Mouse); ok {
+		return m.Modifiers&vaxis.ModCtrl != 0
+	}
+	return false
+}
+func EventMouseShift(e vaxis.Event) bool {
+	if m, ok := e.(vaxis.Mouse); ok {
+		return m.Modifiers&vaxis.ModShift != 0
+	}
+	return false
+}
+func EventMouseAlt(e vaxis.Event) bool {
+	if m, ok := e.(vaxis.Mouse); ok {
+		return m.Modifiers&vaxis.ModAlt != 0
+	}
+	return false
+}
 
-func EventFocusFocused() bool { return lastEvent.focusFocused }
-func EventPasteStarted() bool { return lastEvent.pasteStarted }
+func EventResizeCols(e vaxis.Event) int {
+	if r, ok := e.(vaxis.Resize); ok {
+		return r.Cols
+	}
+	return 0
+}
+func EventResizeRows(e vaxis.Event) int {
+	if r, ok := e.(vaxis.Resize); ok {
+		return r.Rows
+	}
+	return 0
+}
+
+func EventFocusFocused(e vaxis.Event) bool {
+	_, isIn := e.(vaxis.FocusIn)
+	return isIn
+}
+func EventPasteStarted(e vaxis.Event) bool {
+	_, isStart := e.(vaxis.PasteStartEvent)
+	return isStart
+}
 
 func drainStartupEvents(vx *vaxis.Vaxis) {
 	quiet := time.NewTimer(100 * time.Millisecond)
