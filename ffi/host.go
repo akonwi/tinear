@@ -279,8 +279,10 @@ func ReadKey(term *vaxis.Vaxis) (string, error) {
 				return key, nil
 			}
 			switch ev.String() {
-			case "Ctrl+c", "Esc":
+			case "Ctrl+c":
 				return "q", nil
+			case "Escape":
+				return "escape", nil
 			case "Up":
 				return "up", nil
 			case "Down":

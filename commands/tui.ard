@@ -431,7 +431,7 @@ fn draw_inbox_screen(state: AppState) Void {
 
     // Status bar
     let sb_y = status_bar_y(vx)
-    vaxis::draw_text(vx, 1, sb_y, "↑↓ · ↵ select · ⌫ back · r refresh · q quit")
+    vaxis::draw_text(vx, 1, sb_y, "↑↓ · ↵ select · Esc back · r refresh · q quit")
   } else {
     // Full-width list
     let max_rows = content_height(vx) - 4
@@ -500,7 +500,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
     } else if key == "select" {
       detail_mode = true
       comment_cursor = trigger_comment_index(notifs.at(cursor))
-    } else if key == "backspace" {
+    } else if key == "escape" {
       detail_mode = false
     } else if key == "up" {
       if detail_mode {
