@@ -379,10 +379,6 @@ fn draw_pr_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: I
     pr => decode::run(pr, decode::field("targetBranch", decode::string)).expect("Missing target branch"),
     _ => "—",
   }
-  let pr_url = match pr_obj {
-    pr => decode::run(pr, decode::field("url", decode::string)).expect("Missing PR url"),
-    _ => "",
-  }
   let pr_opened = match pr_obj {
     pr => format_date(decode::run(pr, decode::field("openedAt", decode::string)).expect("Missing openedAt")),
     _ => "—",
@@ -446,17 +442,6 @@ fn draw_pr_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: I
     vaxis::draw_text(vx, x + 2, content_y + 4, type_label)
   }
 
-  // URL
-  match pr_url.is_empty() {
-    true => (),
-    false => {
-      let url_y = match is_pr_comment_type(n_type) {
-        true => content_y + 7,
-        false => content_y + 6,
-      }
-      vaxis::draw_text(vx, x, url_y, truncate_with_ellipsis(pr_url, panel_width - 1))
-    },
-  }
 }
 
 

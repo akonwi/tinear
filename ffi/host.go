@@ -149,6 +149,26 @@ func DrawText(term *vaxis.Vaxis, x int, y int, text string) {
 	WindowDrawText(term.Window(), x, y, text)
 }
 
+// DrawLink renders text wrapped in an OSC 8 hyperlink. Terminals that
+// support OSC 8 (iTerm2, Kitty, WezTerm, modern macOS Terminal, ...)
+// make the text clickable. The text is also underlined so users can
+// see it's a link.
+func DrawLink(term *vaxis.Vaxis, x int, y int, text string, url string) {
+	if term == nil {
+		return
+	}
+	win := term.Window()
+	width, height := win.Size()
+	if x < 0 || y < 0 || x >= width || y >= height {
+		return
+	}
+	style := vaxis.Style{
+		Hyperlink:      url,
+		UnderlineStyle: vaxis.UnderlineSingle,
+	}
+	win.New(x, y, width-x, 1).Print(vaxis.Segment{Text: text, Style: style})
+}
+
 func DrawTextStyle(term *vaxis.Vaxis, x int, y int, text string, fg int, bg int, bold bool, dim bool, italic bool, underline bool, reverse bool) {
 	if term == nil {
 		return

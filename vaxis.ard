@@ -221,6 +221,11 @@ extern fn window_show_cursor(win: Window, x: Int, y: Int) Void = "WindowShowCurs
 
 extern fn draw_text(vx: Vaxis, x: Int, y: Int, text: Str) Void = "DrawText"
 
+// Render `text` as an OSC 8 clickable hyperlink pointing at `url`.
+// Renders an underline so the link is visually distinct. Terminals
+// without OSC 8 support just render the underlined text.
+extern fn draw_link(vx: Vaxis, x: Int, y: Int, text: Str, url: Str) Void = "DrawLink"
+
 extern fn draw_text_style(
   vx: Vaxis,
   x: Int,
