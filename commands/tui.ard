@@ -14,6 +14,13 @@ struct BoardColumn {
   issues: [Dynamic],
 }
 
+// A title wrapped to at most two lines. line2 is "" when the whole
+// title fit on one line.
+struct TitleLines {
+  line1: Str,
+  line2: Str,
+}
+
 struct AppState {
   api_key: Str,
   vx: vaxis::Vaxis,
@@ -82,6 +89,55 @@ fn truncate_with_ellipsis(s: Str, max: Int) Str {
   match s.size() <= max {
     true => s,
     false => truncate(s, max - 1) + "…",
+  }
+}
+
+// Wraps a title onto at most two lines of `width` characters each.
+// Breaks at the last word boundary inside the first line when
+// possible, otherwise hard-breaks at exactly `width`. The second line
+// is truncated with an ellipsis if the remainder doesn't fit.
+fn wrap_title(title: Str, width: Int) TitleLines {
+  match title.size() <= width {
+    true => TitleLines{ line1: title, line2: "" },
+    false => {
+      // First pass: find the last space within [0, width) so we can
+      // break at a word boundary.
+      mut last_space = -1
+      mut i = 0
+      for c in title {
+        if i < width and c == " " {
+          last_space = i
+        }
+        i = i + 1
+      }
+
+      // Use the word boundary if we found one; otherwise hard break.
+      let break_at = match last_space >= 0 {
+        true => last_space,
+        false => width,
+      }
+      let skip_break_char = last_space >= 0
+
+      // Second pass: distribute chars between the two lines.
+      mut line1 = ""
+      mut line2 = ""
+      mut idx = 0
+      for c in title {
+        if idx < break_at {
+          line1 = line1 + c
+        } else if idx == break_at and skip_break_char {
+          // skip the breaking space
+        } else {
+          line2 = line2 + c
+        }
+        idx = idx + 1
+      }
+
+      TitleLines{
+        line1: line1,
+        line2: truncate_with_ellipsis(line2, width),
+      }
+    },
   }
 }
 
@@ -466,6 +522,24 @@ fn priority_label(p: Int?) Str {
   }
 }
 
+// Single-character priority glyph for compact card rendering. Returns
+// a space when priority is None or 0 (no priority), so all glyphs
+// occupy the same visual column.
+fn priority_glyph(p: Int?) Str {
+  match p {
+    n => {
+      match n {
+        1 => "!",
+        2 => "↑",
+        3 => "~",
+        4 => "↓",
+        _ => " ",
+      }
+    },
+    _ => " ",
+  }
+}
+
 fn draw_label_row(vx: vaxis::Vaxis, x: Int, y: Int, label: Str, value: Str) Void {
   vaxis::draw_text(vx, x, y, pad_str(label, 10) + value)
 }
@@ -747,19 +821,109 @@ fn draw_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int,
 
 }
 
-// Width of a single column in the board view, including its right gap.
-fn board_column_width() Int { 22 }
+// Gap between adjacent board columns, in cells.
 fn board_column_gap() Int { 3 }
+
+// Computes the column width that best fits all `col_count` columns in
+// the current terminal width. Clamped to a sane range so columns
+// don't get too cramped on narrow terminals or absurdly wide on
+// ultrawide ones.
+fn board_column_width(vx: vaxis::Vaxis, col_count: Int) Int {
+  match col_count == 0 {
+    true => 30,
+    false => {
+      let win = vaxis::root(vx)
+      let term_w = vaxis::window_width(win)
+      let gap = board_column_gap()
+      let left_padding = 1
+      let available = term_w - left_padding
+      let computed = (available - ((col_count - 1) * gap)) / col_count
+      match computed < 22 {
+        true => 22,
+        false => match computed > 50 {
+          true => 50,
+          false => computed,
+        },
+      }
+    },
+  }
+}
+
+// Draws a single card in one of the board columns. Returns the y
+// position where the *next* card (or divider) should start.
+//
+// Layout depends on title length:
+//   <cursor><glyph> <identifier>
+//   <indent><title-line-1>
+//   <indent><title-line-2>          ← only if title wraps
+//   <heavy-divider>                 ← only if not the last card
+//   <blank>                         ← only if not the last card
+fn draw_board_card(
+  vx: vaxis::Vaxis,
+  issue: Dynamic,
+  x: Int,
+  y: Int,
+  col_w: Int,
+  is_selected: Bool,
+  is_last: Bool,
+) Int {
+  let identifier = decode::run(issue, decode::field("identifier", decode::string))
+    .expect("Missing identifier")
+  let title = decode::run(issue, decode::field("title", decode::string))
+    .expect("Missing title")
+  let priority = decode::run(issue, decode::field("priority", decode::nullable(decode::int)))
+    .expect("Missing priority")
+
+  let cursor = match is_selected {
+    true => "▸",
+    false => " ",
+  }
+  let glyph = priority_glyph(priority)
+
+  // Line 1: "<cursor><glyph> <identifier>"  (3-char prefix before id)
+  let header = "{cursor}{glyph} {identifier}"
+  vaxis::draw_text(vx, x, y, truncate_with_ellipsis(header, col_w))
+
+  // Title lines: aligned under the identifier, up to 2 lines.
+  let title_indent = 3
+  let title_w = col_w - title_indent
+  let wrapped = wrap_title(title, title_w)
+  vaxis::draw_text(vx, x + title_indent, y + 1, wrapped.line1)
+
+  let has_line2 = not wrapped.line2.is_empty()
+  if has_line2 {
+    vaxis::draw_text(vx, x + title_indent, y + 2, wrapped.line2)
+  }
+
+  // Position right after the title block.
+  let divider_y = match has_line2 {
+    true => y + 3,
+    false => y + 2,
+  }
+
+  // Divider + blank between cards (skip after the last one).
+  mut next_y = divider_y
+  if (not is_last) {
+    mut divider = ""
+    for i in 0..(col_w - 2) {
+      divider =+ "━"
+    }
+    vaxis::draw_text(vx, x, divider_y, divider)
+    next_y = divider_y + 2
+  }
+  next_y
+}
 
 fn draw_board_content(state: AppState) Void {
   let vx = state.vx
   let sb_y = status_bar_y(vx)
+  let content_bottom = sb_y - 1
 
   if state.columns.size() == 0 {
     vaxis::draw_text(vx, 1, 3, "No issues assigned to you.")
     vaxis::draw_text(vx, 1, sb_y, "Tab switch · r refresh")
   } else {
-    let col_w = board_column_width()
+    let col_w = board_column_width(vx, state.columns.size())
     let gap = board_column_gap()
     mut x = 1
     for col in state.columns {
@@ -772,11 +936,22 @@ fn draw_board_content(state: AppState) Void {
       vaxis::draw_text(vx, x, 3, truncate_with_ellipsis(header, col_w))
 
       // Divider under header.
-      mut divider = ""
+      mut header_div = ""
       for i in 0..(col_w - 2) {
-        divider =+ "─"
+        header_div =+ "─"
       }
-      vaxis::draw_text(vx, x, 4, divider)
+      vaxis::draw_text(vx, x, 4, header_div)
+
+      // Cards in this column.
+      mut card_y = 6
+      let last_idx = col.issues.size() - 1
+      for issue, idx in col.issues {
+        // Stop drawing if we'd run past the status bar.
+        if card_y + 1 < content_bottom {
+          let is_last = idx == last_idx
+          card_y = draw_board_card(vx, issue, x, card_y, col_w, false, is_last)
+        }
+      }
 
       x = x + col_w + gap
     }
