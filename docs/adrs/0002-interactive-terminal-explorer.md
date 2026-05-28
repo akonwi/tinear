@@ -7,7 +7,7 @@ Accepted — Phase 1 implemented
 ## Context
 
 The existing `tui` command shows a static read-only view of the user's
-open issues (My Board). We want to expand it into a full explorer that
+open issues (My Issues). We want to expand it into a full explorer that
 lets users navigate Linear data interactively — inbox, projects, issue
 details — without leaving the terminal.
 
@@ -33,7 +33,7 @@ Non-requirements (for now):
 The TUI will be built incrementally in these phases:
 
 ### Phase 1 — Inbox screen + tab scaffolding
-- Replace the current My Board view with an Inbox (notifications) screen
+- Replace the current My Issues view with an Inbox (notifications) screen
 - Introduce a tab bar with a single permanent Inbox tab
 - Status bar with keybinding hints
 - Separates concerns: tab management, screen rendering, input dispatch

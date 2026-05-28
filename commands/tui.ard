@@ -164,7 +164,7 @@ struct AppState {
   board_col: Int,
   board_row: Int,
   board_scroll: Int,
-  // Tabs beyond the two fixed ones (Inbox, My Board). Each entry is
+  // Tabs beyond the two fixed ones (Inbox, My Issues). Each entry is
   // an open issue tab. The tab name shown in the tab bar is the
   // issue's identifier.
   issue_tabs: [IssueTab],
@@ -1646,7 +1646,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
 
   while running {
     // Build the visible tabs list: two fixed + one per open issue tab.
-    mut tabs = ["Inbox", "My Board"]
+    mut tabs = ["Inbox", "My Issues"]
     for it in issue_tabs {
       let id = decode::run(it.issue, decode::field("identifier", decode::string)).expect("Missing identifier")
       tabs.push(id)
