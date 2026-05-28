@@ -110,6 +110,76 @@ fn truncate_with_ellipsis(s: Str, max: Int) Str {
 // Breaks at the last word boundary inside the first line when
 // possible, otherwise hard-breaks at exactly `width`. The second line
 // is truncated with an ellipsis if the remainder doesn't fit.
+// Wraps a single logical line (no embedded newlines) into one or more
+// strings of at most `width` characters. Breaks at the last space
+// within the window when possible, otherwise hard-breaks at `width`.
+fn wrap_line(s: Str, width: Int) [Str] {
+  mut lines: [Str] = []
+  mut remainder = s
+  while remainder.size() > width {
+    mut last_space = -1
+    mut i = 0
+    for c in remainder {
+      if i < width and c == " " {
+        last_space = i
+      }
+      i = i + 1
+    }
+    let break_at = match last_space >= 0 {
+      true => last_space,
+      false => width,
+    }
+    let skip_break = last_space >= 0
+
+    mut line = ""
+    mut new_remainder = ""
+    mut idx = 0
+    for c in remainder {
+      if idx < break_at {
+        line = line + c
+      } else if idx == break_at and skip_break {
+        ()
+      } else {
+        new_remainder = new_remainder + c
+      }
+      idx = idx + 1
+    }
+    lines.push(line)
+    remainder = new_remainder
+  }
+  if (not remainder.is_empty()) or lines.size() == 0 {
+    lines.push(remainder)
+  }
+  lines
+}
+
+// Wraps multi-line text to fit within `width` columns. Preserves
+// explicit newlines in the input and word-wraps each segment.
+fn wrap_text(s: Str, width: Int) [Str] {
+  mut segments: [Str] = []
+  mut current = ""
+  for c in s {
+    if c == "\n" {
+      segments.push(current)
+      current = ""
+      ()
+    } else {
+      current = current + c
+      ()
+    }
+  }
+  segments.push(current)
+
+  mut out: [Str] = []
+  for seg in segments {
+    let lines = wrap_line(seg, width)
+    for line in lines {
+      out.push(line)
+    }
+  }
+  out
+}
+
 fn wrap_title(title: Str, width: Int) TitleLines {
   match title.size() <= width {
     true => TitleLines{ line1: title, line2: "" },
@@ -906,26 +976,55 @@ fn draw_issue_tab(state: AppState, tab: IssueTab) Void {
   draw_label_row(vx, panel_x, 8, "Assignee", assignee_name)
   draw_label_row(vx, panel_x, 9, "Priority", priority_label(priority))
 
-  // Description
-  mut next_y = 11
+  // Description — when there are comments, share the space ~50/50;
+  // when there aren't, the description takes the whole remaining
+  // content area before being truncated with an ellipsis.
+  let sb_y = status_bar_y(vx)
+  let max_y = sb_y - 1
+  let desc_start = 11
+  let body_start = desc_start + 2
+  let available = max_y - body_start
+  let half = available / 2
+  let max_desc_lines = match tab.comments.size() == 0 {
+    true => available,
+    false => match half < 4 {
+      true => available,
+      false => half,
+    },
+  }
+
+  mut next_y = desc_start
   match description {
     desc => {
-      vaxis::draw_text(vx, panel_x, 11, "Description")
+      vaxis::draw_text(vx, panel_x, desc_start, "Description")
       mut desc_div = ""
       for i in 0..(panel_width - 1) {
         desc_div =+ "─"
       }
-      vaxis::draw_text(vx, panel_x, 12, desc_div)
-      let desc_truncated = truncate_with_ellipsis(desc, panel_width - 3)
-      vaxis::draw_text(vx, panel_x + 2, 14, desc_truncated)
-      next_y = 16
+      vaxis::draw_text(vx, panel_x, desc_start + 1, desc_div)
+
+      let wrapped = wrap_text(desc, panel_width - 3)
+      let overflow = wrapped.size() > max_desc_lines
+      let render_count = match overflow {
+        true => max_desc_lines - 1,
+        false => wrapped.size(),
+      }
+      for line, idx in wrapped {
+        if idx < render_count {
+          vaxis::draw_text(vx, panel_x + 2, body_start + idx, line)
+        }
+      }
+      if overflow {
+        vaxis::draw_text(vx, panel_x + 2, body_start + render_count, "…")
+        next_y = body_start + render_count + 2
+      } else {
+        next_y = body_start + render_count + 1
+      }
     },
     _ => (),
   }
 
   // Comments
-  let sb_y = status_bar_y(vx)
-  let max_y = sb_y - 1
   if next_y + 2 < max_y {
     let header_label = match tab.comments.size() == 0 {
       true => "Comments (none)",
