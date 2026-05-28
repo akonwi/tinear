@@ -31,6 +31,10 @@ struct AppState {
   board_col: Int,
   board_row: Int,
   board_scroll: Int,
+  // Tabs beyond the two fixed ones (Inbox, My Board). Each entry is
+  // an issue Dynamic. The tab name shown in the tab bar is the
+  // issue's identifier.
+  issue_tabs: [Dynamic],
   viewer_name: Str,
   viewer_email: Str,
 
@@ -227,7 +231,7 @@ fn is_hidden_state(name: Str) Bool {
 // Excludes canceled states. Caps `completed` columns to the first 10
 // issues returned by the API.
 fn fetch_board(api_key: Str, my_id: Str) [BoardColumn]!Str {
-  let query = "query \{ issues(first: 200, filter: \{ assignee: \{ id: \{ eq: \"{my_id}\" \} \}, state: \{ type: \{ nin: [\"canceled\"] \} \} \}) \{ nodes \{ id identifier title priority state \{ id name type position \} \} \} \}"
+  let query = "query \{ issues(first: 200, filter: \{ assignee: \{ id: \{ eq: \"{my_id}\" \} \}, state: \{ type: \{ nin: [\"canceled\"] \} \} \}) \{ nodes \{ id identifier title description priority state \{ id name type position \} team \{ name key \} project \{ name \} assignee \{ name \} \} \} \}"
   let data = try client::graphql(api_key, query)
   let issues = decode::run(data, decode::path(["issues", "nodes"], decode::list(decode::dynamic)))
     .expect("Missing issues.nodes")
@@ -824,6 +828,85 @@ fn draw_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int,
 
 }
 
+// Render an issue detail tab. Reuses the data already fetched by the
+// board query — no additional API call.
+fn draw_issue_tab(state: AppState, issue: Dynamic) Void {
+  let vx = state.vx
+  let win = vaxis::root(vx)
+  let term_w = vaxis::window_width(win)
+  let panel_x = 1
+  let panel_width = term_w - 2
+
+  let issue_id = decode::run(issue, decode::field("identifier", decode::string)).expect("Missing identifier")
+  let issue_title = decode::run(issue, decode::field("title", decode::string)).expect("Missing title")
+
+  let description = decode::run(issue, decode::field("description", decode::nullable(decode::string)))
+    .expect("Missing description")
+  let priority = decode::run(issue, decode::field("priority", decode::nullable(decode::int)))
+    .expect("Missing priority")
+
+  let state_obj = optional_field(issue, "state")
+  let state_name = match state_obj {
+    s => decode::run(s, decode::field("name", decode::string)).expect("Missing state name"),
+    _ => "—",
+  }
+
+  let team_obj = optional_field(issue, "team")
+  let team_name = match team_obj {
+    t => decode::run(t, decode::field("name", decode::string)).expect("Missing team name"),
+    _ => "—",
+  }
+
+  let project_obj = optional_field(issue, "project")
+  let project_name = match project_obj {
+    p => decode::run(p, decode::field("name", decode::string)).expect("Missing project name"),
+    _ => "—",
+  }
+
+  let assignee_obj = optional_field(issue, "assignee")
+  let assignee_name = match assignee_obj {
+    a => decode::run(a, decode::field("name", decode::string)).expect("Missing assignee name"),
+    _ => "—",
+  }
+
+  // Header: identifier — title
+  let header_title = truncate_with_ellipsis(issue_title, panel_width - issue_id.size() - 3)
+  vaxis::draw_text(vx, panel_x, 2, "{issue_id} — {header_title}")
+
+  // Separator under header
+  mut sep = ""
+  for i in 0..(panel_width - 1) {
+    sep =+ "─"
+  }
+  vaxis::draw_text(vx, panel_x, 3, sep)
+
+  // Issue details block
+  draw_label_row(vx, panel_x, 5, "Status",   state_name)
+  draw_label_row(vx, panel_x, 6, "Team",     team_name)
+  draw_label_row(vx, panel_x, 7, "Project",  project_name)
+  draw_label_row(vx, panel_x, 8, "Assignee", assignee_name)
+  draw_label_row(vx, panel_x, 9, "Priority", priority_label(priority))
+
+  // Description
+  match description {
+    desc => {
+      vaxis::draw_text(vx, panel_x, 11, "Description")
+      mut desc_div = ""
+      for i in 0..(panel_width - 1) {
+        desc_div =+ "─"
+      }
+      vaxis::draw_text(vx, panel_x, 12, desc_div)
+      let desc_truncated = truncate_with_ellipsis(desc, panel_width - 3)
+      vaxis::draw_text(vx, panel_x + 2, 14, desc_truncated)
+    },
+    _ => (),
+  }
+
+  // Status bar
+  let sb_y = status_bar_y(vx)
+  vaxis::draw_text(vx, 1, sb_y, "Esc close tab · Tab switch")
+}
+
 // Gap between adjacent board columns, in cells.
 fn board_column_gap() Int { 3 }
 
@@ -1089,8 +1172,14 @@ fn draw_screen(state: AppState) Void {
 
   if state.active_tab == 0 {
     draw_inbox_content(state)
-  } else {
+  } else if state.active_tab == 1 {
     draw_board_content(state)
+  } else {
+    // Issue detail tab: active_tab - 2 indexes into issue_tabs.
+    let idx = state.active_tab - 2
+    if idx < state.issue_tabs.size() {
+      draw_issue_tab(state, state.issue_tabs.at(idx))
+    }
   }
 
   vaxis::render(vx).expect("render")
@@ -1115,12 +1204,18 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
   mut board_col = 0
   mut board_row = 0
   mut board_scroll = 0
+  mut issue_tabs: [Dynamic] = []
   mut detail_mode = false
   mut active_tab = 0
   mut running = true
 
   while running {
-    let tabs = ["Inbox", "My Board"]
+    // Build the visible tabs list: two fixed + one per open issue tab.
+    mut tabs = ["Inbox", "My Board"]
+    for it in issue_tabs {
+      let id = decode::run(it, decode::field("identifier", decode::string)).expect("Missing identifier")
+      tabs.push(id)
+    }
     let state = AppState{
       api_key: api_key,
       vx: vx,
@@ -1131,6 +1226,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
       board_col: board_col,
       board_row: board_row,
       board_scroll: board_scroll,
+      issue_tabs: issue_tabs,
       viewer_name: name,
       viewer_email: email,
 
@@ -1218,6 +1314,51 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
               if board_col >= board_scroll + visible {
                 board_scroll = board_col - visible + 1
               }
+            }
+          } else if k.name == "Enter" or k.name == "Space" {
+            if columns.size() > 0 {
+              let col = columns.at(board_col)
+              if col.issues.size() > 0 {
+                let selected = col.issues.at(board_row)
+                let sel_id = decode::run(selected, decode::field("identifier", decode::string))
+                  .expect("Missing identifier")
+                // Focus existing tab if this issue is already open.
+                mut existing = -1
+                for it, i in issue_tabs {
+                  let tid = decode::run(it, decode::field("identifier", decode::string))
+                    .expect("Missing identifier")
+                  if tid == sel_id and existing == -1 {
+                    existing = i
+                  }
+                }
+                if existing >= 0 {
+                  active_tab = 2 + existing
+                  ()
+                } else {
+                  issue_tabs.push(selected)
+                  active_tab = 2 + issue_tabs.size() - 1
+                  ()
+                }
+              }
+            }
+          } else {
+            ()
+          }
+        } else if active_tab >= 2 {
+          // ISSUE TAB
+          if k.name == "Escape" {
+            let removed = active_tab - 2
+            mut remaining: [Dynamic] = []
+            for it, i in issue_tabs {
+              if not (i == removed) {
+                remaining.push(it)
+              }
+            }
+            issue_tabs = remaining
+            // Activate the previous tab; never go below 0.
+            active_tab = match active_tab > 0 {
+              true => active_tab - 1,
+              false => 0,
             }
           } else {
             ()
