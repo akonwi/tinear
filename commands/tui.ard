@@ -617,23 +617,85 @@ fn fetch_viewer(api_key: Str) Dynamic!Str {
   Result::ok(viewer)
 }
 
+// Visual width of one tab label, including its surrounding spaces or
+// brackets. " name " and "[name]" are both name.size() + 2 cells.
+fn tab_width(name: Str) Int {
+  name.size() + 2
+}
+
 fn draw_tab_bar(vx: vaxis::Vaxis, tabs: [Str], active: Int) Void {
-  mut x = 1
-  for tab, idx in tabs {
-    let label = " {tab} "
-    if idx == active {
-      vaxis::draw_text(vx, x, 0, "[" + tab + "]")
-      x = x + tab.size() + 2 + 1
-    } else {
-      vaxis::draw_text(vx, x, 0, label)
-      x = x + label.size()
+  let win = vaxis::root(vx)
+  let term_w = vaxis::window_width(win)
+
+  if tabs.size() > 0 {
+    // Total width if every tab were rendered starting at col 1.
+    mut total = 0
+    for t in tabs {
+      total = total + tab_width(t)
+    }
+
+    let fits_clean = total <= term_w - 1
+
+    // Compute the leftmost visible tab so the active one stays in view.
+    // When scrolling we reserve col 0 for `‹` and col term_w-1 for `›`,
+    // so usable width drops to term_w - 3.
+    mut scroll = 0
+    if (not fits_clean) {
+      let avail = term_w - 3
+      mut sum_to_active = 0
+      for t, idx in tabs {
+        if idx <= active {
+          sum_to_active = sum_to_active + tab_width(t)
+        }
+      }
+      mut sum = sum_to_active
+      while sum > avail and scroll < active {
+        sum = sum - tab_width(tabs.at(scroll))
+        scroll = scroll + 1
+      }
+    }
+
+    let start_x = match (not fits_clean) and scroll > 0 {
+      true => 2,
+      false => 1,
+    }
+    let max_x = match fits_clean {
+      true => term_w,
+      false => term_w - 1,
+    }
+
+    // Render tabs from `scroll`, stopping when the next one wouldn't fit.
+    mut x = start_x
+    mut last_rendered = scroll - 1
+    mut n = scroll
+    while n < tabs.size() {
+      let t = tabs.at(n)
+      let w = tab_width(t)
+      if x + w > max_x {
+        break
+      }
+      if n == active {
+        vaxis::draw_text(vx, x, 0, "[" + t + "]")
+      } else {
+        vaxis::draw_text(vx, x, 0, " " + t + " ")
+      }
+      x = x + w
+      last_rendered = n
+      n = n + 1
+    }
+
+    // Overflow indicators.
+    if (not fits_clean) and scroll > 0 {
+      vaxis::draw_text(vx, 0, 0, "‹")
+    }
+    if (not fits_clean) and last_rendered < tabs.size() - 1 {
+      vaxis::draw_text(vx, term_w - 1, 0, "›")
     }
   }
-  // Separator line below tabs
-  let win = vaxis::root(vx)
-  let w = vaxis::window_width(win)
+
+  // Separator line below the tab bar.
   mut sep = ""
-  for i in 0..(w - 1) {
+  for i in 0..(term_w - 1) {
     sep =+ "─"
   }
   vaxis::draw_text(vx, 0, 1, sep)
