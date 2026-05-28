@@ -1976,7 +1976,7 @@ fn draw_comment_composer(vx: vaxis::Vaxis, composer: CommentComposer) Void {
   foot_sep =+ "┤"
   vaxis::draw_text(vx, x, foot_y, foot_sep)
 
-  let footer = " Ctrl+S send  Esc cancel "
+  let footer = " Ctrl+↵ send  Esc cancel "
   let footer_padded = pad_str_display(vx, truncate_with_ellipsis_display(vx, footer, w - 2), w - 2)
   vaxis::draw_text(vx, x, foot_y + 1, "│{footer_padded}│")
 
@@ -2185,7 +2185,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
             comp => {
               if k.name == "Escape" {
                 comment_composer = maybe::none()
-              } else if k.ctrl and k.name == "s" {
+              } else if k.ctrl and k.name == "Enter" {
                 if (not comp.body.is_empty()) {
                   match create_comment(api_key, comp.issue_id, comp.body) {
                     ok(_) => {
