@@ -7,6 +7,99 @@ use linear-cli/os
 use linear-cli/util
 use linear-cli/vaxis
 
+fn truncate(s: Str, max: Int) Str {
+  mut result = s
+  while result.size() > max {
+    result = vaxis::text_backspace(result)
+  }
+  result
+}
+
+fn truncate_with_ellipsis(s: Str, max: Int) Str {
+  match s.size() <= max {
+    true => s,
+    false => truncate(s, max - 1) + "…",
+  }
+}
+
+// A scrollable list-of-lines viewport with a vertical scrollbar on
+// the right edge. The caller wraps content into `lines` and tracks
+// `scroll` (the index of the top visible line).
+//
+// The rightmost column of `width` is reserved for the scrollbar even
+// when no overflow is present, so the layout stays stable.
+struct Scrollview {
+  x: Int,
+  y: Int,
+  width: Int,
+  height: Int,
+  lines: [Str],
+  scroll: Int,
+}
+
+impl Scrollview {
+  // Maximum valid scroll offset given current size of `lines`.
+  fn max_scroll() Int {
+    match self.lines.size() > self.height {
+      true => self.lines.size() - self.height,
+      false => 0,
+    }
+  }
+
+  // Returns `self.scroll` clamped into [0, max_scroll()]. Used so
+  // callers can set scroll to large/negative values and the renderer
+  // still does the right thing.
+  fn clamped_scroll() Int {
+    let max = self.max_scroll()
+    match self.scroll > max {
+      true => max,
+      false => match self.scroll < 0 {
+        true => 0,
+        false => self.scroll,
+      },
+    }
+  }
+
+  fn draw(vx: vaxis::Vaxis) {
+    let scroll = self.clamped_scroll()
+    let content_w = self.width - 1
+    let end = match scroll + self.height > self.lines.size() {
+      true => self.lines.size(),
+      false => scroll + self.height,
+    }
+    for line, idx in self.lines {
+      if idx >= scroll and idx < end {
+        let display = truncate_with_ellipsis(line, content_w)
+        vaxis::draw_text(vx, self.x, self.y + (idx - scroll), display)
+      }
+    }
+    if self.lines.size() > self.height {
+      let bar_x = self.x + self.width - 1
+      // Track
+      for r in 0..(self.height - 1) {
+        vaxis::draw_text(vx, bar_x, self.y + r, "│")
+      }
+      // Thumb size, proportional to viewport / total.
+      let total = self.lines.size()
+      let raw_thumb = (self.height * self.height) / total
+      let thumb_h = match raw_thumb < 1 {
+        true => 1,
+        false => raw_thumb,
+      }
+      // Thumb position, proportional to scroll / max_scroll.
+      let max_thumb_pos = self.height - thumb_h
+      let max_s = self.max_scroll()
+      let thumb_pos = match max_s == 0 {
+        true => 0,
+        false => (scroll * max_thumb_pos) / max_s,
+      }
+      for r in 0..(thumb_h - 1) {
+        vaxis::draw_text(vx, bar_x, self.y + thumb_pos + r, "█")
+      }
+    }
+  }
+}
+
 struct BoardColumn {
   name: Str,
   state_type: Str,
@@ -27,7 +120,10 @@ struct IssueTab {
   comments: [Dynamic],
   section: Int,
   focused: Bool,
-  desc_scroll: Int,
+  // Persistent scroll state for the Description section. The
+  // scrollview's layout and lines get refreshed each draw; only its
+  // .scroll field meaningfully persists across frames.
+  desc_sv: Scrollview,
   comment_cursor: Int,
 }
 
@@ -37,6 +133,7 @@ struct TitleLines {
   line1: Str,
   line2: Str,
 }
+
 
 struct AppState {
   api_key: Str,
@@ -101,20 +198,6 @@ fn pad_str(s: Str, width: Int) Str {
   }
 }
 
-fn truncate(s: Str, max: Int) Str {
-  mut result = s
-  while result.size() > max {
-    result = vaxis::text_backspace(result)
-  }
-  result
-}
-
-fn truncate_with_ellipsis(s: Str, max: Int) Str {
-  match s.size() <= max {
-    true => s,
-    false => truncate(s, max - 1) + "…",
-  }
-}
 
 // Wraps a title onto at most two lines of `width` characters each.
 // Breaks at the last word boundary inside the first line when
@@ -189,6 +272,7 @@ fn wrap_text(s: Str, width: Int) [Str] {
   }
   out
 }
+
 
 fn wrap_title(title: Str, width: Int) TitleLines {
   match title.size() <= width {
@@ -387,21 +471,6 @@ fn fetch_issue_comments(api_key: Str, issue_id: Str) [Dynamic]!Str {
   let nodes = decode::run(data, decode::path(["issue", "comments", "nodes"], decode::list(decode::dynamic)))
     .expect("Missing issue.comments.nodes")
   Result::ok(nodes)
-}
-
-// Returns a new list with the IssueTab at `idx` replaced by `t`.
-// Ard structs aren't mutated in place; we rebuild the list so the
-// caller can swap in the new value.
-fn replace_tab(tabs: [IssueTab], idx: Int, t: IssueTab) [IssueTab] {
-  mut out: [IssueTab] = []
-  for it, i in tabs {
-    if i == idx {
-      out.push(t)
-    } else {
-      out.push(it)
-    }
-  }
-  out
 }
 
 fn fetch_inbox(api_key: Str) [Dynamic]!Str {
@@ -1039,50 +1108,24 @@ fn draw_issue_tab(state: AppState, tab: IssueTab) Void {
   mut next_y = desc_body_start
   match description {
     desc => {
+      // Construct a fresh Scrollview per frame, populating .scroll
+      // from the tab's persistent state. Key handlers update
+      // tab.desc_sv.scroll directly; we read it here.
       let wrapped = wrap_text(desc, panel_width - 3)
-      let total = wrapped.size()
-      // When focused, the scroll offset chooses which slice of the
-      // wrapped lines we render. Otherwise pinned to the top.
-      let max_scroll = match total > max_desc_lines {
-        true => total - max_desc_lines,
+      let init_scroll = match desc_focused {
+        true => tab.desc_sv.scroll,
         false => 0,
       }
-      let scroll_raw = match desc_focused {
-        true => tab.desc_scroll,
-        false => 0,
+      let sv = Scrollview{
+        x: panel_x + 2,
+        y: desc_body_start,
+        width: panel_width - 2,
+        height: max_desc_lines,
+        lines: wrapped,
+        scroll: init_scroll,
       }
-      let scroll = match scroll_raw > max_scroll {
-        true => max_scroll,
-        false => match scroll_raw < 0 {
-          true => 0,
-          false => scroll_raw,
-        },
-      }
-      let remaining_after_scroll = match total > scroll {
-        true => total - scroll,
-        false => 0,
-      }
-      let overflow = remaining_after_scroll > max_desc_lines
-      let render_count = match overflow {
-        true => max_desc_lines - 1,
-        false => remaining_after_scroll,
-      }
-      for line, idx in wrapped {
-        let rel = idx - scroll
-        if rel >= 0 and rel < render_count {
-          vaxis::draw_text(vx, panel_x + 2, desc_body_start + rel, line)
-        }
-      }
-      // Scroll indicators
-      if scroll > 0 {
-        vaxis::draw_text(vx, panel_width - 2, desc_start + 1, "↑")
-      }
-      if overflow {
-        vaxis::draw_text(vx, panel_x + 2, desc_body_start + render_count, "…")
-        next_y = desc_body_start + render_count + 2
-      } else {
-        next_y = desc_body_start + render_count + 1
-      }
+      sv.draw(vx)
+      next_y = desc_body_start + max_desc_lines + 1
     },
     _ => {
       vaxis::draw_text(vx, panel_x + 2, desc_body_start, "(no description)")
@@ -1578,7 +1621,11 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                     comments: comments,
                     section: 0,
                     focused: false,
-                    desc_scroll: 0,
+                    desc_sv: Scrollview{
+                      x: 0, y: 0, width: 0, height: 0,
+                      lines: [],
+                      scroll: 0,
+                    },
                     comment_cursor: 0,
                   })
                   active_tab = 2 + issue_tabs.size() - 1
@@ -1595,17 +1642,16 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
           let current = issue_tabs.at(idx)
           if k.name == "Escape" {
             if current.focused {
-              // Pop section focus.
-              issue_tabs = replace_tab(issue_tabs, idx, IssueTab{
+              issue_tabs.set(idx, IssueTab{
                 issue: current.issue,
                 comments: current.comments,
                 section: current.section,
                 focused: false,
-                desc_scroll: current.desc_scroll,
+                desc_sv: current.desc_sv,
                 comment_cursor: current.comment_cursor,
               })
+              ()
             } else {
-              // Close the tab.
               mut remaining: [IssueTab] = []
               for it, i in issue_tabs {
                 if not (i == idx) {
@@ -1617,76 +1663,87 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                 true => active_tab - 1,
                 false => 0,
               }
+              ()
             }
           } else if (k.name == "Enter" or k.name == "Space") and (not current.focused) {
-            // Focus into the highlighted section.
-            issue_tabs = replace_tab(issue_tabs, idx, IssueTab{
+            issue_tabs.set(idx, IssueTab{
               issue: current.issue,
               comments: current.comments,
               section: current.section,
               focused: true,
-              desc_scroll: current.desc_scroll,
+              desc_sv: current.desc_sv,
               comment_cursor: current.comment_cursor,
             })
+            ()
           } else if k.name == "Up" or k.name == "k" {
             if current.focused {
               if current.section == 0 {
-                // Description: scroll up
-                let new_scroll = match current.desc_scroll > 0 {
-                  true => current.desc_scroll - 1,
-                  false => 0,
+                let new_sv = Scrollview{
+                  x: current.desc_sv.x,
+                  y: current.desc_sv.y,
+                  width: current.desc_sv.width,
+                  height: current.desc_sv.height,
+                  lines: current.desc_sv.lines,
+                  scroll: current.desc_sv.scroll - 1,
                 }
-                issue_tabs = replace_tab(issue_tabs, idx, IssueTab{
+                issue_tabs.set(idx, IssueTab{
                   issue: current.issue,
                   comments: current.comments,
                   section: current.section,
                   focused: current.focused,
-                  desc_scroll: new_scroll,
+                  desc_sv: new_sv,
                   comment_cursor: current.comment_cursor,
                 })
+                ()
               } else {
-                // Comments: cursor up
                 let new_cursor = match current.comment_cursor > 0 {
                   true => current.comment_cursor - 1,
                   false => 0,
                 }
-                issue_tabs = replace_tab(issue_tabs, idx, IssueTab{
+                issue_tabs.set(idx, IssueTab{
                   issue: current.issue,
                   comments: current.comments,
                   section: current.section,
                   focused: current.focused,
-                  desc_scroll: current.desc_scroll,
+                  desc_sv: current.desc_sv,
                   comment_cursor: new_cursor,
                 })
+                ()
               }
             } else {
-              // Section-level: go to Description (section 0).
               if current.section > 0 {
-                issue_tabs = replace_tab(issue_tabs, idx, IssueTab{
+                issue_tabs.set(idx, IssueTab{
                   issue: current.issue,
                   comments: current.comments,
                   section: 0,
                   focused: current.focused,
-                  desc_scroll: current.desc_scroll,
+                  desc_sv: current.desc_sv,
                   comment_cursor: current.comment_cursor,
                 })
+                ()
               }
             }
           } else if k.name == "Down" or k.name == "j" {
             if current.focused {
               if current.section == 0 {
-                // Description: scroll down (no upper clamp here;
-                // renderer handles overflow.)
-                issue_tabs = replace_tab(issue_tabs, idx, IssueTab{
+                let new_sv = Scrollview{
+                  x: current.desc_sv.x,
+                  y: current.desc_sv.y,
+                  width: current.desc_sv.width,
+                  height: current.desc_sv.height,
+                  lines: current.desc_sv.lines,
+                  scroll: current.desc_sv.scroll + 1,
+                }
+                issue_tabs.set(idx, IssueTab{
                   issue: current.issue,
                   comments: current.comments,
                   section: current.section,
                   focused: current.focused,
-                  desc_scroll: current.desc_scroll + 1,
+                  desc_sv: new_sv,
                   comment_cursor: current.comment_cursor,
                 })
+                ()
               } else {
-                // Comments: cursor down
                 let last = current.comments.size() - 1
                 let new_cursor = match current.comment_cursor < last {
                   true => current.comment_cursor + 1,
@@ -1696,89 +1753,107 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                   true => 0,
                   false => new_cursor,
                 }
-                issue_tabs = replace_tab(issue_tabs, idx, IssueTab{
+                issue_tabs.set(idx, IssueTab{
                   issue: current.issue,
                   comments: current.comments,
                   section: current.section,
                   focused: current.focused,
-                  desc_scroll: current.desc_scroll,
+                  desc_sv: current.desc_sv,
                   comment_cursor: clamped,
                 })
+                ()
               }
             } else {
-              // Section-level: go to Comments (section 1).
               if current.section < 1 {
-                issue_tabs = replace_tab(issue_tabs, idx, IssueTab{
+                issue_tabs.set(idx, IssueTab{
                   issue: current.issue,
                   comments: current.comments,
                   section: 1,
                   focused: current.focused,
-                  desc_scroll: current.desc_scroll,
+                  desc_sv: current.desc_sv,
                   comment_cursor: current.comment_cursor,
                 })
+                ()
               }
             }
           } else if k.name == "g" and current.focused {
-            // Top / first
-            if current.section == 0 {
-              issue_tabs = replace_tab(issue_tabs, idx, IssueTab{
-                issue: current.issue,
-                comments: current.comments,
-                section: current.section,
-                focused: current.focused,
-                desc_scroll: 0,
-                comment_cursor: current.comment_cursor,
-              })
-            } else {
-              issue_tabs = replace_tab(issue_tabs, idx, IssueTab{
-                issue: current.issue,
-                comments: current.comments,
-                section: current.section,
-                focused: current.focused,
-                desc_scroll: current.desc_scroll,
-                comment_cursor: 0,
-              })
-            }
-          } else if k.name == "G" and current.focused {
-            // Bottom / last
-            if current.section == 0 {
-              // Approximate: scroll to a large value; the renderer
-              // will clamp visually via the available window.
-              issue_tabs = replace_tab(issue_tabs, idx, IssueTab{
-                issue: current.issue,
-                comments: current.comments,
-                section: current.section,
-                focused: current.focused,
-                desc_scroll: 9999,
-                comment_cursor: current.comment_cursor,
-              })
-            } else {
-              let last = current.comments.size() - 1
-              let clamped = match last < 0 {
-                true => 0,
-                false => last,
+            if k.shift {
+              if current.section == 0 {
+                let new_sv = Scrollview{
+                  x: current.desc_sv.x,
+                  y: current.desc_sv.y,
+                  width: current.desc_sv.width,
+                  height: current.desc_sv.height,
+                  lines: current.desc_sv.lines,
+                  scroll: 999999,
+                }
+                issue_tabs.set(idx, IssueTab{
+                  issue: current.issue,
+                  comments: current.comments,
+                  section: current.section,
+                  focused: current.focused,
+                  desc_sv: new_sv,
+                  comment_cursor: current.comment_cursor,
+                })
+                ()
+              } else {
+                let last = current.comments.size() - 1
+                let clamped = match last < 0 {
+                  true => 0,
+                  false => last,
+                }
+                issue_tabs.set(idx, IssueTab{
+                  issue: current.issue,
+                  comments: current.comments,
+                  section: current.section,
+                  focused: current.focused,
+                  desc_sv: current.desc_sv,
+                  comment_cursor: clamped,
+                })
+                ()
               }
-              issue_tabs = replace_tab(issue_tabs, idx, IssueTab{
-                issue: current.issue,
-                comments: current.comments,
-                section: current.section,
-                focused: current.focused,
-                desc_scroll: current.desc_scroll,
-                comment_cursor: clamped,
-              })
+            } else {
+              if current.section == 0 {
+                let new_sv = Scrollview{
+                  x: current.desc_sv.x,
+                  y: current.desc_sv.y,
+                  width: current.desc_sv.width,
+                  height: current.desc_sv.height,
+                  lines: current.desc_sv.lines,
+                  scroll: 0,
+                }
+                issue_tabs.set(idx, IssueTab{
+                  issue: current.issue,
+                  comments: current.comments,
+                  section: current.section,
+                  focused: current.focused,
+                  desc_sv: new_sv,
+                  comment_cursor: current.comment_cursor,
+                })
+                ()
+              } else {
+                issue_tabs.set(idx, IssueTab{
+                  issue: current.issue,
+                  comments: current.comments,
+                  section: current.section,
+                  focused: current.focused,
+                  desc_sv: current.desc_sv,
+                  comment_cursor: 0,
+                })
+                ()
+              }
             }
           } else if k.name == "r" {
-            // Re-fetch comments for the active issue tab.
             let issue_uid = decode::run(current.issue, decode::field("id", decode::string))
               .expect("Missing id")
             match fetch_issue_comments(api_key, issue_uid) {
               ok(cs) => {
-                issue_tabs = replace_tab(issue_tabs, idx, IssueTab{
+                issue_tabs.set(idx, IssueTab{
                   issue: current.issue,
                   comments: cs,
                   section: current.section,
                   focused: current.focused,
-                  desc_scroll: current.desc_scroll,
+                  desc_sv: current.desc_sv,
                   comment_cursor: current.comment_cursor,
                 })
                 ()
