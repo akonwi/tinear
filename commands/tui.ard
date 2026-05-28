@@ -100,6 +100,23 @@ impl Scrollview {
   }
 }
 
+// A list view for items rendered at a fixed height each, with a
+// cursor that can be moved by the caller. Used for the issue tab's
+// comments section. Items render via draw_comment (so a comment is
+// header line + truncated body + blank line = 3 rows).
+struct CommentListView {
+  x: Int,
+  y: Int,
+  width: Int,
+  height: Int,
+  comments: [Dynamic],
+  cursor: Int,
+  top: Int,
+}
+
+// CommentListView impl block lives below `draw_comment` so the
+// renderer can refer to it.
+
 struct BoardColumn {
   name: Str,
   state_type: Str,
@@ -124,7 +141,9 @@ struct IssueTab {
   // scrollview's layout and lines get refreshed each draw; only its
   // .scroll field meaningfully persists across frames.
   desc_sv: Scrollview,
-  comment_cursor: Int,
+  // Persistent state for the Comments section. As with desc_sv,
+  // layout/comments are reset each draw; .cursor and .top persist.
+  cmt_lv: CommentListView,
 }
 
 // A title wrapped to at most two lines. line2 is "" when the whole
@@ -866,6 +885,79 @@ fn draw_comment(vx: vaxis::Vaxis, comment: Dynamic, x: Int, y: Int, panel_width:
   y + 3
 }
 
+impl CommentListView {
+  // Fixed rows per item in the list. Header + body + blank.
+  fn item_height() Int { 3 }
+
+  // How many items can fit in the view.
+  fn visible_count() Int {
+    self.height / 3
+  }
+
+  // The largest valid `top` value: how far we can scroll while
+  // keeping at least one item visible.
+  fn max_top() Int {
+    let vc = self.visible_count()
+    match self.comments.size() > vc {
+      true => self.comments.size() - vc,
+      false => 0,
+    }
+  }
+
+  // Returns `top` adjusted to keep the cursor visible, then clamped
+  // into [0, max_top()]. Callers may set any value for `top`; the
+  // renderer goes through this so it does the right thing.
+  fn effective_top() Int {
+    let vc = self.visible_count()
+    let raw = match self.cursor < self.top {
+      true => self.cursor,
+      false => match self.cursor >= self.top + vc {
+        true => self.cursor - vc + 1,
+        false => self.top,
+      },
+    }
+    let mt = self.max_top()
+    match raw > mt {
+      true => mt,
+      false => match raw < 0 {
+        true => 0,
+        false => raw,
+      },
+    }
+  }
+
+  // Render visible comments. The `focused` flag controls whether the
+  // selected comment shows its cursor marker.
+  fn draw(vx: vaxis::Vaxis, focused: Bool) Void {
+    if self.comments.size() == 0 {
+      ()
+    } else {
+      let vc = self.visible_count()
+      let top = self.effective_top()
+      let end_excl = match top + vc > self.comments.size() {
+        true => self.comments.size(),
+        false => top + vc,
+      }
+      mut row_y = self.y
+      for c, idx in self.comments {
+        if idx >= top and idx < end_excl {
+          let is_cursor = focused and idx == self.cursor
+          draw_comment(vx, c, self.x, row_y, self.width, is_cursor, false)
+          row_y = row_y + 3
+        }
+      }
+      // Overflow indicators on the right-hand column.
+      let arrow_x = self.x + self.width - 1
+      if top > 0 {
+        vaxis::draw_text(vx, arrow_x, self.y, "↑")
+      }
+      if end_excl < self.comments.size() {
+        vaxis::draw_text(vx, arrow_x, self.y + self.height - 1, "↓")
+      }
+    }
+  }
+}
+
 fn draw_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int, comment_cursor: Int) Void {
   let n_type = decode::run(notif, decode::field("type", decode::string)).expect("Missing type")
 
@@ -1159,13 +1251,20 @@ fn draw_issue_tab(state: AppState, tab: IssueTab) Void {
     if tab.comments.size() == 0 {
       vaxis::draw_text(vx, panel_x + 2, next_y + 3, "(no comments)")
     } else {
-      mut y = next_y + 3
-      for c, idx in tab.comments {
-        if y + 2 < max_y {
-          let is_cursor = comments_focused and idx == tab.comment_cursor
-          y = draw_comment(vx, c, panel_x, y, panel_width, is_cursor, false)
-        }
+      // Build a fresh list view with current layout + comments, but
+      // copy cursor/top from the persisted state.
+      let body_y = next_y + 3
+      let body_h = max_y - body_y
+      let lv = CommentListView{
+        x: panel_x,
+        y: body_y,
+        width: panel_width,
+        height: body_h,
+        comments: tab.comments,
+        cursor: tab.cmt_lv.cursor,
+        top: tab.cmt_lv.top,
       }
+      lv.draw(vx, comments_focused)
     }
   }
 
@@ -1626,7 +1725,12 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                       lines: [],
                       scroll: 0,
                     },
-                    comment_cursor: 0,
+                    cmt_lv: CommentListView{
+                      x: 0, y: 0, width: 0, height: 0,
+                      comments: comments,
+                      cursor: 0,
+                      top: 0,
+                    },
                   })
                   active_tab = 2 + issue_tabs.size() - 1
                   ()
@@ -1648,7 +1752,15 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                 section: current.section,
                 focused: false,
                 desc_sv: current.desc_sv,
-                comment_cursor: current.comment_cursor,
+                cmt_lv: CommentListView{
+                  x: current.cmt_lv.x,
+                  y: current.cmt_lv.y,
+                  width: current.cmt_lv.width,
+                  height: current.cmt_lv.height,
+                  comments: current.cmt_lv.comments,
+                  cursor: current.cmt_lv.cursor,
+                  top: current.cmt_lv.top,
+                },
               })
               ()
             } else {
@@ -1672,7 +1784,15 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
               section: current.section,
               focused: true,
               desc_sv: current.desc_sv,
-              comment_cursor: current.comment_cursor,
+              cmt_lv: CommentListView{
+                  x: current.cmt_lv.x,
+                  y: current.cmt_lv.y,
+                  width: current.cmt_lv.width,
+                  height: current.cmt_lv.height,
+                  comments: current.cmt_lv.comments,
+                  cursor: current.cmt_lv.cursor,
+                  top: current.cmt_lv.top,
+                },
             })
             ()
           } else if k.name == "Up" or k.name == "k" {
@@ -1692,12 +1812,20 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                   section: current.section,
                   focused: current.focused,
                   desc_sv: new_sv,
-                  comment_cursor: current.comment_cursor,
+                  cmt_lv: CommentListView{
+                  x: current.cmt_lv.x,
+                  y: current.cmt_lv.y,
+                  width: current.cmt_lv.width,
+                  height: current.cmt_lv.height,
+                  comments: current.cmt_lv.comments,
+                  cursor: current.cmt_lv.cursor,
+                  top: current.cmt_lv.top,
+                },
                 })
                 ()
               } else {
-                let new_cursor = match current.comment_cursor > 0 {
-                  true => current.comment_cursor - 1,
+                let new_cursor = match current.cmt_lv.cursor > 0 {
+                  true => current.cmt_lv.cursor - 1,
                   false => 0,
                 }
                 issue_tabs.set(idx, IssueTab{
@@ -1706,7 +1834,15 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                   section: current.section,
                   focused: current.focused,
                   desc_sv: current.desc_sv,
-                  comment_cursor: new_cursor,
+                  cmt_lv: CommentListView{
+                  x: current.cmt_lv.x,
+                  y: current.cmt_lv.y,
+                  width: current.cmt_lv.width,
+                  height: current.cmt_lv.height,
+                  comments: current.cmt_lv.comments,
+                  cursor: new_cursor,
+                  top: current.cmt_lv.top,
+                },
                 })
                 ()
               }
@@ -1718,7 +1854,15 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                   section: 0,
                   focused: current.focused,
                   desc_sv: current.desc_sv,
-                  comment_cursor: current.comment_cursor,
+                  cmt_lv: CommentListView{
+                  x: current.cmt_lv.x,
+                  y: current.cmt_lv.y,
+                  width: current.cmt_lv.width,
+                  height: current.cmt_lv.height,
+                  comments: current.cmt_lv.comments,
+                  cursor: current.cmt_lv.cursor,
+                  top: current.cmt_lv.top,
+                },
                 })
                 ()
               }
@@ -1740,13 +1884,21 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                   section: current.section,
                   focused: current.focused,
                   desc_sv: new_sv,
-                  comment_cursor: current.comment_cursor,
+                  cmt_lv: CommentListView{
+                  x: current.cmt_lv.x,
+                  y: current.cmt_lv.y,
+                  width: current.cmt_lv.width,
+                  height: current.cmt_lv.height,
+                  comments: current.cmt_lv.comments,
+                  cursor: current.cmt_lv.cursor,
+                  top: current.cmt_lv.top,
+                },
                 })
                 ()
               } else {
                 let last = current.comments.size() - 1
-                let new_cursor = match current.comment_cursor < last {
-                  true => current.comment_cursor + 1,
+                let new_cursor = match current.cmt_lv.cursor < last {
+                  true => current.cmt_lv.cursor + 1,
                   false => last,
                 }
                 let clamped = match new_cursor < 0 {
@@ -1759,7 +1911,15 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                   section: current.section,
                   focused: current.focused,
                   desc_sv: current.desc_sv,
-                  comment_cursor: clamped,
+                  cmt_lv: CommentListView{
+                  x: current.cmt_lv.x,
+                  y: current.cmt_lv.y,
+                  width: current.cmt_lv.width,
+                  height: current.cmt_lv.height,
+                  comments: current.cmt_lv.comments,
+                  cursor: clamped,
+                  top: current.cmt_lv.top,
+                },
                 })
                 ()
               }
@@ -1771,7 +1931,15 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                   section: 1,
                   focused: current.focused,
                   desc_sv: current.desc_sv,
-                  comment_cursor: current.comment_cursor,
+                  cmt_lv: CommentListView{
+                  x: current.cmt_lv.x,
+                  y: current.cmt_lv.y,
+                  width: current.cmt_lv.width,
+                  height: current.cmt_lv.height,
+                  comments: current.cmt_lv.comments,
+                  cursor: current.cmt_lv.cursor,
+                  top: current.cmt_lv.top,
+                },
                 })
                 ()
               }
@@ -1793,7 +1961,15 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                   section: current.section,
                   focused: current.focused,
                   desc_sv: new_sv,
-                  comment_cursor: current.comment_cursor,
+                  cmt_lv: CommentListView{
+                  x: current.cmt_lv.x,
+                  y: current.cmt_lv.y,
+                  width: current.cmt_lv.width,
+                  height: current.cmt_lv.height,
+                  comments: current.cmt_lv.comments,
+                  cursor: current.cmt_lv.cursor,
+                  top: current.cmt_lv.top,
+                },
                 })
                 ()
               } else {
@@ -1808,7 +1984,15 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                   section: current.section,
                   focused: current.focused,
                   desc_sv: current.desc_sv,
-                  comment_cursor: clamped,
+                  cmt_lv: CommentListView{
+                  x: current.cmt_lv.x,
+                  y: current.cmt_lv.y,
+                  width: current.cmt_lv.width,
+                  height: current.cmt_lv.height,
+                  comments: current.cmt_lv.comments,
+                  cursor: clamped,
+                  top: current.cmt_lv.top,
+                },
                 })
                 ()
               }
@@ -1828,7 +2012,15 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                   section: current.section,
                   focused: current.focused,
                   desc_sv: new_sv,
-                  comment_cursor: current.comment_cursor,
+                  cmt_lv: CommentListView{
+                  x: current.cmt_lv.x,
+                  y: current.cmt_lv.y,
+                  width: current.cmt_lv.width,
+                  height: current.cmt_lv.height,
+                  comments: current.cmt_lv.comments,
+                  cursor: current.cmt_lv.cursor,
+                  top: current.cmt_lv.top,
+                },
                 })
                 ()
               } else {
@@ -1838,7 +2030,15 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                   section: current.section,
                   focused: current.focused,
                   desc_sv: current.desc_sv,
-                  comment_cursor: 0,
+                  cmt_lv: CommentListView{
+                  x: current.cmt_lv.x,
+                  y: current.cmt_lv.y,
+                  width: current.cmt_lv.width,
+                  height: current.cmt_lv.height,
+                  comments: current.cmt_lv.comments,
+                  cursor: 0,
+                  top: 0,
+                },
                 })
                 ()
               }
@@ -1854,7 +2054,15 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                   section: current.section,
                   focused: current.focused,
                   desc_sv: current.desc_sv,
-                  comment_cursor: current.comment_cursor,
+                  cmt_lv: CommentListView{
+                  x: current.cmt_lv.x,
+                  y: current.cmt_lv.y,
+                  width: current.cmt_lv.width,
+                  height: current.cmt_lv.height,
+                  comments: current.cmt_lv.comments,
+                  cursor: current.cmt_lv.cursor,
+                  top: current.cmt_lv.top,
+                },
                 })
                 ()
               },
