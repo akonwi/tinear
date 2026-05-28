@@ -16,9 +16,19 @@ struct BoardColumn {
 
 // An open issue detail tab. Comments are fetched on-demand when the
 // tab is opened (see fetch_issue_comments).
+//
+// Navigation model: two sections (description=0, comments=1). When
+// `focused` is false, the section cursor highlights one of them and
+// arrows switch between sections. When `focused` is true, arrows
+// scroll/move within the focused section. Escape pops focus or
+// closes the tab.
 struct IssueTab {
   issue: Dynamic,
   comments: [Dynamic],
+  section: Int,
+  focused: Bool,
+  desc_scroll: Int,
+  comment_cursor: Int,
 }
 
 // A title wrapped to at most two lines. line2 is "" when the whole
@@ -377,6 +387,21 @@ fn fetch_issue_comments(api_key: Str, issue_id: Str) [Dynamic]!Str {
   let nodes = decode::run(data, decode::path(["issue", "comments", "nodes"], decode::list(decode::dynamic)))
     .expect("Missing issue.comments.nodes")
   Result::ok(nodes)
+}
+
+// Returns a new list with the IssueTab at `idx` replaced by `t`.
+// Ard structs aren't mutated in place; we rebuild the list so the
+// caller can swap in the new value.
+fn replace_tab(tabs: [IssueTab], idx: Int, t: IssueTab) [IssueTab] {
+  mut out: [IssueTab] = []
+  for it, i in tabs {
+    if i == idx {
+      out.push(t)
+    } else {
+      out.push(it)
+    }
+  }
+  out
 }
 
 fn fetch_inbox(api_key: Str) [Dynamic]!Str {
@@ -976,14 +1001,14 @@ fn draw_issue_tab(state: AppState, tab: IssueTab) Void {
   draw_label_row(vx, panel_x, 8, "Assignee", assignee_name)
   draw_label_row(vx, panel_x, 9, "Priority", priority_label(priority))
 
-  // Description — when there are comments, share the space ~50/50;
-  // when there aren't, the description takes the whole remaining
-  // content area before being truncated with an ellipsis.
+  // Sections (Description, Comments) share the space ~50/50 when both
+  // are present; otherwise the present one takes the full remaining
+  // area before being truncated with an ellipsis.
   let sb_y = status_bar_y(vx)
   let max_y = sb_y - 1
   let desc_start = 11
-  let body_start = desc_start + 2
-  let available = max_y - body_start
+  let desc_body_start = desc_start + 2
+  let available = max_y - desc_body_start
   let half = available / 2
   let max_desc_lines = match tab.comments.size() == 0 {
     true => available,
@@ -993,59 +1018,123 @@ fn draw_issue_tab(state: AppState, tab: IssueTab) Void {
     },
   }
 
-  mut next_y = desc_start
+  // ---- Description section ----
+  let desc_highlighted = tab.section == 0
+  let desc_focused = desc_highlighted and tab.focused
+  let desc_header = match desc_highlighted {
+    true => "[Description]",
+    false => "Description",
+  }
+  let desc_underline_char = match desc_focused {
+    true => "━",
+    false => "─",
+  }
+  vaxis::draw_text(vx, panel_x, desc_start, desc_header)
+  mut desc_div = ""
+  for i in 0..(panel_width - 1) {
+    desc_div =+ desc_underline_char
+  }
+  vaxis::draw_text(vx, panel_x, desc_start + 1, desc_div)
+
+  mut next_y = desc_body_start
   match description {
     desc => {
-      vaxis::draw_text(vx, panel_x, desc_start, "Description")
-      mut desc_div = ""
-      for i in 0..(panel_width - 1) {
-        desc_div =+ "─"
-      }
-      vaxis::draw_text(vx, panel_x, desc_start + 1, desc_div)
-
       let wrapped = wrap_text(desc, panel_width - 3)
-      let overflow = wrapped.size() > max_desc_lines
+      let total = wrapped.size()
+      // When focused, the scroll offset chooses which slice of the
+      // wrapped lines we render. Otherwise pinned to the top.
+      let max_scroll = match total > max_desc_lines {
+        true => total - max_desc_lines,
+        false => 0,
+      }
+      let scroll_raw = match desc_focused {
+        true => tab.desc_scroll,
+        false => 0,
+      }
+      let scroll = match scroll_raw > max_scroll {
+        true => max_scroll,
+        false => match scroll_raw < 0 {
+          true => 0,
+          false => scroll_raw,
+        },
+      }
+      let remaining_after_scroll = match total > scroll {
+        true => total - scroll,
+        false => 0,
+      }
+      let overflow = remaining_after_scroll > max_desc_lines
       let render_count = match overflow {
         true => max_desc_lines - 1,
-        false => wrapped.size(),
+        false => remaining_after_scroll,
       }
       for line, idx in wrapped {
-        if idx < render_count {
-          vaxis::draw_text(vx, panel_x + 2, body_start + idx, line)
+        let rel = idx - scroll
+        if rel >= 0 and rel < render_count {
+          vaxis::draw_text(vx, panel_x + 2, desc_body_start + rel, line)
         }
       }
+      // Scroll indicators
+      if scroll > 0 {
+        vaxis::draw_text(vx, panel_width - 2, desc_start + 1, "↑")
+      }
       if overflow {
-        vaxis::draw_text(vx, panel_x + 2, body_start + render_count, "…")
-        next_y = body_start + render_count + 2
+        vaxis::draw_text(vx, panel_x + 2, desc_body_start + render_count, "…")
+        next_y = desc_body_start + render_count + 2
       } else {
-        next_y = body_start + render_count + 1
+        next_y = desc_body_start + render_count + 1
       }
     },
-    _ => (),
+    _ => {
+      vaxis::draw_text(vx, panel_x + 2, desc_body_start, "(no description)")
+      next_y = desc_body_start + 2
+    },
   }
 
-  // Comments
+  // ---- Comments section ----
   if next_y + 2 < max_y {
-    let header_label = match tab.comments.size() == 0 {
+    let comments_highlighted = tab.section == 1
+    let comments_focused = comments_highlighted and tab.focused
+    let count_label = match tab.comments.size() == 0 {
       true => "Comments (none)",
       false => "Comments ({tab.comments.size()})",
     }
-    vaxis::draw_text(vx, panel_x, next_y, header_label)
+    let comments_header = match comments_highlighted {
+      true => "[{count_label}]",
+      false => count_label,
+    }
+    let comments_underline_char = match comments_focused {
+      true => "━",
+      false => "─",
+    }
+    vaxis::draw_text(vx, panel_x, next_y, comments_header)
     mut cm_div = ""
     for i in 0..(panel_width - 1) {
-      cm_div =+ "─"
+      cm_div =+ comments_underline_char
     }
     vaxis::draw_text(vx, panel_x, next_y + 1, cm_div)
 
-    mut y = next_y + 3
-    for c in tab.comments {
-      if y + 2 < max_y {
-        y = draw_comment(vx, c, panel_x, y, panel_width, false, false)
+    if tab.comments.size() == 0 {
+      vaxis::draw_text(vx, panel_x + 2, next_y + 3, "(no comments)")
+    } else {
+      mut y = next_y + 3
+      for c, idx in tab.comments {
+        if y + 2 < max_y {
+          let is_cursor = comments_focused and idx == tab.comment_cursor
+          y = draw_comment(vx, c, panel_x, y, panel_width, is_cursor, false)
+        }
       }
     }
   }
 
-  vaxis::draw_text(vx, 1, sb_y, "Esc close tab · Tab switch · r refresh")
+  // Contextual status bar
+  let hint = match tab.focused {
+    true => match tab.section == 0 {
+      true => "↑↓ scroll · g/G top/bottom · Esc back",
+      false => "↑↓ comment · g/G first/last · Esc back",
+    },
+    false => "↑↓ section · ↵ focus · Esc close tab · Tab switch",
+  }
+  vaxis::draw_text(vx, 1, sb_y, hint)
 }
 
 // Gap between adjacent board columns, in cells.
@@ -1484,7 +1573,14 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                     ok(cs) => cs,
                     err(_) => [],
                   }
-                  issue_tabs.push(IssueTab{issue: selected, comments: comments})
+                  issue_tabs.push(IssueTab{
+                    issue: selected,
+                    comments: comments,
+                    section: 0,
+                    focused: false,
+                    desc_scroll: 0,
+                    comment_cursor: 0,
+                  })
                   active_tab = 2 + issue_tabs.size() - 1
                   ()
                 }
@@ -1495,37 +1591,196 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
           }
         } else if active_tab >= 2 {
           // ISSUE TAB
+          let idx = active_tab - 2
+          let current = issue_tabs.at(idx)
           if k.name == "Escape" {
-            let removed = active_tab - 2
-            mut remaining: [IssueTab] = []
-            for it, i in issue_tabs {
-              if not (i == removed) {
-                remaining.push(it)
+            if current.focused {
+              // Pop section focus.
+              issue_tabs = replace_tab(issue_tabs, idx, IssueTab{
+                issue: current.issue,
+                comments: current.comments,
+                section: current.section,
+                focused: false,
+                desc_scroll: current.desc_scroll,
+                comment_cursor: current.comment_cursor,
+              })
+            } else {
+              // Close the tab.
+              mut remaining: [IssueTab] = []
+              for it, i in issue_tabs {
+                if not (i == idx) {
+                  remaining.push(it)
+                }
+              }
+              issue_tabs = remaining
+              active_tab = match active_tab > 0 {
+                true => active_tab - 1,
+                false => 0,
               }
             }
-            issue_tabs = remaining
-            // Activate the previous tab; never go below 0.
-            active_tab = match active_tab > 0 {
-              true => active_tab - 1,
-              false => 0,
+          } else if (k.name == "Enter" or k.name == "Space") and (not current.focused) {
+            // Focus into the highlighted section.
+            issue_tabs = replace_tab(issue_tabs, idx, IssueTab{
+              issue: current.issue,
+              comments: current.comments,
+              section: current.section,
+              focused: true,
+              desc_scroll: current.desc_scroll,
+              comment_cursor: current.comment_cursor,
+            })
+          } else if k.name == "Up" or k.name == "k" {
+            if current.focused {
+              if current.section == 0 {
+                // Description: scroll up
+                let new_scroll = match current.desc_scroll > 0 {
+                  true => current.desc_scroll - 1,
+                  false => 0,
+                }
+                issue_tabs = replace_tab(issue_tabs, idx, IssueTab{
+                  issue: current.issue,
+                  comments: current.comments,
+                  section: current.section,
+                  focused: current.focused,
+                  desc_scroll: new_scroll,
+                  comment_cursor: current.comment_cursor,
+                })
+              } else {
+                // Comments: cursor up
+                let new_cursor = match current.comment_cursor > 0 {
+                  true => current.comment_cursor - 1,
+                  false => 0,
+                }
+                issue_tabs = replace_tab(issue_tabs, idx, IssueTab{
+                  issue: current.issue,
+                  comments: current.comments,
+                  section: current.section,
+                  focused: current.focused,
+                  desc_scroll: current.desc_scroll,
+                  comment_cursor: new_cursor,
+                })
+              }
+            } else {
+              // Section-level: go to Description (section 0).
+              if current.section > 0 {
+                issue_tabs = replace_tab(issue_tabs, idx, IssueTab{
+                  issue: current.issue,
+                  comments: current.comments,
+                  section: 0,
+                  focused: current.focused,
+                  desc_scroll: current.desc_scroll,
+                  comment_cursor: current.comment_cursor,
+                })
+              }
+            }
+          } else if k.name == "Down" or k.name == "j" {
+            if current.focused {
+              if current.section == 0 {
+                // Description: scroll down (no upper clamp here;
+                // renderer handles overflow.)
+                issue_tabs = replace_tab(issue_tabs, idx, IssueTab{
+                  issue: current.issue,
+                  comments: current.comments,
+                  section: current.section,
+                  focused: current.focused,
+                  desc_scroll: current.desc_scroll + 1,
+                  comment_cursor: current.comment_cursor,
+                })
+              } else {
+                // Comments: cursor down
+                let last = current.comments.size() - 1
+                let new_cursor = match current.comment_cursor < last {
+                  true => current.comment_cursor + 1,
+                  false => last,
+                }
+                let clamped = match new_cursor < 0 {
+                  true => 0,
+                  false => new_cursor,
+                }
+                issue_tabs = replace_tab(issue_tabs, idx, IssueTab{
+                  issue: current.issue,
+                  comments: current.comments,
+                  section: current.section,
+                  focused: current.focused,
+                  desc_scroll: current.desc_scroll,
+                  comment_cursor: clamped,
+                })
+              }
+            } else {
+              // Section-level: go to Comments (section 1).
+              if current.section < 1 {
+                issue_tabs = replace_tab(issue_tabs, idx, IssueTab{
+                  issue: current.issue,
+                  comments: current.comments,
+                  section: 1,
+                  focused: current.focused,
+                  desc_scroll: current.desc_scroll,
+                  comment_cursor: current.comment_cursor,
+                })
+              }
+            }
+          } else if k.name == "g" and current.focused {
+            // Top / first
+            if current.section == 0 {
+              issue_tabs = replace_tab(issue_tabs, idx, IssueTab{
+                issue: current.issue,
+                comments: current.comments,
+                section: current.section,
+                focused: current.focused,
+                desc_scroll: 0,
+                comment_cursor: current.comment_cursor,
+              })
+            } else {
+              issue_tabs = replace_tab(issue_tabs, idx, IssueTab{
+                issue: current.issue,
+                comments: current.comments,
+                section: current.section,
+                focused: current.focused,
+                desc_scroll: current.desc_scroll,
+                comment_cursor: 0,
+              })
+            }
+          } else if k.name == "G" and current.focused {
+            // Bottom / last
+            if current.section == 0 {
+              // Approximate: scroll to a large value; the renderer
+              // will clamp visually via the available window.
+              issue_tabs = replace_tab(issue_tabs, idx, IssueTab{
+                issue: current.issue,
+                comments: current.comments,
+                section: current.section,
+                focused: current.focused,
+                desc_scroll: 9999,
+                comment_cursor: current.comment_cursor,
+              })
+            } else {
+              let last = current.comments.size() - 1
+              let clamped = match last < 0 {
+                true => 0,
+                false => last,
+              }
+              issue_tabs = replace_tab(issue_tabs, idx, IssueTab{
+                issue: current.issue,
+                comments: current.comments,
+                section: current.section,
+                focused: current.focused,
+                desc_scroll: current.desc_scroll,
+                comment_cursor: clamped,
+              })
             }
           } else if k.name == "r" {
             // Re-fetch comments for the active issue tab.
-            let idx = active_tab - 2
-            let current = issue_tabs.at(idx)
             let issue_uid = decode::run(current.issue, decode::field("id", decode::string))
               .expect("Missing id")
             match fetch_issue_comments(api_key, issue_uid) {
               ok(cs) => {
-                mut updated: [IssueTab] = []
-                for it, i in issue_tabs {
-                  if i == idx {
-                    updated.push(IssueTab{issue: it.issue, comments: cs})
-                  } else {
-                    updated.push(it)
-                  }
-                }
-                issue_tabs = updated
+                issue_tabs = replace_tab(issue_tabs, idx, IssueTab{
+                  issue: current.issue,
+                  comments: cs,
+                  section: current.section,
+                  focused: current.focused,
+                  desc_scroll: current.desc_scroll,
+                  comment_cursor: current.comment_cursor,
+                })
                 ()
               },
               err(_) => (),
