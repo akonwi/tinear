@@ -14,6 +14,13 @@ struct BoardColumn {
   issues: [Dynamic],
 }
 
+// An open issue detail tab. Comments are fetched on-demand when the
+// tab is opened (see fetch_issue_comments).
+struct IssueTab {
+  issue: Dynamic,
+  comments: [Dynamic],
+}
+
 // A title wrapped to at most two lines. line2 is "" when the whole
 // title fit on one line.
 struct TitleLines {
@@ -32,9 +39,9 @@ struct AppState {
   board_row: Int,
   board_scroll: Int,
   // Tabs beyond the two fixed ones (Inbox, My Board). Each entry is
-  // an issue Dynamic. The tab name shown in the tab bar is the
+  // an open issue tab. The tab name shown in the tab bar is the
   // issue's identifier.
-  issue_tabs: [Dynamic],
+  issue_tabs: [IssueTab],
   viewer_name: Str,
   viewer_email: Str,
 
@@ -289,6 +296,17 @@ fn fetch_board(api_key: Str, my_id: Str) [BoardColumn]!Str {
   }
 
   Result::ok(sort_columns_by_position(columns))
+}
+
+// Fetch comments for a specific issue by id. Returns them ordered by
+// createdAt ascending (oldest first), which is how Linear's API
+// returns them by default.
+fn fetch_issue_comments(api_key: Str, issue_id: Str) [Dynamic]!Str {
+  let query = "query \{ issue(id: \"{issue_id}\") \{ comments(first: 50) \{ nodes \{ id body createdAt user \{ name \} \} \} \} \}"
+  let data = try client::graphql(api_key, query)
+  let nodes = decode::run(data, decode::path(["issue", "comments", "nodes"], decode::list(decode::dynamic)))
+    .expect("Missing issue.comments.nodes")
+  Result::ok(nodes)
 }
 
 fn fetch_inbox(api_key: Str) [Dynamic]!Str {
@@ -828,14 +846,15 @@ fn draw_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int,
 
 }
 
-// Render an issue detail tab. Reuses the data already fetched by the
-// board query — no additional API call.
-fn draw_issue_tab(state: AppState, issue: Dynamic) Void {
+// Render an issue detail tab. The issue data is what the board query
+// returned; comments were fetched separately when the tab was opened.
+fn draw_issue_tab(state: AppState, tab: IssueTab) Void {
   let vx = state.vx
   let win = vaxis::root(vx)
   let term_w = vaxis::window_width(win)
   let panel_x = 1
   let panel_width = term_w - 2
+  let issue = tab.issue
 
   let issue_id = decode::run(issue, decode::field("identifier", decode::string)).expect("Missing identifier")
   let issue_title = decode::run(issue, decode::field("title", decode::string)).expect("Missing title")
@@ -888,6 +907,7 @@ fn draw_issue_tab(state: AppState, issue: Dynamic) Void {
   draw_label_row(vx, panel_x, 9, "Priority", priority_label(priority))
 
   // Description
+  mut next_y = 11
   match description {
     desc => {
       vaxis::draw_text(vx, panel_x, 11, "Description")
@@ -898,13 +918,35 @@ fn draw_issue_tab(state: AppState, issue: Dynamic) Void {
       vaxis::draw_text(vx, panel_x, 12, desc_div)
       let desc_truncated = truncate_with_ellipsis(desc, panel_width - 3)
       vaxis::draw_text(vx, panel_x + 2, 14, desc_truncated)
+      next_y = 16
     },
     _ => (),
   }
 
-  // Status bar
+  // Comments
   let sb_y = status_bar_y(vx)
-  vaxis::draw_text(vx, 1, sb_y, "Esc close tab · Tab switch")
+  let max_y = sb_y - 1
+  if next_y + 2 < max_y {
+    let header_label = match tab.comments.size() == 0 {
+      true => "Comments (none)",
+      false => "Comments ({tab.comments.size()})",
+    }
+    vaxis::draw_text(vx, panel_x, next_y, header_label)
+    mut cm_div = ""
+    for i in 0..(panel_width - 1) {
+      cm_div =+ "─"
+    }
+    vaxis::draw_text(vx, panel_x, next_y + 1, cm_div)
+
+    mut y = next_y + 3
+    for c in tab.comments {
+      if y + 2 < max_y {
+        y = draw_comment(vx, c, panel_x, y, panel_width, false, false)
+      }
+    }
+  }
+
+  vaxis::draw_text(vx, 1, sb_y, "Esc close tab · Tab switch · r refresh")
 }
 
 // Gap between adjacent board columns, in cells.
@@ -1182,6 +1224,7 @@ fn draw_screen(state: AppState) Void {
     }
   }
 
+
   vaxis::render(vx).expect("render")
 }
 
@@ -1204,7 +1247,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
   mut board_col = 0
   mut board_row = 0
   mut board_scroll = 0
-  mut issue_tabs: [Dynamic] = []
+  mut issue_tabs: [IssueTab] = []
   mut detail_mode = false
   mut active_tab = 0
   mut running = true
@@ -1213,7 +1256,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
     // Build the visible tabs list: two fixed + one per open issue tab.
     mut tabs = ["Inbox", "My Board"]
     for it in issue_tabs {
-      let id = decode::run(it, decode::field("identifier", decode::string)).expect("Missing identifier")
+      let id = decode::run(it.issue, decode::field("identifier", decode::string)).expect("Missing identifier")
       tabs.push(id)
     }
     let state = AppState{
@@ -1322,10 +1365,12 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                 let selected = col.issues.at(board_row)
                 let sel_id = decode::run(selected, decode::field("identifier", decode::string))
                   .expect("Missing identifier")
+                let sel_uid = decode::run(selected, decode::field("id", decode::string))
+                  .expect("Missing id")
                 // Focus existing tab if this issue is already open.
                 mut existing = -1
                 for it, i in issue_tabs {
-                  let tid = decode::run(it, decode::field("identifier", decode::string))
+                  let tid = decode::run(it.issue, decode::field("identifier", decode::string))
                     .expect("Missing identifier")
                   if tid == sel_id and existing == -1 {
                     existing = i
@@ -1335,7 +1380,12 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                   active_tab = 2 + existing
                   ()
                 } else {
-                  issue_tabs.push(selected)
+                  // Fetch comments on demand; best-effort.
+                  let comments: [Dynamic] = match fetch_issue_comments(api_key, sel_uid) {
+                    ok(cs) => cs,
+                    err(_) => [],
+                  }
+                  issue_tabs.push(IssueTab{issue: selected, comments: comments})
                   active_tab = 2 + issue_tabs.size() - 1
                   ()
                 }
@@ -1348,7 +1398,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
           // ISSUE TAB
           if k.name == "Escape" {
             let removed = active_tab - 2
-            mut remaining: [Dynamic] = []
+            mut remaining: [IssueTab] = []
             for it, i in issue_tabs {
               if not (i == removed) {
                 remaining.push(it)
@@ -1359,6 +1409,27 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
             active_tab = match active_tab > 0 {
               true => active_tab - 1,
               false => 0,
+            }
+          } else if k.name == "r" {
+            // Re-fetch comments for the active issue tab.
+            let idx = active_tab - 2
+            let current = issue_tabs.at(idx)
+            let issue_uid = decode::run(current.issue, decode::field("id", decode::string))
+              .expect("Missing id")
+            match fetch_issue_comments(api_key, issue_uid) {
+              ok(cs) => {
+                mut updated: [IssueTab] = []
+                for it, i in issue_tabs {
+                  if i == idx {
+                    updated.push(IssueTab{issue: it.issue, comments: cs})
+                  } else {
+                    updated.push(it)
+                  }
+                }
+                issue_tabs = updated
+                ()
+              },
+              err(_) => (),
             }
           } else {
             ()
