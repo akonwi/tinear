@@ -47,8 +47,15 @@ extern fn clipboard_push(vx: Vaxis, text: Str) Void = "ClipboardPush"
 // prefixes, taken from vaxis.Key.String() with modifiers cleared.
 // Examples: "Escape", "Enter", "Up", "Tab", "Space", "BackSpace",
 // "a", "F1".
+//
+// `text` is the rendered text the key would insert into a text
+// buffer, accounting for shift, keyboard layout, and IME. Empty for
+// non-textual keys (Enter, arrows, function keys, control combos).
+// Prefer `text` when implementing text inputs so you don't have to
+// uppercase/layout-translate characters yourself.
 struct KeyEvent {
   name: Str,
+  text: Str,
   ctrl: Bool,
   shift: Bool,
   alt: Bool,
@@ -103,6 +110,7 @@ extern fn read_event(vx: Vaxis) RawEvent!Str = "ReadEvent"
 extern fn event_kind(e: RawEvent) Str = "EventKind"
 
 extern fn event_key_name(e: RawEvent) Str = "EventKeyName"
+extern fn event_key_text(e: RawEvent) Str = "EventKeyText"
 extern fn event_key_ctrl(e: RawEvent) Bool = "EventKeyCtrl"
 extern fn event_key_shift(e: RawEvent) Bool = "EventKeyShift"
 extern fn event_key_alt(e: RawEvent) Bool = "EventKeyAlt"
@@ -131,6 +139,7 @@ fn next_event(vx: Vaxis) Event!Str {
     "key" => {
       let ev: Event = KeyEvent{
         name: event_key_name(raw),
+        text: event_key_text(raw),
         ctrl: event_key_ctrl(raw),
         shift: event_key_shift(raw),
         alt: event_key_alt(raw),

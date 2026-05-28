@@ -421,6 +421,18 @@ func EventKeyMeta(e vaxis.Event) bool {
 	return false
 }
 
+// EventKeyText returns the rendered text the key would insert into a
+// text buffer, accounting for shift, keyboard layout, and IME. Empty
+// for non-textual keys (Enter, arrows, function keys, control combos
+// like Ctrl+C, etc.). Use this when implementing text inputs so you
+// don't have to manually shift/layout characters.
+func EventKeyText(e vaxis.Event) string {
+	if k, ok := e.(vaxis.Key); ok {
+		return k.Text
+	}
+	return ""
+}
+
 func EventMouseCol(e vaxis.Event) int {
 	if m, ok := e.(vaxis.Mouse); ok {
 		return m.Col

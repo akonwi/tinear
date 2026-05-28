@@ -1,4 +1,5 @@
 use ard/decode
+use ard/json
 use ard/list as List
 use ard/maybe
 
@@ -172,6 +173,20 @@ struct StatePicker {
   tab_idx: Int,
 }
 
+// Modal text editor for composing a new comment on an issue. While
+// present on AppState.comment_composer, key events go to the editor
+// rather than the underlying tab.
+//
+// `body` is an append-only buffer of UTF-8 text; the in-modal cursor
+// is always at the end. tab_idx is the issue_tabs index to refresh
+// after a successful commentCreate.
+struct CommentComposer {
+  issue_id: Str,
+  issue_identifier: Str,
+  body: Str,
+  tab_idx: Int,
+}
+
 
 struct AppState {
   api_key: Str,
@@ -197,6 +212,9 @@ struct AppState {
   // When set, the status picker is open and overlays everything else.
   // Closed by Esc or by confirming a selection.
   state_picker: StatePicker?,
+  // When set, the comment composer is open. Mutually exclusive with
+  // state_picker in practice.
+  comment_composer: CommentComposer?,
 }
 
 fn format_type(n_type: Str) Str {
@@ -571,6 +589,21 @@ fn update_issue_state(api_key: Str, issue_id: Str, state_id: Str) Void!Str {
   }
 }
 
+// Mutation: post a new comment on an issue. body is JSON-encoded so
+// embedded quotes and newlines survive the round trip through the
+// GraphQL query.
+fn create_comment(api_key: Str, issue_id: Str, body: Str) Void!Str {
+  let body_json = json::encode(body).expect("encode body")
+  let mutation = "mutation \{ commentCreate(input: \{ issueId: \"{issue_id}\", body: {body_json} \}) \{ success \} \}"
+  let data = try client::graphql(api_key, mutation)
+  let success = decode::run(data, decode::path(["commentCreate", "success"], decode::bool))
+    .expect("Missing commentCreate.success")
+  match success {
+    true => Result::ok(()),
+    false => Result::err("commentCreate returned success=false"),
+  }
+}
+
 // Refetch a single issue with the same shape as fetch_board, so the
 // caller can drop the updated Dynamic into the existing UI state.
 fn fetch_single_issue(api_key: Str, issue_id: Str) Dynamic!Str {
@@ -661,6 +694,16 @@ fn picker_with_cursor(p: StatePicker, c: Int) StatePicker {
     cursor: c,
     from_board: p.from_board,
     tab_idx: p.tab_idx,
+  }
+}
+
+// Reconstruct a composer with a new body.
+fn composer_with_body(c: CommentComposer, body: Str) CommentComposer {
+  CommentComposer{
+    issue_id: c.issue_id,
+    issue_identifier: c.issue_identifier,
+    body: body,
+    tab_idx: c.tab_idx,
   }
 }
 
@@ -1508,7 +1551,7 @@ fn draw_issue_tab(state: AppState, tab: IssueTab) Void {
       true => "↑↓ scroll · g/G top/bottom · Esc back",
       false => "↑↓ comment · g/G first/last · Esc back",
     },
-    false => "↑↓ section · ↵ focus · s status · Esc close tab · Tab switch",
+    false => "↑↓ section · ↵ focus · s status · c comment · Esc close tab · Tab switch",
   }
   vaxis::draw_text(vx, 1, sb_y, hint)
 }
@@ -1837,6 +1880,109 @@ fn draw_state_picker(vx: vaxis::Vaxis, picker: StatePicker) Void {
   vaxis::draw_text(vx, x, y + 3 + states_count + 1, bot)
 }
 
+// Render the comment composer modal centered on screen. Multi-line
+// body word-wrapped to the interior width; cursor follows the end of
+// the buffer. If the wrapped output overflows the text area, only the
+// last `text_h` lines are shown.
+fn draw_comment_composer(vx: vaxis::Vaxis, composer: CommentComposer) Void {
+  let win = vaxis::root(vx)
+  let term_w = vaxis::window_width(win)
+  let term_h = vaxis::window_height(win)
+
+  let w = match term_w > 90 {
+    true => 80,
+    false => term_w - 4,
+  }
+  let h = match term_h > 24 {
+    true => 18,
+    false => term_h - 4,
+  }
+  let x = (term_w - w) / 2
+  let y = (term_h - h) / 2
+
+  // Top border
+  mut top = "┌"
+  for i in 0..(w - 3) {
+    top =+ "─"
+  }
+  top =+ "┐"
+  vaxis::draw_text(vx, x, y, top)
+
+  // Header row
+  let header = " New comment — {composer.issue_identifier} "
+  let header_padded = pad_str_display(vx, truncate_with_ellipsis_display(vx, header, w - 2), w - 2)
+  vaxis::draw_text(vx, x, y + 1, "│{header_padded}│")
+
+  // Separator under header
+  mut sep = "├"
+  for i in 0..(w - 3) {
+    sep =+ "─"
+  }
+  sep =+ "┤"
+  vaxis::draw_text(vx, x, y + 2, sep)
+
+  // Text area: rows y+3 through y+h-3 (h-5 rows total).
+  let text_h = h - 5
+  let text_w = w - 4
+  // Wrap into display lines, preserving explicit newlines.
+  let wrapped = wrap_text(composer.body, text_w)
+  // If we overflow, show the last `text_h` lines.
+  let total = wrapped.size()
+  let first = match total > text_h {
+    true => total - text_h,
+    false => 0,
+  }
+
+  // Fill all text rows (so any prior content is cleared).
+  for r in 0..(text_h - 1) {
+    let blank = pad_str_display(vx, "", text_w)
+    vaxis::draw_text(vx, x, y + 3 + r, "│ {blank} │")
+  }
+
+  // Draw visible wrapped lines.
+  mut cursor_row = 0
+  mut cursor_col = 0
+  for line, i in wrapped {
+    if i >= first {
+      let row_idx = i - first
+      let padded = pad_str_display(vx, truncate_with_ellipsis_display(vx, line, text_w), text_w)
+      vaxis::draw_text(vx, x, y + 3 + row_idx, "│ {padded} │")
+      if i == total - 1 {
+        cursor_row = y + 3 + row_idx
+        cursor_col = x + 2 + vaxis::rendered_width(vx, line)
+      }
+    }
+  }
+  if total == 0 {
+    cursor_row = y + 3
+    cursor_col = x + 2
+  }
+
+  // Footer with key hints
+  let foot_y = y + 3 + text_h
+  mut foot_sep = "├"
+  for i in 0..(w - 3) {
+    foot_sep =+ "─"
+  }
+  foot_sep =+ "┤"
+  vaxis::draw_text(vx, x, foot_y, foot_sep)
+
+  let footer = " Ctrl+S send  Esc cancel "
+  let footer_padded = pad_str_display(vx, truncate_with_ellipsis_display(vx, footer, w - 2), w - 2)
+  vaxis::draw_text(vx, x, foot_y + 1, "│{footer_padded}│")
+
+  // Bottom border
+  mut bot = "└"
+  for i in 0..(w - 3) {
+    bot =+ "─"
+  }
+  bot =+ "┘"
+  vaxis::draw_text(vx, x, foot_y + 2, bot)
+
+  // Cursor at the end of the buffer.
+  vaxis::show_cursor(vx, cursor_col, cursor_row)
+}
+
 fn draw_screen(state: AppState) Void {
   let vx = state.vx
   vaxis::clear(vx)
@@ -1859,6 +2005,13 @@ fn draw_screen(state: AppState) Void {
   match state.state_picker {
     p => draw_state_picker(state.vx, p),
     _ => (),
+  }
+
+  // The composer takes precedence over the picker (they shouldn't be
+  // open at the same time, but if they are this is the active one).
+  match state.comment_composer {
+    c => draw_comment_composer(state.vx, c),
+    _ => vaxis::hide_cursor(state.vx),
   }
 
   vaxis::render(vx).expect("render")
@@ -1887,6 +2040,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
   mut detail_mode = false
   mut active_tab = 0
   mut state_picker: StatePicker? = maybe::none()
+  mut comment_composer: CommentComposer? = maybe::none()
   mut running = true
 
   while running {
@@ -1915,6 +2069,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
       active_tab: active_tab,
       detail_mode: detail_mode,
       state_picker: state_picker,
+      comment_composer: comment_composer,
     }
     draw_screen(state)
 
@@ -2008,6 +2163,63 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                     err(_) => (),
                   }
                 }
+              } else {
+                ()
+              }
+            },
+            _ => (),
+          }
+        } else if comment_composer.is_some() {
+          // COMPOSER MODE — typed text goes into the buffer; Ctrl+S
+          // submits, Esc cancels.
+          match comment_composer {
+            comp => {
+              if k.name == "Escape" {
+                comment_composer = maybe::none()
+              } else if k.ctrl and k.name == "s" {
+                if (not comp.body.is_empty()) {
+                  match create_comment(api_key, comp.issue_id, comp.body) {
+                    ok(_) => {
+                      // Refetch this tab's comments and slot them in.
+                      if comp.tab_idx < issue_tabs.size() {
+                        match fetch_issue_comments(api_key, comp.issue_id) {
+                          ok(cs) => {
+                            let tab = issue_tabs.at(comp.tab_idx)
+                            issue_tabs.set(comp.tab_idx, IssueTab{
+                              issue: tab.issue,
+                              comments: cs,
+                              section: tab.section,
+                              focused: tab.focused,
+                              desc_sv: tab.desc_sv,
+                              cmt_lv: CommentListView{
+                                x: tab.cmt_lv.x,
+                                y: tab.cmt_lv.y,
+                                width: tab.cmt_lv.width,
+                                height: tab.cmt_lv.height,
+                                comments: cs,
+                                cursor: tab.cmt_lv.cursor,
+                                top: tab.cmt_lv.top,
+                              },
+                            })
+                            ()
+                          },
+                          err(_) => (),
+                        }
+                      }
+                      comment_composer = maybe::none()
+                      ()
+                    },
+                    err(_) => (),
+                  }
+                }
+              } else if k.name == "BackSpace" {
+                comment_composer = maybe::some(composer_with_body(comp, vaxis::text_backspace(comp.body)))
+              } else if k.name == "Enter" {
+                comment_composer = maybe::some(composer_with_body(comp, comp.body + "\n"))
+              } else if (not k.text.is_empty()) and (not k.ctrl) and (not k.alt) and (not k.meta) {
+                // Typed text: append. Skips modifier combos so Ctrl+L
+                // etc. don't accidentally insert characters.
+                comment_composer = maybe::some(composer_with_body(comp, comp.body + k.text))
               } else {
                 ()
               }
@@ -2482,6 +2694,18 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
               },
               err(_) => (),
             }
+          } else if k.name == "c" and (not current.focused) {
+            // Open the comment composer for this tab's issue.
+            let issue_uid = decode::run(current.issue, decode::field("id", decode::string))
+              .expect("Missing id")
+            let issue_ident = decode::run(current.issue, decode::field("identifier", decode::string))
+              .expect("Missing identifier")
+            comment_composer = maybe::some(CommentComposer{
+              issue_id: issue_uid,
+              issue_identifier: issue_ident,
+              body: "",
+              tab_idx: idx,
+            })
           } else {
             ()
           }
