@@ -347,6 +347,25 @@ func mouseKindName(t vaxis.EventType) string {
 	}
 }
 
+// RefreshEvent is the "data is stale, refetch now" signal posted by
+// the Ard-side refresh fiber via PostRefreshEvent. Distinct from
+// vaxis.Redraw (terminal-level repaint) and from any per-frame
+// animation tick; the only thing it carries is intent. vaxis's event
+// queue is the bridge because it is the only thread-safe multiplexer
+// that can unblock a ReadEvent call.
+type RefreshEvent struct{}
+
+// PostRefreshEvent enqueues a RefreshEvent into the vaxis event loop.
+// Called from the Ard refresh fiber after each sleep interval.
+// PostEvent is non-blocking and drops silently if the queue is full,
+// which is the behaviour we want for a periodic refresh signal.
+func PostRefreshEvent(term *vaxis.Vaxis) {
+	if term == nil {
+		return
+	}
+	term.PostEvent(RefreshEvent{})
+}
+
 // ReadEvent blocks until the next event from the terminal and returns
 // it. Non-press key events are filtered out at this layer.
 func ReadEvent(term *vaxis.Vaxis) (vaxis.Event, error) {
@@ -385,6 +404,8 @@ func EventKind(e vaxis.Event) string {
 		return "paste"
 	case vaxis.QuitEvent:
 		return "quit"
+	case RefreshEvent:
+		return "refresh"
 	default:
 		return "unknown"
 	}

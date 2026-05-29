@@ -1,4 +1,6 @@
+use ard/async
 use ard/decode
+use ard/duration
 use ard/list as List
 use ard/maybe
 
@@ -88,6 +90,19 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
   mut comment_composer: state::CommentComposer? = maybe::none()
   mut running = true
 
+  // Background refresh: an Ard fiber owns the schedule. Every 5
+  // minutes it pokes vaxis's event queue with a RefreshEvent, which
+  // wakes the main loop's blocking next_event call and lets it
+  // refetch inbox + board. The fiber captures vx read-only (vaxis's
+  // Go-side methods are thread-safe) and outlives this scope; the
+  // process tears it down on exit.
+  async::start(fn() {
+    while {
+      async::sleep(duration::from_minutes(5))
+      vaxis::post_refresh_event(vx)
+    }
+  })
+
   while running {
     // Build the visible tabs list: two fixed + one per open issue tab.
     mut tabs = ["Inbox", "My Issues"]
@@ -130,6 +145,69 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
       FocusEvent(_) => (),
       PasteEvent(_) => (),
       MouseEvent(_) => (),
+      RefreshEvent(_) => {
+        // Background refresh: refetch inbox + board silently. Try to
+        // preserve the inbox selection by id (a notification may have
+        // shifted index after archive/new arrivals); clamp board
+        // cursors. Issue tabs are left alone — they refresh as a
+        // side effect of mutations and the per-tab `r` key.
+        let prev_selected_id = match notifs.size() > cursor {
+          true => decode::run(notifs.at(cursor), decode::field("id", decode::string))
+            .expect("Missing notif id"),
+          false => "",
+        }
+        match api::fetch_inbox(api_key) {
+          ok(nodes) => {
+            notifs = nodes
+            mut found = false
+            if (not prev_selected_id.is_empty()) {
+              for n, i in notifs {
+                let nid = decode::run(n, decode::field("id", decode::string))
+                  .expect("Missing notif id")
+                if nid == prev_selected_id {
+                  cursor = i
+                  found = true
+                }
+              }
+            }
+            if (not found) {
+              cursor = match notifs.size() == 0 {
+                true => 0,
+                false => match cursor >= notifs.size() {
+                  true => notifs.size() - 1,
+                  false => cursor,
+                },
+              }
+              comment_cursor = 0
+              detail_mode = false
+            }
+            ()
+          },
+          err(_) => (),
+        }
+        match api::fetch_board(api_key, viewer_id) {
+          ok(cols) => {
+            columns = cols
+            if board_col >= columns.size() {
+              board_col = match columns.size() == 0 {
+                true => 0,
+                false => columns.size() - 1,
+              }
+            }
+            if columns.size() > 0 {
+              let col_size = columns.at(board_col).issues.size()
+              if board_row >= col_size {
+                board_row = match col_size == 0 {
+                  true => 0,
+                  false => col_size - 1,
+                }
+              }
+            }
+            ()
+          },
+          err(_) => (),
+        }
+      },
       KeyEvent(k) => {
         if k.ctrl and k.name == "c" {
           running = false

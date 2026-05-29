@@ -1,3 +1,8 @@
+// `use ard/async` is required at the entry module — without it,
+// async::sleep calls in sub-modules misroute through the project-FFI
+// lowering path. See akonwi/ard#163. Once that lands this line can
+// be removed.
+use ard/async
 use ard/argv
 use ard/io
 use ard/list as List

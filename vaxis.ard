@@ -95,10 +95,16 @@ struct PasteEvent {
 // Vaxis asked the app to redraw (e.g. after a SyncFunc).
 struct RedrawEvent {}
 
+// "Data is stale, refetch now" signal posted from outside the main
+// event loop (typically by a background fiber). Distinct from
+// RedrawEvent (terminal-level repaint) so handlers can refetch
+// without conflating the two concerns.
+struct RefreshEvent {}
+
 // Application is shutting down.
 struct QuitEvent {}
 
-type Event = KeyEvent | MouseEvent | ResizeEvent | FocusEvent | PasteEvent | RedrawEvent | QuitEvent
+type Event = KeyEvent | MouseEvent | ResizeEvent | FocusEvent | PasteEvent | RedrawEvent | RefreshEvent | QuitEvent
 
 // Opaque handle to a single vaxis event. Constructed by `read_event`,
 // passed back into the accessor functions to extract its fields.
@@ -108,6 +114,12 @@ private extern type RawEvent = "vaxis.Event"
 
 extern fn read_event(vx: Vaxis) RawEvent!Str = "ReadEvent"
 extern fn event_kind(e: RawEvent) Str = "EventKind"
+
+// Enqueue a RefreshEvent into the vaxis event loop. Intended to be
+// called from an Ard fiber that owns the refresh schedule; the
+// queue is the only thread-safe way to wake the main loop's
+// blocking next_event call.
+extern fn post_refresh_event(vx: Vaxis) Void = "PostRefreshEvent"
 
 extern fn event_key_name(e: RawEvent) Str = "EventKeyName"
 extern fn event_key_text(e: RawEvent) Str = "EventKeyText"
@@ -176,6 +188,10 @@ fn next_event(vx: Vaxis) Event!Str {
     },
     "redraw" => {
       let ev: Event = RedrawEvent{}
+      Result::ok(ev)
+    },
+    "refresh" => {
+      let ev: Event = RefreshEvent{}
       Result::ok(ev)
     },
     "quit" => {
