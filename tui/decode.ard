@@ -1,0 +1,19 @@
+use ard/decode
+use ard/maybe
+
+// Returns the field as `Some(Dynamic)` if present and non-null,
+// otherwise `None`. Use this instead of `decode::field(name, ...)`
+// for fields that might be absent — GraphQL inline fragments, for
+// instance, omit the field entirely when their parent type doesn't
+// match the fragment.
+fn optional_field(data: Dynamic, name: Str) Dynamic? {
+  match decode::run(data, decode::field(name, decode::dynamic)) {
+    ok(v) => {
+      match decode::is_void(v) {
+        true => maybe::none(),
+        false => maybe::some(v),
+      }
+    },
+    err(_) => maybe::none(),
+  }
+}

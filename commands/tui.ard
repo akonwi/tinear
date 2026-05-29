@@ -7,21 +7,9 @@ use linear-cli/linear/client
 use linear-cli/os
 use linear-cli/util
 use linear-cli/vaxis
-
-fn truncate(s: Str, max: Int) Str {
-  mut result = s
-  while result.size() > max {
-    result = vaxis::text_backspace(result)
-  }
-  result
-}
-
-fn truncate_with_ellipsis(s: Str, max: Int) Str {
-  match s.size() <= max {
-    true => s,
-    false => truncate(s, max - 1) + "…",
-  }
-}
+use linear-cli/tui/decode as decode_utils
+use linear-cli/tui/text
+use linear-cli/tui/screen
 
 // A scrollable list-of-lines viewport with a vertical scrollbar on
 // the right edge. The caller wraps content into `lines` and tracks
@@ -32,13 +20,6 @@ fn truncate_with_ellipsis(s: Str, max: Int) Str {
 // Per-frame layout box. Parents compute this each frame and pass it
 // to a component's draw method. Components never store layout
 // themselves — only the persistent state in the structs below.
-struct Layout {
-  x: Int,
-  y: Int,
-  width: Int,
-  height: Int,
-}
-
 // Scrollview component: a vertical-scrolling viewport over a list of
 // lines. Holds only the persistent scroll offset; layout and the
 // lines themselves are passed to `draw` each frame. The draw method
@@ -86,7 +67,7 @@ struct IssueTab {
   issue: Dynamic,
   section: Int,
   focused: Bool,
-  // The Description section's scrollview component. Layout and
+  // The Description section's scrollview component. screen::Layout and
   // wrapped lines are recomputed each frame; only its scroll offset
   // persists here.
   desc_view: Scrollview,
@@ -97,11 +78,6 @@ struct IssueTab {
 
 // A title wrapped to at most two lines. line2 is "" when the whole
 // title fit on one line.
-struct TitleLines {
-  line1: Str,
-  line2: Str,
-}
-
 // Modal picker for changing an issue's workflow state. While present
 // on AppState.state_picker, arrow keys drive the picker and the
 // underlying tab keys are blocked.
@@ -190,56 +166,11 @@ fn format_type(n_type: Str) Str {
   }
 }
 
-fn pad_str(s: Str, width: Int) Str {
-  let len = s.size()
-  match len >= width {
-    true => s,
-    false => {
-      mut result = s
-      let pads = width - len - 1
-      for i in 0..pads {
-        result =+ " "
-      }
-      result
-    },
-  }
-}
-
 // Display-width-aware padding. Uses vaxis's rendered_width which
 // counts grapheme cells (not bytes), so strings containing multi-byte
 // runes like — or ▸ pad correctly. Use this whenever the result is
 // composed into a fixed-width slot, like a modal interior.
-fn pad_str_display(vx: vaxis::Vaxis, s: Str, width: Int) Str {
-  let len = vaxis::rendered_width(vx, s)
-  match len >= width {
-    true => s,
-    false => {
-      mut result = s
-      let pads = width - len - 1
-      for i in 0..pads {
-        result =+ " "
-      }
-      result
-    },
-  }
-}
-
 // Display-width-aware truncation.
-fn truncate_display(vx: vaxis::Vaxis, s: Str, max: Int) Str {
-  mut result = s
-  while vaxis::rendered_width(vx, result) > max {
-    result = vaxis::text_backspace(result)
-  }
-  result
-}
-
-fn truncate_with_ellipsis_display(vx: vaxis::Vaxis, s: Str, max: Int) Str {
-  match vaxis::rendered_width(vx, s) <= max {
-    true => s,
-    false => truncate_display(vx, s, max - 1) + "…",
-  }
-}
-
 
 // Wraps a title onto at most two lines of `width` characters each.
 // Breaks at the last word boundary inside the first line when
@@ -248,141 +179,8 @@ fn truncate_with_ellipsis_display(vx: vaxis::Vaxis, s: Str, max: Int) Str {
 // Wraps a single logical line (no embedded newlines) into one or more
 // strings of at most `width` characters. Breaks at the last space
 // within the window when possible, otherwise hard-breaks at `width`.
-fn wrap_line(s: Str, width: Int) [Str] {
-  mut lines: [Str] = []
-  mut remainder = s
-  while remainder.size() > width {
-    mut last_space = -1
-    mut i = 0
-    for c in remainder {
-      if i < width and c == " " {
-        last_space = i
-      }
-      i = i + 1
-    }
-    let break_at = match last_space >= 0 {
-      true => last_space,
-      false => width,
-    }
-    let skip_break = last_space >= 0
-
-    mut line = ""
-    mut new_remainder = ""
-    mut idx = 0
-    for c in remainder {
-      if idx < break_at {
-        line = line + c
-      } else if idx == break_at and skip_break {
-        ()
-      } else {
-        new_remainder = new_remainder + c
-      }
-      idx = idx + 1
-    }
-    lines.push(line)
-    remainder = new_remainder
-  }
-  if (not remainder.is_empty()) or lines.size() == 0 {
-    lines.push(remainder)
-  }
-  lines
-}
-
 // Wraps multi-line text to fit within `width` columns. Preserves
 // explicit newlines in the input and word-wraps each segment.
-fn wrap_text(s: Str, width: Int) [Str] {
-  mut segments: [Str] = []
-  mut current = ""
-  for c in s {
-    if c == "\n" {
-      segments.push(current)
-      current = ""
-      ()
-    } else {
-      current = current + c
-      ()
-    }
-  }
-  segments.push(current)
-
-  mut out: [Str] = []
-  for seg in segments {
-    let lines = wrap_line(seg, width)
-    for line in lines {
-      out.push(line)
-    }
-  }
-  out
-}
-
-
-fn wrap_title(title: Str, width: Int) TitleLines {
-  match title.size() <= width {
-    true => TitleLines{ line1: title, line2: "" },
-    false => {
-      // First pass: find the last space within [0, width) so we can
-      // break at a word boundary.
-      mut last_space = -1
-      mut i = 0
-      for c in title {
-        if i < width and c == " " {
-          last_space = i
-        }
-        i = i + 1
-      }
-
-      // Use the word boundary if we found one; otherwise hard break.
-      let break_at = match last_space >= 0 {
-        true => last_space,
-        false => width,
-      }
-      let skip_break_char = last_space >= 0
-
-      // Second pass: distribute chars between the two lines.
-      mut line1 = ""
-      mut line2 = ""
-      mut idx = 0
-      for c in title {
-        if idx < break_at {
-          line1 = line1 + c
-        } else if idx == break_at and skip_break_char {
-          // skip the breaking space
-        } else {
-          line2 = line2 + c
-        }
-        idx = idx + 1
-      }
-
-      TitleLines{
-        line1: line1,
-        line2: truncate_with_ellipsis(line2, width),
-      }
-    },
-  }
-}
-
-fn first_n(s: Str, n: Int) Str {
-  truncate(s, n)
-}
-
-fn format_date(iso: Str) Str {
-  // "2026-05-26T20:17:01.313Z" -> "2026-05-26"
-  first_n(iso, 10)
-}
-
-fn term_height(vx: vaxis::Vaxis) Int {
-  let win = vaxis::root(vx)
-  vaxis::window_height(win)
-}
-
-fn status_bar_y(vx: vaxis::Vaxis) Int {
-  let h = term_height(vx)
-  h - 1
-}
-
-fn content_height(vx: vaxis::Vaxis) Int {
-  term_height(vx) - 4
-}
 
 // Archive (delete from inbox) a single notification.
 fn archive_notification(api_key: Str, id: Str) Void!Str {
@@ -643,18 +441,6 @@ fn fetch_inbox(api_key: Str) [Dynamic]!Str {
 // explicit null value as None. Use this in place of
 // `decode::field(name, decode::nullable(...))` whenever the field may
 // be absent from the JSON.
-fn optional_field(data: Dynamic, name: Str) Dynamic? {
-  match decode::run(data, decode::field(name, decode::dynamic)) {
-    ok(v) => {
-      match decode::is_void(v) {
-        true => maybe::none(),
-        false => maybe::some(v),
-      }
-    },
-    err(_) => maybe::none(),
-  }
-}
-
 fn is_comment_type(n_type: Str) Bool {
   n_type == "issueNewComment" or n_type == "issueCommentMention" or n_type == "issueCommentReaction"
 }
@@ -675,7 +461,7 @@ struct StatusTransition {
 // Find the most recent status transition from the issue's history.
 // Returns empty strings if none is recorded.
 fn last_status_transition(notif: Dynamic) StatusTransition {
-  let issue_obj = optional_field(notif, "issue")
+  let issue_obj = decode_utils::optional_field(notif, "issue")
   let entries: [Dynamic] = match issue_obj {
     iss => {
       let nodes_res = decode::run(iss, decode::path(["history", "nodes"], decode::list(decode::dynamic)))
@@ -699,8 +485,8 @@ fn last_status_transition(notif: Dynamic) StatusTransition {
   mut to_name = ""
   for entry in entries {
     if from_name.is_empty() {
-      let from_obj = optional_field(entry, "fromState")
-      let to_obj = optional_field(entry, "toState")
+      let from_obj = decode_utils::optional_field(entry, "fromState")
+      let to_obj = decode_utils::optional_field(entry, "toState")
       let f = match from_obj {
         v => decode::run(v, decode::field("name", decode::string)).expect("Missing fromState.name"),
         _ => "",
@@ -720,7 +506,7 @@ fn last_status_transition(notif: Dynamic) StatusTransition {
 
 fn notif_comments(notif: Dynamic) [Dynamic] {
   let empty: [Dynamic] = []
-  let issue_obj = optional_field(notif, "issue")
+  let issue_obj = decode_utils::optional_field(notif, "issue")
   match issue_obj {
     iss => {
       let nodes_res = decode::run(iss, decode::path(["comments", "nodes"], decode::list(decode::dynamic)))
@@ -734,7 +520,7 @@ fn notif_comments(notif: Dynamic) [Dynamic] {
 }
 
 fn trigger_comment_index(notif: Dynamic) Int {
-  let trigger_obj = optional_field(notif, "comment")
+  let trigger_obj = decode_utils::optional_field(notif, "comment")
   let trigger_id = match trigger_obj {
     c => decode::run(c, decode::field("id", decode::string)).expect("Missing comment id"),
     _ => "",
@@ -864,19 +650,6 @@ fn draw_tab_bar(vx: vaxis::Vaxis, tabs: [Str], active: Int) Void {
   vaxis::draw_text(vx, 0, 1, sep)
 }
 
-fn sidebar_width(vx: vaxis::Vaxis) Int {
-  let win = vaxis::root(vx)
-  let w = vaxis::window_width(win)
-  let s = w * 35 / 100
-  match s < 28 {
-    true => 28,
-    false => match s > 44 {
-      true => 44,
-      false => s,
-    },
-  }
-}
-
 struct IdTitle {
   id: Str,
   title: Str,
@@ -888,7 +661,7 @@ struct IdTitle {
 fn notif_id_and_title(notif: Dynamic, n_type: Str) IdTitle {
   match is_pr_type(n_type) {
     true => {
-      let pr_obj = optional_field(notif, "pullRequest")
+      let pr_obj = decode_utils::optional_field(notif, "pullRequest")
       let id = match pr_obj {
         pr => {
           let num = decode::run(pr, decode::field("number", decode::int)).expect("Missing PR number")
@@ -903,7 +676,7 @@ fn notif_id_and_title(notif: Dynamic, n_type: Str) IdTitle {
       IdTitle{id: id, title: title}
     },
     false => {
-      let issue_obj = optional_field(notif, "issue")
+      let issue_obj = decode_utils::optional_field(notif, "issue")
       let id = match issue_obj {
         iss => decode::run(iss, decode::field("identifier", decode::string)).expect("Missing issue identifier"),
         _ => "—",
@@ -921,7 +694,7 @@ fn draw_card_row(vx: vaxis::Vaxis, notif: Dynamic, idx: Int, cursor: Int, width:
   let n_type = decode::run(notif, decode::field("type", decode::string)).expect("Missing type")
   let type_label = format_type(n_type)
 
-  let actor_obj = optional_field(notif, "actor")
+  let actor_obj = decode_utils::optional_field(notif, "actor")
   let actor_name = match actor_obj {
     act => decode::run(act, decode::field("name", decode::string)).expect("Missing actor name"),
     _ => "—",
@@ -934,10 +707,10 @@ fn draw_card_row(vx: vaxis::Vaxis, notif: Dynamic, idx: Int, cursor: Int, width:
     false => " ",
   }
 
-  let id_part = pad_str(info.id, 10)
+  let id_part = text::pad_str(info.id, 10)
   let line = "{cursor_mark} {id_part} {actor_name} {type_label}  {info.title}"
   let row = 2 + idx
-  vaxis::draw_text(vx, 1, row, truncate_with_ellipsis(line, width))
+  vaxis::draw_text(vx, 1, row, text::truncate_with_ellipsis(line, width))
 }
 
 fn priority_label(p: Int?) Str {
@@ -974,13 +747,13 @@ fn priority_glyph(p: Int?) Str {
 }
 
 fn draw_label_row(vx: vaxis::Vaxis, x: Int, y: Int, label: Str, value: Str) Void {
-  vaxis::draw_text(vx, x, y, pad_str(label, 10) + value)
+  vaxis::draw_text(vx, x, y, text::pad_str(label, 10) + value)
 }
 fn draw_pr_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int) Void {
   let n_type = decode::run(notif, decode::field("type", decode::string)).expect("Missing type")
   let type_label = format_type(n_type)
 
-  let actor_obj = optional_field(notif, "actor")
+  let actor_obj = decode_utils::optional_field(notif, "actor")
   let actor_name = match actor_obj {
     act => decode::run(act, decode::field("name", decode::string)).expect("Missing actor name"),
     _ => "—",
@@ -989,11 +762,11 @@ fn draw_pr_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: I
   let created = decode::run(notif, decode::field("createdAt", decode::nullable(decode::string)))
     .expect("Missing createdAt")
   let created_str = match created {
-    t => format_date(t),
+    t => text::format_date(t),
     _ => "",
   }
 
-  let pr_obj = optional_field(notif, "pullRequest")
+  let pr_obj = decode_utils::optional_field(notif, "pullRequest")
 
   let pr_number = match pr_obj {
     pr => decode::run(pr, decode::field("number", decode::int)).expect("Missing PR number"),
@@ -1016,12 +789,12 @@ fn draw_pr_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: I
     _ => "—",
   }
   let pr_opened = match pr_obj {
-    pr => format_date(decode::run(pr, decode::field("openedAt", decode::string)).expect("Missing openedAt")),
+    pr => text::format_date(decode::run(pr, decode::field("openedAt", decode::string)).expect("Missing openedAt")),
     _ => "—",
   }
   let pr_creator = match pr_obj {
     pr => {
-      let creator_obj = optional_field(pr, "creator")
+      let creator_obj = decode_utils::optional_field(pr, "creator")
       match creator_obj {
         c => decode::run(c, decode::field("name", decode::string)).expect("Missing creator name"),
         _ => "—",
@@ -1032,7 +805,7 @@ fn draw_pr_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: I
 
   // Header: PR #number — title
   let id_str = "PR #{pr_number.to_str()}"
-  let header_title = truncate_with_ellipsis(pr_title, panel_width - id_str.size() - 3)
+  let header_title = text::truncate_with_ellipsis(pr_title, panel_width - id_str.size() - 3)
   let header = "{id_str} — {header_title}"
   vaxis::draw_text(vx, x, 2, header)
 
@@ -1072,7 +845,7 @@ fn draw_pr_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: I
       s => s,
       _ => "(comment body not available)",
     }
-    let body_truncated = truncate_with_ellipsis(body, panel_width - 3)
+    let body_truncated = text::truncate_with_ellipsis(body, panel_width - 3)
     vaxis::draw_text(vx, x + 2, content_y + 5, body_truncated)
   } else {
     vaxis::draw_text(vx, x + 2, content_y + 4, type_label)
@@ -1085,13 +858,13 @@ fn draw_comment(vx: vaxis::Vaxis, comment: Dynamic, x: Int, y: Int, panel_width:
   let body = decode::run(comment, decode::field("body", decode::string)).expect("Missing body")
   let created = decode::run(comment, decode::field("createdAt", decode::nullable(decode::string)))
     .expect("Missing createdAt")
-  let user_obj = optional_field(comment, "user")
+  let user_obj = decode_utils::optional_field(comment, "user")
   let user_name = match user_obj {
     u => decode::run(u, decode::field("name", decode::string)).expect("Missing user name"),
     _ => "—",
   }
   let date_str = match created {
-    t => format_date(t),
+    t => text::format_date(t),
     _ => "",
   }
 
@@ -1105,7 +878,7 @@ fn draw_comment(vx: vaxis::Vaxis, comment: Dynamic, x: Int, y: Int, panel_width:
   }
   let head = "{cursor_mark}{trigger_mark} {user_name} · {date_str}"
   vaxis::draw_text(vx, x, y, head)
-  let body_truncated = truncate_with_ellipsis(body, panel_width - 4)
+  let body_truncated = text::truncate_with_ellipsis(body, panel_width - 4)
   vaxis::draw_text(vx, x + 3, y + 1, body_truncated)
   y + 3
 }
@@ -1115,7 +888,7 @@ impl Scrollview {
   // of range values are clamped, so key handlers can set raw
   // values. Rightmost column is reserved for a scrollbar even when
   // content fits, so the visible area stays stable.
-  fn draw(vx: vaxis::Vaxis, layout: Layout, lines: [Str]) Void {
+  fn draw(vx: vaxis::Vaxis, layout: screen::Layout, lines: [Str]) Void {
     let max_scroll = match lines.size() > layout.height {
       true => lines.size() - layout.height,
       false => 0,
@@ -1134,7 +907,7 @@ impl Scrollview {
     }
     for line, idx in lines {
       if idx >= scroll and idx < end {
-        let display = truncate_with_ellipsis(line, content_w)
+        let display = text::truncate_with_ellipsis(line, content_w)
         vaxis::draw_text(vx, layout.x, layout.y + (idx - scroll), display)
       }
     }
@@ -1173,7 +946,7 @@ impl CommentList {
   // `focused` is true. `self.top` is treated as a hint; the method
   // adjusts and clamps internally so callers can set raw values from
   // key handlers without worrying about bounds.
-  fn draw(vx: vaxis::Vaxis, layout: Layout, focused: Bool) Void {
+  fn draw(vx: vaxis::Vaxis, layout: screen::Layout, focused: Bool) Void {
     if self.comments.size() == 0 {
       ()
     } else {
@@ -1225,13 +998,13 @@ impl CommentList {
 fn draw_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int, comment_cursor: Int) Void {
   let n_type = decode::run(notif, decode::field("type", decode::string)).expect("Missing type")
 
-  let trigger_comment_obj = optional_field(notif, "comment")
+  let trigger_comment_obj = decode_utils::optional_field(notif, "comment")
   let trigger_comment_id = match trigger_comment_obj {
     c => decode::run(c, decode::field("id", decode::string)).expect("Missing comment id"),
     _ => "",
   }
 
-  let issue_obj = optional_field(notif, "issue")
+  let issue_obj = decode_utils::optional_field(notif, "issue")
   let issue_id = match issue_obj {
     iss => decode::run(iss, decode::field("identifier", decode::string)).expect("Missing issue identifier"),
     _ => "—",
@@ -1252,7 +1025,7 @@ fn draw_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int,
   }
 
   let state_obj = match issue_obj {
-    iss => optional_field(iss, "state"),
+    iss => decode_utils::optional_field(iss, "state"),
     _ => maybe::none(),
   }
   let state_name = match state_obj {
@@ -1261,7 +1034,7 @@ fn draw_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int,
   }
 
   let team_obj = match issue_obj {
-    iss => optional_field(iss, "team"),
+    iss => decode_utils::optional_field(iss, "team"),
     _ => maybe::none(),
   }
   let team_name = match team_obj {
@@ -1270,7 +1043,7 @@ fn draw_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int,
   }
 
   let project_obj = match issue_obj {
-    iss => optional_field(iss, "project"),
+    iss => decode_utils::optional_field(iss, "project"),
     _ => maybe::none(),
   }
   let project_name = match project_obj {
@@ -1279,7 +1052,7 @@ fn draw_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int,
   }
 
   let assignee_obj = match issue_obj {
-    iss => optional_field(iss, "assignee"),
+    iss => decode_utils::optional_field(iss, "assignee"),
     _ => maybe::none(),
   }
   let assignee_name = match assignee_obj {
@@ -1288,7 +1061,7 @@ fn draw_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int,
   }
 
   // Header: identifier — title
-  let header_title = truncate_with_ellipsis(issue_title, panel_width - issue_id.size() - 3)
+  let header_title = text::truncate_with_ellipsis(issue_title, panel_width - issue_id.size() - 3)
   let header = "{issue_id} — {header_title}"
   vaxis::draw_text(vx, x, 2, header)
 
@@ -1308,7 +1081,7 @@ fn draw_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int,
 
   // Comments thread (for comment-type notifications) or Description
   let content_y = 11
-  let max_y = status_bar_y(vx) - 1
+  let max_y = screen::status_bar_y(vx) - 1
 
   if is_comment_type(n_type) {
     vaxis::draw_text(vx, x, content_y, "Comments")
@@ -1357,7 +1130,7 @@ fn draw_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int,
     match description {
       desc => {
         vaxis::draw_text(vx, x, content_y, "Description")
-        let desc_truncated = truncate_with_ellipsis(desc, panel_width - 3)
+        let desc_truncated = text::truncate_with_ellipsis(desc, panel_width - 3)
         vaxis::draw_text(vx, x + 2, content_y + 1, desc_truncated)
       },
       _ => (),
@@ -1384,32 +1157,32 @@ fn draw_issue_tab(state: AppState, tab: IssueTab) Void {
   let priority = decode::run(issue, decode::field("priority", decode::nullable(decode::int)))
     .expect("Missing priority")
 
-  let state_obj = optional_field(issue, "state")
+  let state_obj = decode_utils::optional_field(issue, "state")
   let state_name = match state_obj {
     s => decode::run(s, decode::field("name", decode::string)).expect("Missing state name"),
     _ => "—",
   }
 
-  let team_obj = optional_field(issue, "team")
+  let team_obj = decode_utils::optional_field(issue, "team")
   let team_name = match team_obj {
     t => decode::run(t, decode::field("name", decode::string)).expect("Missing team name"),
     _ => "—",
   }
 
-  let project_obj = optional_field(issue, "project")
+  let project_obj = decode_utils::optional_field(issue, "project")
   let project_name = match project_obj {
     p => decode::run(p, decode::field("name", decode::string)).expect("Missing project name"),
     _ => "—",
   }
 
-  let assignee_obj = optional_field(issue, "assignee")
+  let assignee_obj = decode_utils::optional_field(issue, "assignee")
   let assignee_name = match assignee_obj {
     a => decode::run(a, decode::field("name", decode::string)).expect("Missing assignee name"),
     _ => "—",
   }
 
   // Header: identifier — title
-  let header_title = truncate_with_ellipsis(issue_title, panel_width - issue_id.size() - 3)
+  let header_title = text::truncate_with_ellipsis(issue_title, panel_width - issue_id.size() - 3)
   vaxis::draw_text(vx, panel_x, 2, "{issue_id} — {header_title}")
 
   // Separator under header
@@ -1429,7 +1202,7 @@ fn draw_issue_tab(state: AppState, tab: IssueTab) Void {
   // Sections (Description, Comments) share the space ~50/50 when both
   // are present; otherwise the present one takes the full remaining
   // area before being truncated with an ellipsis.
-  let sb_y = status_bar_y(vx)
+  let sb_y = screen::status_bar_y(vx)
   let max_y = sb_y - 1
   let desc_start = 11
   let desc_body_start = desc_start + 2
@@ -1467,12 +1240,12 @@ fn draw_issue_tab(state: AppState, tab: IssueTab) Void {
       // Wrap and render the description as a scrollview. When the
       // section isn't focused, force scroll back to top so unrelated
       // scrolling state doesn't bleed across.
-      let wrapped = wrap_text(desc, panel_width - 3)
+      let wrapped = text::wrap_text(desc, panel_width - 3)
       let sv = match desc_focused {
         true => tab.desc_view,
         false => Scrollview::new(),
       }
-      let sv_layout = Layout{
+      let sv_layout = screen::Layout{
         x: panel_x + 2,
         y: desc_body_start,
         width: panel_width - 2,
@@ -1514,7 +1287,7 @@ fn draw_issue_tab(state: AppState, tab: IssueTab) Void {
       vaxis::draw_text(vx, panel_x + 2, next_y + 3, "(no comments)")
     } else {
       let body_y = next_y + 3
-      let lv_layout = Layout{
+      let lv_layout = screen::Layout{
         x: panel_x,
         y: body_y,
         width: panel_width,
@@ -1566,7 +1339,7 @@ fn board_column_width(vx: vaxis::Vaxis, col_count: Int) Int {
 // Draws a single card in one of the board columns. Returns the y
 // position where the *next* card (or divider) should start.
 //
-// Layout depends on title length:
+// screen::Layout depends on title length:
 //   <cursor><glyph> <identifier>
 //   <indent><title-line-1>
 //   <indent><title-line-2>          ← only if title wraps
@@ -1596,12 +1369,12 @@ fn draw_board_card(
 
   // Line 1: "<cursor><glyph> <identifier>"  (3-char prefix before id)
   let header = "{cursor}{glyph} {identifier}"
-  vaxis::draw_text(vx, x, y, truncate_with_ellipsis(header, col_w))
+  vaxis::draw_text(vx, x, y, text::truncate_with_ellipsis(header, col_w))
 
   // Title lines: aligned under the identifier, up to 2 lines.
   let title_indent = 3
   let title_w = col_w - title_indent
-  let wrapped = wrap_title(title, title_w)
+  let wrapped = text::wrap_title(title, title_w)
   vaxis::draw_text(vx, x + title_indent, y + 1, wrapped.line1)
 
   let has_line2 = not wrapped.line2.is_empty()
@@ -1655,7 +1428,7 @@ fn board_visible_count(vx: vaxis::Vaxis, col_count: Int) Int {
 
 fn draw_board_content(state: AppState) Void {
   let vx = state.vx
-  let sb_y = status_bar_y(vx)
+  let sb_y = screen::status_bar_y(vx)
   let content_bottom = sb_y - 1
 
   if state.columns.size() == 0 {
@@ -1694,7 +1467,7 @@ fn draw_board_content(state: AppState) Void {
           false => "",
         }
         let header = "{col.name} ({col.issues.size()}){suffix}"
-        vaxis::draw_text(vx, x, 3, truncate_with_ellipsis(header, col_w))
+        vaxis::draw_text(vx, x, 3, text::truncate_with_ellipsis(header, col_w))
 
         // Divider under header.
         mut header_div = ""
@@ -1739,13 +1512,13 @@ fn draw_inbox_content(state: AppState) Void {
 
   if state.detail_mode {
     // Split layout: sidebar + detail
-    let s_w = sidebar_width(vx)
+    let s_w = screen::sidebar_width(vx)
     let divider_x = s_w + 1
     let detail_x = s_w + 3
     let detail_w = term_w - detail_x - 1
 
     // Sidebar: notification cards (truncated to fit)
-    let max_rows = content_height(vx) - 4
+    let max_rows = screen::content_height(vx) - 4
     for notif, idx in state.notifications {
       if idx >= max_rows {
         break
@@ -1755,7 +1528,7 @@ fn draw_inbox_content(state: AppState) Void {
 
     // Vertical divider
     let div_y_start = 2
-    let div_y_end = status_bar_y(vx) - 1
+    let div_y_end = screen::status_bar_y(vx) - 1
     for row in div_y_start..div_y_end {
       vaxis::draw_text(vx, divider_x, row, "│")
     }
@@ -1770,7 +1543,7 @@ fn draw_inbox_content(state: AppState) Void {
     }
 
     // Status bar
-    let sb_y = status_bar_y(vx)
+    let sb_y = screen::status_bar_y(vx)
     let hints = match is_pr_comment_type(sel_type) {
       true => "↑↓ · ↵ select · Esc back · ⌫ delete · o open · r refresh",
       false => "↑↓ · ↵ select · Esc back · ⌫ delete · r refresh",
@@ -1778,7 +1551,7 @@ fn draw_inbox_content(state: AppState) Void {
     vaxis::draw_text(vx, 1, sb_y, hints)
   } else {
     // Full-width list
-    let max_rows = content_height(vx) - 4
+    let max_rows = screen::content_height(vx) - 4
     for notif, idx in state.notifications {
       if idx >= max_rows {
         break
@@ -1787,7 +1560,7 @@ fn draw_inbox_content(state: AppState) Void {
     }
 
     // Status bar
-    let sb_y = status_bar_y(vx)
+    let sb_y = screen::status_bar_y(vx)
     vaxis::draw_text(vx, 1, sb_y, "↑↓ · ↵ select · Tab · ⌫ delete · r refresh")
   }
 }
@@ -1817,7 +1590,7 @@ fn draw_state_picker(vx: vaxis::Vaxis, picker: StatePicker) Void {
 
   // Header row
   let header = " Status — {picker.issue_identifier} ({picker.team_name}) "
-  let header_padded = pad_str_display(vx, truncate_with_ellipsis_display(vx, header, w - 2), w - 2)
+  let header_padded = text::pad_str_display(vx, text::truncate_with_ellipsis_display(vx, header, w - 2), w - 2)
   vaxis::draw_text(vx, x, y + 1, "│{header_padded}│")
 
   // Separator
@@ -1841,7 +1614,7 @@ fn draw_state_picker(vx: vaxis::Vaxis, picker: StatePicker) Void {
       false => "",
     }
     let content = " {cursor_mark} {sname}{current_suffix}"
-    let padded = pad_str_display(vx, truncate_with_ellipsis_display(vx, content, w - 2), w - 2)
+    let padded = text::pad_str_display(vx, text::truncate_with_ellipsis_display(vx, content, w - 2), w - 2)
     vaxis::draw_text(vx, x, y + 3 + i, "│{padded}│")
   }
 
@@ -1856,7 +1629,7 @@ fn draw_state_picker(vx: vaxis::Vaxis, picker: StatePicker) Void {
 
   // Footer with key hints
   let footer = " ↑↓ select  ↵ confirm  Esc cancel "
-  let footer_padded = pad_str_display(vx, truncate_with_ellipsis_display(vx, footer, w - 2), w - 2)
+  let footer_padded = text::pad_str_display(vx, text::truncate_with_ellipsis_display(vx, footer, w - 2), w - 2)
   vaxis::draw_text(vx, x, foot_y + 1, "│{footer_padded}│")
 
   // Bottom border
@@ -1898,7 +1671,7 @@ fn draw_comment_composer(vx: vaxis::Vaxis, composer: CommentComposer) Void {
 
   // Header row
   let header = " New comment — {composer.issue_identifier} "
-  let header_padded = pad_str_display(vx, truncate_with_ellipsis_display(vx, header, w - 2), w - 2)
+  let header_padded = text::pad_str_display(vx, text::truncate_with_ellipsis_display(vx, header, w - 2), w - 2)
   vaxis::draw_text(vx, x, y + 1, "│{header_padded}│")
 
   // Separator under header
@@ -1913,7 +1686,7 @@ fn draw_comment_composer(vx: vaxis::Vaxis, composer: CommentComposer) Void {
   let text_h = h - 5
   let text_w = w - 4
   // Wrap into display lines, preserving explicit newlines.
-  let wrapped = wrap_text(composer.body, text_w)
+  let wrapped = text::wrap_text(composer.body, text_w)
   // If we overflow, show the last `text_h` lines.
   let total = wrapped.size()
   let first = match total > text_h {
@@ -1923,7 +1696,7 @@ fn draw_comment_composer(vx: vaxis::Vaxis, composer: CommentComposer) Void {
 
   // Fill all text rows (so any prior content is cleared).
   for r in 0..(text_h - 1) {
-    let blank = pad_str_display(vx, "", text_w)
+    let blank = text::pad_str_display(vx, "", text_w)
     vaxis::draw_text(vx, x, y + 3 + r, "│ {blank} │")
   }
 
@@ -1933,7 +1706,7 @@ fn draw_comment_composer(vx: vaxis::Vaxis, composer: CommentComposer) Void {
   for line, i in wrapped {
     if i >= first {
       let row_idx = i - first
-      let padded = pad_str_display(vx, truncate_with_ellipsis_display(vx, line, text_w), text_w)
+      let padded = text::pad_str_display(vx, text::truncate_with_ellipsis_display(vx, line, text_w), text_w)
       vaxis::draw_text(vx, x, y + 3 + row_idx, "│ {padded} │")
       if i == total - 1 {
         cursor_row = y + 3 + row_idx
@@ -1956,7 +1729,7 @@ fn draw_comment_composer(vx: vaxis::Vaxis, composer: CommentComposer) Void {
   vaxis::draw_text(vx, x, foot_y, foot_sep)
 
   let footer = " Ctrl+↵ send  Esc cancel "
-  let footer_padded = pad_str_display(vx, truncate_with_ellipsis_display(vx, footer, w - 2), w - 2)
+  let footer_padded = text::pad_str_display(vx, text::truncate_with_ellipsis_display(vx, footer, w - 2), w - 2)
   vaxis::draw_text(vx, x, foot_y + 1, "│{footer_padded}│")
 
   // Bottom border
@@ -2510,7 +2283,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
             // Build the GitHub comment permalink from the PR URL and
             // comment id, since Linear's notification.url just points
             // back to the Linear inbox.
-            let pr_obj = optional_field(selected, "pullRequest")
+            let pr_obj = decode_utils::optional_field(selected, "pullRequest")
             let pr_url = match pr_obj {
               pr => decode::run(pr, decode::field("url", decode::string)).expect("Missing PR url"),
               _ => "",
