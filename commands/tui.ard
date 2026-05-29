@@ -912,12 +912,10 @@ fn draw_tab_bar(vx: vaxis::Vaxis, tabs: [Str], active: Int) Void {
         x = x + 1
       }
       if n == active {
-        // Surrounding spaces plain, label with underline. -1/-1
-        // colors mean "use terminal defaults" in the vaxis FFI, so
-        // we get the regular text color plus an underline attribute.
-        vaxis::draw_text(vx, x, 0, " ")
-        vaxis::draw_text_style(vx, x + 1, 0, t, -1, -1, false, false, false, true, false)
-        vaxis::draw_text(vx, x + 1 + t.size(), 0, " ")
+        // Full-cell reverse video: leading space, label, trailing
+        // space all get fg/bg swapped against the terminal defaults
+        // (-1/-1). Reads like a selected pill button.
+        vaxis::draw_text_style(vx, x, 0, " " + t + " ", -1, -1, false, false, false, false, true)
       } else {
         vaxis::draw_text(vx, x, 0, " " + t + " ")
       }
