@@ -1,0 +1,180 @@
+use ard/decode
+
+use linear-cli/tui/components
+use linear-cli/tui/decode as decode_utils
+use linear-cli/tui/draw
+use linear-cli/tui/screen
+use linear-cli/tui/state
+use linear-cli/tui/text
+use linear-cli/vaxis
+
+// Issue detail tab: a single open issue with a header, metadata
+// table, description (Scrollview), and comments (CommentList). Two
+// sections, navigated via the tab's section/focused state.
+
+fn draw_issue_tab(state: state::AppState, tab: state::IssueTab) Void {
+  let vx = state.vx
+  let win = vaxis::root(vx)
+  let term_w = vaxis::window_width(win)
+  let panel_x = 1
+  let panel_width = term_w - 2
+  let issue = tab.issue
+
+  let issue_id = decode::run(issue, decode::field("identifier", decode::string)).expect("Missing identifier")
+  let issue_title = decode::run(issue, decode::field("title", decode::string)).expect("Missing title")
+
+  let description = decode::run(issue, decode::field("description", decode::nullable(decode::string)))
+    .expect("Missing description")
+  let priority = decode::run(issue, decode::field("priority", decode::nullable(decode::int)))
+    .expect("Missing priority")
+
+  let state_obj = decode_utils::optional_field(issue, "state")
+  let state_name = match state_obj {
+    s => decode::run(s, decode::field("name", decode::string)).expect("Missing state name"),
+    _ => "—",
+  }
+
+  let team_obj = decode_utils::optional_field(issue, "team")
+  let team_name = match team_obj {
+    t => decode::run(t, decode::field("name", decode::string)).expect("Missing team name"),
+    _ => "—",
+  }
+
+  let project_obj = decode_utils::optional_field(issue, "project")
+  let project_name = match project_obj {
+    p => decode::run(p, decode::field("name", decode::string)).expect("Missing project name"),
+    _ => "—",
+  }
+
+  let assignee_obj = decode_utils::optional_field(issue, "assignee")
+  let assignee_name = match assignee_obj {
+    a => decode::run(a, decode::field("name", decode::string)).expect("Missing assignee name"),
+    _ => "—",
+  }
+
+  // Header: identifier — title
+  let header_title = text::truncate_with_ellipsis(issue_title, panel_width - issue_id.size() - 3)
+  vaxis::draw_text(vx, panel_x, 2, "{issue_id} — {header_title}")
+
+  // Separator under header
+  mut sep = ""
+  for i in 0..(panel_width - 1) {
+    sep =+ "─"
+  }
+  vaxis::draw_text(vx, panel_x, 3, sep)
+
+  // Issue details block
+  draw::draw_label_row(vx, panel_x, 5, "Status",   state_name)
+  draw::draw_label_row(vx, panel_x, 6, "Team",     team_name)
+  draw::draw_label_row(vx, panel_x, 7, "Project",  project_name)
+  draw::draw_label_row(vx, panel_x, 8, "Assignee", assignee_name)
+  draw::draw_label_row(vx, panel_x, 9, "Priority", state::priority_label(priority))
+
+  // Sections (Description, Comments) share the space ~50/50 when both
+  // are present; otherwise the present one takes the full remaining
+  // area before being truncated with an ellipsis.
+  let sb_y = screen::status_bar_y(vx)
+  let max_y = sb_y - 1
+  let desc_start = 11
+  let desc_body_start = desc_start + 2
+  let available = max_y - desc_body_start
+  let half = available / 2
+  let max_desc_lines = match tab.comments_view.comments.size() == 0 {
+    true => available,
+    false => match half < 4 {
+      true => available,
+      false => half,
+    },
+  }
+
+  // ---- Description section ----
+  let desc_highlighted = tab.section == 0
+  let desc_focused = desc_highlighted and tab.focused
+  let desc_header = match desc_highlighted {
+    true => "[Description]",
+    false => "Description",
+  }
+  let desc_underline_char = match desc_focused {
+    true => "━",
+    false => "─",
+  }
+  vaxis::draw_text(vx, panel_x, desc_start, desc_header)
+  mut desc_div = ""
+  for i in 0..(panel_width - 1) {
+    desc_div =+ desc_underline_char
+  }
+  vaxis::draw_text(vx, panel_x, desc_start + 1, desc_div)
+
+  mut next_y = desc_body_start
+  match description {
+    desc => {
+      // Wrap and render the description as a scrollview. When the
+      // section isn't focused, force scroll back to top so unrelated
+      // scrolling state doesn't bleed across.
+      let wrapped = text::wrap_text(desc, panel_width - 3)
+      let sv = match desc_focused {
+        true => tab.desc_view,
+        false => components::Scrollview::new(),
+      }
+      let sv_layout = screen::Layout{
+        x: panel_x + 2,
+        y: desc_body_start,
+        width: panel_width - 2,
+        height: max_desc_lines,
+      }
+      sv.draw(vx, sv_layout, wrapped)
+      next_y = desc_body_start + max_desc_lines + 1
+    },
+    _ => {
+      vaxis::draw_text(vx, panel_x + 2, desc_body_start, "(no description)")
+      next_y = desc_body_start + 2
+    },
+  }
+
+  // ---- Comments section ----
+  if next_y + 2 < max_y {
+    let comments_highlighted = tab.section == 1
+    let comments_focused = comments_highlighted and tab.focused
+    let count_label = match tab.comments_view.comments.size() == 0 {
+      true => "Comments (none)",
+      false => "Comments ({tab.comments_view.comments.size()})",
+    }
+    let comments_header = match comments_highlighted {
+      true => "[{count_label}]",
+      false => count_label,
+    }
+    let comments_underline_char = match comments_focused {
+      true => "━",
+      false => "─",
+    }
+    vaxis::draw_text(vx, panel_x, next_y, comments_header)
+    mut cm_div = ""
+    for i in 0..(panel_width - 1) {
+      cm_div =+ comments_underline_char
+    }
+    vaxis::draw_text(vx, panel_x, next_y + 1, cm_div)
+
+    if tab.comments_view.comments.size() == 0 {
+      vaxis::draw_text(vx, panel_x + 2, next_y + 3, "(no comments)")
+    } else {
+      let body_y = next_y + 3
+      let lv_layout = screen::Layout{
+        x: panel_x,
+        y: body_y,
+        width: panel_width,
+        height: max_y - body_y,
+      }
+      tab.comments_view.draw(vx, lv_layout, comments_focused)
+    }
+  }
+
+  // Contextual status bar
+  let hint = match tab.focused {
+    true => match tab.section == 0 {
+      true => "↑↓ scroll · g/G top/bottom · Esc back",
+      false => "↑↓ comment · g/G first/last · Esc back",
+    },
+    false => "↑↓ section · ↵ focus · s status · c comment · Esc close tab · Tab switch",
+  }
+  vaxis::draw_text(vx, 1, sb_y, hint)
+}
