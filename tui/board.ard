@@ -1,0 +1,206 @@
+use ard/decode
+
+use linear-cli/tui/screen
+use linear-cli/tui/state
+use linear-cli/tui/text
+use linear-cli/vaxis
+
+// ---- column geometry ---------------------------------------------------
+
+// Gap between adjacent board columns, in cells.
+fn board_column_gap() Int { 3 }
+
+// Computes the column width that best fits all `col_count` columns
+// in the current terminal width. Clamped to a sane range so columns
+// don't get too cramped on narrow terminals or absurdly wide on
+// ultrawide ones.
+fn board_column_width(vx: vaxis::Vaxis, col_count: Int) Int {
+  match col_count == 0 {
+    true => 30,
+    false => {
+      let term_w = screen::term_width(vx)
+      let gap = board_column_gap()
+      let left_padding = 1
+      let available = term_w - left_padding
+      let computed = (available - ((col_count - 1) * gap)) / col_count
+      match computed < 22 {
+        true => 22,
+        false => match computed > 50 {
+          true => 50,
+          false => computed,
+        },
+      }
+    },
+  }
+}
+
+// How many board columns fit on the current terminal width given
+// the total column count. Each column takes `col_w + gap` except the
+// last (which doesn't need a trailing gap).
+fn board_visible_count(vx: vaxis::Vaxis, col_count: Int) Int {
+  match col_count == 0 {
+    true => 0,
+    false => {
+      let col_w = board_column_width(vx, col_count)
+      let gap = board_column_gap()
+      let term_w = screen::term_width(vx)
+      let available = term_w - 1
+      let per_col = col_w + gap
+      let computed = (available + gap) / per_col
+      match computed > col_count {
+        true => col_count,
+        false => match computed < 1 {
+          true => 1,
+          false => computed,
+        },
+      }
+    },
+  }
+}
+
+// ---- card rendering ----------------------------------------------------
+
+// Draws a single card in one of the board columns. Returns the y
+// position where the *next* card (or divider) should start.
+//
+// Layout depends on title length:
+//   <cursor><glyph> <identifier>
+//   <indent><title-line-1>
+//   <indent><title-line-2>          ← only if title wraps
+//   <heavy-divider>                 ← only if not the last card
+//   <blank>                         ← only if not the last card
+fn draw_board_card(
+  vx: vaxis::Vaxis,
+  issue: Dynamic,
+  x: Int,
+  y: Int,
+  col_w: Int,
+  is_selected: Bool,
+  is_last: Bool,
+) Int {
+  let identifier = decode::run(issue, decode::field("identifier", decode::string))
+    .expect("Missing identifier")
+  let title = decode::run(issue, decode::field("title", decode::string))
+    .expect("Missing title")
+  let priority = decode::run(issue, decode::field("priority", decode::nullable(decode::int)))
+    .expect("Missing priority")
+
+  let cursor = match is_selected {
+    true => "▸",
+    false => " ",
+  }
+  let glyph = state::priority_glyph(priority)
+
+  // Line 1: "<cursor><glyph> <identifier>"  (3-char prefix before id)
+  let header = "{cursor}{glyph} {identifier}"
+  vaxis::draw_text(vx, x, y, text::truncate_with_ellipsis(header, col_w))
+
+  // Title lines: aligned under the identifier, up to 2 lines.
+  let title_indent = 3
+  let title_w = col_w - title_indent
+  let wrapped = text::wrap_title(title, title_w)
+  vaxis::draw_text(vx, x + title_indent, y + 1, wrapped.line1)
+
+  let has_line2 = not wrapped.line2.is_empty()
+  if has_line2 {
+    vaxis::draw_text(vx, x + title_indent, y + 2, wrapped.line2)
+  }
+
+  // Position right after the title block.
+  let divider_y = match has_line2 {
+    true => y + 3,
+    false => y + 2,
+  }
+
+  // Divider + blank between cards (skip after the last one).
+  mut next_y = divider_y
+  if (not is_last) {
+    mut divider = ""
+    for i in 0..(col_w - 2) {
+      divider =+ "━"
+    }
+    vaxis::draw_text(vx, x, divider_y, divider)
+    next_y = divider_y + 2
+  }
+  next_y
+}
+
+// ---- main view ---------------------------------------------------------
+
+fn draw_board_content(state: state::AppState) Void {
+  let vx = state.vx
+  let sb_y = screen::status_bar_y(vx)
+  let content_bottom = sb_y - 1
+
+  if state.columns.size() == 0 {
+    vaxis::draw_text(vx, 1, 3, "No issues assigned to you.")
+    vaxis::draw_text(vx, 1, sb_y, "Tab switch · r refresh")
+  } else {
+    let col_count = state.columns.size()
+    let col_w = board_column_width(vx, col_count)
+    let gap = board_column_gap()
+    let visible_count = board_visible_count(vx, col_count)
+
+    // Clamp scroll to a valid range in case state is stale (e.g. after
+    // a resize or refresh).
+    let max_scroll = match col_count > visible_count {
+      true => col_count - visible_count,
+      false => 0,
+    }
+    let scroll = match state.board_scroll > max_scroll {
+      true => max_scroll,
+      false => match state.board_scroll < 0 {
+        true => 0,
+        false => state.board_scroll,
+      },
+    }
+    let end_excl = match scroll + visible_count > col_count {
+      true => col_count,
+      false => scroll + visible_count,
+    }
+
+    mut x = 1
+    for col, col_idx in state.columns {
+      if col_idx >= scroll and col_idx < end_excl {
+        // Header: name + count, with "· last 10" for completed columns.
+        let suffix = match col.state_type == "completed" {
+          true => " · last 10",
+          false => "",
+        }
+        let header = "{col.name} ({col.issues.size()}){suffix}"
+        vaxis::draw_text(vx, x, 3, text::truncate_with_ellipsis(header, col_w))
+
+        // Divider under header.
+        mut header_div = ""
+        for i in 0..(col_w - 2) {
+          header_div =+ "─"
+        }
+        vaxis::draw_text(vx, x, 4, header_div)
+
+        // Cards in this column.
+        mut card_y = 6
+        let last_idx = col.issues.size() - 1
+        for issue, card_idx in col.issues {
+          if card_y + 1 < content_bottom {
+            let is_last = card_idx == last_idx
+            let is_selected = col_idx == state.board_col and card_idx == state.board_row
+            card_y = draw_board_card(vx, issue, x, card_y, col_w, is_selected, is_last)
+          }
+        }
+
+        x = x + col_w + gap
+      }
+    }
+
+    // Scroll indicators on the header row.
+    if scroll > 0 {
+      vaxis::draw_text(vx, 0, 3, "‹")
+    }
+    if end_excl < col_count {
+      let term_w = screen::term_width(vx)
+      vaxis::draw_text(vx, term_w - 1, 3, "›")
+    }
+
+    vaxis::draw_text(vx, 1, sb_y, "↑↓ · ← → · ↵ open · s status · r refresh")
+  }
+}

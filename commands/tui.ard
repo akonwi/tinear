@@ -11,6 +11,9 @@ use linear-cli/tui/decode as decode_utils
 use linear-cli/tui/components
 use linear-cli/tui/state
 use linear-cli/tui/api
+use linear-cli/tui/draw
+use linear-cli/tui/modals
+use linear-cli/tui/board
 use linear-cli/tui/text
 use linear-cli/tui/screen
 
@@ -223,113 +226,6 @@ fn trigger_comment_index(notif: Dynamic) Int {
 
 // Visual width of one tab label, including its surrounding spaces or
 // brackets. " name " and "[name]" are both name.size() + 2 cells.
-fn tab_width(name: Str) Int {
-  name.size() + 2
-}
-
-fn draw_tab_bar(vx: vaxis::Vaxis, tabs: [Str], active: Int) Void {
-  let win = vaxis::root(vx)
-  let term_w = vaxis::window_width(win)
-
-  if tabs.size() > 0 {
-    // Total width including a 1-col pipe between each pair of tabs.
-    mut total = 0
-    for t in tabs {
-      total = total + tab_width(t)
-    }
-    let pipe_count = match tabs.size() > 1 {
-      true => tabs.size() - 1,
-      false => 0,
-    }
-    total = total + pipe_count
-
-    let fits_clean = total <= term_w - 1
-
-    // Compute the leftmost visible tab so the active one stays in view.
-    // When scrolling we reserve col 0 for `‹` and col term_w-1 for `›`,
-    // so usable width drops to term_w - 3.
-    mut scroll = 0
-    if (not fits_clean) {
-      let avail = term_w - 3
-      mut sum = 0
-      for t, idx in tabs {
-        if idx <= active {
-          sum = sum + tab_width(t)
-          if idx > 0 {
-            sum = sum + 1
-          }
-        }
-      }
-      // Each scroll++ removes the leftmost tab and the pipe that used
-      // to sit between it and its right neighbour.
-      while sum > avail and scroll < active {
-        sum = sum - tab_width(tabs.at(scroll)) - 1
-        scroll = scroll + 1
-      }
-    }
-
-    let start_x = match (not fits_clean) and scroll > 0 {
-      true => 2,
-      false => 1,
-    }
-    let max_x = match fits_clean {
-      true => term_w,
-      false => term_w - 1,
-    }
-
-    // Render tabs starting from `scroll`. Each tab is drawn as
-    // " {name} ". A `│` sits in its own column between adjacent
-    // visible tabs so the pipe is surrounded by spaces on both sides
-    // (tab N's trailing space, pipe, tab N+1's leading space). The
-    // active tab's label is drawn with the underline attribute.
-    mut x = start_x
-    mut last_rendered = scroll - 1
-    mut n = scroll
-    while n < tabs.size() {
-      let t = tabs.at(n)
-      let w = tab_width(t)
-      let needs_pipe = n > scroll
-      let cost = match needs_pipe {
-        true => w + 1,
-        false => w,
-      }
-      if x + cost > max_x {
-        break
-      }
-      if needs_pipe {
-        vaxis::draw_text(vx, x, 0, "│")
-        x = x + 1
-      }
-      if n == active {
-        // Full-cell reverse video: leading space, label, trailing
-        // space all get fg/bg swapped against the terminal defaults
-        // (-1/-1). Reads like a selected pill button.
-        vaxis::draw_text_style(vx, x, 0, " " + t + " ", -1, -1, false, false, false, false, true)
-      } else {
-        vaxis::draw_text(vx, x, 0, " " + t + " ")
-      }
-      x = x + w
-      last_rendered = n
-      n = n + 1
-    }
-
-    // Overflow indicators.
-    if (not fits_clean) and scroll > 0 {
-      vaxis::draw_text(vx, 0, 0, "‹")
-    }
-    if (not fits_clean) and last_rendered < tabs.size() - 1 {
-      vaxis::draw_text(vx, term_w - 1, 0, "›")
-    }
-  }
-
-  // Separator line below the tab bar.
-  mut sep = ""
-  for i in 0..(term_w - 1) {
-    sep =+ "─"
-  }
-  vaxis::draw_text(vx, 0, 1, sep)
-}
-
 // For a notification, return its display identifier and title. PR
 // notifications use #<number> and PR title; issue notifications use
 // the issue identifier and issue title.
@@ -388,42 +284,9 @@ fn draw_card_row(vx: vaxis::Vaxis, notif: Dynamic, idx: Int, cursor: Int, width:
   vaxis::draw_text(vx, 1, row, text::truncate_with_ellipsis(line, width))
 }
 
-fn priority_label(p: Int?) Str {
-  match p {
-    n => {
-      match n {
-        1 => "Urgent",
-        2 => "High",
-        3 => "Medium",
-        4 => "Low",
-        _ => "—",
-      }
-    },
-    _ => "—",
-  }
-}
-
 // Single-character priority glyph for compact card rendering. Returns
 // a space when priority is None or 0 (no priority), so all glyphs
 // occupy the same visual column.
-fn priority_glyph(p: Int?) Str {
-  match p {
-    n => {
-      match n {
-        1 => "!",
-        2 => "↑",
-        3 => "~",
-        4 => "↓",
-        _ => " ",
-      }
-    },
-    _ => " ",
-  }
-}
-
-fn draw_label_row(vx: vaxis::Vaxis, x: Int, y: Int, label: Str, value: Str) Void {
-  vaxis::draw_text(vx, x, y, text::pad_str(label, 10) + value)
-}
 fn draw_pr_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int) Void {
   let n_type = decode::run(notif, decode::field("type", decode::string)).expect("Missing type")
   let type_label = format_type(n_type)
@@ -492,10 +355,10 @@ fn draw_pr_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: I
   vaxis::draw_text(vx, x, 3, sep)
 
   // PR details block
-  draw_label_row(vx, x, 5, "Status",   pr_status)
-  draw_label_row(vx, x, 6, "Branch",   "{pr_source} → {pr_target}")
-  draw_label_row(vx, x, 7, "Author",   pr_creator)
-  draw_label_row(vx, x, 8, "Opened",   pr_opened)
+  draw::draw_label_row(vx, x, 5, "Status",   pr_status)
+  draw::draw_label_row(vx, x, 6, "Branch",   "{pr_source} → {pr_target}")
+  draw::draw_label_row(vx, x, 7, "Author",   pr_creator)
+  draw::draw_label_row(vx, x, 8, "Opened",   pr_opened)
 
   // Latest event
   let content_y = 10
@@ -609,11 +472,11 @@ fn draw_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int,
   vaxis::draw_text(vx, x, 3, sep)
 
   // Issue details block
-  draw_label_row(vx, x, 5, "Status",   state_name)
-  draw_label_row(vx, x, 6, "Team",     team_name)
-  draw_label_row(vx, x, 7, "Project",  project_name)
-  draw_label_row(vx, x, 8, "Assignee", assignee_name)
-  draw_label_row(vx, x, 9, "Priority", priority_label(priority))
+  draw::draw_label_row(vx, x, 5, "Status",   state_name)
+  draw::draw_label_row(vx, x, 6, "Team",     team_name)
+  draw::draw_label_row(vx, x, 7, "Project",  project_name)
+  draw::draw_label_row(vx, x, 8, "Assignee", assignee_name)
+  draw::draw_label_row(vx, x, 9, "Priority", state::priority_label(priority))
 
   // Comments thread (for comment-type notifications) or Description
   let content_y = 11
@@ -729,11 +592,11 @@ fn draw_issue_tab(state: state::AppState, tab: state::IssueTab) Void {
   vaxis::draw_text(vx, panel_x, 3, sep)
 
   // Issue details block
-  draw_label_row(vx, panel_x, 5, "Status",   state_name)
-  draw_label_row(vx, panel_x, 6, "Team",     team_name)
-  draw_label_row(vx, panel_x, 7, "Project",  project_name)
-  draw_label_row(vx, panel_x, 8, "Assignee", assignee_name)
-  draw_label_row(vx, panel_x, 9, "Priority", priority_label(priority))
+  draw::draw_label_row(vx, panel_x, 5, "Status",   state_name)
+  draw::draw_label_row(vx, panel_x, 6, "Team",     team_name)
+  draw::draw_label_row(vx, panel_x, 7, "Project",  project_name)
+  draw::draw_label_row(vx, panel_x, 8, "Assignee", assignee_name)
+  draw::draw_label_row(vx, panel_x, 9, "Priority", state::priority_label(priority))
 
   // Sections (Description, Comments) share the space ~50/50 when both
   // are present; otherwise the present one takes the full remaining
@@ -845,33 +708,10 @@ fn draw_issue_tab(state: state::AppState, tab: state::IssueTab) Void {
 }
 
 // Gap between adjacent board columns, in cells.
-fn board_column_gap() Int { 3 }
-
 // Computes the column width that best fits all `col_count` columns in
 // the current terminal width. Clamped to a sane range so columns
 // don't get too cramped on narrow terminals or absurdly wide on
 // ultrawide ones.
-fn board_column_width(vx: vaxis::Vaxis, col_count: Int) Int {
-  match col_count == 0 {
-    true => 30,
-    false => {
-      let win = vaxis::root(vx)
-      let term_w = vaxis::window_width(win)
-      let gap = board_column_gap()
-      let left_padding = 1
-      let available = term_w - left_padding
-      let computed = (available - ((col_count - 1) * gap)) / col_count
-      match computed < 22 {
-        true => 22,
-        false => match computed > 50 {
-          true => 50,
-          false => computed,
-        },
-      }
-    },
-  }
-}
-
 // Draws a single card in one of the board columns. Returns the y
 // position where the *next* card (or divider) should start.
 //
@@ -881,166 +721,9 @@ fn board_column_width(vx: vaxis::Vaxis, col_count: Int) Int {
 //   <indent><title-line-2>          ← only if title wraps
 //   <heavy-divider>                 ← only if not the last card
 //   <blank>                         ← only if not the last card
-fn draw_board_card(
-  vx: vaxis::Vaxis,
-  issue: Dynamic,
-  x: Int,
-  y: Int,
-  col_w: Int,
-  is_selected: Bool,
-  is_last: Bool,
-) Int {
-  let identifier = decode::run(issue, decode::field("identifier", decode::string))
-    .expect("Missing identifier")
-  let title = decode::run(issue, decode::field("title", decode::string))
-    .expect("Missing title")
-  let priority = decode::run(issue, decode::field("priority", decode::nullable(decode::int)))
-    .expect("Missing priority")
-
-  let cursor = match is_selected {
-    true => "▸",
-    false => " ",
-  }
-  let glyph = priority_glyph(priority)
-
-  // Line 1: "<cursor><glyph> <identifier>"  (3-char prefix before id)
-  let header = "{cursor}{glyph} {identifier}"
-  vaxis::draw_text(vx, x, y, text::truncate_with_ellipsis(header, col_w))
-
-  // Title lines: aligned under the identifier, up to 2 lines.
-  let title_indent = 3
-  let title_w = col_w - title_indent
-  let wrapped = text::wrap_title(title, title_w)
-  vaxis::draw_text(vx, x + title_indent, y + 1, wrapped.line1)
-
-  let has_line2 = not wrapped.line2.is_empty()
-  if has_line2 {
-    vaxis::draw_text(vx, x + title_indent, y + 2, wrapped.line2)
-  }
-
-  // Position right after the title block.
-  let divider_y = match has_line2 {
-    true => y + 3,
-    false => y + 2,
-  }
-
-  // Divider + blank between cards (skip after the last one).
-  mut next_y = divider_y
-  if (not is_last) {
-    mut divider = ""
-    for i in 0..(col_w - 2) {
-      divider =+ "━"
-    }
-    vaxis::draw_text(vx, x, divider_y, divider)
-    next_y = divider_y + 2
-  }
-  next_y
-}
-
 // How many board columns fit on the current terminal width given the
 // total column count. Each column takes `col_w + gap` except the last
 // (which doesn't need a trailing gap).
-fn board_visible_count(vx: vaxis::Vaxis, col_count: Int) Int {
-  match col_count == 0 {
-    true => 0,
-    false => {
-      let col_w = board_column_width(vx, col_count)
-      let gap = board_column_gap()
-      let win = vaxis::root(vx)
-      let term_w = vaxis::window_width(win)
-      let available = term_w - 1
-      let per_col = col_w + gap
-      let computed = (available + gap) / per_col
-      match computed > col_count {
-        true => col_count,
-        false => match computed < 1 {
-          true => 1,
-          false => computed,
-        },
-      }
-    },
-  }
-}
-
-fn draw_board_content(state: state::AppState) Void {
-  let vx = state.vx
-  let sb_y = screen::status_bar_y(vx)
-  let content_bottom = sb_y - 1
-
-  if state.columns.size() == 0 {
-    vaxis::draw_text(vx, 1, 3, "No issues assigned to you.")
-    vaxis::draw_text(vx, 1, sb_y, "Tab switch · r refresh")
-  } else {
-    let col_count = state.columns.size()
-    let col_w = board_column_width(vx, col_count)
-    let gap = board_column_gap()
-    let visible_count = board_visible_count(vx, col_count)
-
-    // Clamp scroll to a valid range in case state is stale (e.g. after
-    // a resize or refresh).
-    let max_scroll = match col_count > visible_count {
-      true => col_count - visible_count,
-      false => 0,
-    }
-    let scroll = match state.board_scroll > max_scroll {
-      true => max_scroll,
-      false => match state.board_scroll < 0 {
-        true => 0,
-        false => state.board_scroll,
-      },
-    }
-    let end_excl = match scroll + visible_count > col_count {
-      true => col_count,
-      false => scroll + visible_count,
-    }
-
-    mut x = 1
-    for col, col_idx in state.columns {
-      if col_idx >= scroll and col_idx < end_excl {
-        // Header: name + count, with "· last 10" for completed columns.
-        let suffix = match col.state_type == "completed" {
-          true => " · last 10",
-          false => "",
-        }
-        let header = "{col.name} ({col.issues.size()}){suffix}"
-        vaxis::draw_text(vx, x, 3, text::truncate_with_ellipsis(header, col_w))
-
-        // Divider under header.
-        mut header_div = ""
-        for i in 0..(col_w - 2) {
-          header_div =+ "─"
-        }
-        vaxis::draw_text(vx, x, 4, header_div)
-
-        // Cards in this column.
-        mut card_y = 6
-        let last_idx = col.issues.size() - 1
-        for issue, card_idx in col.issues {
-          if card_y + 1 < content_bottom {
-            let is_last = card_idx == last_idx
-            let is_selected = col_idx == state.board_col and card_idx == state.board_row
-            card_y = draw_board_card(vx, issue, x, card_y, col_w, is_selected, is_last)
-          }
-        }
-
-        x = x + col_w + gap
-      }
-    }
-
-    // Scroll indicators on the header row.
-    if scroll > 0 {
-      vaxis::draw_text(vx, 0, 3, "‹")
-    }
-    if end_excl < col_count {
-      let win = vaxis::root(vx)
-      let term_w = vaxis::window_width(win)
-      vaxis::draw_text(vx, term_w - 1, 3, "›")
-    }
-
-    vaxis::draw_text(vx, 1, sb_y, "↑↓ · ← → · ↵ open · s status · r refresh")
-  }
-}
-
 fn draw_inbox_content(state: state::AppState) Void {
   let vx = state.vx
   let win = vaxis::root(vx)
@@ -1104,192 +787,20 @@ fn draw_inbox_content(state: state::AppState) Void {
 // Render the status picker modal centered on screen. Drawn last so it
 // sits on top of the underlying tab. The interior is filled with
 // spaces so the tab content doesn't leak through.
-fn draw_state_picker(vx: vaxis::Vaxis, picker: state::StatePicker) Void {
-  let win = vaxis::root(vx)
-  let term_w = vaxis::window_width(win)
-  let term_h = vaxis::window_height(win)
-
-  let w = 50
-  let states_count = picker.states.size()
-  // top + header + sep + states + foot_sep + footer + bottom
-  let h = states_count + 6
-  let x = (term_w - w) / 2
-  let y = (term_h - h) / 2
-
-  // Top border
-  mut top = "┌"
-  for i in 0..(w - 3) {
-    top =+ "─"
-  }
-  top =+ "┐"
-  vaxis::draw_text(vx, x, y, top)
-
-  // Header row
-  let header = " Status — {picker.issue_identifier} ({picker.team_name}) "
-  let header_padded = text::pad_str_display(vx, text::truncate_with_ellipsis_display(vx, header, w - 2), w - 2)
-  vaxis::draw_text(vx, x, y + 1, "│{header_padded}│")
-
-  // Separator
-  mut sep = "├"
-  for i in 0..(w - 3) {
-    sep =+ "─"
-  }
-  sep =+ "┤"
-  vaxis::draw_text(vx, x, y + 2, sep)
-
-  // State rows
-  for s, i in picker.states {
-    let sid = decode::run(s, decode::field("id", decode::string)).expect("Missing state.id")
-    let sname = decode::run(s, decode::field("name", decode::string)).expect("Missing state.name")
-    let cursor_mark = match i == picker.cursor {
-      true => "▸",
-      false => " ",
-    }
-    let current_suffix = match sid == picker.current_state_id {
-      true => "  (current)",
-      false => "",
-    }
-    let content = " {cursor_mark} {sname}{current_suffix}"
-    let padded = text::pad_str_display(vx, text::truncate_with_ellipsis_display(vx, content, w - 2), w - 2)
-    vaxis::draw_text(vx, x, y + 3 + i, "│{padded}│")
-  }
-
-  // Separator above the footer hints, matching the composer style.
-  let foot_y = y + 3 + states_count
-  mut foot_sep = "├"
-  for i in 0..(w - 3) {
-    foot_sep =+ "─"
-  }
-  foot_sep =+ "┤"
-  vaxis::draw_text(vx, x, foot_y, foot_sep)
-
-  // Footer with key hints
-  let footer = " ↑↓ select  ↵ confirm  Esc cancel "
-  let footer_padded = text::pad_str_display(vx, text::truncate_with_ellipsis_display(vx, footer, w - 2), w - 2)
-  vaxis::draw_text(vx, x, foot_y + 1, "│{footer_padded}│")
-
-  // Bottom border
-  mut bot = "└"
-  for i in 0..(w - 3) {
-    bot =+ "─"
-  }
-  bot =+ "┘"
-  vaxis::draw_text(vx, x, foot_y + 2, bot)
-}
-
 // Render the comment composer modal centered on screen. Multi-line
 // body word-wrapped to the interior width; cursor follows the end of
 // the buffer. If the wrapped output overflows the text area, only the
 // last `text_h` lines are shown.
-fn draw_comment_composer(vx: vaxis::Vaxis, composer: state::CommentComposer) Void {
-  let win = vaxis::root(vx)
-  let term_w = vaxis::window_width(win)
-  let term_h = vaxis::window_height(win)
-
-  let w = match term_w > 90 {
-    true => 80,
-    false => term_w - 4,
-  }
-  let h = match term_h > 24 {
-    true => 18,
-    false => term_h - 4,
-  }
-  let x = (term_w - w) / 2
-  let y = (term_h - h) / 2
-
-  // Top border
-  mut top = "┌"
-  for i in 0..(w - 3) {
-    top =+ "─"
-  }
-  top =+ "┐"
-  vaxis::draw_text(vx, x, y, top)
-
-  // Header row
-  let header = " New comment — {composer.issue_identifier} "
-  let header_padded = text::pad_str_display(vx, text::truncate_with_ellipsis_display(vx, header, w - 2), w - 2)
-  vaxis::draw_text(vx, x, y + 1, "│{header_padded}│")
-
-  // Separator under header
-  mut sep = "├"
-  for i in 0..(w - 3) {
-    sep =+ "─"
-  }
-  sep =+ "┤"
-  vaxis::draw_text(vx, x, y + 2, sep)
-
-  // Text area: rows y+3 through y+h-3 (h-5 rows total).
-  let text_h = h - 5
-  let text_w = w - 4
-  // Wrap into display lines, preserving explicit newlines.
-  let wrapped = text::wrap_text(composer.body, text_w)
-  // If we overflow, show the last `text_h` lines.
-  let total = wrapped.size()
-  let first = match total > text_h {
-    true => total - text_h,
-    false => 0,
-  }
-
-  // Fill all text rows (so any prior content is cleared).
-  for r in 0..(text_h - 1) {
-    let blank = text::pad_str_display(vx, "", text_w)
-    vaxis::draw_text(vx, x, y + 3 + r, "│ {blank} │")
-  }
-
-  // Draw visible wrapped lines.
-  mut cursor_row = 0
-  mut cursor_col = 0
-  for line, i in wrapped {
-    if i >= first {
-      let row_idx = i - first
-      let padded = text::pad_str_display(vx, text::truncate_with_ellipsis_display(vx, line, text_w), text_w)
-      vaxis::draw_text(vx, x, y + 3 + row_idx, "│ {padded} │")
-      if i == total - 1 {
-        cursor_row = y + 3 + row_idx
-        cursor_col = x + 2 + vaxis::rendered_width(vx, line)
-      }
-    }
-  }
-  if total == 0 {
-    cursor_row = y + 3
-    cursor_col = x + 2
-  }
-
-  // Footer with key hints
-  let foot_y = y + 3 + text_h
-  mut foot_sep = "├"
-  for i in 0..(w - 3) {
-    foot_sep =+ "─"
-  }
-  foot_sep =+ "┤"
-  vaxis::draw_text(vx, x, foot_y, foot_sep)
-
-  let footer = " Ctrl+↵ send  Esc cancel "
-  let footer_padded = text::pad_str_display(vx, text::truncate_with_ellipsis_display(vx, footer, w - 2), w - 2)
-  vaxis::draw_text(vx, x, foot_y + 1, "│{footer_padded}│")
-
-  // Bottom border
-  mut bot = "└"
-  for i in 0..(w - 3) {
-    bot =+ "─"
-  }
-  bot =+ "┘"
-  vaxis::draw_text(vx, x, foot_y + 2, bot)
-
-  // Cursor at the end of the buffer.
-  vaxis::show_cursor(vx, cursor_col, cursor_row)
-}
-
 fn draw_screen(state: state::AppState) Void {
   let vx = state.vx
   vaxis::clear(vx)
 
-  draw_tab_bar(vx, state.tabs, state.active_tab)
+  draw::draw_tab_bar(vx, state.tabs, state.active_tab)
 
   if state.active_tab == 0 {
     draw_inbox_content(state)
   } else if state.active_tab == 1 {
-    draw_board_content(state)
+    board::draw_board_content(state)
   } else {
     // Issue detail tab: active_tab - 2 indexes into issue_tabs.
     let idx = state.active_tab - 2
@@ -1300,14 +811,14 @@ fn draw_screen(state: state::AppState) Void {
 
   // Overlay the status picker on top of whatever the active tab drew.
   match state.state_picker {
-    p => draw_state_picker(state.vx, p),
+    p => modals::draw_state_picker(state.vx, p),
     _ => (),
   }
 
   // The composer takes precedence over the picker (they shouldn't be
   // open at the same time, but if they are this is the active one).
   match state.comment_composer {
-    c => draw_comment_composer(state.vx, c),
+    c => modals::draw_comment_composer(state.vx, c),
     _ => vaxis::hide_cursor(state.vx),
   }
 
@@ -1572,7 +1083,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                 board_row = new_size - 1
               }
               // Scroll right if cursor went off the right edge.
-              let visible = board_visible_count(vx, columns.size())
+              let visible = board::board_visible_count(vx, columns.size())
               if board_col >= board_scroll + visible {
                 board_scroll = board_col - visible + 1
               }

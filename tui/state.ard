@@ -23,6 +23,42 @@ fn is_hidden_state(name: Str) Bool {
   name == "Duplicate"
 }
 
+// ---- priority helpers --------------------------------------------------
+
+// Linear priority code (1=Urgent..4=Low, 0/None=no priority) to label.
+fn priority_label(p: Int?) Str {
+  match p {
+    n => {
+      match n {
+        1 => "Urgent",
+        2 => "High",
+        3 => "Medium",
+        4 => "Low",
+        _ => "—",
+      }
+    },
+    _ => "—",
+  }
+}
+
+// Single-character priority glyph for compact card rendering.
+// Returns a space when priority is None or 0 so all glyphs occupy
+// the same visual column.
+fn priority_glyph(p: Int?) Str {
+  match p {
+    n => {
+      match n {
+        1 => "!",
+        2 => "↑",
+        3 => "~",
+        4 => "↓",
+        _ => " ",
+      }
+    },
+    _ => " ",
+  }
+}
+
 // ---- data types --------------------------------------------------------
 
 // A column on the My Issues board: a workflow state name + the
