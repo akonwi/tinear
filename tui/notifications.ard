@@ -165,7 +165,7 @@ fn draw_card_row(vx: vaxis::Vaxis, notif: Dynamic, idx: Int, cursor: Int, width:
 
   let actor_obj = decode_utils::optional_field(notif, "actor")
   let actor_name = match actor_obj {
-    act => decode::run(act, decode::field("name", decode::string)).expect("Missing actor name"),
+    act => decode_utils::user_display_name(act),
     _ => "—",
   }
 
@@ -188,7 +188,7 @@ fn draw_pr_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: I
 
   let actor_obj = decode_utils::optional_field(notif, "actor")
   let actor_name = match actor_obj {
-    act => decode::run(act, decode::field("name", decode::string)).expect("Missing actor name"),
+    act => decode_utils::user_display_name(act),
     _ => "—",
   }
 
@@ -229,7 +229,7 @@ fn draw_pr_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: I
     pr => {
       let creator_obj = decode_utils::optional_field(pr, "creator")
       match creator_obj {
-        c => decode::run(c, decode::field("name", decode::string)).expect("Missing creator name"),
+        c => decode_utils::user_display_name(c),
         _ => "—",
       }
     },
@@ -347,7 +347,7 @@ fn draw_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int,
     _ => maybe::none(),
   }
   let assignee_name = match assignee_obj {
-    a => decode::run(a, decode::field("name", decode::string)).expect("Missing assignee name"),
+    a => decode_utils::user_display_name(a),
     _ => "—",
   }
 

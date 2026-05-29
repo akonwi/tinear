@@ -17,3 +17,20 @@ fn optional_field(data: Dynamic, name: Str) Dynamic? {
     err(_) => maybe::none(),
   }
 }
+
+// Renderable name for a Linear User. Prefers `displayName` when the
+// User object contains it and it is non-empty; otherwise falls back
+// to `name`. Queries should select both fields whenever possible so
+// this helper always has something to return.
+fn user_display_name(user: Dynamic) Str {
+  let dn_opt = optional_field(user, "displayName")
+  let dn = match dn_opt {
+    d => decode::run(d, decode::string).expect("displayName not a string"),
+    _ => "",
+  }
+  match dn.is_empty() {
+    true => decode::run(user, decode::field("name", decode::string))
+      .expect("Missing user.name"),
+    false => dn,
+  }
+}

@@ -83,7 +83,7 @@ fn draw_comment(vx: vaxis::Vaxis, comment: Dynamic, x: Int, y: Int, panel_width:
     .expect("Missing createdAt")
   let user_obj = decode_utils::optional_field(comment, "user")
   let user_name = match user_obj {
-    u => decode::run(u, decode::field("name", decode::string)).expect("Missing user name"),
+    u => decode_utils::user_display_name(u),
     _ => "—",
   }
   let date_str = match created {

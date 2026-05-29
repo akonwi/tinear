@@ -4,6 +4,7 @@ use ard/json
 use ard/env
 use ard/decode
 use linear-cli/linear/client
+use linear-cli/tui/decode as decode_utils
 use linear-cli/util
 
 struct LoginConfig {
@@ -35,10 +36,10 @@ fn run_inner(args: [Str]) Void!Str {
   let api_key = try require_non_empty(raw_key, "API key cannot be empty")
 
   io::print("Validating...")
-  match client::graphql(api_key, "query \{ viewer \{ id name email \} \}") {
+  match client::graphql(api_key, "query \{ viewer \{ id name displayName email \} \}") {
     ok(data) => {
       let viewer = decode::run(data, decode::field("viewer", decode::dynamic)).expect("Missing viewer")
-      let name = decode::run(viewer, decode::field("name", decode::string)).expect("Missing name")
+      let name = decode_utils::user_display_name(viewer)
       let email = decode::run(viewer, decode::field("email", decode::string)).expect("Missing email")
 
       let home = try get_home_dir()

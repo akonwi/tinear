@@ -64,7 +64,7 @@ fn draw_screen(state: state::AppState) Void {
 fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
   let viewer = try api::fetch_viewer(api_key)
   let viewer_id = decode::run(viewer, decode::field("id", decode::string)).expect("Missing id")
-  let name = decode::run(viewer, decode::field("name", decode::string)).expect("Missing name")
+  let name = decode_utils::user_display_name(viewer)
   let email = decode::run(viewer, decode::field("email", decode::string)).expect("Missing email")
 
   let initial_notifs = try api::fetch_inbox(api_key)

@@ -69,7 +69,7 @@ fn create_comment(api_key: Str, issue_id: Str, body: Str) Void!Str {
 
 // Current authenticated user.
 fn fetch_viewer(api_key: Str) Dynamic!Str {
-  let data = try client::graphql(api_key, "query \{ viewer \{ id name email \} \}")
+  let data = try client::graphql(api_key, "query \{ viewer \{ id name displayName email \} \}")
   let viewer = decode::run(data, decode::field("viewer", decode::dynamic)).expect("Missing viewer")
   Result::ok(viewer)
 }
@@ -77,7 +77,7 @@ fn fetch_viewer(api_key: Str) Dynamic!Str {
 // All notifications, with inline fragments populating IssueNotification
 // and PullRequestNotification specifics.
 fn fetch_inbox(api_key: Str) [Dynamic]!Str {
-  let query = "query \{ notifications(first: 50) \{ nodes \{ id type createdAt title subtitle url ... on IssueNotification \{ comment \{ id body createdAt user \{ name \} \} issue \{ id identifier title description priority state \{ name \} team \{ name key \} project \{ name \} assignee \{ name \} comments(first: 30) \{ nodes \{ id body createdAt user \{ name \} \} \} history(first: 10) \{ nodes \{ id createdAt fromState \{ name \} toState \{ name \} \} \} \} \} ... on PullRequestNotification \{ pullRequestCommentId pullRequest \{ id number title url status sourceBranch targetBranch openedAt creator \{ name \} \} \} actor \{ id name \} \} \} \}"
+  let query = "query \{ notifications(first: 50) \{ nodes \{ id type createdAt title subtitle url ... on IssueNotification \{ comment \{ id body createdAt user \{ name displayName \} \} issue \{ id identifier title description priority state \{ name \} team \{ name key \} project \{ name \} assignee \{ name displayName \} comments(first: 30) \{ nodes \{ id body createdAt user \{ name displayName \} \} \} history(first: 10) \{ nodes \{ id createdAt fromState \{ name \} toState \{ name \} \} \} \} \} ... on PullRequestNotification \{ pullRequestCommentId pullRequest \{ id number title url status sourceBranch targetBranch openedAt creator \{ name displayName \} \} \} actor \{ id name displayName \} \} \} \}"
   let data = try client::graphql(api_key, query)
   let nodes = decode::run(data, decode::path(["notifications", "nodes"], decode::list(decode::dynamic)))
     .expect("Missing notifications nodes")
@@ -87,7 +87,7 @@ fn fetch_inbox(api_key: Str) [Dynamic]!Str {
 // Comments for a specific issue. Returned by createdAt ascending,
 // which is Linear's default order.
 fn fetch_issue_comments(api_key: Str, issue_id: Str) [Dynamic]!Str {
-  let query = "query \{ issue(id: \"{issue_id}\") \{ comments(first: 50) \{ nodes \{ id body createdAt user \{ name \} \} \} \} \}"
+  let query = "query \{ issue(id: \"{issue_id}\") \{ comments(first: 50) \{ nodes \{ id body createdAt user \{ name displayName \} \} \} \} \}"
   let data = try client::graphql(api_key, query)
   let nodes = decode::run(data, decode::path(["issue", "comments", "nodes"], decode::list(decode::dynamic)))
     .expect("Missing issue.comments.nodes")
@@ -131,7 +131,7 @@ fn fetch_team_cycles(api_key: Str, team_id: Str) state::TeamCyclesResult!Str {
 // Refetch one issue with the same shape as fetch_board, so the
 // caller can drop the updated Dynamic into existing UI state.
 fn fetch_single_issue(api_key: Str, issue_id: Str) Dynamic!Str {
-  let query = "query \{ issue(id: \"{issue_id}\") \{ id identifier title description priority state \{ id name type position \} team \{ id name key \} project \{ name \} assignee \{ name \} cycle \{ id number name \} \} \}"
+  let query = "query \{ issue(id: \"{issue_id}\") \{ id identifier title description priority state \{ id name type position \} team \{ id name key \} project \{ name \} assignee \{ name displayName \} cycle \{ id number name \} \} \}"
   let data = try client::graphql(api_key, query)
   let issue = decode::run(data, decode::field("issue", decode::dynamic))
     .expect("Missing issue")
@@ -231,7 +231,7 @@ fn sort_states_for_picker(states: [Dynamic]) [Dynamic] {
 // Excludes canceled states. Caps `completed` columns to the first 10
 // issues returned by the API.
 fn fetch_board(api_key: Str, my_id: Str) [state::BoardColumn]!Str {
-  let query = "query \{ issues(first: 200, filter: \{ assignee: \{ id: \{ eq: \"{my_id}\" \} \}, state: \{ type: \{ nin: [\"canceled\"] \} \} \}) \{ nodes \{ id identifier title description priority state \{ id name type position \} team \{ id name key \} project \{ name \} assignee \{ name \} cycle \{ id number name \} \} \} \}"
+  let query = "query \{ issues(first: 200, filter: \{ assignee: \{ id: \{ eq: \"{my_id}\" \} \}, state: \{ type: \{ nin: [\"canceled\"] \} \} \}) \{ nodes \{ id identifier title description priority state \{ id name type position \} team \{ id name key \} project \{ name \} assignee \{ name displayName \} cycle \{ id number name \} \} \} \}"
   let data = try client::graphql(api_key, query)
   let issues = decode::run(data, decode::path(["issues", "nodes"], decode::list(decode::dynamic)))
     .expect("Missing issues.nodes")
