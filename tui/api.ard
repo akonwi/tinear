@@ -1,7 +1,9 @@
 use ard/decode
 use ard/json
+use ard/maybe
 
 use linear-cli/linear/client
+use linear-cli/tui/decode as decode_utils
 use linear-cli/tui/state
 
 // All GraphQL fetchers and mutations for the TUI. Functions either
@@ -22,6 +24,23 @@ fn archive_notification(api_key: Str, id: Str) Void!Str {
 // API reported success.
 fn update_issue_state(api_key: Str, issue_id: Str, state_id: Str) Void!Str {
   let mutation = "mutation \{ issueUpdate(id: \"{issue_id}\", input: \{ stateId: \"{state_id}\" \}) \{ success \} \}"
+  let data = try client::graphql(api_key, mutation)
+  let success = decode::run(data, decode::path(["issueUpdate", "success"], decode::bool))
+    .expect("Missing issueUpdate.success")
+  match success {
+    true => Result::ok(()),
+    false => Result::err("issueUpdate returned success=false"),
+  }
+}
+
+// Move an issue to a different cycle, or detach it from any cycle
+// when cycle_id is empty.
+fn update_issue_cycle(api_key: Str, issue_id: Str, cycle_id: Str) Void!Str {
+  let cycle_part = match cycle_id.is_empty() {
+    true => "cycleId: null",
+    false => "cycleId: \"{cycle_id}\"",
+  }
+  let mutation = "mutation \{ issueUpdate(id: \"{issue_id}\", input: \{ {cycle_part} \}) \{ success \} \}"
   let data = try client::graphql(api_key, mutation)
   let success = decode::run(data, decode::path(["issueUpdate", "success"], decode::bool))
     .expect("Missing issueUpdate.success")
@@ -84,10 +103,35 @@ fn fetch_team_states(api_key: Str, team_id: Str) [Dynamic]!Str {
   Result::ok(nodes)
 }
 
+// Cycles for a team plus the team's active cycle number, used by
+// the cycle picker to filter out far-future cycles. The first 50
+// cycles are plenty for any team in practice. Returned in whatever
+// order the API hands back; sort_cycles_by_number normalises before
+// display. activeCycle can be null when the team isn't currently
+// running a cycle.
+fn fetch_team_cycles(api_key: Str, team_id: Str) state::TeamCyclesResult!Str {
+  let query = "query \{ team(id: \"{team_id}\") \{ activeCycle \{ number \} cycles(first: 50) \{ nodes \{ id number name startsAt \} \} \} \}"
+  let data = try client::graphql(api_key, query)
+  let team_obj = decode::run(data, decode::field("team", decode::dynamic))
+    .expect("Missing team")
+  let nodes = decode::run(team_obj, decode::path(["cycles", "nodes"], decode::list(decode::dynamic)))
+    .expect("Missing team.cycles.nodes")
+  let active_obj = decode_utils::optional_field(team_obj, "activeCycle")
+  let active_number = match active_obj {
+    a => maybe::some(decode::run(a, decode::field("number", decode::int))
+      .expect("Missing activeCycle.number")),
+    _ => maybe::none(),
+  }
+  Result::ok(state::TeamCyclesResult{
+    active_cycle_number: active_number,
+    cycles: nodes,
+  })
+}
+
 // Refetch one issue with the same shape as fetch_board, so the
 // caller can drop the updated Dynamic into existing UI state.
 fn fetch_single_issue(api_key: Str, issue_id: Str) Dynamic!Str {
-  let query = "query \{ issue(id: \"{issue_id}\") \{ id identifier title description priority state \{ id name type position \} team \{ id name key \} project \{ name \} assignee \{ name \} \} \}"
+  let query = "query \{ issue(id: \"{issue_id}\") \{ id identifier title description priority state \{ id name type position \} team \{ id name key \} project \{ name \} assignee \{ name \} cycle \{ id number name \} \} \}"
   let data = try client::graphql(api_key, query)
   let issue = decode::run(data, decode::field("issue", decode::dynamic))
     .expect("Missing issue")
@@ -126,6 +170,31 @@ fn sort_columns_by_position(cols: [state::BoardColumn]) [state::BoardColumn] {
 }
 
 
+// Sort cycles descending by their `number` field. Used after
+// fetch_team_cycles so the most recent cycle appears at the top of
+// the picker.
+fn sort_cycles_by_number(cycles: [Dynamic]) [Dynamic] {
+  let n = cycles.size()
+  if n < 2 {
+    cycles
+  } else {
+    mut result = cycles
+    for i in 0..(n - 2) {
+      for j in 0..(n - 2 - i) {
+        let a = result.at(j)
+        let b = result.at(j + 1)
+        let na = decode::run(a, decode::field("number", decode::int)).expect("Missing cycle.number")
+        let nb = decode::run(b, decode::field("number", decode::int)).expect("Missing cycle.number")
+        if na < nb {
+          result.set(j, b)
+          result.set(j + 1, a)
+        }
+      }
+    }
+    result
+  }
+}
+
 // Sort states for the status picker: by workflow type rank, then
 // position. Used after fetch_team_states.
 fn sort_states_for_picker(states: [Dynamic]) [Dynamic] {
@@ -162,7 +231,7 @@ fn sort_states_for_picker(states: [Dynamic]) [Dynamic] {
 // Excludes canceled states. Caps `completed` columns to the first 10
 // issues returned by the API.
 fn fetch_board(api_key: Str, my_id: Str) [state::BoardColumn]!Str {
-  let query = "query \{ issues(first: 200, filter: \{ assignee: \{ id: \{ eq: \"{my_id}\" \} \}, state: \{ type: \{ nin: [\"canceled\"] \} \} \}) \{ nodes \{ id identifier title description priority state \{ id name type position \} team \{ id name key \} project \{ name \} assignee \{ name \} \} \} \}"
+  let query = "query \{ issues(first: 200, filter: \{ assignee: \{ id: \{ eq: \"{my_id}\" \} \}, state: \{ type: \{ nin: [\"canceled\"] \} \} \}) \{ nodes \{ id identifier title description priority state \{ id name type position \} team \{ id name key \} project \{ name \} assignee \{ name \} cycle \{ id number name \} \} \} \}"
   let data = try client::graphql(api_key, query)
   let issues = decode::run(data, decode::path(["issues", "nodes"], decode::list(decode::dynamic)))
     .expect("Missing issues.nodes")
@@ -252,6 +321,71 @@ fn open_state_picker(api_key: Str, issue: Dynamic, from_board: Bool, tab_idx: In
     current_state_id: current_state_id,
     team_name: team_name,
     states: states,
+    cursor: cur,
+    from_board: from_board,
+    tab_idx: tab_idx,
+  })
+}
+
+// Construct a CyclePicker for the given issue. Fetches the team's
+// cycles, sorts them, and positions the cursor on the issue's
+// current cycle. Cursor index 0 is the implicit "(no cycle)" option;
+// real cycles start at index 1.
+fn open_cycle_picker(api_key: Str, issue: Dynamic, from_board: Bool, tab_idx: Int) state::CyclePicker!Str {
+  let issue_id = decode::run(issue, decode::field("id", decode::string)).expect("Missing id")
+  let identifier = decode::run(issue, decode::field("identifier", decode::string)).expect("Missing identifier")
+  let team = decode::run(issue, decode::field("team", decode::dynamic)).expect("Missing team")
+  let team_id = decode::run(team, decode::field("id", decode::string)).expect("Missing team.id")
+  let team_name = decode::run(team, decode::field("name", decode::string)).expect("Missing team.name")
+
+  // The issue may not have a cycle. "" means "no current cycle".
+  let cycle_obj = decode_utils::optional_field(issue, "cycle")
+  let current_cycle_id = match cycle_obj {
+    c => decode::run(c, decode::field("id", decode::string)).expect("Missing cycle.id"),
+    _ => "",
+  }
+
+  let result = try fetch_team_cycles(api_key, team_id)
+
+  // Filter to a useful slice. When the team has an active cycle,
+  // keep only past + active + next (number <= active + 1) so users
+  // aren't scrolling through dozens of far-future cycles. Always
+  // keep the issue's current cycle as a safety net in case it lives
+  // outside that window.
+  let filtered = match result.active_cycle_number {
+    active_n => {
+      mut kept: [Dynamic] = []
+      for c in result.cycles {
+        let n = decode::run(c, decode::field("number", decode::int))
+          .expect("Missing cycle.number")
+        let cid = decode::run(c, decode::field("id", decode::string))
+          .expect("Missing cycle.id")
+        if n <= active_n + 1 or cid == current_cycle_id {
+          kept.push(c)
+        }
+      }
+      kept
+    },
+    _ => result.cycles,
+  }
+  let cycles = sort_cycles_by_number(filtered)
+
+  // Default cursor: 0 means "(no cycle)"; if the issue is in a known
+  // cycle, position the cursor on it instead (offset by 1).
+  mut cur = 0
+  for c, i in cycles {
+    let cid = decode::run(c, decode::field("id", decode::string)).expect("Missing cycle.id")
+    if cid == current_cycle_id {
+      cur = i + 1
+    }
+  }
+
+  Result::ok(state::CyclePicker{
+    issue_id: issue_id,
+    issue_identifier: identifier,
+    current_cycle_id: current_cycle_id,
+    team_name: team_name,
+    cycles: cycles,
     cursor: cur,
     from_board: from_board,
     tab_idx: tab_idx,

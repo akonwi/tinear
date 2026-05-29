@@ -40,14 +40,19 @@ fn draw_screen(state: state::AppState) Void {
     }
   }
 
-  // Overlay the status picker on top of whatever the active tab drew.
+  // Overlay pickers on top of whatever the active tab drew.
   match state.state_picker {
     p => modals::draw_state_picker(state.vx, p),
     _ => (),
   }
+  match state.cycle_picker {
+    p => modals::draw_cycle_picker(state.vx, p),
+    _ => (),
+  }
 
-  // The composer takes precedence over the picker (they shouldn't be
-  // open at the same time, but if they are this is the active one).
+  // The composer takes precedence over the pickers (they shouldn't
+  // be open at the same time, but if they are this is the active
+  // one).
   match state.comment_composer {
     c => modals::draw_comment_composer(state.vx, c),
     _ => vaxis::hide_cursor(state.vx),
@@ -79,6 +84,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
   mut detail_mode = false
   mut active_tab = 0
   mut state_picker: state::StatePicker? = maybe::none()
+  mut cycle_picker: state::CyclePicker? = maybe::none()
   mut comment_composer: state::CommentComposer? = maybe::none()
   mut running = true
 
@@ -108,6 +114,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
       active_tab: active_tab,
       detail_mode: detail_mode,
       state_picker: state_picker,
+      cycle_picker: cycle_picker,
       comment_composer: comment_composer,
     }
     draw_screen(state)
@@ -196,6 +203,88 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                         }
                       }
                       state_picker = maybe::none()
+                      ()
+                    },
+                    err(_) => (),
+                  }
+                }
+              } else {
+                ()
+              }
+            },
+            _ => (),
+          }
+        } else if cycle_picker.is_some() {
+          // CYCLE PICKER MODE — cursor index 0 is "(no cycle)", real
+          // cycles start at 1. Mirrors the state picker flow.
+          match cycle_picker {
+            picker => {
+              mut p = picker
+              let row_count = p.cycles.size() + 1
+              if k.name == "Escape" {
+                cycle_picker = maybe::none()
+              } else if k.name == "Up" or k.name == "k" {
+                if p.cursor > 0 {
+                  p.cursor = p.cursor - 1
+                  cycle_picker = maybe::some(p)
+                }
+              } else if k.name == "Down" or k.name == "j" {
+                if p.cursor < row_count - 1 {
+                  p.cursor = p.cursor + 1
+                  cycle_picker = maybe::some(p)
+                }
+              } else if k.name == "Enter" or k.name == "Space" {
+                let target_cycle_id = match p.cursor == 0 {
+                  true => "",
+                  false => {
+                    let c = p.cycles.at(p.cursor - 1)
+                    decode::run(c, decode::field("id", decode::string))
+                      .expect("Missing cycle.id")
+                  },
+                }
+                if target_cycle_id == p.current_cycle_id {
+                  // No change — just close.
+                  cycle_picker = maybe::none()
+                } else {
+                  match api::update_issue_cycle(api_key, p.issue_id, target_cycle_id) {
+                    ok(_) => {
+                      if p.from_board {
+                        match api::fetch_board(api_key, viewer_id) {
+                          ok(cols) => {
+                            columns = cols
+                            if board_col >= columns.size() {
+                              board_col = match columns.size() == 0 {
+                                true => 0,
+                                false => columns.size() - 1,
+                              }
+                            }
+                            if columns.size() > 0 {
+                              let col_size = columns.at(board_col).issues.size()
+                              if board_row >= col_size {
+                                board_row = match col_size == 0 {
+                                  true => 0,
+                                  false => col_size - 1,
+                                }
+                              }
+                            }
+                            ()
+                          },
+                          err(_) => (),
+                        }
+                      } else {
+                        if p.tab_idx < issue_tabs.size() {
+                          match api::fetch_single_issue(api_key, p.issue_id) {
+                            ok(updated) => {
+                              mut tab = issue_tabs.at(p.tab_idx)
+                              tab.issue = updated
+                              issue_tabs.set(p.tab_idx, tab)
+                              ()
+                            },
+                            err(_) => (),
+                          }
+                        }
+                      }
+                      cycle_picker = maybe::none()
                       ()
                     },
                     err(_) => (),
@@ -373,6 +462,21 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                 }
               }
             }
+          } else if k.name == "y" {
+            // Open the cycle picker for the selected card.
+            if columns.size() > 0 {
+              let col = columns.at(board_col)
+              if col.issues.size() > 0 {
+                let selected = col.issues.at(board_row)
+                match api::open_cycle_picker(api_key, selected, true, 0) {
+                  ok(p) => {
+                    cycle_picker = maybe::some(p)
+                    ()
+                  },
+                  err(_) => (),
+                }
+              }
+            }
           } else {
             ()
           }
@@ -493,6 +597,15 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
             match api::open_state_picker(api_key, current.issue, false, idx) {
               ok(p) => {
                 state_picker = maybe::some(p)
+                ()
+              },
+              err(_) => (),
+            }
+          } else if k.name == "y" and (not current.active) {
+            // Open the cycle picker for this tab's issue.
+            match api::open_cycle_picker(api_key, current.issue, false, idx) {
+              ok(p) => {
+                cycle_picker = maybe::some(p)
                 ()
               },
               err(_) => (),

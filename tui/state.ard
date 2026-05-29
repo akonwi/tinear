@@ -109,6 +109,30 @@ struct StatePicker {
   tab_idx: Int,
 }
 
+// Result of fetching a team's cycles. `active_cycle_number` is the
+// number of the team's currently active cycle, used to filter the
+// list of cycles to a useful slice (past + active + next) instead of
+// every future cycle the team has scheduled.
+struct TeamCyclesResult {
+  active_cycle_number: Int?,
+  cycles: [Dynamic],
+}
+
+// Modal picker for changing an issue's cycle. Same conventions as
+// StatePicker. The implicit "(no cycle)" option occupies cursor
+// index 0, so cycles[i] corresponds to cursor index i + 1.
+struct CyclePicker {
+  issue_id: Str,
+  issue_identifier: Str,
+  // The issue's current cycle id, or "" if it has no cycle.
+  current_cycle_id: Str,
+  team_name: Str,
+  cycles: [Dynamic],
+  cursor: Int,
+  from_board: Bool,
+  tab_idx: Int,
+}
+
 // Modal text editor for composing a new comment on an issue. While
 // AppState.comment_composer is set, key events go to the editor
 // rather than the underlying tab.
@@ -162,7 +186,9 @@ struct AppState {
   detail_mode: Bool,
   // Status picker overlay. Set means open.
   state_picker: StatePicker?,
+  // Cycle picker overlay. Set means open.
+  cycle_picker: CyclePicker?,
   // Comment composer overlay. Mutually exclusive in practice with
-  // state_picker.
+  // state_picker / cycle_picker.
   comment_composer: CommentComposer?,
 }

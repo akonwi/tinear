@@ -201,6 +201,6 @@ fn draw_board_content(state: state::AppState) Void {
       vaxis::draw_text(vx, term_w - 1, 3, "›")
     }
 
-    vaxis::draw_text(vx, 1, sb_y, "↑↓ · ← → · ↵ open · s status · r refresh")
+    vaxis::draw_text(vx, 1, sb_y, "↑↓ · ← → · ↵ open · s status · y cycle · r refresh")
   }
 }
