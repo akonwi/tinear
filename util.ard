@@ -1,75 +1,10 @@
 use ard/io
-use ard/json
-use ard/maybe
 
 use linear-cli/config
 
 fn get_api_key() Str!Str {
   let cfg = try config::load()
   Result::ok(cfg.api_key)
-}
-
-fn has_flag(args: [Str], flag: Str) Bool {
-  mut found = false
-  for arg in args {
-    if arg == flag {
-      found = true
-    }
-  }
-  found
-}
-
-fn join_strs(items: [Str], separator: Str) Str {
-  mut result = ""
-  for item, idx in items {
-    if idx > 0 {
-      result =+ separator
-    }
-    result =+ item
-  }
-  result
-}
-
-fn positional_arg(args: [Str]) Str? {
-  mut result: Str? = maybe::none()
-  for arg in args {
-    if result.is_none() and not arg.starts_with("--") {
-      result = maybe::some(arg)
-    }
-  }
-  result
-}
-
-fn flag_value(args: [Str], flag: Str) Str? {
-  mut found = false
-  mut result: Str? = maybe::none()
-  for arg in args {
-    if found and result.is_none() {
-      result = maybe::some(arg)
-    }
-    if arg == flag {
-      found = true
-    }
-  }
-  result
-}
-
-fn require_opt(opt: Str?, msg: Str) Str!Str {
-  match opt {
-    v => Result::ok(v),
-    _ => Result::err(msg),
-  }
-}
-
-fn require_flag(args: [Str], flag: Str, usage: Str) Str!Str {
-  match flag_value(args, flag) {
-    val => Result::ok(val),
-    _ => {
-      io::print("Error: {flag} is required")
-      io::print("Usage: {usage}")
-      Result::err("missing {flag}")
-    },
-  }
 }
 
 fn print_usage() {
