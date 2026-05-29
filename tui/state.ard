@@ -1,0 +1,132 @@
+use linear-cli/tui/components
+use linear-cli/vaxis
+
+// ---- workflow helpers --------------------------------------------------
+
+// Workflow rank for a Linear state type. Lower is earlier in the
+// flow. Used to sort columns/states across teams so cross-team
+// merged states land in a predictable order.
+fn state_type_rank(state_type: Str) Int {
+  match state_type {
+    "triage" => 0,
+    "backlog" => 1,
+    "unstarted" => 2,
+    "started" => 3,
+    "completed" => 4,
+    _ => 5,
+  }
+}
+
+// State names to exclude from the board view. These are typically
+// dead-end states whose issues shouldn't clutter the active workflow.
+fn is_hidden_state(name: Str) Bool {
+  name == "Duplicate"
+}
+
+// ---- data types --------------------------------------------------------
+
+// A column on the My Issues board: a workflow state name + the
+// issues currently in it.
+struct BoardColumn {
+  name: Str,
+  state_type: Str,
+  position: Float,
+  issues: [Dynamic],
+}
+
+// An open issue detail tab. Comments are fetched on-demand when the
+// tab is opened (see api::fetch_issue_comments).
+//
+// Navigation model: two sections (description=0, comments=1). When
+// `focused` is false, the section cursor highlights one of them and
+// arrows switch between sections. When `focused` is true, arrows
+// scroll/move within the focused section. Escape pops focus or
+// closes the tab.
+struct IssueTab {
+  issue: Dynamic,
+  section: Int,
+  focused: Bool,
+  // Description section's scrollview. Layout and wrapped lines are
+  // recomputed each frame; only its scroll offset persists here.
+  desc_view: components::Scrollview,
+  // Comments section's list component. Owns the comments and its
+  // own cursor/top.
+  comments_view: components::CommentList,
+}
+
+// Modal picker for changing an issue's workflow state. While
+// AppState.state_picker is set, arrow keys drive the picker and the
+// underlying tab keys are blocked.
+//
+// `from_board = true` means the picker was opened from the board
+// (cursor at columns[board_col].issues[board_row]). On confirm we
+// refresh the board. Otherwise it was opened from an issue tab and
+// `tab_idx` says which entry in issue_tabs to refresh.
+struct StatePicker {
+  issue_id: Str,
+  issue_identifier: Str,
+  current_state_id: Str,
+  team_name: Str,
+  states: [Dynamic],
+  cursor: Int,
+  from_board: Bool,
+  tab_idx: Int,
+}
+
+// Modal text editor for composing a new comment on an issue. While
+// AppState.comment_composer is set, key events go to the editor
+// rather than the underlying tab.
+//
+// `body` is an append-only buffer of UTF-8 text; the in-modal cursor
+// is always at the end. tab_idx is the issue_tabs index to refresh
+// after a successful commentCreate.
+struct CommentComposer {
+  issue_id: Str,
+  issue_identifier: Str,
+  body: Str,
+  tab_idx: Int,
+}
+
+// Notification status-change transition (e.g. Backlog → Done),
+// derived from an issue's history.
+struct StatusTransition {
+  from: Str,
+  to: Str,
+}
+
+// Display identifier + title pair for a notification. PR
+// notifications use #<number> and PR title; issue notifications use
+// the issue identifier and issue title.
+struct IdTitle {
+  id: Str,
+  title: Str,
+}
+
+// The central TUI state. Rebuilt each frame from the run_loop's
+// local mutable variables and passed (immutably) into draw_screen.
+struct AppState {
+  api_key: Str,
+  vx: vaxis::Vaxis,
+  notifications: [Dynamic],
+  columns: [BoardColumn],
+  cursor: Int,
+  comment_cursor: Int,
+  board_col: Int,
+  board_row: Int,
+  board_scroll: Int,
+  // Tabs beyond the two fixed ones (Inbox, My Issues). Each entry
+  // is an open issue tab; the tab label is the issue's identifier.
+  issue_tabs: [IssueTab],
+  viewer_name: Str,
+  viewer_email: Str,
+
+  running: Bool,
+  tabs: [Str],
+  active_tab: Int,
+  detail_mode: Bool,
+  // Status picker overlay. Set means open.
+  state_picker: StatePicker?,
+  // Comment composer overlay. Mutually exclusive in practice with
+  // state_picker.
+  comment_composer: CommentComposer?,
+}

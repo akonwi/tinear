@@ -1,0 +1,259 @@
+use ard/decode
+use ard/json
+
+use linear-cli/linear/client
+use linear-cli/tui/state
+
+// All GraphQL fetchers and mutations for the TUI. Functions either
+// return parsed Linear data as Dynamic (caller decodes the fields it
+// needs) or, when the result is opinionated to the TUI's data model,
+// a project-defined struct from tui/state.ard.
+
+// ---- mutations --------------------------------------------------------
+
+// Archive a single notification.
+fn archive_notification(api_key: Str, id: Str) Void!Str {
+  let mutation = "mutation \{ notificationArchive(id: \"{id}\") \{ success \} \}"
+  let _ = try client::graphql(api_key, mutation)
+  Result::ok(())
+}
+
+// Move an issue to a different workflow state. Returns Ok when the
+// API reported success.
+fn update_issue_state(api_key: Str, issue_id: Str, state_id: Str) Void!Str {
+  let mutation = "mutation \{ issueUpdate(id: \"{issue_id}\", input: \{ stateId: \"{state_id}\" \}) \{ success \} \}"
+  let data = try client::graphql(api_key, mutation)
+  let success = decode::run(data, decode::path(["issueUpdate", "success"], decode::bool))
+    .expect("Missing issueUpdate.success")
+  match success {
+    true => Result::ok(()),
+    false => Result::err("issueUpdate returned success=false"),
+  }
+}
+
+// Post a new comment on an issue. body is JSON-encoded so embedded
+// quotes and newlines survive the round trip through the GraphQL
+// query.
+fn create_comment(api_key: Str, issue_id: Str, body: Str) Void!Str {
+  let body_json = json::encode(body).expect("encode body")
+  let mutation = "mutation \{ commentCreate(input: \{ issueId: \"{issue_id}\", body: {body_json} \}) \{ success \} \}"
+  let data = try client::graphql(api_key, mutation)
+  let success = decode::run(data, decode::path(["commentCreate", "success"], decode::bool))
+    .expect("Missing commentCreate.success")
+  match success {
+    true => Result::ok(()),
+    false => Result::err("commentCreate returned success=false"),
+  }
+}
+
+// ---- queries ----------------------------------------------------------
+
+// Current authenticated user.
+fn fetch_viewer(api_key: Str) Dynamic!Str {
+  let data = try client::graphql(api_key, "query \{ viewer \{ id name email \} \}")
+  let viewer = decode::run(data, decode::field("viewer", decode::dynamic)).expect("Missing viewer")
+  Result::ok(viewer)
+}
+
+// All notifications, with inline fragments populating IssueNotification
+// and PullRequestNotification specifics.
+fn fetch_inbox(api_key: Str) [Dynamic]!Str {
+  let query = "query \{ notifications(first: 50) \{ nodes \{ id type createdAt title subtitle url ... on IssueNotification \{ comment \{ id body createdAt user \{ name \} \} issue \{ id identifier title description priority state \{ name \} team \{ name key \} project \{ name \} assignee \{ name \} comments(first: 30) \{ nodes \{ id body createdAt user \{ name \} \} \} history(first: 10) \{ nodes \{ id createdAt fromState \{ name \} toState \{ name \} \} \} \} \} ... on PullRequestNotification \{ pullRequestCommentId pullRequest \{ id number title url status sourceBranch targetBranch openedAt creator \{ name \} \} \} actor \{ id name \} \} \} \}"
+  let data = try client::graphql(api_key, query)
+  let nodes = decode::run(data, decode::path(["notifications", "nodes"], decode::list(decode::dynamic)))
+    .expect("Missing notifications nodes")
+  Result::ok(nodes)
+}
+
+// Comments for a specific issue. Returned by createdAt ascending,
+// which is Linear's default order.
+fn fetch_issue_comments(api_key: Str, issue_id: Str) [Dynamic]!Str {
+  let query = "query \{ issue(id: \"{issue_id}\") \{ comments(first: 50) \{ nodes \{ id body createdAt user \{ name \} \} \} \} \}"
+  let data = try client::graphql(api_key, query)
+  let nodes = decode::run(data, decode::path(["issue", "comments", "nodes"], decode::list(decode::dynamic)))
+    .expect("Missing issue.comments.nodes")
+  Result::ok(nodes)
+}
+
+// Workflow states for a team, used by the status picker.
+fn fetch_team_states(api_key: Str, team_id: Str) [Dynamic]!Str {
+  let query = "query \{ team(id: \"{team_id}\") \{ states \{ nodes \{ id name type position \} \} \} \}"
+  let data = try client::graphql(api_key, query)
+  let nodes = decode::run(data, decode::path(["team", "states", "nodes"], decode::list(decode::dynamic)))
+    .expect("Missing team.states.nodes")
+  Result::ok(nodes)
+}
+
+// Refetch one issue with the same shape as fetch_board, so the
+// caller can drop the updated Dynamic into existing UI state.
+fn fetch_single_issue(api_key: Str, issue_id: Str) Dynamic!Str {
+  let query = "query \{ issue(id: \"{issue_id}\") \{ id identifier title description priority state \{ id name type position \} team \{ id name key \} project \{ name \} assignee \{ name \} \} \}"
+  let data = try client::graphql(api_key, query)
+  let issue = decode::run(data, decode::field("issue", decode::dynamic))
+    .expect("Missing issue")
+  Result::ok(issue)
+}
+
+
+// ---- helpers ----------------------------------------------------------
+
+// Sort board columns by workflow type, then by position within type.
+fn sort_columns_by_position(cols: [state::BoardColumn]) [state::BoardColumn] {
+  let n = cols.size()
+  if n < 2 {
+    cols
+  } else {
+    mut result = cols
+    // Bubble sort — fine for the handful of states a team has.
+    for i in 0..(n - 2) {
+      for j in 0..(n - 2 - i) {
+        let a = result.at(j)
+        let b = result.at(j + 1)
+        let ra = state::state_type_rank(a.state_type)
+        let rb = state::state_type_rank(b.state_type)
+        let swap = match ra == rb {
+          true => a.position > b.position,
+          false => ra > rb,
+        }
+        if swap {
+          result.set(j, b)
+          result.set(j + 1, a)
+        }
+      }
+    }
+    result
+  }
+}
+
+
+// Sort states for the status picker: by workflow type rank, then
+// position. Used after fetch_team_states.
+fn sort_states_for_picker(states: [Dynamic]) [Dynamic] {
+  let n = states.size()
+  if n < 2 {
+    states
+  } else {
+    mut result = states
+    for i in 0..(n - 2) {
+      for j in 0..(n - 2 - i) {
+        let a = result.at(j)
+        let b = result.at(j + 1)
+        let ta = decode::run(a, decode::field("type", decode::string)).expect("Missing type")
+        let tb = decode::run(b, decode::field("type", decode::string)).expect("Missing type")
+        let pa = decode::run(a, decode::field("position", decode::float)).expect("Missing position")
+        let pb = decode::run(b, decode::field("position", decode::float)).expect("Missing position")
+        let ra = state::state_type_rank(ta)
+        let rb = state::state_type_rank(tb)
+        let swap = match ra == rb {
+          true => pa > pb,
+          false => ra > rb,
+        }
+        if swap {
+          result.set(j, b)
+          result.set(j + 1, a)
+        }
+      }
+    }
+    result
+  }
+}
+
+// Build the board: issues assigned to me grouped by workflow state.
+// Excludes canceled states. Caps `completed` columns to the first 10
+// issues returned by the API.
+fn fetch_board(api_key: Str, my_id: Str) [state::BoardColumn]!Str {
+  let query = "query \{ issues(first: 200, filter: \{ assignee: \{ id: \{ eq: \"{my_id}\" \} \}, state: \{ type: \{ nin: [\"canceled\"] \} \} \}) \{ nodes \{ id identifier title description priority state \{ id name type position \} team \{ id name key \} project \{ name \} assignee \{ name \} \} \} \}"
+  let data = try client::graphql(api_key, query)
+  let issues = decode::run(data, decode::path(["issues", "nodes"], decode::list(decode::dynamic)))
+    .expect("Missing issues.nodes")
+
+  // First pass: collect unique state names. Each team has its own set
+  // of workflow states, but states with the same name across teams
+  // (e.g. "Backlog") should share a column. Type and position come
+  // from the first state encountered for that name.
+  mut state_names: [Str] = []
+  mut state_types: [Str] = []
+  mut state_positions: [Float] = []
+  for issue in issues {
+    let s = decode::run(issue, decode::field("state", decode::dynamic)).expect("Missing state")
+    let sname = decode::run(s, decode::field("name", decode::string)).expect("Missing state.name")
+    if (not state::is_hidden_state(sname)) {
+      mut seen = false
+      for existing in state_names {
+        if existing == sname {
+          seen = true
+        }
+      }
+      if (not seen) {
+        state_names.push(sname)
+        state_types.push(decode::run(s, decode::field("type", decode::string)).expect("Missing state.type"))
+        state_positions.push(decode::run(s, decode::field("position", decode::float)).expect("Missing state.position"))
+      }
+    }
+  }
+
+  // Second pass: build columns, filtering issues into the right one
+  // and capping completed at 10.
+  mut columns: [state::BoardColumn] = []
+  for sname, idx in state_names {
+    let is_completed = state_types.at(idx) == "completed"
+    let cap = match is_completed {
+      true => 10,
+      false => 200,
+    }
+    mut col_issues: [Dynamic] = []
+    mut count = 0
+    for issue in issues {
+      let iss_name = decode::run(issue, decode::path(["state", "name"], decode::string))
+        .expect("Missing state.name on issue")
+      if iss_name == sname and count < cap {
+        col_issues.push(issue)
+        count = count + 1
+      }
+    }
+    columns.push(state::BoardColumn{
+      name: sname,
+      state_type: state_types.at(idx),
+      position: state_positions.at(idx),
+      issues: col_issues,
+    })
+  }
+
+  Result::ok(sort_columns_by_position(columns))
+}
+
+// Construct a StatePicker for the given issue. Fetches the team's
+// states, sorts them, and positions the cursor on the issue's
+// current state.
+fn open_state_picker(api_key: Str, issue: Dynamic, from_board: Bool, tab_idx: Int) state::StatePicker!Str {
+  let issue_id = decode::run(issue, decode::field("id", decode::string)).expect("Missing id")
+  let identifier = decode::run(issue, decode::field("identifier", decode::string)).expect("Missing identifier")
+  let s = decode::run(issue, decode::field("state", decode::dynamic)).expect("Missing state")
+  let current_state_id = decode::run(s, decode::field("id", decode::string)).expect("Missing state.id")
+  let team = decode::run(issue, decode::field("team", decode::dynamic)).expect("Missing team")
+  let team_id = decode::run(team, decode::field("id", decode::string)).expect("Missing team.id")
+  let team_name = decode::run(team, decode::field("name", decode::string)).expect("Missing team.name")
+
+  let raw_states = try fetch_team_states(api_key, team_id)
+  let states = sort_states_for_picker(raw_states)
+
+  // Default cursor to the current state, if it's in the list.
+  mut cur = 0
+  for s2, i in states {
+    let sid = decode::run(s2, decode::field("id", decode::string)).expect("Missing id")
+    if sid == current_state_id {
+      cur = i
+    }
+  }
+
+  Result::ok(state::StatePicker{
+    issue_id: issue_id,
+    issue_identifier: identifier,
+    current_state_id: current_state_id,
+    team_name: team_name,
+    states: states,
+    cursor: cur,
+    from_board: from_board,
+    tab_idx: tab_idx,
+  })
+}
