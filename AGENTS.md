@@ -5,60 +5,106 @@ CLI for [Linear](https://linear.app/) built with [Ard](https://ard.run).
 ## Build & Run
 
 ```bash
-# After editing vaxis/ bindings, sync to vendor first:
-./scripts/sync-vaxis.sh
-
-ard check main.ard      # type-check
-ard build main.ard       # build -> ard-out/go/main
-ard run main.ard         # run directly
+ard check main.ard                          # type-check
+ard build main.ard --out ard-out/linear     # build into the gitignored ard-out/
+ard run main.ard                            # run directly
 ```
 
 ## Project Layout
 
 | Path | Purpose |
 |------|---------|
-| `main.ard` | Entrypoint, command dispatch |
-| `config.ard` | API key from env var `LINEAR_API_KEY` or `~/.linear-cli/config` |
-| `util.ard` | Flag parsing, error helpers, usage printer |
+| `main.ard` | Entrypoint, dispatches `help` / `login` / default-to-TUI |
+| `config.ard` | API key from `LINEAR_API_KEY` env var or `~/.linear-cli/config` |
+| `util.ard` | `get_api_key()` + `print_usage()` |
 | `linear/client.ard` | Shared GraphQL client (one `graphql()` function) |
-| `commands/*.ard` | One file per subcommand, each exports `fn run(args: [Str])` |
-| `vaxis/` | Terminal UI bindings (FFI + Ard extern declarations) |
+| `commands/login.ard` | Interactive `login` command (saves key to config) |
+| `commands/tui.ard` | Thin TUI entrypoint — delegates to `tui/app::run_loop` |
+| `tui/*.ard` | TUI implementation, split by concern (see below) |
+| `vaxis.ard` + `ffi/` | Terminal UI bindings (Ard extern declarations + Go FFI) |
 
-## Vaxis Module
+## TUI Layout
 
-`vaxis/` is a first-class project module imported as:
-```ard
-use linear-cli/vaxis/vaxis as vaxis
-```
+`commands/tui.ard` is just an entrypoint. The actual implementation lives in `tui/`:
 
-The `ffi/` subdirectory contains the Go host functions. The module is
-self-contained and extractable as a standalone package later.
+| File | Purpose |
+|------|---------|
+| `tui/app.ard` | `run_loop` (event loop + input dispatch) and `draw_screen` |
+| `tui/state.ard` | All data structs (AppState, IssueTab, etc.) + workflow / priority helpers |
+| `tui/components.ard` | `Scrollview`, `CommentList`, `draw_comment` — view components with impls |
+| `tui/api.ard` | Every GraphQL fetch/mutation + `open_state_picker` |
+| `tui/text.ard` | Byte- and display-width string helpers (truncate, pad, wrap) |
+| `tui/screen.ard` | `Layout` struct + terminal geometry helpers |
+| `tui/decode.ard` | `optional_field` — missing-or-null aware field decoder |
+| `tui/draw.ard` | Shared draw primitives (tab bar, label rows) |
+| `tui/notifications.ard` | Notification helpers + inbox view (list, detail panels) |
+| `tui/board.ard` | Board geometry + card/column rendering |
+| `tui/issue_tab.ard` | Open-issue tab rendering |
+| `tui/modals.ard` | Status picker + comment composer modal rendering |
+
+### Architectural conventions
+
+- **Persistent state vs ephemeral layout**: view components store only the bits
+  that survive across frames (`scroll`, `cursor`, `top`). The per-frame layout
+  rectangle (`screen::Layout`) is computed in the parent and passed into the
+  component's `draw` method. Use this pattern for any new component.
+- **`AppState` is rebuilt each frame** in `app::run_loop` from local mutable
+  variables and passed (immutably) into `draw_screen`. State mutations live in
+  the input handler, not in draw paths.
+- **Dependency direction**: text/screen/decode → components → state → api →
+  draw/board/notifications/modals/issue_tab → app. Don't introduce upward
+  dependencies.
+
+## Vaxis FFI
+
+`vaxis.ard` lives at the project root with `ffi/host.go` holding the Go bindings.
+The Go module includes both.
+
+Key bits of the event API:
+
+- `vaxis::next_event(vx) Event!Str` — blocking; returns the typed `Event` union
+  (`KeyEvent | MouseEvent | ResizeEvent | FocusEvent | PasteEvent | RedrawEvent | QuitEvent`).
+- `KeyEvent.name` is the plain key name (no modifier prefixes): `"Escape"`,
+  `"Enter"`, `"Up"`, `"Tab"`, `"a"`, etc.
+- `KeyEvent.text` is the rendered text (handles shift/layout/IME). Empty for
+  non-textual keys. Prefer `.text` for text inputs.
 
 ## Key Patterns
 
-- **Error handling**: `.expect("msg")` panics with a message. The `run()` entrypoints are `Void`, so they panic on failure. Keep error messages user-facing.
-- **Nullable nested JSON**: Always decode parent objects one level at a time with `decode::nullable(decode::dynamic)`, then `match obj { v => ... maybe::some(name), _ => maybe::none() }`. Avoid `decode::path()` on nullable intermediates — it panics on null.
-- **Auth header**: `Authorization: <raw key>` — no `Bearer` prefix. Linear rejects it.
+- **Error handling**: `.expect("msg")` panics with a message. The `run()`
+  entrypoints return `Void`, so they panic on failure. Keep error messages
+  user-facing.
+- **Nullable nested JSON**: use `tui/decode::optional_field(data, name)` to
+  treat both missing-field and null-value cases as `None`. GraphQL inline
+  fragments omit fields entirely when their parent type doesn't match.
+- **Display-width-aware** text helpers (`text::pad_str_display`,
+  `text::truncate_with_ellipsis_display`) require a `vx` argument and use
+  `vaxis::rendered_width`. Use these whenever fitting into a fixed-cell slot;
+  the byte-based versions are only safe for ASCII.
+- **Auth header**: `Authorization: <raw key>` — no `Bearer` prefix. Linear
+  rejects it.
 
 ## Commands
 
-- `me` — viewer query, plain text = `Name <email>`
-- `teams` — lists all teams
-- `issues [--team <key>] [--status <name>] [--json]` — lists issues, filter args optional
-- `my-board [--json]` — lists open issues assigned to you
-- `issue <id> [--json]` — detail view with labels, description
-- `create-issue --team <key> --title <title> [--description <desc>]` — resolves team key to ID
-- `update-issue <id> --status <name>` — resolves issue team, looks up state by name
-- `login` — prompts for API key, validates via `viewer` query, saves to `~/.linear-cli/config`
-- `tui` — interactive TUI (inbox as default tab, tab bar, status bar with keybinding hints)
+- `login` — prompts for API key, validates via `viewer` query, saves to
+  `~/.linear-cli/config`
+- `help` — prints usage
+- _(no command)_ — launches the interactive TUI (Inbox + My Issues tabs,
+  per-issue detail tabs, status picker, comment composer)
 
 ## Ard Language Notes
 
-- **No `return` keyword** — last expression is the return value. Use `try` for Result propagation.
-- **Functions must be defined before use** within a file.
-- **No `private fn`** for regular functions — visibility isn't supported yet.
+- **No `return` keyword** — last expression is the return value. Use `try` for
+  Result propagation.
+- **Functions must be defined before use** within a file (cross-file is fine).
 - **`and` / `not`** instead of `&&` / `!`.
 - **`Void!Str`** uses `Result::ok(())` for the Ok variant.
-- **`{ ... }` in `match`** must be followed by a newline — no inline `match x { a => b, _ => c }`.
+- **`{ ... }` in `match`** must be followed by a newline — no inline
+  `match x { a => b, _ => c }`.
 - **String interpolation** with `{var}`, literal braces need `\{` / `\}`.
 - **`use ard/list as List`** to access `List::drop()`.
+- **Mutating methods** with `fn mut name() { self.field = v }`. Methods can
+  mutate fields when the receiver is `mut`.
+- **`mut` doesn't propagate through match/for bindings** — `mut x = ...; for
+  item in xs { item.field = v }` doesn't compile. Hoist a copy:
+  `mut t = xs.at(i); t.field = v; xs.set(i, t)`.
