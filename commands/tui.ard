@@ -843,11 +843,16 @@ fn draw_tab_bar(vx: vaxis::Vaxis, tabs: [Str], active: Int) Void {
   let term_w = vaxis::window_width(win)
 
   if tabs.size() > 0 {
-    // Total width if every tab were rendered starting at col 1.
+    // Total width including a 1-col pipe between each pair of tabs.
     mut total = 0
     for t in tabs {
       total = total + tab_width(t)
     }
+    let pipe_count = match tabs.size() > 1 {
+      true => tabs.size() - 1,
+      false => 0,
+    }
+    total = total + pipe_count
 
     let fits_clean = total <= term_w - 1
 
@@ -857,15 +862,19 @@ fn draw_tab_bar(vx: vaxis::Vaxis, tabs: [Str], active: Int) Void {
     mut scroll = 0
     if (not fits_clean) {
       let avail = term_w - 3
-      mut sum_to_active = 0
+      mut sum = 0
       for t, idx in tabs {
         if idx <= active {
-          sum_to_active = sum_to_active + tab_width(t)
+          sum = sum + tab_width(t)
+          if idx > 0 {
+            sum = sum + 1
+          }
         }
       }
-      mut sum = sum_to_active
+      // Each scroll++ removes the leftmost tab and the pipe that used
+      // to sit between it and its right neighbour.
       while sum > avail and scroll < active {
-        sum = sum - tab_width(tabs.at(scroll))
+        sum = sum - tab_width(tabs.at(scroll)) - 1
         scroll = scroll + 1
       }
     }
@@ -879,18 +888,36 @@ fn draw_tab_bar(vx: vaxis::Vaxis, tabs: [Str], active: Int) Void {
       false => term_w - 1,
     }
 
-    // Render tabs from `scroll`, stopping when the next one wouldn't fit.
+    // Render tabs starting from `scroll`. Each tab is drawn as
+    // " {name} ". A `│` sits in its own column between adjacent
+    // visible tabs so the pipe is surrounded by spaces on both sides
+    // (tab N's trailing space, pipe, tab N+1's leading space). The
+    // active tab's label is drawn with the underline attribute.
     mut x = start_x
     mut last_rendered = scroll - 1
     mut n = scroll
     while n < tabs.size() {
       let t = tabs.at(n)
       let w = tab_width(t)
-      if x + w > max_x {
+      let needs_pipe = n > scroll
+      let cost = match needs_pipe {
+        true => w + 1,
+        false => w,
+      }
+      if x + cost > max_x {
         break
       }
+      if needs_pipe {
+        vaxis::draw_text(vx, x, 0, "│")
+        x = x + 1
+      }
       if n == active {
-        vaxis::draw_text(vx, x, 0, "[" + t + "]")
+        // Surrounding spaces plain, label with underline. -1/-1
+        // colors mean "use terminal defaults" in the vaxis FFI, so
+        // we get the regular text color plus an underline attribute.
+        vaxis::draw_text(vx, x, 0, " ")
+        vaxis::draw_text_style(vx, x + 1, 0, t, -1, -1, false, false, false, true, false)
+        vaxis::draw_text(vx, x + 1 + t.size(), 0, " ")
       } else {
         vaxis::draw_text(vx, x, 0, " " + t + " ")
       }
