@@ -682,31 +682,6 @@ fn open_state_picker(api_key: Str, issue: Dynamic, from_board: Bool, tab_idx: In
   })
 }
 
-// Reconstruct a picker with a new cursor index. Used by the input
-// handler since Ard structs are immutable.
-fn picker_with_cursor(p: StatePicker, c: Int) StatePicker {
-  StatePicker{
-    issue_id: p.issue_id,
-    issue_identifier: p.issue_identifier,
-    current_state_id: p.current_state_id,
-    team_name: p.team_name,
-    states: p.states,
-    cursor: c,
-    from_board: p.from_board,
-    tab_idx: p.tab_idx,
-  }
-}
-
-// Reconstruct a composer with a new body.
-fn composer_with_body(c: CommentComposer, body: Str) CommentComposer {
-  CommentComposer{
-    issue_id: c.issue_id,
-    issue_identifier: c.issue_identifier,
-    body: body,
-    tab_idx: c.tab_idx,
-  }
-}
-
 fn fetch_inbox(api_key: Str) [Dynamic]!Str {
   let query = "query \{ notifications(first: 50) \{ nodes \{ id type createdAt title subtitle url ... on IssueNotification \{ comment \{ id body createdAt user \{ name \} \} issue \{ id identifier title description priority state \{ name \} team \{ name key \} project \{ name \} assignee \{ name \} comments(first: 30) \{ nodes \{ id body createdAt user \{ name \} \} \} history(first: 10) \{ nodes \{ id createdAt fromState \{ name \} toState \{ name \} \} \} \} \} ... on PullRequestNotification \{ pullRequestCommentId pullRequest \{ id number title url status sourceBranch targetBranch openedAt creator \{ name \} \} \} actor \{ id name \} \} \} \}"
   let data = try client::graphql(api_key, query)
@@ -2123,30 +2098,35 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
           running = false
         } else if state_picker.is_some() {
           // PICKER MODE — intercepts everything until closed.
+          // Match bindings are immutable, so copy once into `p` and
+          // mutate that throughout this arm.
           match state_picker {
             picker => {
+              mut p = picker
               if k.name == "Escape" {
                 state_picker = maybe::none()
               } else if k.name == "Up" or k.name == "k" {
-                if picker.cursor > 0 {
-                  state_picker = maybe::some(picker_with_cursor(picker, picker.cursor - 1))
+                if p.cursor > 0 {
+                  p.cursor = p.cursor - 1
+                  state_picker = maybe::some(p)
                 }
               } else if k.name == "Down" or k.name == "j" {
-                if picker.cursor < picker.states.size() - 1 {
-                  state_picker = maybe::some(picker_with_cursor(picker, picker.cursor + 1))
+                if p.cursor < p.states.size() - 1 {
+                  p.cursor = p.cursor + 1
+                  state_picker = maybe::some(p)
                 }
               } else if k.name == "Enter" or k.name == "Space" {
-                let target = picker.states.at(picker.cursor)
+                let target = p.states.at(p.cursor)
                 let new_state_id = decode::run(target, decode::field("id", decode::string))
                   .expect("Missing state.id")
-                if new_state_id == picker.current_state_id {
+                if new_state_id == p.current_state_id {
                   // No change — just close.
                   state_picker = maybe::none()
                 } else {
-                  match update_issue_state(api_key, picker.issue_id, new_state_id) {
+                  match update_issue_state(api_key, p.issue_id, new_state_id) {
                     ok(_) => {
                       // Refresh whichever view triggered the picker.
-                      if picker.from_board {
+                      if p.from_board {
                         match fetch_board(api_key, viewer_id) {
                           ok(cols) => {
                             columns = cols
@@ -2173,18 +2153,12 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                           err(_) => (),
                         }
                       } else {
-                        if picker.tab_idx < issue_tabs.size() {
-                          match fetch_single_issue(api_key, picker.issue_id) {
+                        if p.tab_idx < issue_tabs.size() {
+                          match fetch_single_issue(api_key, p.issue_id) {
                             ok(updated) => {
-                              let tab = issue_tabs.at(picker.tab_idx)
-                              issue_tabs.set(picker.tab_idx, IssueTab{
-                                issue: updated,
-                                comments: tab.comments,
-                                section: tab.section,
-                                focused: tab.focused,
-                                desc_sv: tab.desc_sv,
-                                cmt_lv: tab.cmt_lv,
-                              })
+                              mut tab = issue_tabs.at(p.tab_idx)
+                              tab.issue = updated
+                              issue_tabs.set(p.tab_idx, tab)
                               ()
                             },
                             err(_) => (),
@@ -2204,37 +2178,26 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
             _ => (),
           }
         } else if comment_composer.is_some() {
-          // COMPOSER MODE — typed text goes into the buffer; Ctrl+S
-          // submits, Esc cancels.
+          // COMPOSER MODE — typed text goes into the buffer; Ctrl+↵
+          // submits, Esc cancels. Match bindings are immutable so
+          // copy once into `c` and mutate that throughout the arm.
           match comment_composer {
             comp => {
+              mut c = comp
               if k.name == "Escape" {
                 comment_composer = maybe::none()
               } else if k.ctrl and k.name == "Enter" {
-                if (not comp.body.is_empty()) {
-                  match create_comment(api_key, comp.issue_id, comp.body) {
+                if (not c.body.is_empty()) {
+                  match create_comment(api_key, c.issue_id, c.body) {
                     ok(_) => {
                       // Refetch this tab's comments and slot them in.
-                      if comp.tab_idx < issue_tabs.size() {
-                        match fetch_issue_comments(api_key, comp.issue_id) {
+                      if c.tab_idx < issue_tabs.size() {
+                        match fetch_issue_comments(api_key, c.issue_id) {
                           ok(cs) => {
-                            let tab = issue_tabs.at(comp.tab_idx)
-                            issue_tabs.set(comp.tab_idx, IssueTab{
-                              issue: tab.issue,
-                              comments: cs,
-                              section: tab.section,
-                              focused: tab.focused,
-                              desc_sv: tab.desc_sv,
-                              cmt_lv: CommentListView{
-                                x: tab.cmt_lv.x,
-                                y: tab.cmt_lv.y,
-                                width: tab.cmt_lv.width,
-                                height: tab.cmt_lv.height,
-                                comments: cs,
-                                cursor: tab.cmt_lv.cursor,
-                                top: tab.cmt_lv.top,
-                              },
-                            })
+                            mut tab = issue_tabs.at(c.tab_idx)
+                            tab.comments = cs
+                            tab.cmt_lv.comments = cs
+                            issue_tabs.set(c.tab_idx, tab)
                             ()
                           },
                           err(_) => (),
@@ -2247,13 +2210,16 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                   }
                 }
               } else if k.name == "BackSpace" {
-                comment_composer = maybe::some(composer_with_body(comp, vaxis::text_backspace(comp.body)))
+                c.body = vaxis::text_backspace(c.body)
+                comment_composer = maybe::some(c)
               } else if k.name == "Enter" {
-                comment_composer = maybe::some(composer_with_body(comp, comp.body + "\n"))
+                c.body = c.body + "\n"
+                comment_composer = maybe::some(c)
               } else if (not k.text.is_empty()) and (not k.ctrl) and (not k.alt) and (not k.meta) {
                 // Typed text: append. Skips modifier combos so Ctrl+L
                 // etc. don't accidentally insert characters.
-                comment_composer = maybe::some(composer_with_body(comp, comp.body + k.text))
+                c.body = c.body + k.text
+                comment_composer = maybe::some(c)
               } else {
                 ()
               }
@@ -2394,25 +2360,11 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
         } else if active_tab >= 2 {
           // ISSUE TAB
           let idx = active_tab - 2
-          let current = issue_tabs.at(idx)
+          mut current = issue_tabs.at(idx)
           if k.name == "Escape" {
             if current.focused {
-              issue_tabs.set(idx, IssueTab{
-                issue: current.issue,
-                comments: current.comments,
-                section: current.section,
-                focused: false,
-                desc_sv: current.desc_sv,
-                cmt_lv: CommentListView{
-                  x: current.cmt_lv.x,
-                  y: current.cmt_lv.y,
-                  width: current.cmt_lv.width,
-                  height: current.cmt_lv.height,
-                  comments: current.cmt_lv.comments,
-                  cursor: current.cmt_lv.cursor,
-                  top: current.cmt_lv.top,
-                },
-              })
+              current.focused = false
+              issue_tabs.set(idx, current)
               ()
             } else {
               mut remaining: [IssueTab] = []
@@ -2429,122 +2381,35 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
               ()
             }
           } else if (k.name == "Enter" or k.name == "Space") and (not current.focused) {
-            issue_tabs.set(idx, IssueTab{
-              issue: current.issue,
-              comments: current.comments,
-              section: current.section,
-              focused: true,
-              desc_sv: current.desc_sv,
-              cmt_lv: CommentListView{
-                  x: current.cmt_lv.x,
-                  y: current.cmt_lv.y,
-                  width: current.cmt_lv.width,
-                  height: current.cmt_lv.height,
-                  comments: current.cmt_lv.comments,
-                  cursor: current.cmt_lv.cursor,
-                  top: current.cmt_lv.top,
-                },
-            })
+            current.focused = true
+            issue_tabs.set(idx, current)
             ()
           } else if k.name == "Up" or k.name == "k" {
             if current.focused {
               if current.section == 0 {
-                let new_sv = Scrollview{
-                  x: current.desc_sv.x,
-                  y: current.desc_sv.y,
-                  width: current.desc_sv.width,
-                  height: current.desc_sv.height,
-                  lines: current.desc_sv.lines,
-                  scroll: current.desc_sv.scroll - 1,
-                }
-                issue_tabs.set(idx, IssueTab{
-                  issue: current.issue,
-                  comments: current.comments,
-                  section: current.section,
-                  focused: current.focused,
-                  desc_sv: new_sv,
-                  cmt_lv: CommentListView{
-                  x: current.cmt_lv.x,
-                  y: current.cmt_lv.y,
-                  width: current.cmt_lv.width,
-                  height: current.cmt_lv.height,
-                  comments: current.cmt_lv.comments,
-                  cursor: current.cmt_lv.cursor,
-                  top: current.cmt_lv.top,
-                },
-                })
+                current.desc_sv.scroll = current.desc_sv.scroll - 1
+                issue_tabs.set(idx, current)
                 ()
               } else {
-                let new_cursor = match current.cmt_lv.cursor > 0 {
+                current.cmt_lv.cursor = match current.cmt_lv.cursor > 0 {
                   true => current.cmt_lv.cursor - 1,
                   false => 0,
                 }
-                issue_tabs.set(idx, IssueTab{
-                  issue: current.issue,
-                  comments: current.comments,
-                  section: current.section,
-                  focused: current.focused,
-                  desc_sv: current.desc_sv,
-                  cmt_lv: CommentListView{
-                  x: current.cmt_lv.x,
-                  y: current.cmt_lv.y,
-                  width: current.cmt_lv.width,
-                  height: current.cmt_lv.height,
-                  comments: current.cmt_lv.comments,
-                  cursor: new_cursor,
-                  top: current.cmt_lv.top,
-                },
-                })
+                issue_tabs.set(idx, current)
                 ()
               }
             } else {
               if current.section > 0 {
-                issue_tabs.set(idx, IssueTab{
-                  issue: current.issue,
-                  comments: current.comments,
-                  section: 0,
-                  focused: current.focused,
-                  desc_sv: current.desc_sv,
-                  cmt_lv: CommentListView{
-                  x: current.cmt_lv.x,
-                  y: current.cmt_lv.y,
-                  width: current.cmt_lv.width,
-                  height: current.cmt_lv.height,
-                  comments: current.cmt_lv.comments,
-                  cursor: current.cmt_lv.cursor,
-                  top: current.cmt_lv.top,
-                },
-                })
+                current.section = 0
+                issue_tabs.set(idx, current)
                 ()
               }
             }
           } else if k.name == "Down" or k.name == "j" {
             if current.focused {
               if current.section == 0 {
-                let new_sv = Scrollview{
-                  x: current.desc_sv.x,
-                  y: current.desc_sv.y,
-                  width: current.desc_sv.width,
-                  height: current.desc_sv.height,
-                  lines: current.desc_sv.lines,
-                  scroll: current.desc_sv.scroll + 1,
-                }
-                issue_tabs.set(idx, IssueTab{
-                  issue: current.issue,
-                  comments: current.comments,
-                  section: current.section,
-                  focused: current.focused,
-                  desc_sv: new_sv,
-                  cmt_lv: CommentListView{
-                  x: current.cmt_lv.x,
-                  y: current.cmt_lv.y,
-                  width: current.cmt_lv.width,
-                  height: current.cmt_lv.height,
-                  comments: current.cmt_lv.comments,
-                  cursor: current.cmt_lv.cursor,
-                  top: current.cmt_lv.top,
-                },
-                })
+                current.desc_sv.scroll = current.desc_sv.scroll + 1
+                issue_tabs.set(idx, current)
                 ()
               } else {
                 let last = current.comments.size() - 1
@@ -2552,145 +2417,44 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                   true => current.cmt_lv.cursor + 1,
                   false => last,
                 }
-                let clamped = match new_cursor < 0 {
+                current.cmt_lv.cursor = match new_cursor < 0 {
                   true => 0,
                   false => new_cursor,
                 }
-                issue_tabs.set(idx, IssueTab{
-                  issue: current.issue,
-                  comments: current.comments,
-                  section: current.section,
-                  focused: current.focused,
-                  desc_sv: current.desc_sv,
-                  cmt_lv: CommentListView{
-                  x: current.cmt_lv.x,
-                  y: current.cmt_lv.y,
-                  width: current.cmt_lv.width,
-                  height: current.cmt_lv.height,
-                  comments: current.cmt_lv.comments,
-                  cursor: clamped,
-                  top: current.cmt_lv.top,
-                },
-                })
+                issue_tabs.set(idx, current)
                 ()
               }
             } else {
               if current.section < 1 {
-                issue_tabs.set(idx, IssueTab{
-                  issue: current.issue,
-                  comments: current.comments,
-                  section: 1,
-                  focused: current.focused,
-                  desc_sv: current.desc_sv,
-                  cmt_lv: CommentListView{
-                  x: current.cmt_lv.x,
-                  y: current.cmt_lv.y,
-                  width: current.cmt_lv.width,
-                  height: current.cmt_lv.height,
-                  comments: current.cmt_lv.comments,
-                  cursor: current.cmt_lv.cursor,
-                  top: current.cmt_lv.top,
-                },
-                })
+                current.section = 1
+                issue_tabs.set(idx, current)
                 ()
               }
             }
           } else if k.name == "g" and current.focused {
             if k.shift {
               if current.section == 0 {
-                let new_sv = Scrollview{
-                  x: current.desc_sv.x,
-                  y: current.desc_sv.y,
-                  width: current.desc_sv.width,
-                  height: current.desc_sv.height,
-                  lines: current.desc_sv.lines,
-                  scroll: 999999,
-                }
-                issue_tabs.set(idx, IssueTab{
-                  issue: current.issue,
-                  comments: current.comments,
-                  section: current.section,
-                  focused: current.focused,
-                  desc_sv: new_sv,
-                  cmt_lv: CommentListView{
-                  x: current.cmt_lv.x,
-                  y: current.cmt_lv.y,
-                  width: current.cmt_lv.width,
-                  height: current.cmt_lv.height,
-                  comments: current.cmt_lv.comments,
-                  cursor: current.cmt_lv.cursor,
-                  top: current.cmt_lv.top,
-                },
-                })
+                current.desc_sv.scroll = 999999
+                issue_tabs.set(idx, current)
                 ()
               } else {
                 let last = current.comments.size() - 1
-                let clamped = match last < 0 {
+                current.cmt_lv.cursor = match last < 0 {
                   true => 0,
                   false => last,
                 }
-                issue_tabs.set(idx, IssueTab{
-                  issue: current.issue,
-                  comments: current.comments,
-                  section: current.section,
-                  focused: current.focused,
-                  desc_sv: current.desc_sv,
-                  cmt_lv: CommentListView{
-                  x: current.cmt_lv.x,
-                  y: current.cmt_lv.y,
-                  width: current.cmt_lv.width,
-                  height: current.cmt_lv.height,
-                  comments: current.cmt_lv.comments,
-                  cursor: clamped,
-                  top: current.cmt_lv.top,
-                },
-                })
+                issue_tabs.set(idx, current)
                 ()
               }
             } else {
               if current.section == 0 {
-                let new_sv = Scrollview{
-                  x: current.desc_sv.x,
-                  y: current.desc_sv.y,
-                  width: current.desc_sv.width,
-                  height: current.desc_sv.height,
-                  lines: current.desc_sv.lines,
-                  scroll: 0,
-                }
-                issue_tabs.set(idx, IssueTab{
-                  issue: current.issue,
-                  comments: current.comments,
-                  section: current.section,
-                  focused: current.focused,
-                  desc_sv: new_sv,
-                  cmt_lv: CommentListView{
-                  x: current.cmt_lv.x,
-                  y: current.cmt_lv.y,
-                  width: current.cmt_lv.width,
-                  height: current.cmt_lv.height,
-                  comments: current.cmt_lv.comments,
-                  cursor: current.cmt_lv.cursor,
-                  top: current.cmt_lv.top,
-                },
-                })
+                current.desc_sv.scroll = 0
+                issue_tabs.set(idx, current)
                 ()
               } else {
-                issue_tabs.set(idx, IssueTab{
-                  issue: current.issue,
-                  comments: current.comments,
-                  section: current.section,
-                  focused: current.focused,
-                  desc_sv: current.desc_sv,
-                  cmt_lv: CommentListView{
-                  x: current.cmt_lv.x,
-                  y: current.cmt_lv.y,
-                  width: current.cmt_lv.width,
-                  height: current.cmt_lv.height,
-                  comments: current.cmt_lv.comments,
-                  cursor: 0,
-                  top: 0,
-                },
-                })
+                current.cmt_lv.cursor = 0
+                current.cmt_lv.top = 0
+                issue_tabs.set(idx, current)
                 ()
               }
             }
@@ -2699,22 +2463,8 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
               .expect("Missing id")
             match fetch_issue_comments(api_key, issue_uid) {
               ok(cs) => {
-                issue_tabs.set(idx, IssueTab{
-                  issue: current.issue,
-                  comments: cs,
-                  section: current.section,
-                  focused: current.focused,
-                  desc_sv: current.desc_sv,
-                  cmt_lv: CommentListView{
-                  x: current.cmt_lv.x,
-                  y: current.cmt_lv.y,
-                  width: current.cmt_lv.width,
-                  height: current.cmt_lv.height,
-                  comments: current.cmt_lv.comments,
-                  cursor: current.cmt_lv.cursor,
-                  top: current.cmt_lv.top,
-                },
-                })
+                current.comments = cs
+                issue_tabs.set(idx, current)
                 ()
               },
               err(_) => (),
