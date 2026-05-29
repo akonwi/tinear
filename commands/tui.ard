@@ -53,16 +53,18 @@ fn Scrollview::new() Scrollview {
 }
 
 // CommentList component: fixed-item-height list view over comments.
-// `cursor` is the selected item index; `top` is the first visible
-// item. The draw method keeps the cursor in view and clamps `top`
-// into a valid range.
+// Owns the comments themselves (they're fetched once and stable
+// across frames, unlike Scrollview's lines which are derived per
+// frame from description+width). Persistent state is cursor/top;
+// callers replace `comments` after refetch.
 struct CommentList {
+  comments: [Dynamic],
   cursor: Int,
   top: Int,
 }
 
-fn CommentList::new() CommentList {
-  CommentList{cursor: 0, top: 0}
+fn CommentList::new(comments: [Dynamic]) CommentList {
+  CommentList{comments: comments, cursor: 0, top: 0}
 }
 
 struct BoardColumn {
@@ -82,15 +84,14 @@ struct BoardColumn {
 // closes the tab.
 struct IssueTab {
   issue: Dynamic,
-  comments: [Dynamic],
   section: Int,
   focused: Bool,
   // The Description section's scrollview component. Layout and
   // wrapped lines are recomputed each frame; only its scroll offset
   // persists here.
   desc_view: Scrollview,
-  // The Comments section's list component. Comments live on
-  // `comments` above; only cursor/top persist here.
+  // The Comments section's list component. Owns the comments and
+  // its own cursor/top.
   comments_view: CommentList,
 }
 
@@ -1172,13 +1173,13 @@ impl CommentList {
   // `focused` is true. `self.top` is treated as a hint; the method
   // adjusts and clamps internally so callers can set raw values from
   // key handlers without worrying about bounds.
-  fn draw(vx: vaxis::Vaxis, layout: Layout, comments: [Dynamic], focused: Bool) Void {
-    if comments.size() == 0 {
+  fn draw(vx: vaxis::Vaxis, layout: Layout, focused: Bool) Void {
+    if self.comments.size() == 0 {
       ()
     } else {
       let vc = layout.height / comment_item_height()
-      let max_top = match comments.size() > vc {
-        true => comments.size() - vc,
+      let max_top = match self.comments.size() > vc {
+        true => self.comments.size() - vc,
         false => 0,
       }
       // Adjust top to keep the cursor visible.
@@ -1197,12 +1198,12 @@ impl CommentList {
           false => adjusted,
         },
       }
-      let end_excl = match top + vc > comments.size() {
-        true => comments.size(),
+      let end_excl = match top + vc > self.comments.size() {
+        true => self.comments.size(),
         false => top + vc,
       }
       mut row_y = layout.y
-      for c, idx in comments {
+      for c, idx in self.comments {
         if idx >= top and idx < end_excl {
           let is_cursor = focused and idx == self.cursor
           draw_comment(vx, c, layout.x, row_y, layout.width, is_cursor, false)
@@ -1214,7 +1215,7 @@ impl CommentList {
       if top > 0 {
         vaxis::draw_text(vx, arrow_x, layout.y, "↑")
       }
-      if end_excl < comments.size() {
+      if end_excl < self.comments.size() {
         vaxis::draw_text(vx, arrow_x, layout.y + layout.height - 1, "↓")
       }
     }
@@ -1434,7 +1435,7 @@ fn draw_issue_tab(state: AppState, tab: IssueTab) Void {
   let desc_body_start = desc_start + 2
   let available = max_y - desc_body_start
   let half = available / 2
-  let max_desc_lines = match tab.comments.size() == 0 {
+  let max_desc_lines = match tab.comments_view.comments.size() == 0 {
     true => available,
     false => match half < 4 {
       true => available,
@@ -1490,9 +1491,9 @@ fn draw_issue_tab(state: AppState, tab: IssueTab) Void {
   if next_y + 2 < max_y {
     let comments_highlighted = tab.section == 1
     let comments_focused = comments_highlighted and tab.focused
-    let count_label = match tab.comments.size() == 0 {
+    let count_label = match tab.comments_view.comments.size() == 0 {
       true => "Comments (none)",
-      false => "Comments ({tab.comments.size()})",
+      false => "Comments ({tab.comments_view.comments.size()})",
     }
     let comments_header = match comments_highlighted {
       true => "[{count_label}]",
@@ -1509,7 +1510,7 @@ fn draw_issue_tab(state: AppState, tab: IssueTab) Void {
     }
     vaxis::draw_text(vx, panel_x, next_y + 1, cm_div)
 
-    if tab.comments.size() == 0 {
+    if tab.comments_view.comments.size() == 0 {
       vaxis::draw_text(vx, panel_x + 2, next_y + 3, "(no comments)")
     } else {
       let body_y = next_y + 3
@@ -1519,7 +1520,7 @@ fn draw_issue_tab(state: AppState, tab: IssueTab) Void {
         width: panel_width,
         height: max_y - body_y,
       }
-      tab.comments_view.draw(vx, lv_layout, tab.comments, comments_focused)
+      tab.comments_view.draw(vx, lv_layout, comments_focused)
     }
   }
 
@@ -2173,7 +2174,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                         match fetch_issue_comments(api_key, c.issue_id) {
                           ok(cs) => {
                             mut tab = issue_tabs.at(c.tab_idx)
-                            tab.comments = cs
+                            tab.comments_view.comments = cs
                             issue_tabs.set(c.tab_idx, tab)
                             ()
                           },
@@ -2296,11 +2297,10 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                   }
                   issue_tabs.push(IssueTab{
                     issue: selected,
-                    comments: comments,
                     section: 0,
                     focused: false,
                     desc_view: Scrollview::new(),
-                    comments_view: CommentList::new(),
+                    comments_view: CommentList::new(comments),
                   })
                   active_tab = 2 + issue_tabs.size() - 1
                   ()
@@ -2380,7 +2380,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                 issue_tabs.set(idx, current)
                 ()
               } else {
-                let last = current.comments.size() - 1
+                let last = current.comments_view.comments.size() - 1
                 let new_cursor = match current.comments_view.cursor < last {
                   true => current.comments_view.cursor + 1,
                   false => last,
@@ -2406,7 +2406,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                 issue_tabs.set(idx, current)
                 ()
               } else {
-                let last = current.comments.size() - 1
+                let last = current.comments_view.comments.size() - 1
                 current.comments_view.cursor = match last < 0 {
                   true => 0,
                   false => last,
@@ -2431,7 +2431,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
               .expect("Missing id")
             match fetch_issue_comments(api_key, issue_uid) {
               ok(cs) => {
-                current.comments = cs
+                current.comments_view.comments = cs
                 issue_tabs.set(idx, current)
                 ()
               },
