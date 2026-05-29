@@ -29,94 +29,41 @@ fn truncate_with_ellipsis(s: Str, max: Int) Str {
 //
 // The rightmost column of `width` is reserved for the scrollbar even
 // when no overflow is present, so the layout stays stable.
-struct Scrollview {
+// Per-frame layout box. Parents compute this each frame and pass it
+// to a component's draw method. Components never store layout
+// themselves — only the persistent state in the structs below.
+struct Layout {
   x: Int,
   y: Int,
   width: Int,
   height: Int,
-  lines: [Str],
+}
+
+// Scrollview component: a vertical-scrolling viewport over a list of
+// lines. Holds only the persistent scroll offset; layout and the
+// lines themselves are passed to `draw` each frame. The draw method
+// clamps any out-of-range value, so key handlers can freely set
+// `scroll` to large or negative numbers.
+struct Scrollview {
   scroll: Int,
 }
 
-impl Scrollview {
-  // Maximum valid scroll offset given current size of `lines`.
-  fn max_scroll() Int {
-    match self.lines.size() > self.height {
-      true => self.lines.size() - self.height,
-      false => 0,
-    }
-  }
-
-  // Returns `self.scroll` clamped into [0, max_scroll()]. Used so
-  // callers can set scroll to large/negative values and the renderer
-  // still does the right thing.
-  fn clamped_scroll() Int {
-    let max = self.max_scroll()
-    match self.scroll > max {
-      true => max,
-      false => match self.scroll < 0 {
-        true => 0,
-        false => self.scroll,
-      },
-    }
-  }
-
-  fn draw(vx: vaxis::Vaxis) {
-    let scroll = self.clamped_scroll()
-    let content_w = self.width - 1
-    let end = match scroll + self.height > self.lines.size() {
-      true => self.lines.size(),
-      false => scroll + self.height,
-    }
-    for line, idx in self.lines {
-      if idx >= scroll and idx < end {
-        let display = truncate_with_ellipsis(line, content_w)
-        vaxis::draw_text(vx, self.x, self.y + (idx - scroll), display)
-      }
-    }
-    if self.lines.size() > self.height {
-      let bar_x = self.x + self.width - 1
-      // Track
-      for r in 0..(self.height - 1) {
-        vaxis::draw_text(vx, bar_x, self.y + r, "│")
-      }
-      // Thumb size, proportional to viewport / total.
-      let total = self.lines.size()
-      let raw_thumb = (self.height * self.height) / total
-      let thumb_h = match raw_thumb < 1 {
-        true => 1,
-        false => raw_thumb,
-      }
-      // Thumb position, proportional to scroll / max_scroll.
-      let max_thumb_pos = self.height - thumb_h
-      let max_s = self.max_scroll()
-      let thumb_pos = match max_s == 0 {
-        true => 0,
-        false => (scroll * max_thumb_pos) / max_s,
-      }
-      for r in 0..(thumb_h - 1) {
-        vaxis::draw_text(vx, bar_x, self.y + thumb_pos + r, "█")
-      }
-    }
-  }
+fn Scrollview::new() Scrollview {
+  Scrollview{scroll: 0}
 }
 
-// A list view for items rendered at a fixed height each, with a
-// cursor that can be moved by the caller. Used for the issue tab's
-// comments section. Items render via draw_comment (so a comment is
-// header line + truncated body + blank line = 3 rows).
-struct CommentListView {
-  x: Int,
-  y: Int,
-  width: Int,
-  height: Int,
-  comments: [Dynamic],
+// CommentList component: fixed-item-height list view over comments.
+// `cursor` is the selected item index; `top` is the first visible
+// item. The draw method keeps the cursor in view and clamps `top`
+// into a valid range.
+struct CommentList {
   cursor: Int,
   top: Int,
 }
 
-// CommentListView impl block lives below `draw_comment` so the
-// renderer can refer to it.
+fn CommentList::new() CommentList {
+  CommentList{cursor: 0, top: 0}
+}
 
 struct BoardColumn {
   name: Str,
@@ -138,13 +85,13 @@ struct IssueTab {
   comments: [Dynamic],
   section: Int,
   focused: Bool,
-  // Persistent scroll state for the Description section. The
-  // scrollview's layout and lines get refreshed each draw; only its
-  // .scroll field meaningfully persists across frames.
-  desc_sv: Scrollview,
-  // Persistent state for the Comments section. As with desc_sv,
-  // layout/comments are reset each draw; .cursor and .top persist.
-  cmt_lv: CommentListView,
+  // The Description section's scrollview component. Layout and
+  // wrapped lines are recomputed each frame; only its scroll offset
+  // persists here.
+  desc_view: Scrollview,
+  // The Comments section's list component. Comments live on
+  // `comments` above; only cursor/top persist here.
+  comments_view: CommentList,
 }
 
 // A title wrapped to at most two lines. line2 is "" when the whole
@@ -1162,74 +1109,113 @@ fn draw_comment(vx: vaxis::Vaxis, comment: Dynamic, x: Int, y: Int, panel_width:
   y + 3
 }
 
-impl CommentListView {
-  // Fixed rows per item in the list. Header + body + blank.
-  fn item_height() Int { 3 }
-
-  // How many items can fit in the view.
-  fn visible_count() Int {
-    self.height / 3
-  }
-
-  // The largest valid `top` value: how far we can scroll while
-  // keeping at least one item visible.
-  fn max_top() Int {
-    let vc = self.visible_count()
-    match self.comments.size() > vc {
-      true => self.comments.size() - vc,
+impl Scrollview {
+  // Render `lines` inside `layout`, scrolled to `self.scroll`. Out
+  // of range values are clamped, so key handlers can set raw
+  // values. Rightmost column is reserved for a scrollbar even when
+  // content fits, so the visible area stays stable.
+  fn draw(vx: vaxis::Vaxis, layout: Layout, lines: [Str]) Void {
+    let max_scroll = match lines.size() > layout.height {
+      true => lines.size() - layout.height,
       false => 0,
     }
-  }
-
-  // Returns `top` adjusted to keep the cursor visible, then clamped
-  // into [0, max_top()]. Callers may set any value for `top`; the
-  // renderer goes through this so it does the right thing.
-  fn effective_top() Int {
-    let vc = self.visible_count()
-    let raw = match self.cursor < self.top {
-      true => self.cursor,
-      false => match self.cursor >= self.top + vc {
-        true => self.cursor - vc + 1,
-        false => self.top,
-      },
-    }
-    let mt = self.max_top()
-    match raw > mt {
-      true => mt,
-      false => match raw < 0 {
+    let scroll = match self.scroll > max_scroll {
+      true => max_scroll,
+      false => match self.scroll < 0 {
         true => 0,
-        false => raw,
+        false => self.scroll,
       },
     }
+    let content_w = layout.width - 1
+    let end = match scroll + layout.height > lines.size() {
+      true => lines.size(),
+      false => scroll + layout.height,
+    }
+    for line, idx in lines {
+      if idx >= scroll and idx < end {
+        let display = truncate_with_ellipsis(line, content_w)
+        vaxis::draw_text(vx, layout.x, layout.y + (idx - scroll), display)
+      }
+    }
+    if lines.size() > layout.height {
+      let bar_x = layout.x + layout.width - 1
+      // Track
+      for r in 0..(layout.height - 1) {
+        vaxis::draw_text(vx, bar_x, layout.y + r, "│")
+      }
+      // Thumb size, proportional to viewport / total.
+      let total = lines.size()
+      let raw_thumb = (layout.height * layout.height) / total
+      let thumb_h = match raw_thumb < 1 {
+        true => 1,
+        false => raw_thumb,
+      }
+      let max_thumb_pos = layout.height - thumb_h
+      let thumb_pos = match max_scroll == 0 {
+        true => 0,
+        false => (scroll * max_thumb_pos) / max_scroll,
+      }
+      for r in 0..(thumb_h - 1) {
+        vaxis::draw_text(vx, bar_x, layout.y + thumb_pos + r, "█")
+      }
+    }
   }
+}
 
-  // Render visible comments. The `focused` flag controls whether the
-  // selected comment shows its cursor marker.
-  fn draw(vx: vaxis::Vaxis, focused: Bool) Void {
-    if self.comments.size() == 0 {
+// Each comment renders to a fixed number of cells via `draw_comment`
+// (header + body + blank).
+fn comment_item_height() Int { 3 }
+
+impl CommentList {
+  // Render the comments inside `layout`, scrolled to keep
+  // `self.cursor` visible. The cursor marker only renders when
+  // `focused` is true. `self.top` is treated as a hint; the method
+  // adjusts and clamps internally so callers can set raw values from
+  // key handlers without worrying about bounds.
+  fn draw(vx: vaxis::Vaxis, layout: Layout, comments: [Dynamic], focused: Bool) Void {
+    if comments.size() == 0 {
       ()
     } else {
-      let vc = self.visible_count()
-      let top = self.effective_top()
-      let end_excl = match top + vc > self.comments.size() {
-        true => self.comments.size(),
+      let vc = layout.height / comment_item_height()
+      let max_top = match comments.size() > vc {
+        true => comments.size() - vc,
+        false => 0,
+      }
+      // Adjust top to keep the cursor visible.
+      let adjusted = match self.cursor < self.top {
+        true => self.cursor,
+        false => match self.cursor >= self.top + vc {
+          true => self.cursor - vc + 1,
+          false => self.top,
+        },
+      }
+      // Clamp into a valid range.
+      let top = match adjusted > max_top {
+        true => max_top,
+        false => match adjusted < 0 {
+          true => 0,
+          false => adjusted,
+        },
+      }
+      let end_excl = match top + vc > comments.size() {
+        true => comments.size(),
         false => top + vc,
       }
-      mut row_y = self.y
-      for c, idx in self.comments {
+      mut row_y = layout.y
+      for c, idx in comments {
         if idx >= top and idx < end_excl {
           let is_cursor = focused and idx == self.cursor
-          draw_comment(vx, c, self.x, row_y, self.width, is_cursor, false)
-          row_y = row_y + 3
+          draw_comment(vx, c, layout.x, row_y, layout.width, is_cursor, false)
+          row_y = row_y + comment_item_height()
         }
       }
       // Overflow indicators on the right-hand column.
-      let arrow_x = self.x + self.width - 1
+      let arrow_x = layout.x + layout.width - 1
       if top > 0 {
-        vaxis::draw_text(vx, arrow_x, self.y, "↑")
+        vaxis::draw_text(vx, arrow_x, layout.y, "↑")
       }
-      if end_excl < self.comments.size() {
-        vaxis::draw_text(vx, arrow_x, self.y + self.height - 1, "↓")
+      if end_excl < comments.size() {
+        vaxis::draw_text(vx, arrow_x, layout.y + layout.height - 1, "↓")
       }
     }
   }
@@ -1477,23 +1463,21 @@ fn draw_issue_tab(state: AppState, tab: IssueTab) Void {
   mut next_y = desc_body_start
   match description {
     desc => {
-      // Construct a fresh Scrollview per frame, populating .scroll
-      // from the tab's persistent state. Key handlers update
-      // tab.desc_sv.scroll directly; we read it here.
+      // Wrap and render the description as a scrollview. When the
+      // section isn't focused, force scroll back to top so unrelated
+      // scrolling state doesn't bleed across.
       let wrapped = wrap_text(desc, panel_width - 3)
-      let init_scroll = match desc_focused {
-        true => tab.desc_sv.scroll,
-        false => 0,
+      let sv = match desc_focused {
+        true => tab.desc_view,
+        false => Scrollview::new(),
       }
-      let sv = Scrollview{
+      let sv_layout = Layout{
         x: panel_x + 2,
         y: desc_body_start,
         width: panel_width - 2,
         height: max_desc_lines,
-        lines: wrapped,
-        scroll: init_scroll,
       }
-      sv.draw(vx)
+      sv.draw(vx, sv_layout, wrapped)
       next_y = desc_body_start + max_desc_lines + 1
     },
     _ => {
@@ -1528,20 +1512,14 @@ fn draw_issue_tab(state: AppState, tab: IssueTab) Void {
     if tab.comments.size() == 0 {
       vaxis::draw_text(vx, panel_x + 2, next_y + 3, "(no comments)")
     } else {
-      // Build a fresh list view with current layout + comments, but
-      // copy cursor/top from the persisted state.
       let body_y = next_y + 3
-      let body_h = max_y - body_y
-      let lv = CommentListView{
+      let lv_layout = Layout{
         x: panel_x,
         y: body_y,
         width: panel_width,
-        height: body_h,
-        comments: tab.comments,
-        cursor: tab.cmt_lv.cursor,
-        top: tab.cmt_lv.top,
+        height: max_y - body_y,
       }
-      lv.draw(vx, comments_focused)
+      tab.comments_view.draw(vx, lv_layout, tab.comments, comments_focused)
     }
   }
 
@@ -2196,7 +2174,6 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                           ok(cs) => {
                             mut tab = issue_tabs.at(c.tab_idx)
                             tab.comments = cs
-                            tab.cmt_lv.comments = cs
                             issue_tabs.set(c.tab_idx, tab)
                             ()
                           },
@@ -2322,17 +2299,8 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                     comments: comments,
                     section: 0,
                     focused: false,
-                    desc_sv: Scrollview{
-                      x: 0, y: 0, width: 0, height: 0,
-                      lines: [],
-                      scroll: 0,
-                    },
-                    cmt_lv: CommentListView{
-                      x: 0, y: 0, width: 0, height: 0,
-                      comments: comments,
-                      cursor: 0,
-                      top: 0,
-                    },
+                    desc_view: Scrollview::new(),
+                    comments_view: CommentList::new(),
                   })
                   active_tab = 2 + issue_tabs.size() - 1
                   ()
@@ -2387,12 +2355,12 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
           } else if k.name == "Up" or k.name == "k" {
             if current.focused {
               if current.section == 0 {
-                current.desc_sv.scroll = current.desc_sv.scroll - 1
+                current.desc_view.scroll = current.desc_view.scroll - 1
                 issue_tabs.set(idx, current)
                 ()
               } else {
-                current.cmt_lv.cursor = match current.cmt_lv.cursor > 0 {
-                  true => current.cmt_lv.cursor - 1,
+                current.comments_view.cursor = match current.comments_view.cursor > 0 {
+                  true => current.comments_view.cursor - 1,
                   false => 0,
                 }
                 issue_tabs.set(idx, current)
@@ -2408,16 +2376,16 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
           } else if k.name == "Down" or k.name == "j" {
             if current.focused {
               if current.section == 0 {
-                current.desc_sv.scroll = current.desc_sv.scroll + 1
+                current.desc_view.scroll = current.desc_view.scroll + 1
                 issue_tabs.set(idx, current)
                 ()
               } else {
                 let last = current.comments.size() - 1
-                let new_cursor = match current.cmt_lv.cursor < last {
-                  true => current.cmt_lv.cursor + 1,
+                let new_cursor = match current.comments_view.cursor < last {
+                  true => current.comments_view.cursor + 1,
                   false => last,
                 }
-                current.cmt_lv.cursor = match new_cursor < 0 {
+                current.comments_view.cursor = match new_cursor < 0 {
                   true => 0,
                   false => new_cursor,
                 }
@@ -2434,12 +2402,12 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
           } else if k.name == "g" and current.focused {
             if k.shift {
               if current.section == 0 {
-                current.desc_sv.scroll = 999999
+                current.desc_view.scroll = 999999
                 issue_tabs.set(idx, current)
                 ()
               } else {
                 let last = current.comments.size() - 1
-                current.cmt_lv.cursor = match last < 0 {
+                current.comments_view.cursor = match last < 0 {
                   true => 0,
                   false => last,
                 }
@@ -2448,12 +2416,12 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
               }
             } else {
               if current.section == 0 {
-                current.desc_sv.scroll = 0
+                current.desc_view.scroll = 0
                 issue_tabs.set(idx, current)
                 ()
               } else {
-                current.cmt_lv.cursor = 0
-                current.cmt_lv.top = 0
+                current.comments_view.cursor = 0
+                current.comments_view.top = 0
                 issue_tabs.set(idx, current)
                 ()
               }
