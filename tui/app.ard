@@ -349,7 +349,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                   issue_tabs.push(state::IssueTab{
                     issue: selected,
                     section: 0,
-                    focused: false,
+                    active: false,
                     desc_view: components::Scrollview::new(),
                     comments_view: components::CommentList::new(comments),
                   })
@@ -381,8 +381,8 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
           let idx = active_tab - 2
           mut current = issue_tabs.at(idx)
           if k.name == "Escape" {
-            if current.focused {
-              current.focused = false
+            if current.active {
+              current.active = false
               issue_tabs.set(idx, current)
               ()
             } else {
@@ -399,12 +399,12 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
               }
               ()
             }
-          } else if (k.name == "Enter" or k.name == "Space") and (not current.focused) {
-            current.focused = true
+          } else if (k.name == "Enter" or k.name == "Space") and (not current.active) {
+            current.active = true
             issue_tabs.set(idx, current)
             ()
           } else if k.name == "Up" or k.name == "k" {
-            if current.focused {
+            if current.active {
               if current.section == 0 {
                 current.desc_view.scroll = current.desc_view.scroll - 1
                 issue_tabs.set(idx, current)
@@ -425,7 +425,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
               }
             }
           } else if k.name == "Down" or k.name == "j" {
-            if current.focused {
+            if current.active {
               if current.section == 0 {
                 current.desc_view.scroll = current.desc_view.scroll + 1
                 issue_tabs.set(idx, current)
@@ -450,7 +450,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
                 ()
               }
             }
-          } else if k.name == "g" and current.focused {
+          } else if k.name == "g" and current.active {
             if k.shift {
               if current.section == 0 {
                 current.desc_view.scroll = 999999
@@ -488,7 +488,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
               },
               err(_) => (),
             }
-          } else if k.name == "s" and (not current.focused) {
+          } else if k.name == "s" and (not current.active) {
             // Open the status picker for this tab's issue.
             match api::open_state_picker(api_key, current.issue, false, idx) {
               ok(p) => {
@@ -497,7 +497,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
               },
               err(_) => (),
             }
-          } else if k.name == "c" and (not current.focused) {
+          } else if k.name == "c" and (not current.active) {
             // Open the comment composer for this tab's issue.
             let issue_uid = decode::run(current.issue, decode::field("id", decode::string))
               .expect("Missing id")

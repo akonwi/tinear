@@ -74,14 +74,14 @@ struct BoardColumn {
 // tab is opened (see api::fetch_issue_comments).
 //
 // Navigation model: two sections (description=0, comments=1). When
-// `focused` is false, the section cursor highlights one of them and
-// arrows switch between sections. When `focused` is true, arrows
-// scroll/move within the focused section. Escape pops focus or
-// closes the tab.
+// `active` is false, the section cursor highlights one of them and
+// arrows switch between sections. When `active` is true, arrows
+// scroll/move within the active section. Escape exits the active
+// section or closes the tab.
 struct IssueTab {
   issue: Dynamic,
   section: Int,
-  focused: Bool,
+  active: Bool,
   // Description section's scrollview. Layout and wrapped lines are
   // recomputed each frame; only its scroll offset persists here.
   desc_view: components::Scrollview,

@@ -130,10 +130,10 @@ fn comment_item_height() Int { 3 }
 impl CommentList {
   // Render the comments inside `layout`, scrolled to keep
   // `self.cursor` visible. The cursor marker only renders when
-  // `focused` is true. `self.top` is treated as a hint; the method
+  // `active` is true. `self.top` is treated as a hint; the method
   // clamps it internally so callers can set raw values from key
   // handlers without worrying about bounds.
-  fn draw(vx: vaxis::Vaxis, layout: screen::Layout, focused: Bool) Void {
+  fn draw(vx: vaxis::Vaxis, layout: screen::Layout, active: Bool) Void {
     if self.comments.size() == 0 {
       ()
     } else {
@@ -165,7 +165,7 @@ impl CommentList {
       mut row_y = layout.y
       for c, idx in self.comments {
         if idx >= top and idx < end_excl {
-          let is_cursor = focused and idx == self.cursor
+          let is_cursor = active and idx == self.cursor
           draw_comment(vx, c, layout.x, row_y, layout.width, is_cursor, false)
           row_y = row_y + comment_item_height()
         }
