@@ -1,9 +1,9 @@
 use ard/decode
 
-use linear-cli/tui/screen
-use linear-cli/tui/state
-use linear-cli/tui/text
-use linear-cli/vaxis
+use tinear/tui/screen
+use tinear/tui/state
+use tinear/tui/text
+use tinear/vaxis
 
 // ---- column geometry ---------------------------------------------------
 

@@ -1,13 +1,13 @@
 use ard/decode
 use ard/maybe
 
-use linear-cli/tui/components
-use linear-cli/tui/decode as decode_utils
-use linear-cli/tui/draw
-use linear-cli/tui/screen
-use linear-cli/tui/state
-use linear-cli/tui/text
-use linear-cli/vaxis
+use tinear/tui/components
+use tinear/tui/decode as decode_utils
+use tinear/tui/draw
+use tinear/tui/screen
+use tinear/tui/state
+use tinear/tui/text
+use tinear/vaxis
 
 // Notification-shape helpers and the inbox view (list + detail panel
 // + PR-specific panel). Functions in this module decode the Linear

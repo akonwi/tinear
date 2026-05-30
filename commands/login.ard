@@ -3,9 +3,9 @@ use ard/fs
 use ard/json
 use ard/env
 use ard/decode
-use linear-cli/linear/client
-use linear-cli/tui/decode as decode_utils
-use linear-cli/util
+use tinear/linear/client
+use tinear/tui/decode as decode_utils
+use tinear/util
 
 struct LoginConfig {
   api_key: Str,
@@ -43,7 +43,7 @@ fn run_inner(args: [Str]) Void!Str {
       let email = decode::run(viewer, decode::field("email", decode::string)).expect("Missing email")
 
       let home = try get_home_dir()
-      let config_dir = "{home}/.linear-cli"
+      let config_dir = "{home}/.tinear"
 
       match fs::exists(config_dir) {
         false => try fs::create_dir(config_dir),

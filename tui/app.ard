@@ -4,20 +4,20 @@ use ard/duration
 use ard/list as List
 use ard/maybe
 
-use linear-cli/linear/client
-use linear-cli/os
-use linear-cli/tui/api
-use linear-cli/tui/board
-use linear-cli/tui/components
-use linear-cli/tui/decode as decode_utils
-use linear-cli/tui/draw
-use linear-cli/tui/issue_tab
-use linear-cli/tui/modals
-use linear-cli/tui/notifications
-use linear-cli/tui/screen
-use linear-cli/tui/state
-use linear-cli/tui/text
-use linear-cli/vaxis
+use tinear/linear/client
+use tinear/os
+use tinear/tui/api
+use tinear/tui/board
+use tinear/tui/components
+use tinear/tui/decode as decode_utils
+use tinear/tui/draw
+use tinear/tui/issue_tab
+use tinear/tui/modals
+use tinear/tui/notifications
+use tinear/tui/screen
+use tinear/tui/state
+use tinear/tui/text
+use tinear/vaxis
 
 // The TUI application: top-level draw routine plus the event/input
 // loop. Holds run-time mutable state as locals in run_loop; an

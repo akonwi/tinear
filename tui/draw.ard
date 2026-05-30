@@ -1,5 +1,5 @@
-use linear-cli/tui/text
-use linear-cli/vaxis
+use tinear/tui/text
+use tinear/vaxis
 
 // Cross-cutting draw helpers used by multiple views.
 

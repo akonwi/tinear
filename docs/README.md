@@ -1,4 +1,4 @@
-# linear-cli docs
+# tinear docs
 
 Architecture Decision Records (ADRs) and project documentation.
 

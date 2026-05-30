@@ -1,8 +1,8 @@
 use ard/decode
 
-use linear-cli/tui/state
-use linear-cli/tui/text
-use linear-cli/vaxis
+use tinear/tui/state
+use tinear/tui/text
+use tinear/vaxis
 
 // Render the status picker modal centered on screen. Drawn last so
 // it sits on top of the underlying tab. The interior is filled with

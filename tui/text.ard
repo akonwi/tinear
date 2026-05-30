@@ -1,4 +1,4 @@
-use linear-cli/vaxis
+use tinear/vaxis
 
 // ---- byte-based helpers ------------------------------------------------
 // `.size()` returns UTF-8 byte length, so these are accurate only when the

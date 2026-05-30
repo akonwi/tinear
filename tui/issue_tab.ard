@@ -1,12 +1,12 @@
 use ard/decode
 
-use linear-cli/tui/components
-use linear-cli/tui/decode as decode_utils
-use linear-cli/tui/draw
-use linear-cli/tui/screen
-use linear-cli/tui/state
-use linear-cli/tui/text
-use linear-cli/vaxis
+use tinear/tui/components
+use tinear/tui/decode as decode_utils
+use tinear/tui/draw
+use tinear/tui/screen
+use tinear/tui/state
+use tinear/tui/text
+use tinear/vaxis
 
 // Issue detail tab: a single open issue with a header, metadata
 // table, description (Scrollview), and comments (CommentList). Two

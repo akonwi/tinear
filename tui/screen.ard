@@ -1,4 +1,4 @@
-use linear-cli/vaxis
+use tinear/vaxis
 
 // Per-frame layout box. Parents compute this each frame and pass it
 // to a component's draw method. Components never store layout

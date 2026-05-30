@@ -2,9 +2,9 @@ use ard/decode
 use ard/json
 use ard/maybe
 
-use linear-cli/linear/client
-use linear-cli/tui/decode as decode_utils
-use linear-cli/tui/state
+use tinear/linear/client
+use tinear/tui/decode as decode_utils
+use tinear/tui/state
 
 // All GraphQL fetchers and mutations for the TUI. Functions either
 // return parsed Linear data as Dynamic (caller decodes the fields it

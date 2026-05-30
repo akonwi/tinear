@@ -1,5 +1,5 @@
-use linear-cli/tui/components
-use linear-cli/vaxis
+use tinear/tui/components
+use tinear/vaxis
 
 // ---- workflow helpers --------------------------------------------------
 

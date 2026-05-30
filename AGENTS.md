@@ -1,4 +1,4 @@
-# linear-cli
+# tinear
 
 CLI for [Linear](https://linear.app/) built with [Ard](https://ard.run).
 
@@ -6,7 +6,7 @@ CLI for [Linear](https://linear.app/) built with [Ard](https://ard.run).
 
 ```bash
 ard check main.ard                          # type-check
-ard build main.ard --out ard-out/linear     # build into the gitignored ard-out/
+ard build main.ard --out ard-out/tinear     # build into the gitignored ard-out/
 ard run main.ard                            # run directly
 ```
 
@@ -15,7 +15,7 @@ ard run main.ard                            # run directly
 | Path | Purpose |
 |------|---------|
 | `main.ard` | Entrypoint, dispatches `help` / `login` / default-to-TUI |
-| `config.ard` | API key from `LINEAR_API_KEY` env var or `~/.linear-cli/config` |
+| `config.ard` | API key from `LINEAR_API_KEY` env var or `~/.tinear/config` |
 | `util.ard` | `get_api_key()` + `print_usage()` |
 | `linear/client.ard` | Shared GraphQL client (one `graphql()` function) |
 | `commands/login.ard` | Interactive `login` command (saves key to config) |
@@ -87,7 +87,7 @@ Key bits of the event API:
 ## Commands
 
 - `login` — prompts for API key, validates via `viewer` query, saves to
-  `~/.linear-cli/config`
+  `~/.tinear/config`
 - `help` — prints usage
 - _(no command)_ — launches the interactive TUI (Inbox + My Issues tabs,
   per-issue detail tabs, status picker, comment composer)

@@ -1,9 +1,9 @@
-use linear-cli/tui/app
-use linear-cli/util
-use linear-cli/vaxis
+use tinear/tui/app
+use tinear/util
+use tinear/vaxis
 
 // Thin entrypoint: open vaxis, hand off to the TUI app's run_loop,
-// then clean up. Everything else lives under linear-cli/tui/*.
+// then clean up. Everything else lives under tinear/tui/*.
 fn run(args: [Str]) {
   let api_key = util::get_api_key().expect("Failed to load API key")
   let vx = vaxis::new("Linear CLI").expect("open terminal")

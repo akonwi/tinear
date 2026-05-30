@@ -1,9 +1,9 @@
 use ard/decode
 
-use linear-cli/tui/decode as decode_utils
-use linear-cli/tui/screen
-use linear-cli/tui/text
-use linear-cli/vaxis
+use tinear/tui/decode as decode_utils
+use tinear/tui/screen
+use tinear/tui/text
+use tinear/vaxis
 
 // ---- Scrollview --------------------------------------------------------
 // A scrollable list-of-lines viewport with a vertical scrollbar on the

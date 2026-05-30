@@ -7,9 +7,9 @@ use ard/argv
 use ard/io
 use ard/list as List
 
-use linear-cli/commands/login
-use linear-cli/commands/tui
-use linear-cli/util
+use tinear/commands/login
+use tinear/commands/tui
+use tinear/util
 
 fn main() {
   let args = argv::load()

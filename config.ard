@@ -21,7 +21,7 @@ fn load() Config!Str {
     _ => {
       // Fall back to config file
       let home = try get_home()
-      let config_path = "{home}/.linear-cli/config"
+      let config_path = "{home}/.tinear/config"
       let content = try fs::read(config_path)
       json::parse<Config>(content)
     },
