@@ -1,5 +1,9 @@
 # tinear
 
+## Agent rules
+
+- **Do not run `git commit` without explicit direction from the user.**
+
 CLI for [Linear](https://linear.app/) built with [Ard](https://ard.run).
 
 ## Build & Run
