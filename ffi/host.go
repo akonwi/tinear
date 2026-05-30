@@ -130,6 +130,51 @@ func CanDisplayGraphics(term *vaxis.Vaxis) bool {
 	return term != nil && term.CanDisplayGraphics()
 }
 
+func CanReportColor(term *vaxis.Vaxis) bool {
+	return term != nil && term.CanReportColor()
+}
+
+func CanReportForegroundColor(term *vaxis.Vaxis) bool {
+	return term != nil && term.CanReportForegroundColor()
+}
+
+func CanReportBackgroundColor(term *vaxis.Vaxis) bool {
+	return term != nil && term.CanReportBackgroundColor()
+}
+
+func CanExplicitWidth(term *vaxis.Vaxis) bool {
+	return term != nil && term.CanExplicitWidth()
+}
+
+func CanInBandResize(term *vaxis.Vaxis) bool {
+	return term != nil && term.CanInBandResize()
+}
+
+func CanSetAppID(term *vaxis.Vaxis) bool {
+	return term != nil && term.CanSetAppID()
+}
+
+func NotifyWorkingDirectory(term *vaxis.Vaxis, path string) {
+	if term != nil {
+		term.NotifyWorkingDirectory(path)
+	}
+}
+
+func SetAppID(term *vaxis.Vaxis, id string) {
+	if term != nil {
+		term.SetAppID(id)
+	}
+}
+
+// SetMouseShape sets the terminal mouse cursor shape. shape is the raw CSS
+// cursor name used by vaxis: "default", "text", "pointer", "help", "wait",
+// "progress", "ew-resize", "ns-resize", "cell".
+func SetMouseShape(term *vaxis.Vaxis, shape string) {
+	if term != nil {
+		term.SetMouseShape(vaxis.MouseShape(shape))
+	}
+}
+
 func Notify(term *vaxis.Vaxis, title string, body string) {
 	if term != nil {
 		term.Notify(title, body)
@@ -176,12 +221,11 @@ func DrawTextStyle(term *vaxis.Vaxis, x int, y int, text string, fg int, bg int,
 	WindowDrawTextStyle(term.Window(), x, y, text, fg, bg, bold, dim, italic, underline, reverse)
 }
 
-func Render(term *vaxis.Vaxis) error {
+func Render(term *vaxis.Vaxis) {
 	if term == nil {
-		return nil
+		return
 	}
 	term.Render()
-	return nil
 }
 
 func Root(term *vaxis.Vaxis) vaxis.Window {
@@ -213,6 +257,16 @@ func WindowWidth(win vaxis.Window) int {
 func WindowHeight(win vaxis.Window) int {
 	_, height := win.Size()
 	return height
+}
+
+func WindowOriginCol(win vaxis.Window) int {
+	col, _ := win.Origin()
+	return col
+}
+
+func WindowOriginRow(win vaxis.Window) int {
+	_, row := win.Origin()
+	return row
 }
 
 func WindowClear(win vaxis.Window) {
@@ -406,6 +460,8 @@ func EventKind(e vaxis.Event) string {
 		return "quit"
 	case RefreshEvent:
 		return "refresh"
+	case vaxis.ColorThemeUpdate:
+		return "color_theme"
 	default:
 		return "unknown"
 	}
@@ -508,6 +564,27 @@ func EventResizeRows(e vaxis.Event) int {
 		return r.Rows
 	}
 	return 0
+}
+
+func EventResizeXPixel(e vaxis.Event) int {
+	if r, ok := e.(vaxis.Resize); ok {
+		return r.XPixel
+	}
+	return 0
+}
+
+func EventResizeYPixel(e vaxis.Event) int {
+	if r, ok := e.(vaxis.Resize); ok {
+		return r.YPixel
+	}
+	return 0
+}
+
+func EventColorThemeDark(e vaxis.Event) bool {
+	if u, ok := e.(vaxis.ColorThemeUpdate); ok {
+		return u.Mode == vaxis.DarkMode
+	}
+	return false
 }
 
 func EventFocusFocused(e vaxis.Event) bool {

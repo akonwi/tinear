@@ -7,7 +7,7 @@ extern fn close(vx: Vaxis) Void!Str = "Close"
 
 extern fn clear(vx: Vaxis) Void = "Clear"
 
-extern fn render(vx: Vaxis) Void!Str = "Render"
+extern fn render(vx: Vaxis) Void = "Render"
 
 extern fn refresh(vx: Vaxis) Void = "Refresh"
 
@@ -37,6 +37,18 @@ extern fn can_unicode_core(vx: Vaxis) Bool = "CanUnicodeCore"
 
 extern fn can_display_graphics(vx: Vaxis) Bool = "CanDisplayGraphics"
 
+extern fn can_report_color(vx: Vaxis) Bool = "CanReportColor"
+extern fn can_report_foreground_color(vx: Vaxis) Bool = "CanReportForegroundColor"
+extern fn can_report_background_color(vx: Vaxis) Bool = "CanReportBackgroundColor"
+extern fn can_explicit_width(vx: Vaxis) Bool = "CanExplicitWidth"
+extern fn can_in_band_resize(vx: Vaxis) Bool = "CanInBandResize"
+extern fn can_set_app_id(vx: Vaxis) Bool = "CanSetAppID"
+
+extern fn notify_working_directory(vx: Vaxis, path: Str) Void = "NotifyWorkingDirectory"
+extern fn set_app_id(vx: Vaxis, id: Str) Void = "SetAppID"
+// shape is the raw CSS cursor name: "default", "text", "pointer", "help",
+// "wait", "progress", "ew-resize", "ns-resize", "cell".
+extern fn set_mouse_shape(vx: Vaxis, shape: Str) Void = "SetMouseShape"
 extern fn notify(vx: Vaxis, title: Str, body: Str) Void = "Notify"
 
 extern fn clipboard_push(vx: Vaxis, text: Str) Void = "ClipboardPush"
@@ -76,9 +88,12 @@ struct MouseEvent {
 }
 
 // Terminal was resized. cols/rows are the new dimensions in cells.
+// x_pixel/y_pixel are the terminal dimensions in pixels (0 if unknown).
 struct ResizeEvent {
   cols: Int,
   rows: Int,
+  x_pixel: Int,
+  y_pixel: Int,
 }
 
 // Terminal gained or lost focus. focused = true means FocusIn.
@@ -101,10 +116,15 @@ struct RedrawEvent {}
 // without conflating the two concerns.
 struct RefreshEvent {}
 
+// Terminal color theme changed. dark = true for dark mode, false for light.
+struct ColorThemeEvent {
+  dark: Bool,
+}
+
 // Application is shutting down.
 struct QuitEvent {}
 
-type Event = KeyEvent | MouseEvent | ResizeEvent | FocusEvent | PasteEvent | RedrawEvent | RefreshEvent | QuitEvent
+type Event = KeyEvent | MouseEvent | ResizeEvent | FocusEvent | PasteEvent | RedrawEvent | RefreshEvent | ColorThemeEvent | QuitEvent
 
 // Opaque handle to a single vaxis event. Constructed by `read_event`,
 // passed back into the accessor functions to extract its fields.
@@ -138,6 +158,10 @@ extern fn event_mouse_alt(e: RawEvent) Bool = "EventMouseAlt"
 
 extern fn event_resize_cols(e: RawEvent) Int = "EventResizeCols"
 extern fn event_resize_rows(e: RawEvent) Int = "EventResizeRows"
+extern fn event_resize_x_pixel(e: RawEvent) Int = "EventResizeXPixel"
+extern fn event_resize_y_pixel(e: RawEvent) Int = "EventResizeYPixel"
+
+extern fn event_color_theme_dark(e: RawEvent) Bool = "EventColorThemeDark"
 
 extern fn event_focus_focused(e: RawEvent) Bool = "EventFocusFocused"
 extern fn event_paste_started(e: RawEvent) Bool = "EventPasteStarted"
@@ -175,6 +199,8 @@ fn next_event(vx: Vaxis) Event!Str {
       let ev: Event = ResizeEvent{
         cols: event_resize_cols(raw),
         rows: event_resize_rows(raw),
+        x_pixel: event_resize_x_pixel(raw),
+        y_pixel: event_resize_y_pixel(raw),
       }
       Result::ok(ev)
     },
@@ -194,6 +220,10 @@ fn next_event(vx: Vaxis) Event!Str {
       let ev: Event = RefreshEvent{}
       Result::ok(ev)
     },
+    "color_theme" => {
+      let ev: Event = ColorThemeEvent{dark: event_color_theme_dark(raw)}
+      Result::ok(ev)
+    },
     "quit" => {
       let ev: Event = QuitEvent{}
       Result::ok(ev)
@@ -211,6 +241,9 @@ extern fn subwindow(win: Window, x: Int, y: Int, width: Int, height: Int) Window
 extern fn window_width(win: Window) Int = "WindowWidth"
 
 extern fn window_height(win: Window) Int = "WindowHeight"
+
+extern fn window_origin_col(win: Window) Int = "WindowOriginCol"
+extern fn window_origin_row(win: Window) Int = "WindowOriginRow"
 
 extern fn window_clear(win: Window) Void = "WindowClear"
 

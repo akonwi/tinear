@@ -60,7 +60,7 @@ fn draw_screen(state: state::AppState) Void {
     _ => vaxis::hide_cursor(state.vx),
   }
 
-  vaxis::render(vx).expect("render")
+  vaxis::render(vx)
 }
 
 fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
@@ -145,6 +145,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
       FocusEvent(_) => (),
       PasteEvent(_) => (),
       MouseEvent(_) => (),
+      ColorThemeEvent(_) => (),
       RefreshEvent(_) => {
         // Background refresh: refetch inbox + board silently. Try to
         // preserve the inbox selection by id (a notification may have
