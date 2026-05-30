@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+DRY_RUN=false
+if [ "${1:-}" = "--dry-run" ]; then
+  DRY_RUN=true
+  shift
+fi
+
 if [ $# -ne 1 ]; then
-  echo "Usage: $0 <version>"
-  echo "  e.g. $0 v0.1.0"
+  echo "Usage: $0 [--dry-run] <version>"
+  echo "  e.g. $0 --dry-run v0.1.0"
   exit 1
 fi
 VERSION="$1"
@@ -31,8 +37,12 @@ if git rev-parse "refs/tags/$VERSION" >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "==> Tagging $VERSION …"
-git tag -a "$VERSION" -m "$VERSION"
+if [ "$DRY_RUN" = true ]; then
+  echo "==> Dry run — skipping tag creation"
+else
+  echo "==> Tagging $VERSION …"
+  git tag -a "$VERSION" -m "$VERSION"
+fi
 
 echo ""
 echo "==> Building tinear $VERSION"
@@ -109,10 +119,12 @@ FORMULA
 echo ""
 echo "==> All done."
 echo ""
-echo "Push the tag:"
-echo "  git push origin $VERSION"
-echo ""
-echo "Then publish the release:"
+if [ "$DRY_RUN" = false ]; then
+  echo "Push the tag:"
+  echo "  git push origin $VERSION"
+  echo ""
+fi
+echo "Publish the release:"
 echo "  cd $OUTDIR"
 echo "  gh release create $VERSION *.tar.gz --title \"$VERSION\" --notes \"...\""
 echo ""
