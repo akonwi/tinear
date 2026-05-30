@@ -26,7 +26,7 @@ use tinear/vaxis
 
 fn draw_screen(state: state::AppState) Void {
   let vx = state.vx
-  vaxis::clear(vx)
+  vaxis::window_clear(vaxis::root(vx))
 
   draw::draw_tab_bar(vx, state.tabs, state.active_tab)
 

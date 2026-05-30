@@ -93,17 +93,17 @@ fn draw_board_card(
 
   // Line 1: "<cursor><glyph> <identifier>"  (3-char prefix before id)
   let header = "{cursor}{glyph} {identifier}"
-  vaxis::draw_text(vx, x, y, text::truncate_with_ellipsis(header, col_w))
+  vaxis::window_draw_text(vaxis::root(vx), x, y, text::truncate_with_ellipsis(header, col_w))
 
   // Title lines: aligned under the identifier, up to 2 lines.
   let title_indent = 3
   let title_w = col_w - title_indent
   let wrapped = text::wrap_title(title, title_w)
-  vaxis::draw_text(vx, x + title_indent, y + 1, wrapped.line1)
+  vaxis::window_draw_text(vaxis::root(vx), x + title_indent, y + 1, wrapped.line1)
 
   let has_line2 = not wrapped.line2.is_empty()
   if has_line2 {
-    vaxis::draw_text(vx, x + title_indent, y + 2, wrapped.line2)
+    vaxis::window_draw_text(vaxis::root(vx), x + title_indent, y + 2, wrapped.line2)
   }
 
   // Position right after the title block.
@@ -119,7 +119,7 @@ fn draw_board_card(
     for i in 0..(col_w - 2) {
       divider =+ "━"
     }
-    vaxis::draw_text(vx, x, divider_y, divider)
+    vaxis::window_draw_text(vaxis::root(vx), x, divider_y, divider)
     next_y = divider_y + 2
   }
   next_y
@@ -133,8 +133,8 @@ fn draw_board_content(state: state::AppState) Void {
   let content_bottom = sb_y - 1
 
   if state.columns.size() == 0 {
-    vaxis::draw_text(vx, 1, 3, "No issues assigned to you.")
-    vaxis::draw_text(vx, 1, sb_y, "Tab switch · r refresh")
+    vaxis::window_draw_text(vaxis::root(vx), 1, 3, "No issues assigned to you.")
+    vaxis::window_draw_text(vaxis::root(vx), 1, sb_y, "Tab switch · r refresh")
   } else {
     let col_count = state.columns.size()
     let col_w = board_column_width(vx, col_count)
@@ -168,14 +168,14 @@ fn draw_board_content(state: state::AppState) Void {
           false => "",
         }
         let header = "{col.name} ({col.issues.size()}){suffix}"
-        vaxis::draw_text(vx, x, 3, text::truncate_with_ellipsis(header, col_w))
+        vaxis::window_draw_text(vaxis::root(vx), x, 3, text::truncate_with_ellipsis(header, col_w))
 
         // Divider under header.
         mut header_div = ""
         for i in 0..(col_w - 2) {
           header_div =+ "─"
         }
-        vaxis::draw_text(vx, x, 4, header_div)
+        vaxis::window_draw_text(vaxis::root(vx), x, 4, header_div)
 
         // Cards in this column.
         mut card_y = 6
@@ -194,13 +194,13 @@ fn draw_board_content(state: state::AppState) Void {
 
     // Scroll indicators on the header row.
     if scroll > 0 {
-      vaxis::draw_text(vx, 0, 3, "‹")
+      vaxis::window_draw_text(vaxis::root(vx), 0, 3, "‹")
     }
     if end_excl < col_count {
       let term_w = screen::term_width(vx)
-      vaxis::draw_text(vx, term_w - 1, 3, "›")
+      vaxis::window_draw_text(vaxis::root(vx), term_w - 1, 3, "›")
     }
 
-    vaxis::draw_text(vx, 1, sb_y, "↑↓ · ← → · ↵ open · s status · y cycle · r refresh")
+    vaxis::window_draw_text(vaxis::root(vx), 1, sb_y, "↑↓ · ← → · ↵ open · s status · y cycle · r refresh")
   }
 }

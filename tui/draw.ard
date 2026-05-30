@@ -80,16 +80,16 @@ fn draw_tab_bar(vx: vaxis::Vaxis, tabs: [Str], active: Int) Void {
         break
       }
       if needs_pipe {
-        vaxis::draw_text(vx, x, 0, "│")
+        vaxis::window_draw_text(vaxis::root(vx), x, 0, "│")
         x = x + 1
       }
       if n == active {
         // Full-cell reverse video: leading space, label, trailing
         // space all get fg/bg swapped against the terminal defaults
         // (-1/-1). Reads like a selected pill button.
-        vaxis::draw_text_style(vx, x, 0, " " + t + " ", -1, -1, false, false, false, false, true)
+        vaxis::window_draw_text_style(vaxis::root(vx), x, 0, " " + t + " ", -1, -1, false, false, false, false, true)
       } else {
-        vaxis::draw_text(vx, x, 0, " " + t + " ")
+        vaxis::window_draw_text(vaxis::root(vx), x, 0, " " + t + " ")
       }
       x = x + w
       last_rendered = n
@@ -98,10 +98,10 @@ fn draw_tab_bar(vx: vaxis::Vaxis, tabs: [Str], active: Int) Void {
 
     // Overflow indicators.
     if (not fits_clean) and scroll > 0 {
-      vaxis::draw_text(vx, 0, 0, "‹")
+      vaxis::window_draw_text(vaxis::root(vx), 0, 0, "‹")
     }
     if (not fits_clean) and last_rendered < tabs.size() - 1 {
-      vaxis::draw_text(vx, term_w - 1, 0, "›")
+      vaxis::window_draw_text(vaxis::root(vx), term_w - 1, 0, "›")
     }
   }
 
@@ -110,10 +110,10 @@ fn draw_tab_bar(vx: vaxis::Vaxis, tabs: [Str], active: Int) Void {
   for i in 0..(term_w - 1) {
     sep =+ "─"
   }
-  vaxis::draw_text(vx, 0, 1, sep)
+  vaxis::window_draw_text(vaxis::root(vx), 0, 1, sep)
 }
 
 // "Label    value" row, padded so labels align in a column.
 fn draw_label_row(vx: vaxis::Vaxis, x: Int, y: Int, label: Str, value: Str) Void {
-  vaxis::draw_text(vx, x, y, text::pad_str(label, 10) + value)
+  vaxis::window_draw_text(vaxis::root(vx), x, y, text::pad_str(label, 10) + value)
 }

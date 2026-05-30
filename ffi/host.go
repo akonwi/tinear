@@ -45,13 +45,6 @@ func Close(term *vaxis.Vaxis) error {
 	return nil
 }
 
-func Clear(term *vaxis.Vaxis) {
-	if term == nil {
-		return
-	}
-	term.Window().Clear()
-}
-
 func Refresh(term *vaxis.Vaxis) {
 	if term != nil {
 		term.Refresh()
@@ -187,22 +180,11 @@ func ClipboardPush(term *vaxis.Vaxis, text string) {
 	}
 }
 
-func DrawText(term *vaxis.Vaxis, x int, y int, text string) {
-	if term == nil {
-		return
-	}
-	WindowDrawText(term.Window(), x, y, text)
-}
-
-// DrawLink renders text wrapped in an OSC 8 hyperlink. Terminals that
+// WindowDrawLink renders text as an OSC 8 clickable hyperlink. Terminals that
 // support OSC 8 (iTerm2, Kitty, WezTerm, modern macOS Terminal, ...)
 // make the text clickable. The text is also underlined so users can
 // see it's a link.
-func DrawLink(term *vaxis.Vaxis, x int, y int, text string, url string) {
-	if term == nil {
-		return
-	}
-	win := term.Window()
+func WindowDrawLink(win vaxis.Window, x int, y int, text string, url string) {
 	width, height := win.Size()
 	if x < 0 || y < 0 || x >= width || y >= height {
 		return
@@ -212,13 +194,6 @@ func DrawLink(term *vaxis.Vaxis, x int, y int, text string, url string) {
 		UnderlineStyle: vaxis.UnderlineSingle,
 	}
 	win.New(x, y, width-x, 1).Print(vaxis.Segment{Text: text, Style: style})
-}
-
-func DrawTextStyle(term *vaxis.Vaxis, x int, y int, text string, fg int, bg int, bold bool, dim bool, italic bool, underline bool, reverse bool) {
-	if term == nil {
-		return
-	}
-	WindowDrawTextStyle(term.Window(), x, y, text, fg, bg, bold, dim, italic, underline, reverse)
 }
 
 func Render(term *vaxis.Vaxis) {

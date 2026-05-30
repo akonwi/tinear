@@ -179,7 +179,7 @@ fn draw_card_row(vx: vaxis::Vaxis, notif: Dynamic, idx: Int, cursor: Int, width:
   let id_part = text::pad_str(info.id, 10)
   let line = "{cursor_mark} {id_part} {actor_name} {type_label}  {info.title}"
   let row = 2 + idx
-  vaxis::draw_text(vx, 1, row, text::truncate_with_ellipsis(line, width))
+  vaxis::window_draw_text(vaxis::root(vx), 1, row, text::truncate_with_ellipsis(line, width))
 }
 
 fn draw_pr_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int) Void {
@@ -240,14 +240,14 @@ fn draw_pr_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: I
   let id_str = "PR #{pr_number.to_str()}"
   let header_title = text::truncate_with_ellipsis(pr_title, panel_width - id_str.size() - 3)
   let header = "{id_str} — {header_title}"
-  vaxis::draw_text(vx, x, 2, header)
+  vaxis::window_draw_text(vaxis::root(vx), x, 2, header)
 
   // Separator under header
   mut sep = ""
   for i in 0..(panel_width - 1) {
     sep =+ "─"
   }
-  vaxis::draw_text(vx, x, 3, sep)
+  vaxis::window_draw_text(vaxis::root(vx), x, 3, sep)
 
   // PR details block
   draw::draw_label_row(vx, x, 5, "Status",   pr_status)
@@ -261,14 +261,14 @@ fn draw_pr_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: I
     true => "Comment",
     false => "Latest event",
   }
-  vaxis::draw_text(vx, x, content_y, section_title)
+  vaxis::window_draw_text(vaxis::root(vx), x, content_y, section_title)
   mut sep2 = ""
   for i in 0..(panel_width - 1) {
     sep2 =+ "─"
   }
-  vaxis::draw_text(vx, x, content_y + 1, sep2)
+  vaxis::window_draw_text(vaxis::root(vx), x, content_y + 1, sep2)
 
-  vaxis::draw_text(vx, x + 2, content_y + 3, "{actor_name} · {created_str}")
+  vaxis::window_draw_text(vaxis::root(vx), x + 2, content_y + 3, "{actor_name} · {created_str}")
 
   if is_pr_comment_type(n_type) {
     // Linear stores a short preview of the comment in `subtitle`.
@@ -279,9 +279,9 @@ fn draw_pr_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: I
       _ => "(comment body not available)",
     }
     let body_truncated = text::truncate_with_ellipsis(body, panel_width - 3)
-    vaxis::draw_text(vx, x + 2, content_y + 5, body_truncated)
+    vaxis::window_draw_text(vaxis::root(vx), x + 2, content_y + 5, body_truncated)
   } else {
-    vaxis::draw_text(vx, x + 2, content_y + 4, type_label)
+    vaxis::window_draw_text(vaxis::root(vx), x + 2, content_y + 4, type_label)
   }
 
 }
@@ -354,14 +354,14 @@ fn draw_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int,
   // Header: identifier — title
   let header_title = text::truncate_with_ellipsis(issue_title, panel_width - issue_id.size() - 3)
   let header = "{issue_id} — {header_title}"
-  vaxis::draw_text(vx, x, 2, header)
+  vaxis::window_draw_text(vaxis::root(vx), x, 2, header)
 
   // Separator under header
   mut sep = ""
   for i in 0..(panel_width - 1) {
     sep =+ "─"
   }
-  vaxis::draw_text(vx, x, 3, sep)
+  vaxis::window_draw_text(vaxis::root(vx), x, 3, sep)
 
   // Issue details block
   draw::draw_label_row(vx, x, 5, "Status",   state_name)
@@ -375,12 +375,12 @@ fn draw_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int,
   let max_y = screen::status_bar_y(vx) - 1
 
   if is_comment_type(n_type) {
-    vaxis::draw_text(vx, x, content_y, "Comments")
+    vaxis::window_draw_text(vaxis::root(vx), x, content_y, "Comments")
     mut sep2 = ""
     for i in 0..(panel_width - 1) {
       sep2 =+ "─"
     }
-    vaxis::draw_text(vx, x, content_y + 1, sep2)
+    vaxis::window_draw_text(vaxis::root(vx), x, content_y + 1, sep2)
 
     let empty: [Dynamic] = []
     let comments = match issue_obj {
@@ -404,25 +404,25 @@ fn draw_detail_panel(vx: vaxis::Vaxis, notif: Dynamic, x: Int, panel_width: Int,
       }
     }
   } else if n_type == "issueStatusChanged" {
-    vaxis::draw_text(vx, x, content_y, "Status change")
+    vaxis::window_draw_text(vaxis::root(vx), x, content_y, "Status change")
     mut sep3 = ""
     for i in 0..(panel_width - 1) {
       sep3 =+ "─"
     }
-    vaxis::draw_text(vx, x, content_y + 1, sep3)
+    vaxis::window_draw_text(vaxis::root(vx), x, content_y + 1, sep3)
 
     let trans = last_status_transition(notif)
     if trans.from.is_empty() {
-      vaxis::draw_text(vx, x + 2, content_y + 3, "(no transition recorded)")
+      vaxis::window_draw_text(vaxis::root(vx), x + 2, content_y + 3, "(no transition recorded)")
     } else {
-      vaxis::draw_text(vx, x + 2, content_y + 3, "{trans.from}  →  {trans.to}")
+      vaxis::window_draw_text(vaxis::root(vx), x + 2, content_y + 3, "{trans.from}  →  {trans.to}")
     }
   } else {
     match description {
       desc => {
-        vaxis::draw_text(vx, x, content_y, "Description")
+        vaxis::window_draw_text(vaxis::root(vx), x, content_y, "Description")
         let desc_truncated = text::truncate_with_ellipsis(desc, panel_width - 3)
-        vaxis::draw_text(vx, x + 2, content_y + 1, desc_truncated)
+        vaxis::window_draw_text(vaxis::root(vx), x + 2, content_y + 1, desc_truncated)
       },
       _ => (),
     }
@@ -455,7 +455,7 @@ fn draw_inbox_content(state: state::AppState) Void {
     let div_y_start = 2
     let div_y_end = screen::status_bar_y(vx) - 1
     for row in div_y_start..div_y_end {
-      vaxis::draw_text(vx, divider_x, row, "│")
+      vaxis::window_draw_text(vaxis::root(vx), divider_x, row, "│")
     }
 
     // Detail panel
@@ -473,7 +473,7 @@ fn draw_inbox_content(state: state::AppState) Void {
       true => "↑↓ · ↵ select · Esc back · ⌫ delete · o open · r refresh",
       false => "↑↓ · ↵ select · Esc back · ⌫ delete · r refresh",
     }
-    vaxis::draw_text(vx, 1, sb_y, hints)
+    vaxis::window_draw_text(vaxis::root(vx), 1, sb_y, hints)
   } else {
     // Full-width list
     let max_rows = screen::content_height(vx) - 4
@@ -486,6 +486,6 @@ fn draw_inbox_content(state: state::AppState) Void {
 
     // Status bar
     let sb_y = screen::status_bar_y(vx)
-    vaxis::draw_text(vx, 1, sb_y, "↑↓ · ↵ select · Tab · ⌫ delete · r refresh")
+    vaxis::window_draw_text(vaxis::root(vx), 1, sb_y, "↑↓ · ↵ select · Tab · ⌫ delete · r refresh")
   }
 }

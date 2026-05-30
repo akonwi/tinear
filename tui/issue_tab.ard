@@ -73,14 +73,14 @@ fn draw_issue_tab(state: state::AppState, tab: state::IssueTab) Void {
 
   // Header: identifier — title
   let header_title = text::truncate_with_ellipsis(issue_title, panel_width - issue_id.size() - 3)
-  vaxis::draw_text(vx, panel_x, 2, "{issue_id} — {header_title}")
+  vaxis::window_draw_text(vaxis::root(vx), panel_x, 2, "{issue_id} — {header_title}")
 
   // Separator under header
   mut sep = ""
   for i in 0..(panel_width - 1) {
     sep =+ "─"
   }
-  vaxis::draw_text(vx, panel_x, 3, sep)
+  vaxis::window_draw_text(vaxis::root(vx), panel_x, 3, sep)
 
   // Issue details block
   draw::draw_label_row(vx, panel_x, 5,  "Status",   state_name)
@@ -119,17 +119,17 @@ fn draw_issue_tab(state: state::AppState, tab: state::IssueTab) Void {
     false => "─",
   }
   if desc_active {
-    vaxis::draw_text_style(vx, panel_x, desc_start, " Description ", -1, -1, false, false, false, false, true)
+    vaxis::window_draw_text_style(vaxis::root(vx), panel_x, desc_start, " Description ", -1, -1, false, false, false, false, true)
   } else if desc_highlighted {
-    vaxis::draw_text(vx, panel_x, desc_start, "[Description]")
+    vaxis::window_draw_text(vaxis::root(vx), panel_x, desc_start, "[Description]")
   } else {
-    vaxis::draw_text(vx, panel_x, desc_start, "Description")
+    vaxis::window_draw_text(vaxis::root(vx), panel_x, desc_start, "Description")
   }
   mut desc_div = ""
   for i in 0..(panel_width - 1) {
     desc_div =+ desc_underline_char
   }
-  vaxis::draw_text(vx, panel_x, desc_start + 1, desc_div)
+  vaxis::window_draw_text(vaxis::root(vx), panel_x, desc_start + 1, desc_div)
 
   mut next_y = desc_body_start
   match description {
@@ -152,7 +152,7 @@ fn draw_issue_tab(state: state::AppState, tab: state::IssueTab) Void {
       next_y = desc_body_start + max_desc_lines + 1
     },
     _ => {
-      vaxis::draw_text(vx, panel_x + 2, desc_body_start, "(no description)")
+      vaxis::window_draw_text(vaxis::root(vx), panel_x + 2, desc_body_start, "(no description)")
       next_y = desc_body_start + 2
     },
   }
@@ -170,20 +170,20 @@ fn draw_issue_tab(state: state::AppState, tab: state::IssueTab) Void {
       false => "─",
     }
     if comments_active {
-      vaxis::draw_text_style(vx, panel_x, next_y, " {count_label} ", -1, -1, false, false, false, false, true)
+      vaxis::window_draw_text_style(vaxis::root(vx), panel_x, next_y, " {count_label} ", -1, -1, false, false, false, false, true)
     } else if comments_highlighted {
-      vaxis::draw_text(vx, panel_x, next_y, "[{count_label}]")
+      vaxis::window_draw_text(vaxis::root(vx), panel_x, next_y, "[{count_label}]")
     } else {
-      vaxis::draw_text(vx, panel_x, next_y, count_label)
+      vaxis::window_draw_text(vaxis::root(vx), panel_x, next_y, count_label)
     }
     mut cm_div = ""
     for i in 0..(panel_width - 1) {
       cm_div =+ comments_underline_char
     }
-    vaxis::draw_text(vx, panel_x, next_y + 1, cm_div)
+    vaxis::window_draw_text(vaxis::root(vx), panel_x, next_y + 1, cm_div)
 
     if tab.comments_view.comments.size() == 0 {
-      vaxis::draw_text(vx, panel_x + 2, next_y + 3, "(no comments)")
+      vaxis::window_draw_text(vaxis::root(vx), panel_x + 2, next_y + 3, "(no comments)")
     } else {
       let body_y = next_y + 3
       let lv_layout = screen::Layout{
@@ -204,5 +204,5 @@ fn draw_issue_tab(state: state::AppState, tab: state::IssueTab) Void {
     },
     false => "↑↓ section · ↵ enter · s status · y cycle · c comment · Esc close tab · Tab switch",
   }
-  vaxis::draw_text(vx, 1, sb_y, hint)
+  vaxis::window_draw_text(vaxis::root(vx), 1, sb_y, hint)
 }

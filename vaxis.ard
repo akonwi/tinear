@@ -5,8 +5,6 @@ extern fn new(title: Str) Vaxis!Str = "New"
 
 extern fn close(vx: Vaxis) Void!Str = "Close"
 
-extern fn clear(vx: Vaxis) Void = "Clear"
-
 extern fn render(vx: Vaxis) Void = "Render"
 
 extern fn refresh(vx: Vaxis) Void = "Refresh"
@@ -277,25 +275,9 @@ extern fn window_fill(
 
 extern fn window_show_cursor(win: Window, x: Int, y: Int) Void = "WindowShowCursor"
 
-extern fn draw_text(vx: Vaxis, x: Int, y: Int, text: Str) Void = "DrawText"
-
 // Render `text` as an OSC 8 clickable hyperlink pointing at `url`.
 // Renders an underline so the link is visually distinct. Terminals
 // without OSC 8 support just render the underlined text.
-extern fn draw_link(vx: Vaxis, x: Int, y: Int, text: Str, url: Str) Void = "DrawLink"
-
-extern fn draw_text_style(
-  vx: Vaxis,
-  x: Int,
-  y: Int,
-  text: Str,
-  fg: Int,
-  bg: Int,
-  bold: Bool,
-  dim: Bool,
-  italic: Bool,
-  underline: Bool,
-  reverse: Bool,
-) Void = "DrawTextStyle"
+extern fn window_draw_link(win: Window, x: Int, y: Int, text: Str, url: Str) Void = "WindowDrawLink"
 
 extern fn text_backspace(text: Str) Str = "TextBackspace"

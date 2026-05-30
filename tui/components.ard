@@ -44,14 +44,14 @@ impl Scrollview {
     for line, idx in lines {
       if idx >= scroll and idx < end {
         let display = text::truncate_with_ellipsis(line, content_w)
-        vaxis::draw_text(vx, layout.x, layout.y + (idx - scroll), display)
+        vaxis::window_draw_text(vaxis::root(vx), layout.x, layout.y + (idx - scroll), display)
       }
     }
     if lines.size() > layout.height {
       let bar_x = layout.x + layout.width - 1
       // Track
       for r in 0..(layout.height - 1) {
-        vaxis::draw_text(vx, bar_x, layout.y + r, "│")
+        vaxis::window_draw_text(vaxis::root(vx), bar_x, layout.y + r, "│")
       }
       // Thumb size, proportional to viewport / total.
       let total = lines.size()
@@ -66,7 +66,7 @@ impl Scrollview {
         false => (scroll * max_thumb_pos) / max_scroll,
       }
       for r in 0..(thumb_h - 1) {
-        vaxis::draw_text(vx, bar_x, layout.y + thumb_pos + r, "█")
+        vaxis::window_draw_text(vaxis::root(vx), bar_x, layout.y + thumb_pos + r, "█")
       }
     }
   }
@@ -100,9 +100,9 @@ fn draw_comment(vx: vaxis::Vaxis, comment: Dynamic, x: Int, y: Int, panel_width:
     false => " ",
   }
   let head = "{cursor_mark}{trigger_mark} {user_name} · {date_str}"
-  vaxis::draw_text(vx, x, y, head)
+  vaxis::window_draw_text(vaxis::root(vx), x, y, head)
   let body_truncated = text::truncate_with_ellipsis(body, panel_width - 4)
-  vaxis::draw_text(vx, x + 3, y + 1, body_truncated)
+  vaxis::window_draw_text(vaxis::root(vx), x + 3, y + 1, body_truncated)
   y + 3
 }
 
@@ -173,10 +173,10 @@ impl CommentList {
       // Overflow indicators on the right-hand column.
       let arrow_x = layout.x + layout.width - 1
       if top > 0 {
-        vaxis::draw_text(vx, arrow_x, layout.y, "↑")
+        vaxis::window_draw_text(vaxis::root(vx), arrow_x, layout.y, "↑")
       }
       if end_excl < self.comments.size() {
-        vaxis::draw_text(vx, arrow_x, layout.y + layout.height - 1, "↓")
+        vaxis::window_draw_text(vaxis::root(vx), arrow_x, layout.y + layout.height - 1, "↓")
       }
     }
   }
