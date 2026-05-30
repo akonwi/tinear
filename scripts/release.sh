@@ -54,10 +54,10 @@ for plat in "${PLATFORMS[@]}"; do
 
   echo "  Building $NAME …"
   cd "$REPO_ROOT"
-  GOOS="$GOOS" GOARCH="$GOARCH" ard build main.ard --out "$OUTDIR/$NAME" 2>&1 | sed 's/^/    /'
+  GOOS="$GOOS" GOARCH="$GOARCH" ard build main.ard --out "$OUTDIR/tinear" 2>&1 | sed 's/^/    /'
 
   echo "  Packing $NAME.tar.gz …"
-  tar czf "$OUTDIR/$NAME.tar.gz" -C "$OUTDIR" "$NAME"
+  tar czf "$OUTDIR/$NAME.tar.gz" -C "$OUTDIR" tinear
 done
 
 echo ""
