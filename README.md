@@ -1,6 +1,6 @@
 # tinear
 
-A CLI for [Linear](https://linear.app/) built with [Ard](https://ard.run).
+A terminal UI for [Linear](https://linear.app/) built with [Ard](https://ard.run).
 
 ## Setup
 
@@ -12,32 +12,36 @@ A CLI for [Linear](https://linear.app/) built with [Ard](https://ard.run).
    export LINEAR_API_KEY=lin_api_xxx
    ```
 
-   Or create `~/.tinear/config`:
-   ```json
-   { "api_key": "lin_api_xxx" }
-   ```
+   Or run `tinear login` to save it interactively to `~/.tinear/config`.
 
-   The env var takes precedence.
+## Usage
 
-## Commands
+Run without arguments to launch the interactive TUI:
+
+```bash
+tinear
+```
+
+The TUI shows your **Inbox** and **My Issues** tabs, with per-issue detail views,
+a status picker, and a comment composer.
+
+### Commands
 
 | Command | Description |
 |---------|-------------|
-| `tinear me` | Show current user |
-| `tinear teams [--json]` | List teams |
-| `tinear issues [--team <key>] [--status <name>] [--json]` | List and filter issues |
-| `tinear issue <id> [--json]` | View issue details |
-| `tinear create-issue --team <key> --title <title> [--description <desc>]` | Create an issue |
-| `tinear update-issue <id> --status <name>` | Update issue status |
-| `tinear my-board [--json]` | List your open assigned issues |
-| `tinear tui` | Interactive TUI showing you and your open assigned issues |
+| `tinear` (no command) | Launch the interactive TUI |
+| `tinear login` | Save an API key interactively |
 | `tinear help` | Show usage |
-
-Use `--json` on any list/detail command for JSON output.
 
 ## Build
 
 ```bash
-ard build main.ard
-# binary: ./main
+ard check main.ard              # type-check
+ard build main.ard --out ard-out/tinear
 ```
+
+The binary at `ard-out/tinear` is standalone and gitignored.
+
+## License
+
+MIT
