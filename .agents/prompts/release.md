@@ -5,7 +5,13 @@ Create a new tinear release.
 
 ## Instructions
 
-1. **Determine the version**. If no version argument was given, look at the last git tag and suggest the next semantic version bump (patch unless a breaking change is mentioned). Ask for confirmation.
+1. **Determine the version**. If no version argument was given, scan commits since the last tag to determine the bump:
+   - `git log $(git describe --tags --abbrev=0 2>/dev/null || echo HEAD)..HEAD --oneline`
+   - **Major** — any commit message contains `BREAKING CHANGE` or a `!` after the type (e.g. `feat!:`)
+   - **Minor** — any commit matches `feat:` or `feature:`
+   - **Patch** — otherwise (fixes, chores, docs, refactors, etc.)
+   - If no tags exist yet, propose `v0.1.0`
+   - Suggest the version and ask for confirmation.
 
 2. **Generate release notes**. Gather notable changes since the last tag:
    - Scan commits with `git log` between the last tag and HEAD
