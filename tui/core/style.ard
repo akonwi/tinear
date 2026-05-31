@@ -29,11 +29,16 @@ struct Padding {
 }
 
 // Uniform padding on all four sides.
-fn pad_all(n: Int) Padding {
+fn Padding::all(n: Int) Padding {
   Padding{top: n, right: n, bottom: n, left: n}
 }
 
-// Horizontal and vertical padding (CSS-style two-value).
-fn pad_xy(x: Int, y: Int) Padding {
-  Padding{top: y, right: x, bottom: y, left: x}
+// Horizontal padding (CSS-style two-value).
+fn Padding::x(size: Int) Padding {
+  Padding{top: 0, right: 0, bottom: size, left: size}
+}
+
+// Vertical padding (CSS-style two-value).
+fn Padding::y(size: Int) Padding {
+  Padding{top: size, right: size, bottom: 0, left: 0}
 }

@@ -14,7 +14,7 @@ fn run() {
     text::new("Hello, framework!"),
     title: " Demo ",
     border: style::BorderStyle::Single,
-    padding: style::pad_all(1),
+    padding: style::Padding::all(1),
   )
 
   let frame = view::root(vx)
