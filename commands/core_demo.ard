@@ -1,21 +1,21 @@
-use tinear/tui/core/box
 use tinear/tui/core/style
 use tinear/tui/core/text
 use tinear/tui/core/view
 use tinear/vaxis
 
-// Temporary demo for tui/core/ Box + Text.
+// Temporary demo for tui/core/ Style + Text.
 // TODO: remove once the framework is wired into real screens.
 
 fn run() {
   let vx = vaxis::new("tinear core demo").expect("vaxis::new")
 
-  let demo = box::new(
-    text::new("Hello, framework!"),
-    title: " Demo ",
+  let demo_style = style::Style{
     border: style::BorderStyle::Single,
     padding: style::Padding::all(1),
-  )
+    border_title: " Demo ",
+  }
+
+  let demo = style::styled(text::new("Hello, framework!"), demo_style)
 
   let frame = view::root(vx)
   frame.clear()
