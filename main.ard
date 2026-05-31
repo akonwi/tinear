@@ -9,7 +9,7 @@ use tinear/util
 
 // Trait-impl visibility workaround: the Go codegen for cross-module
 // trait dispatch only sees impls reachable from the entry module's
-// import set. Importing widget impls here so the dispatcher in
+// import set. Importing view impls here so the dispatcher in
 // commands/core_demo (and any future framework user) can find them.
 // Revisit when the dev compiler's impl lookup walks the call site's
 // transitive imports instead.

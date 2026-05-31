@@ -1,7 +1,7 @@
 use tinear/tui/core/box
 use tinear/tui/core/style
 use tinear/tui/core/text
-use tinear/tui/core/widget
+use tinear/tui/core/view
 use tinear/vaxis
 
 // Temporary demo for tui/core/ Box + Text.
@@ -17,7 +17,7 @@ fn run() {
     padding: style::pad_all(1),
   )
 
-  let frame = widget::root(vx)
+  let frame = view::root(vx)
   frame.clear()
   demo.render(frame)
   frame.flush()

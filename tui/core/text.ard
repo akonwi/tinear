@@ -3,7 +3,7 @@
 // Truncates to the frame width when too long. Wrapping is left for
 // a future revision; for now `Text` is single-line only.
 
-use tinear/tui/core/widget
+use tinear/tui/core/view
 
 struct Text {
   content: Str,
@@ -18,8 +18,8 @@ struct Text {
   reverse: Bool,
 }
 
-impl widget::Widget for Text {
-  fn render(frame: widget::Frame) {
+impl view::View for Text {
+  fn render(frame: view::Frame) {
     // Draw a single line at (0, 0). Vaxis clips the right edge
     // automatically when content overruns the frame width.
     // Negative fg/bg values mean "terminal default"; all-defaults
@@ -34,13 +34,13 @@ impl widget::Widget for Text {
 
 // Construct a Text with default (no) styling.
 //
-// Returns `widget::Widget` rather than `Text` so the trait coercion
-// happens here — inside the module that defines `impl Widget for
+// Returns `view::View` rather than `Text` so the trait coercion
+// happens here — inside the module that defines `impl View for
 // Text`. The Ard checker does not currently coerce a concrete type
 // to its trait across module boundaries at storage positions (only
-// at function-argument positions), so widget constructors must
-// hand back already-trait-typed values for cross-module use.
-fn new(content: Str) widget::Widget {
+// at function-argument positions), so view constructors must hand
+// back already-trait-typed values for cross-module use.
+fn new(content: Str) view::View {
   Text{
     content: content,
     fg: -1,

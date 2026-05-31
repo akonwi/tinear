@@ -1,9 +1,9 @@
 // Rectangular region used throughout the framework.
 //
 // Coordinates are always in the local space of the Frame they're
-// being used against — never absolute terminal coordinates. A widget
+// being used against — never absolute terminal coordinates. A view
 // addresses its own frame as `(0, 0)..(w, h)`; the position of the
-// frame on the actual terminal is handled by `widget::sub` and the
+// frame on the actual terminal is handled by `view::sub` and the
 // underlying vaxis subwindow.
 //
 // Helpers that return a new `Rect` (e.g. `inset`) are free functions

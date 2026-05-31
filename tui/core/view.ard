@@ -1,16 +1,16 @@
-// Framework core: the Frame value and the Widget trait.
+// Framework core: the Frame value and the View trait.
 //
-// Frame is the drawable surface a widget renders into. The Widget
-// trait is the contract every renderable component implements. They
-// live in one file because they form the framework's two-sided
-// contract — every widget's render method takes a Frame, and every
-// drawing operation happens through one.
+// Frame is the drawable surface a view renders into. The View trait
+// is the contract every renderable component implements. They live
+// in one file because they form the framework's two-sided contract
+// — every view's render method takes a Frame, and every drawing
+// operation happens through one.
 //
-// Composition is the responsibility of widgets, not Frame. A parent
+// Composition is the responsibility of views, not Frame. A parent
 // uses `sub(frame, area)` to produce a clipped sub-frame and then
 // invokes the child's `render` on it directly:
 //
-//   self.child.render(widget::sub(frame, inner_area))
+//   self.child.render(view::sub(frame, inner_area))
 //
 // `sub` is a free function rather than a `Frame` method because the
 // Ard checker stack-overflows on impl methods that return their own
@@ -22,10 +22,10 @@
 use tinear/vaxis
 use tinear/tui/core/rect
 
-// A Frame is the drawable surface a widget renders into. It wraps
-// the underlying vaxis Window plus the Vaxis handle. The Window is
-// already clipped to the widget's assigned region — widgets address
-// it as (0, 0)..(width(), height()) in their own local space.
+// A Frame is the drawable surface a view renders into. It wraps the
+// underlying vaxis Window plus the Vaxis handle. The Window is
+// already clipped to the view's assigned region — views address it
+// as (0, 0)..(width(), height()) in their own local space.
 //
 // The Frame value itself is immutable. Drawing operations mutate the
 // terminal cell buffer through FFI, not any Ard-level state.
@@ -34,16 +34,16 @@ struct Frame {
   window: vaxis::Window,
 }
 
-// Every renderable widget implements this trait. The method receives
-// a Frame pre-clipped to the widget's region; widgets never see
-// their own position on the wider screen.
-trait Widget {
+// Every renderable view implements this trait. The method receives a
+// Frame pre-clipped to the view's region; views never see their own
+// position on the wider screen.
+trait View {
   fn render(frame: Frame)
 }
 
 impl Frame {
   // The frame's own bounds, in its local coordinate space. Always
-  // origin-zero: a widget asking for its area gets (0, 0, w, h).
+  // origin-zero: a view asking for its area gets (0, 0, w, h).
   fn area() rect::Rect {
     rect::Rect{
       x: 0,
@@ -110,10 +110,10 @@ fn root(vx: vaxis::Vaxis) Frame {
 
 // Carve out a sub-region of `frame` as a new Frame. The returned
 // frame has its own (0, 0)..(area.w, area.h) coordinate space; a
-// parent widget uses this to render children without those children
+// parent view uses this to render children without those children
 // knowing where they sit in the wider screen:
 //
-//   self.child.render(widget::sub(frame, inner_area))
+//   self.child.render(view::sub(frame, inner_area))
 //
 // An empty or negative area collapses to a zero-sized subwindow,
 // which silently clips all subsequent draws — the caller can

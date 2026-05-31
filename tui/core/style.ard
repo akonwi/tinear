@@ -1,15 +1,15 @@
-// Decoration primitives — values describing how a widget's
-// rendering surface is styled and laid out around its content.
+// Decoration primitives — values describing how a view's rendering
+// surface is styled and laid out around its content.
 //
 // These types live in their own module rather than alongside any
-// particular widget because they are conceptually orthogonal to any
+// particular view because they are conceptually orthogonal to any
 // specific container. Today only `box` consumes them; in the future
-// any widget that wants bordered or padded behaviour can pull from
-// the same types without depending on `box`.
+// any view that wants bordered or padded behaviour can pull from the
+// same types without depending on `box`.
 //
 // A later refactor (cut 2) may unify these with text attributes
 // (fg/bg/bold/...) into a single `Style` value applied via
-// `styled(widget, style)` — the Lipgloss model. This module is the
+// `styled(view, style)` — the Lipgloss model. This module is the
 // home that lands in.
 
 // Border line style.

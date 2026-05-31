@@ -22,7 +22,7 @@ recurring patterns became visible:
   invent another one. There's no abstraction that says "I am drawable."
 - **No clipping / sub-region abstraction.** Draws go straight to the
   terminal cell buffer at absolute coordinates. There's no equivalent
-  of "this widget owns this rectangle; render within it."
+  of "this view owns this rectangle; render within it."
 
 Three established TUI frameworks were surveyed to choose a direction:
 
@@ -49,8 +49,14 @@ fixed on the current dev branch). A separate codegen bug rejected
 `Void`-returning trait methods (also fixed on the dev branch). With
 those fixes in place, traits now support function parameters, struct
 fields, list elements, and nested dispatch — enough to express a
-genuine open-world `Widget` interface rather than a closed union with
+genuine open-world `View` interface rather than a closed union with
 central match dispatch.
+
+(Terminology note: the rendered things are **views**, the trait is
+**`View`**. Other frameworks call equivalents "widgets" or
+"components"; this ADR uses "view" for our framework and reserves
+"widget" for references to other systems' equivalents, e.g.
+ratatui's `Widget` trait.)
 
 ## Decision
 
@@ -71,29 +77,32 @@ Introduce a small framework layer at `tui/core/` that the rest of
    primitives. The Frame value itself is immutable; the underlying
    terminal buffer is mutated through FFI.
 
-4. **`trait Widget { fn render(frame: Frame) }`** — the universal
+4. **`trait View { fn render(frame: Frame) }`** — the universal
    component contract. Every component implements this trait. Real
    trait dispatch is used (not a closed union).
 
-5. **`Frame::render(self, area: Rect, w: Widget)`** — the
-   framework's composition primitive, exposed as a method on Frame
-   rather than a top-level helper. It creates a subwindow of
-   `self.window` clipped to `area`, wraps it in a new Frame, and
-   invokes `w.render(child_frame)`. Children always see a
-   `(0,0)..(w,h)` coordinate space scoped to their assigned region.
-   This is the flexbox semantic: the parent decides layout, the child
-   paints into the box it was given.
-
-   The trait method `Widget::render(self, frame: Frame)` and the Frame
-   method `Frame::render(self, area: Rect, w: Widget)` share a name by
-   design — the receiver type makes the intent unambiguous:
+5. **`sub(frame: Frame, area: Rect) Frame`** — the framework's
+   composition primitive, exposed as a free function in the `view`
+   module. It carves a sub-rectangle of `frame.window` clipped to
+   `area` and returns a new Frame whose own `(0, 0)` corresponds to
+   `area`'s upper-left in the parent. A parent view composes by
+   handing that sub-frame straight to its child's `render`:
 
    ```
-   widget.render(frame)         # "widget, paint yourself onto this frame"
-   frame.render(area, widget)   # "frame, render this widget at this area"
+   self.child.render(view::sub(frame, inner_area))
    ```
 
-6. **A small set of primitive widgets**, factored by role rather than
+   This separates responsibilities cleanly: `sub` only produces
+   frames; rendering only happens via `View::render`. Children always
+   see a `(0, 0)..(w, h)` coordinate space scoped to their assigned
+   region — the flexbox semantic where the parent decides layout and
+   the child paints into the box it was given.
+
+   `sub` is a free function rather than a `Frame` method because the
+   Ard checker stack-overflows on impl methods that return their own
+   struct type. Revert to a method when that compiler bug is fixed.
+
+6. **A small set of primitive views**, factored by role rather than
    by use case. Eight in total:
 
    *Atoms* — produce visible content, no children:
@@ -107,7 +116,7 @@ Introduce a small framework layer at `tui/core/` that the rest of
    - `HStack(children, constraints)` — stack left-to-right.
    - `ZStack(children)` — overlay children at the same position;
      later children draw over earlier ones (for modals, popups).
-   - `Spacer` — placeholder widget that consumes flex space when
+   - `Spacer` — placeholder view that consumes flex space when
      paired with `Constraint::Fill(weight)`.
 
    *Container* — wrap a single child with decoration:
@@ -123,7 +132,7 @@ Introduce a small framework layer at `tui/core/` that the rest of
 
    *Behavior* — wrap a single child with state:
    - `Scroll(child)` — child is logically larger than the frame;
-     widget holds `scroll_offset` and clips to the visible window.
+     view holds `scroll_offset` and clips to the visible window.
 
    The set is deliberately primitive — there is no `Block`, no
    `Tabs`, no `List with selection`. Those are app-level
@@ -136,21 +145,21 @@ Introduce a small framework layer at `tui/core/` that the rest of
 ### Conventions
 
 - **Storage uses concrete types.** State holds `Scrollview`, `Box`,
-  etc. — not `Widget`. The trait coerces at call sites, which is
-  enough for composition and dispatch. Heterogeneous widget lists
-  (`[Widget]`) are supported but rarely needed.
-- **`render` is non-mutating on `self`.** Widgets own their state via
+  etc. — not `View`. The trait coerces at call sites, which is enough
+  for composition and dispatch. Heterogeneous view lists (`[View]`)
+  are supported but rarely needed.
+- **`render` is non-mutating on `self`.** Views own their state via
   `mut` fields, but state mutations happen only in input handlers.
   This preserves the "AppState is rebuilt each frame; draw paths are
   pure" property documented in `AGENTS.md`.
-- **Frames are pre-clipped, not parameterized by area.** Widgets never
+- **Frames are pre-clipped, not parameterized by area.** Views never
   receive their position. They receive a `Frame` already scoped to
   their region and address it with `(0,0)..(w,h)` coordinates. This
   matches flexbox: position is the parent's concern.
-- **Composition flows through Frame methods.** There are no top-level
-  framework helpers a widget needs to import. Everything a widget needs
-  to draw or to embed children hangs off the `Frame` value it is
-  handed.
+- **Composition uses `view::sub`.** A parent computes its child's
+  `Rect`, calls `view::sub(frame, area)` to produce a clipped
+  sub-frame, and forwards it directly to the child's `render`. Frame
+  itself knows nothing about views.
 - **App-specific compositions live in `tui/`, not `tui/core/`.**
   Tab bars, modal layouts, selectable lists, issue cards, the inbox
   detail panel — these are tinear-specific patterns built from `core`
@@ -163,17 +172,16 @@ Introduce a small framework layer at `tui/core/` that the rest of
 
 ### Sequencing
 
-1. Implement `rect.ard`, `layout.ard`, and `widget.ard`. The latter
-   holds **both** the `Frame` struct (with its draw primitives and the
-   composition method `Frame::render(area, w)`) **and** the `Widget`
-   trait. They share a file because Ard does not support cross-file
-   `impl` blocks, and the Frame composition method must mention
-   `Widget` while the `Widget` trait must mention `Frame` — splitting
-   them would create a cyclic import.
-2. Implement `Box` as the first widget; verify the composition
-   chain end-to-end (Box exercises decoration, child rendering, and
-   the Frame composition method in one shot).
-3. Implement the layout widgets (`VStack`, `HStack`, `ZStack`,
+1. Implement `rect.ard`, `layout.ard`, and `view.ard`. The latter
+   holds **both** the `Frame` struct (with its draw primitives) **and**
+   the `View` trait. They share a file because Ard does not support
+   cross-file `impl` blocks and the `View` trait's method must mention
+   `Frame` — keeping them together avoids a cyclic import the moment
+   any Frame method ever needs to mention `View`.
+2. Implement `Box` as the first view; verify the composition chain
+   end-to-end (Box exercises decoration, child rendering, and the
+   `view::sub` composition primitive in one shot).
+3. Implement the layout views (`VStack`, `HStack`, `ZStack`,
    `Spacer`) and the remaining atoms (`Text`, `Fill`).
 4. Add `Scroll` once a real screen needs it.
 5. Port a modal as the first real surface (smallest and most-bordered;
@@ -187,9 +195,9 @@ Introduce a small framework layer at `tui/core/` that the rest of
 
 - The duplicated box-drawing, geometry math, and per-component draw
   signatures collapse into a small reusable surface.
-- New screens compose existing widgets rather than reinvent rendering
+- New screens compose existing views rather than reinvent rendering
   primitives.
-- The `Widget` trait gives a clear extension point — a third party (or
+- The `View` trait gives a clear extension point — a third party (or
   a future contributor) implements one method and the rest of the
   framework cooperates.
 - Encourages a clean split between **state** (mutated by input
@@ -209,9 +217,9 @@ Introduce a small framework layer at `tui/core/` that the rest of
 ### Neutral
 
 - **Event handling is out of scope for this ADR.** The framework
-  defines the rendering contract only. Per-widget event handling
-  (whether a `Widget` trait gains a second `handle_event` method,
-  whether focus is tracked, how key events route to the active widget)
+  defines the rendering contract only. Per-view event handling
+  (whether the `View` trait gains a second `handle_event` method,
+  whether focus is tracked, how key events route to the active view)
   is a future concern, deferred until the rendering split clarifies
   what state actually needs to mutate. The existing input-dispatch
   loop in `tui/app.ard` is unaffected by this ADR.

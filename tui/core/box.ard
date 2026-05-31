@@ -1,4 +1,4 @@
-// Box container — decoratable wrapper around a single child widget.
+// Box container — decoratable wrapper around a single child view.
 //
 // `Box` is the framework's only decoration primitive. Border,
 // padding, title, and background are properties of `Box`, applied
@@ -8,7 +8,7 @@
 // Composes by nesting: padding outside a border (margin) is
 // `Box{child: Box{child, border}, padding}`.
 
-use tinear/tui/core/widget
+use tinear/tui/core/view
 use tinear/tui/core/rect
 use tinear/tui/core/style
 
@@ -32,7 +32,7 @@ fn glyphs_for(s: style::BorderStyle) BorderGlyphs {
   }
 }
 
-fn draw_border(frame: widget::Frame, w: Int, h: Int, s: style::BorderStyle) {
+fn draw_border(frame: view::Frame, w: Int, h: Int, s: style::BorderStyle) {
   if w < 2 or h < 2 {
     ()
   } else {
@@ -60,7 +60,7 @@ fn draw_border(frame: widget::Frame, w: Int, h: Int, s: style::BorderStyle) {
   }
 }
 
-fn fill_background(frame: widget::Frame, w: Int, h: Int, ch: Str) {
+fn fill_background(frame: view::Frame, w: Int, h: Int, ch: Str) {
   for y in 0..h {
     for x in 0..w {
       frame.draw_text(x, y, ch)
@@ -68,10 +68,10 @@ fn fill_background(frame: widget::Frame, w: Int, h: Int, ch: Str) {
   }
 }
 
-// ---- The Box widget ------------------------------------------------
+// ---- The Box view --------------------------------------------------
 
 struct Box {
-  child: widget::Widget,
+  child: view::View,
   border: style::BorderStyle?,
   padding: style::Padding?,
   // Optional title rendered inline in the top border. Only visible
@@ -83,8 +83,8 @@ struct Box {
   background_char: Str?,
 }
 
-impl widget::Widget for Box {
-  fn render(frame: widget::Frame) {
+impl view::View for Box {
+  fn render(frame: view::Frame) {
     let w = frame.width()
     let h = frame.height()
 
@@ -137,22 +137,22 @@ impl widget::Widget for Box {
 
     // 5. Render the child into the computed inner area.
     let inner_area = rect::Rect{x: inner_x, y: inner_y, w: inner_w, h: inner_h}
-    self.child.render(widget::sub(frame, inner_area))
+    self.child.render(view::sub(frame, inner_area))
   }
 }
 
-// Universal Box constructor. Returns `widget::Widget` so callers
-// can pass the result into other widget-typed parameters across
-// module boundaries (the Ard checker does not currently coerce
-// concrete types to traits at storage positions outside the
-// defining module).
+// Universal Box constructor. Returns `view::View` so callers can
+// pass the result into other view-typed parameters across module
+// boundaries (the Ard checker does not currently coerce concrete
+// types to traits at storage positions outside the defining
+// module).
 fn new(
-  child: widget::Widget,
+  child: view::View,
   border: style::BorderStyle?,
   padding: style::Padding?,
   title: Str?,
   background: Str?,
-) widget::Widget {
+) view::View {
   Box{
     child: child,
     border: border,
