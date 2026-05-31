@@ -163,8 +163,13 @@ Introduce a small framework layer at `tui/core/` that the rest of
 
 ### Sequencing
 
-1. Implement `rect.ard`, `layout.ard`, `frame.ard`, `widget.ard` (the
-   trait).
+1. Implement `rect.ard`, `layout.ard`, and `widget.ard`. The latter
+   holds **both** the `Frame` struct (with its draw primitives and the
+   composition method `Frame::render(area, w)`) **and** the `Widget`
+   trait. They share a file because Ard does not support cross-file
+   `impl` blocks, and the Frame composition method must mention
+   `Widget` while the `Widget` trait must mention `Frame` — splitting
+   them would create a cyclic import.
 2. Implement `Box` as the first widget; verify the composition
    chain end-to-end (Box exercises decoration, child rendering, and
    the Frame composition method in one shot).

@@ -2,9 +2,19 @@ use ard/argv
 use ard/io
 use ard/list as List
 
+use tinear/commands/core_demo
 use tinear/commands/login
 use tinear/commands/tui
 use tinear/util
+
+// Trait-impl visibility workaround: the Go codegen for cross-module
+// trait dispatch only sees impls reachable from the entry module's
+// import set. Importing widget impls here so the dispatcher in
+// commands/core_demo (and any future framework user) can find them.
+// Revisit when the dev compiler's impl lookup walks the call site's
+// transitive imports instead.
+use tinear/tui/core/text
+use tinear/tui/core/box
 
 fn main() {
   let args = argv::load()
@@ -17,6 +27,7 @@ fn main() {
       match cmd {
         "help" => util::print_usage(),
         "login" => login::run(rest),
+        "core-demo" => core_demo::run(),
         _ => {
           io::print("Unknown command: {cmd}")
           io::print("")

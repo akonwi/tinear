@@ -1,0 +1,127 @@
+// Framework core: the Frame value and the Widget trait.
+//
+// Frame is the drawable surface a widget renders into. The Widget
+// trait is the contract every renderable component implements. They
+// live in one file because they form the framework's two-sided
+// contract — every widget's render method takes a Frame, and every
+// drawing operation happens through one.
+//
+// Composition is the responsibility of widgets, not Frame. A parent
+// uses `sub(frame, area)` to produce a clipped sub-frame and then
+// invokes the child's `render` on it directly:
+//
+//   self.child.render(widget::sub(frame, inner_area))
+//
+// `sub` is a free function rather than a `Frame` method because the
+// Ard checker stack-overflows on impl methods that return their own
+// struct type (`impl Frame { fn sub() Frame }`). The free-function
+// form (`fn sub(frame: Frame) Frame`) escapes the cycle. Revert to
+// a method when that compiler bug is fixed. See
+// docs/adrs/0003-tui-framework.md for the broader rationale.
+
+use tinear/vaxis
+use tinear/tui/core/rect
+
+// A Frame is the drawable surface a widget renders into. It wraps
+// the underlying vaxis Window plus the Vaxis handle. The Window is
+// already clipped to the widget's assigned region — widgets address
+// it as (0, 0)..(width(), height()) in their own local space.
+//
+// The Frame value itself is immutable. Drawing operations mutate the
+// terminal cell buffer through FFI, not any Ard-level state.
+struct Frame {
+  vx: vaxis::Vaxis,
+  window: vaxis::Window,
+}
+
+// Every renderable widget implements this trait. The method receives
+// a Frame pre-clipped to the widget's region; widgets never see
+// their own position on the wider screen.
+trait Widget {
+  fn render(frame: Frame)
+}
+
+impl Frame {
+  // The frame's own bounds, in its local coordinate space. Always
+  // origin-zero: a widget asking for its area gets (0, 0, w, h).
+  fn area() rect::Rect {
+    rect::Rect{
+      x: 0,
+      y: 0,
+      w: vaxis::window_width(self.window),
+      h: vaxis::window_height(self.window),
+    }
+  }
+
+  fn width() Int { vaxis::window_width(self.window) }
+  fn height() Int { vaxis::window_height(self.window) }
+
+  // Draw a single line of text at (x, y) in this frame's local
+  // coordinate space. Out-of-bounds draws are silently clipped by
+  // vaxis.
+  fn draw_text(x: Int, y: Int, text: Str) {
+    vaxis::window_draw_text(self.window, x, y, text)
+  }
+
+  // Same as `draw_text` but with explicit style attributes. Color
+  // values of -1 mean "use the terminal default".
+  fn draw_styled(
+    x: Int,
+    y: Int,
+    text: Str,
+    fg: Int,
+    bg: Int,
+    bold: Bool,
+    dim: Bool,
+    italic: Bool,
+    underline: Bool,
+    reverse: Bool,
+  ) {
+    vaxis::window_draw_text_style(
+      self.window, x, y, text, fg, bg,
+      bold, dim, italic, underline, reverse,
+    )
+  }
+
+  // Clear every cell in this frame.
+  fn clear() {
+    vaxis::window_clear(self.window)
+  }
+
+  // Push the accumulated cell buffer to the terminal. Diffs against
+  // the previous frame and writes only changed cells.
+  //
+  // Flushing operates on the whole terminal regardless of which
+  // frame this is called on (vaxis's render is buffer-wide), so in
+  // practice it should only be invoked once per draw pass, on the
+  // root frame.
+  fn flush() {
+    vaxis::render(self.vx)
+  }
+
+}
+
+// Construct a root Frame covering the entire terminal. Use this
+// once at the top of a draw pass; sub-frames flow from `sub` below
+// it.
+fn root(vx: vaxis::Vaxis) Frame {
+  Frame{vx: vx, window: vaxis::root(vx)}
+}
+
+// Carve out a sub-region of `frame` as a new Frame. The returned
+// frame has its own (0, 0)..(area.w, area.h) coordinate space; a
+// parent widget uses this to render children without those children
+// knowing where they sit in the wider screen:
+//
+//   self.child.render(widget::sub(frame, inner_area))
+//
+// An empty or negative area collapses to a zero-sized subwindow,
+// which silently clips all subsequent draws — the caller can
+// forward it to a child without special-casing the degenerate
+// case.
+//
+// (Free function rather than a `Frame` method: see file header.)
+fn sub(frame: Frame, area: rect::Rect) Frame {
+  let win = vaxis::subwindow(frame.window, area.x, area.y, area.w, area.h)
+  Frame{vx: frame.vx, window: win}
+}

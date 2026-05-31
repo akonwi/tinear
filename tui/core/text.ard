@@ -1,0 +1,54 @@
+// Text atom — a single line of styled text.
+//
+// Truncates to the frame width when too long. Wrapping is left for
+// a future revision; for now `Text` is single-line only.
+
+use tinear/tui/core/widget
+
+struct Text {
+  content: Str,
+  // Foreground color. -1 = terminal default.
+  fg: Int,
+  // Background color. -1 = terminal default.
+  bg: Int,
+  bold: Bool,
+  dim: Bool,
+  italic: Bool,
+  underline: Bool,
+  reverse: Bool,
+}
+
+impl widget::Widget for Text {
+  fn render(frame: widget::Frame) {
+    // Draw a single line at (0, 0). Vaxis clips the right edge
+    // automatically when content overruns the frame width.
+    // Negative fg/bg values mean "terminal default"; all-defaults
+    // styling is indistinguishable from plain text.
+    frame.draw_styled(
+      0, 0, self.content,
+      self.fg, self.bg,
+      self.bold, self.dim, self.italic, self.underline, self.reverse,
+    )
+  }
+}
+
+// Construct a Text with default (no) styling.
+//
+// Returns `widget::Widget` rather than `Text` so the trait coercion
+// happens here — inside the module that defines `impl Widget for
+// Text`. The Ard checker does not currently coerce a concrete type
+// to its trait across module boundaries at storage positions (only
+// at function-argument positions), so widget constructors must
+// hand back already-trait-typed values for cross-module use.
+fn new(content: Str) widget::Widget {
+  Text{
+    content: content,
+    fg: -1,
+    bg: -1,
+    bold: false,
+    dim: false,
+    italic: false,
+    underline: false,
+    reverse: false,
+  }
+}
