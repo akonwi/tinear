@@ -35,7 +35,11 @@ impl view::View for Text {
   }
 }
 
-// Construct a Text with default (no) styling.
+// Construct a styled Text. Every styling field is optional and
+// defaults to the terminal's default (colors) or false (attrs).
+// Plain text is `text::new("hello")`; styled text uses named
+// arguments: `text::new("hello", reverse: true)` or
+// `text::new("hello", fg: 4, bold: true)`.
 //
 // Returns `view::View` rather than `Text` so the trait coercion
 // happens here — inside the module that defines `impl View for
@@ -43,15 +47,52 @@ impl view::View for Text {
 // to its trait across module boundaries at storage positions (only
 // at function-argument positions), so view constructors must hand
 // back already-trait-typed values for cross-module use.
-fn new(content: Str) view::View {
+fn new(
+  content: Str,
+  fg: Int?,
+  bg: Int?,
+  bold: Bool?,
+  dim: Bool?,
+  italic: Bool?,
+  underline: Bool?,
+  reverse: Bool?,
+) view::View {
+  let r_fg = match fg {
+    v => v,
+    _ => -1,
+  }
+  let r_bg = match bg {
+    v => v,
+    _ => -1,
+  }
+  let r_bold = match bold {
+    v => v,
+    _ => false,
+  }
+  let r_dim = match dim {
+    v => v,
+    _ => false,
+  }
+  let r_italic = match italic {
+    v => v,
+    _ => false,
+  }
+  let r_underline = match underline {
+    v => v,
+    _ => false,
+  }
+  let r_reverse = match reverse {
+    v => v,
+    _ => false,
+  }
   Text{
     content: content,
-    fg: -1,
-    bg: -1,
-    bold: false,
-    dim: false,
-    italic: false,
-    underline: false,
-    reverse: false,
+    fg: r_fg,
+    bg: r_bg,
+    bold: r_bold,
+    dim: r_dim,
+    italic: r_italic,
+    underline: r_underline,
+    reverse: r_reverse,
   }
 }

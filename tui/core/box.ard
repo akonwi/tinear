@@ -172,13 +172,22 @@ impl view::View for Box {
       false => 0,
     }
 
-    // 1. Render the child into a sub-frame at (border + pad.left,
-    //    border + pad.top), max available size. The child draws
-    //    only what it wants; we read the bounding box after.
-    let inner_x = border_inset + pad.left
-    let inner_y = border_inset + pad.top
-    let raw_inner_w = max_w - 2 * border_inset - pad.left - pad.right
-    let raw_inner_h = max_h - 2 * border_inset - pad.top - pad.bottom
+    // Inner width / height available to the child. If the style
+    // specifies an explicit width/height we honour it (capped at
+    // what the frame can hold); otherwise the child gets the full
+    // available area.
+    let frame_inner_w = max_w - 2 * border_inset - pad.left - pad.right
+    let frame_inner_h = max_h - 2 * border_inset - pad.top - pad.bottom
+    let inner_w_from_explicit = match s.width {
+      w => w - 2 * border_inset - pad.left - pad.right,
+      _ => frame_inner_w,
+    }
+    let inner_h_from_explicit = match s.height {
+      h => h - 2 * border_inset - pad.top - pad.bottom,
+      _ => frame_inner_h,
+    }
+    let raw_inner_w = inner_w_from_explicit
+    let raw_inner_h = inner_h_from_explicit
     let inner_w = match raw_inner_w < 0 {
       true => 0,
       false => raw_inner_w,
@@ -187,19 +196,34 @@ impl view::View for Box {
       true => 0,
       false => raw_inner_h,
     }
+
+    // 1. Render the child into a sub-frame at (border + pad.left,
+    //    border + pad.top), inner area. The child draws only what
+    //    it wants; we read the bounding box after.
+    let inner_x = border_inset + pad.left
+    let inner_y = border_inset + pad.top
     let inner_area = rect::Rect{x: inner_x, y: inner_y, w: inner_w, h: inner_h}
     mut child_sub = view::sub(frame, inner_area)
     self.child.render(child_sub)
     let dim = child_sub.dimensions()
 
-    // 2. Compute our extent from the child's drawn region. Content
-    //    sits in our coords at (inner_x + dim.x, inner_y + dim.y).
+    // 2. Compute our extent. With explicit sizing the Box always
+    //    occupies exactly the requested w/h; otherwise it fits to
+    //    the child's drawn region.
     let content_x = inner_x + dim.x
     let content_y = inner_y + dim.y
     let content_w = dim.w
     let content_h = dim.h
-    let extent_w = content_x + content_w + pad.right + border_inset
-    let extent_h = content_y + content_h + pad.bottom + border_inset
+    let fit_w = content_x + content_w + pad.right + border_inset
+    let fit_h = content_y + content_h + pad.bottom + border_inset
+    let extent_w = match s.width {
+      w => w,
+      _ => fit_w,
+    }
+    let extent_h = match s.height {
+      h => h,
+      _ => fit_h,
+    }
 
     // 3. Paint the padding ring around the content (skipping child
     //    cells). Fires when padding, border, bg, or background_char

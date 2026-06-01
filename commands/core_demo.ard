@@ -1,4 +1,5 @@
 use tinear/tui/core/box
+use tinear/tui/core/rect
 use tinear/tui/core/stack
 use tinear/tui/core/style
 use tinear/tui/core/text
@@ -7,49 +8,35 @@ use tinear/vaxis
 
 // Framework demo / sketch toward a v2 UI.
 //
-// Composes the primitives currently in `tui/core/`:
-//   - Text (atom)
-//   - Box  (decoration wrapper with optional border / title / padding)
-//   - VStack, HStack (fit-content layouts)
+// Renders the entire screen inside a single fullscreen Box. Inside:
+// a tab bar, a one-row gap, then a list of issue rows. The
+// keybinding hint bar is rendered separately into a sub-frame
+// pinned to the bottom row of the viewport — a deliberate
+// workaround until VStack grows a flex/grow Spacer that can claim
+// remaining space.
 //
-// Renders a small mock inbox panel above an HStack of keyboard
-// hints. As real screens get ported, this file will gradually grow
-// into the v2 entry surface rather than be deleted.
+// Exercises Text (with styling), Box (explicit-sized), VStack,
+// HStack, Spacer, and direct sub-frame composition.
 
 fn run() {
   let vx = vaxis::new("tinear core demo").expect("vaxis::new")
+  mut frame = view::root(vx)
+  let term_w = frame.width()
+  let term_h = frame.height()
 
-  // ---- Inbox panel ------------------------------------------------
-  //
-  // ┌ Inbox ──────────────────────────┐
-  // │ AKO-123  Fix login bug          │
-  // │ AKO-124  Add dark mode          │
-  // │ AKO-125  Update README          │
-  // └─────────────────────────────────┘
+  // Tab bar — active tab gets reverse-video highlight, tabs are
+  // separated by vertical bars.
+  let tabs = stack::hstack([
+    text::new(" Inbox ", reverse: true),
+    text::new("│"),
+    text::new(" My Issues "),
+  ])
 
   let items = stack::vstack([
     text::new("AKO-123  Fix login bug"),
     text::new("AKO-124  Add dark mode"),
     text::new("AKO-125  Update README"),
   ])
-
-  let inbox_title = box::new(
-    text::new("Inbox"),
-    style::Style{padding: style::Padding::x(1)},
-  )
-
-  let inbox = box::new(
-    items,
-    style::Style{
-      border: style::BorderStyle::Single,
-      padding: style::Padding::x(1),
-      border_title: inbox_title,
-    },
-  )
-
-  // ---- Hint bar ---------------------------------------------------
-  //
-  //   ↑↓ select · ↵ open · q quit
 
   let hints = stack::hstack([
     text::new("↑↓ select"),
@@ -59,17 +46,32 @@ fn run() {
     text::new("q quit"),
   ])
 
-  // ---- Compose screen ---------------------------------------------
-
-  let screen = stack::vstack([
-    inbox,
+  // Top-and-middle of the screen — laid out top-down in the Box.
+  let upper = stack::vstack([
+    tabs,
     stack::Spacer::v(1),
-    hints,
+    items,
   ])
 
-  mut frame = view::root(vx)
+  let demo = box::new(
+    upper,
+    style::Style{
+      padding: style::Padding::x(1),
+      width: term_w,
+      height: term_h,
+    },
+  )
+
   frame.clear()
-  screen.render(frame)
+  demo.render(frame)
+
+  // Hint bar pinned to the bottom row of the viewport. Sub-frame
+  // matches the Box's horizontal padding (x: 1, w: term_w - 2) so
+  // the hints align with the content above.
+  let hint_area = rect::Rect{x: 1, y: term_h - 1, w: term_w - 2, h: 1}
+  mut hint_sub = view::sub(frame, hint_area)
+  hints.render(hint_sub)
+
   frame.flush()
 
   let _ = vaxis::next_event(vx)

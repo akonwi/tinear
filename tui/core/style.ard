@@ -93,4 +93,14 @@ struct Style {
   italic: Bool?,
   underline: Bool?,
   reverse: Bool?,
+  // Explicit sizing. When set, the Box renders at exactly this
+  // size in the given dimension; the child is given the remaining
+  // inner area regardless of how much it actually draws. When
+  // absent, the dimension is fit-content (sized to the child's
+  // drawn extent + border + padding).
+  //
+  // Pass `frame.width()` / `frame.height()` at render time for a
+  // box that fills its container.
+  width: Int?,
+  height: Int?,
 }
