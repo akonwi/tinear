@@ -19,11 +19,14 @@ struct Text {
 }
 
 impl view::View for Text {
-  fn render(frame: view::Frame) {
+  fn render(mut frame: view::Frame) {
     // Draw a single line at (0, 0). Vaxis clips the right edge
     // automatically when content overruns the frame width.
     // Negative fg/bg values mean "terminal default"; all-defaults
     // styling is indistinguishable from plain text.
+    //
+    // The Frame's extent tracking captures the rendered_width
+    // automatically — no separate measurement is needed.
     frame.draw_styled(
       0, 0, self.content,
       self.fg, self.bg,

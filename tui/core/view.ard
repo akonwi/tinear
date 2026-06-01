@@ -10,7 +10,8 @@
 // uses `sub(frame, area)` to produce a clipped sub-frame and then
 // invokes the child's `render` on it directly:
 //
-//   self.child.render(view::sub(frame, inner_area))
+//   mut child_sub = view::sub(frame, inner_area)
+//   self.child.render(child_sub)
 //
 // `sub` is a free function rather than a `Frame` method because the
 // Ard checker stack-overflows on impl methods that return their own
@@ -23,28 +24,40 @@ use tinear/vaxis
 use tinear/tui/core/rect
 
 // A Frame is the drawable surface a view renders into. It wraps the
-// underlying vaxis Window plus the Vaxis handle. The Window is
-// already clipped to the view's assigned region — views address it
-// as (0, 0)..(width(), height()) in their own local space.
+// underlying vaxis Window plus the Vaxis handle, and tracks the
+// bounding box of cells that have been drawn through it.
 //
-// The Frame value itself is immutable. Drawing operations mutate the
-// terminal cell buffer through FFI, not any Ard-level state.
+// Frame is mutated through `fn mut` methods: each `draw_*` expands
+// the tracked extent; `clear` resets it. After a view's `render`
+// returns, the caller can inspect what was drawn via `dimensions()`
+// — this is how parents size themselves to their children's actual
+// rendered area without a separate `measure` step.
 struct Frame {
   vx: vaxis::Vaxis,
   window: vaxis::Window,
+  // Bounding box of cells drawn through this frame so far. Empty
+  // (w == 0 and h == 0) when nothing has been drawn yet.
+  extent: rect::Rect,
 }
 
-// Every renderable view implements this trait. The method receives a
-// Frame pre-clipped to the view's region; views never see their own
-// position on the wider screen.
+// Every renderable view implements this trait. The method receives
+// a Frame pre-clipped to the view's region; views never see their
+// own position on the wider screen.
+//
+// `frame` is `mut` so the Frame can track the bounding box of cells
+// the view drew. After `render` returns, the caller reads that box
+// via `frame.dimensions()`. This replaces an intrinsic-size method
+// — what the view actually rendered IS its size.
 trait View {
-  fn render(frame: Frame)
+  fn render(mut frame: Frame)
 }
 
 impl Frame {
   // The frame's own bounds, in its local coordinate space. Always
-  // origin-zero: a view asking for its area gets (0, 0, w, h).
-  fn area() rect::Rect {
+  // origin-zero: a view asking for its area gets (0, 0, w, h). This
+  // is the maximum size the view may draw into, not the size it
+  // chose to use; use `dimensions()` for the latter.
+  fn mut area() rect::Rect {
     rect::Rect{
       x: 0,
       y: 0,
@@ -53,19 +66,70 @@ impl Frame {
     }
   }
 
-  fn width() Int { vaxis::window_width(self.window) }
-  fn height() Int { vaxis::window_height(self.window) }
+  fn mut width() Int { vaxis::window_width(self.window) }
+  fn mut height() Int { vaxis::window_height(self.window) }
+
+  // Bounding box of cells drawn through this frame so far.
+  // Returns an empty Rect (w == 0, h == 0) if nothing's been drawn.
+  // Read by parent views to learn what their child actually rendered.
+  fn mut dimensions() rect::Rect { self.extent }
+
+  // Grow `self.extent` to include the rectangle `(x, y, w, h)`.
+  // Zero/negative regions are no-ops. The first non-empty draw
+  // initializes the extent; subsequent draws union with it.
+  // Defined before `draw_text`/`draw_styled` because those call it
+  // and Ard requires definition-before-use within a file.
+  fn mut expand(x: Int, y: Int, w: Int, h: Int) {
+    if w <= 0 or h <= 0 {
+      ()
+    } else {
+      let cur = self.extent
+      let is_empty = cur.w == 0 and cur.h == 0
+      if is_empty {
+        self.extent = rect::Rect{x: x, y: y, w: w, h: h}
+      } else {
+        let cur_x_end = cur.x + cur.w
+        let cur_y_end = cur.y + cur.h
+        let new_x_end = x + w
+        let new_y_end = y + h
+        let min_x = match cur.x < x {
+          true => cur.x,
+          false => x,
+        }
+        let min_y = match cur.y < y {
+          true => cur.y,
+          false => y,
+        }
+        let max_x = match cur_x_end > new_x_end {
+          true => cur_x_end,
+          false => new_x_end,
+        }
+        let max_y = match cur_y_end > new_y_end {
+          true => cur_y_end,
+          false => new_y_end,
+        }
+        self.extent = rect::Rect{
+          x: min_x,
+          y: min_y,
+          w: max_x - min_x,
+          h: max_y - min_y,
+        }
+      }
+    }
+  }
 
   // Draw a single line of text at (x, y) in this frame's local
   // coordinate space. Out-of-bounds draws are silently clipped by
-  // vaxis.
-  fn draw_text(x: Int, y: Int, text: Str) {
+  // vaxis. Expands the tracked extent.
+  fn mut draw_text(x: Int, y: Int, text: Str) {
     vaxis::window_draw_text(self.window, x, y, text)
+    let w = vaxis::rendered_width(self.vx, text)
+    self.expand(x, y, w, 1)
   }
 
   // Same as `draw_text` but with explicit style attributes. Color
   // values of -1 mean "use the terminal default".
-  fn draw_styled(
+  fn mut draw_styled(
     x: Int,
     y: Int,
     text: Str,
@@ -81,11 +145,14 @@ impl Frame {
       self.window, x, y, text, fg, bg,
       bold, dim, italic, underline, reverse,
     )
+    let w = vaxis::rendered_width(self.vx, text)
+    self.expand(x, y, w, 1)
   }
 
-  // Clear every cell in this frame.
-  fn clear() {
+  // Clear every cell in this frame and reset the tracked extent.
+  fn mut clear() {
     vaxis::window_clear(self.window)
+    self.extent = rect::Rect{x: 0, y: 0, w: 0, h: 0}
   }
 
   // Push the accumulated cell buffer to the terminal. Diffs against
@@ -95,25 +162,29 @@ impl Frame {
   // frame this is called on (vaxis's render is buffer-wide), so in
   // practice it should only be invoked once per draw pass, on the
   // root frame.
-  fn flush() {
+  fn mut flush() {
     vaxis::render(self.vx)
   }
-
 }
 
 // Construct a root Frame covering the entire terminal. Use this
 // once at the top of a draw pass; sub-frames flow from `sub` below
 // it.
 fn root(vx: vaxis::Vaxis) Frame {
-  Frame{vx: vx, window: vaxis::root(vx)}
+  let win = vaxis::root(vx)
+  let empty = rect::Rect{x: 0, y: 0, w: 0, h: 0}
+  Frame{vx: vx, window: win, extent: empty}
 }
 
 // Carve out a sub-region of `frame` as a new Frame. The returned
-// frame has its own (0, 0)..(area.w, area.h) coordinate space; a
-// parent view uses this to render children without those children
-// knowing where they sit in the wider screen:
+// frame has its own (0, 0)..(area.w, area.h) coordinate space and a
+// fresh (empty) extent; a parent view uses this to render children
+// without those children knowing where they sit in the wider
+// screen:
 //
-//   self.child.render(view::sub(frame, inner_area))
+//   mut child_sub = view::sub(frame, inner_area)
+//   self.child.render(child_sub)
+//   let drawn = child_sub.dimensions()
 //
 // An empty or negative area collapses to a zero-sized subwindow,
 // which silently clips all subsequent draws — the caller can
@@ -123,5 +194,6 @@ fn root(vx: vaxis::Vaxis) Frame {
 // (Free function rather than a `Frame` method: see file header.)
 fn sub(frame: Frame, area: rect::Rect) Frame {
   let win = vaxis::subwindow(frame.window, area.x, area.y, area.w, area.h)
-  Frame{vx: frame.vx, window: win}
+  let empty = rect::Rect{x: 0, y: 0, w: 0, h: 0}
+  Frame{vx: frame.vx, window: win, extent: empty}
 }

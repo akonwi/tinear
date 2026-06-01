@@ -9,15 +9,23 @@ use tinear/vaxis
 fn run() {
   let vx = vaxis::new("tinear core demo").expect("vaxis::new")
 
+  // The title is itself a view — here a padded text — so its
+  // breathing room around "Demo" comes from explicit padding
+  // rather than baked-in spaces.
+  let title = style::styled(
+    text::new("Demo"),
+    style::Style{padding: style::Padding::x(1)},
+  )
+
   let demo_style = style::Style{
     border: style::BorderStyle::Single,
     padding: style::Padding::all(1),
-    border_title: " Demo ",
+    border_title: title,
   }
 
   let demo = style::styled(text::new("Hello, framework!"), demo_style)
 
-  let frame = view::root(vx)
+  mut frame = view::root(vx)
   frame.clear()
   demo.render(frame)
   frame.flush()
