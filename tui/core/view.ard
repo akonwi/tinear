@@ -75,23 +75,37 @@ impl Frame {
   fn mut dimensions() rect::Rect { self.extent }
 
   // Grow `self.extent` to include the rectangle `(x, y, w, h)`.
-  // Zero/negative regions are no-ops. The first non-empty draw
-  // initializes the extent; subsequent draws union with it.
+  // Zero in a single axis is allowed: a (0, y, 0, n) call reserves
+  // n rows of vertical space without contributing to horizontal
+  // bounds, and vice-versa. Only a truly empty input (both w and h
+  // <= 0) is a no-op. Negative dimensions clamp to zero.
+  //
+  // The first non-empty expand initializes the extent; subsequent
+  // expands union with it.
+  //
   // Defined before `draw_text`/`draw_styled` because those call it
   // and Ard requires definition-before-use within a file.
   fn mut expand(x: Int, y: Int, w: Int, h: Int) {
-    if w <= 0 or h <= 0 {
+    let cw = match w < 0 {
+      true => 0,
+      false => w,
+    }
+    let ch = match h < 0 {
+      true => 0,
+      false => h,
+    }
+    if cw == 0 and ch == 0 {
       ()
     } else {
       let cur = self.extent
       let is_empty = cur.w == 0 and cur.h == 0
       if is_empty {
-        self.extent = rect::Rect{x: x, y: y, w: w, h: h}
+        self.extent = rect::Rect{x: x, y: y, w: cw, h: ch}
       } else {
         let cur_x_end = cur.x + cur.w
         let cur_y_end = cur.y + cur.h
-        let new_x_end = x + w
-        let new_y_end = y + h
+        let new_x_end = x + cw
+        let new_y_end = y + ch
         let min_x = match cur.x < x {
           true => cur.x,
           false => x,

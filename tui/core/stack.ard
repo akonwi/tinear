@@ -1,0 +1,127 @@
+// Stack layouts — fit-content composition of multiple child views
+// in a row (HStack) or column (VStack).
+//
+// Both stacks are *fit-content*: each child is rendered into a
+// sub-frame, and the parent's drawn extent is the union of what
+// each child actually rendered. There's no explicit-size or
+// constraint-based variant here; that lives in a future layout
+// module when something needs it (likely the app shell — tab bar
+// fixed at top, body fill, status bar fixed at bottom).
+//
+// Composition pattern, exemplified by VStack:
+//   - keep a running cursor `y` along the major axis
+//   - hand each child a sub-frame from the remaining area
+//   - read child's `dimensions()` and expand our extent to cover it
+//   - advance `y` past the child's bottom
+//
+// Children that draw nothing leave the cursor untouched and don't
+// expand the parent extent — they're effectively skipped without
+// special-casing.
+
+use tinear/tui/core/view
+use tinear/tui/core/rect
+
+// Stack children top-to-bottom; total width = max child width,
+// total height = sum of child heights.
+struct VStack {
+  children: [view::View],
+}
+
+impl view::View for VStack {
+  fn render(mut frame: view::Frame) {
+    let avail_w = frame.width()
+    let avail_h = frame.height()
+    mut y = 0
+    for child in self.children {
+      let remaining_h = avail_h - y
+      if remaining_h <= 0 {
+        ()
+      } else {
+        let area = rect::Rect{x: 0, y: y, w: avail_w, h: remaining_h}
+        mut child_sub = view::sub(frame, area)
+        child.render(child_sub)
+        let d = child_sub.dimensions()
+        // Translate child's local extent into our coords and expand.
+        frame.expand(area.x + d.x, area.y + d.y, d.w, d.h)
+        // Advance cursor past the bottom of what the child drew.
+        y = y + d.y + d.h
+      }
+    }
+  }
+}
+
+// Stack children left-to-right; total height = max child height,
+// total width = sum of child widths.
+struct HStack {
+  children: [view::View],
+}
+
+impl view::View for HStack {
+  fn render(mut frame: view::Frame) {
+    let avail_w = frame.width()
+    let avail_h = frame.height()
+    mut x = 0
+    for child in self.children {
+      let remaining_w = avail_w - x
+      if remaining_w <= 0 {
+        ()
+      } else {
+        let area = rect::Rect{x: x, y: 0, w: remaining_w, h: avail_h}
+        mut child_sub = view::sub(frame, area)
+        child.render(child_sub)
+        let d = child_sub.dimensions()
+        frame.expand(area.x + d.x, area.y + d.y, d.w, d.h)
+        x = x + d.x + d.w
+      }
+    }
+  }
+}
+
+// Constructor: vertical stack of children.
+//
+// Returns `view::View` rather than `VStack` so the trait coercion
+// happens here — inside the module that defines `impl View for
+// VStack`. See `text.ard` for the broader rationale.
+fn vstack(children: [view::View]) view::View {
+  VStack{children: children}
+}
+
+// Constructor: horizontal stack of children.
+fn hstack(children: [view::View]) view::View {
+  HStack{children: children}
+}
+
+// Spacer — reserves layout space without drawing anything.
+//
+// Useful for explicit gaps in a VStack/HStack:
+//
+//   stack::vstack([
+//     header,
+//     stack::Spacer::v(1),   // one blank row of breathing room
+//     body,
+//   ])
+//
+// A spacer with zero in one axis (the typical use) contributes only
+// to the other axis's extent, leaving width/height untouched.
+struct Spacer {
+  w: Int,
+  h: Int,
+}
+
+impl view::View for Spacer {
+  fn render(mut frame: view::Frame) {
+    // No drawing — just register the reserved region with the
+    // frame's extent tracker so parents advance their cursors.
+    frame.expand(0, 0, self.w, self.h)
+  }
+}
+
+// Spacer of `rows` vertical rows (zero width). Use in a VStack.
+fn Spacer::v(rows: Int) view::View {
+  Spacer{w: 0, h: rows}
+}
+
+// Spacer of `cols` horizontal cells (zero height). Use in an HStack.
+fn Spacer::h(cols: Int) view::View {
+  Spacer{w: cols, h: 0}
+}
