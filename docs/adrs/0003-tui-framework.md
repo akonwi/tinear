@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted
 
 ## Context
 
@@ -40,18 +40,6 @@ parent, and state mutations live exclusively in the input handler. The
 missing pieces are a `Rect` / `Layout` / `Frame` system and a unified
 component contract.
 
-A complication: Ard's trait system was, until very recently, partially
-broken. v0.21.0 type-checked user traits but the Go backend rejected
-dispatch ([akonwi/ard#172](https://github.com/akonwi/ard/issues/172),
-fixed in v0.21.1). v0.21.1 dispatched at call sites but not at storage
-positions ([akonwi/ard#175](https://github.com/akonwi/ard/issues/175),
-fixed on the current dev branch). A separate codegen bug rejected
-`Void`-returning trait methods (also fixed on the dev branch). With
-those fixes in place, traits now support function parameters, struct
-fields, list elements, and nested dispatch — enough to express a
-genuine open-world `View` interface rather than a closed union with
-central match dispatch.
-
 (Terminology note: the rendered things are **views**, the trait is
 **`View`**. Other frameworks call equivalents "widgets" or
 "components"; this ADR uses "view" for our framework and reserves
@@ -66,20 +54,57 @@ Introduce a small framework layer at `tui/core/` that the rest of
 1. **`Rect{ x, y, w, h }`** — the universal unit of layout. Replaces
    the ad-hoc `tui/screen::Layout`.
 
-2. **`Constraint` / `Direction` / `Layout`** — declarative,
-   constraint-based subdivision of a `Rect`. A parent calls
-   `Layout::vertical([…]).split(area)` and receives child rects. This
-   is the ratatui constraint model: `Length(n)`, `Percent(n)`,
-   `Min(n)`, `Max(n)`, `Fill(weight)`.
+2. **Layout engine** in `stack.ard` — two complementary models for
+   composing multiple children:
 
-3. **`Frame`** — a value type carrying the `vaxis::Vaxis` handle plus a
-   pre-clipped `vaxis::Window`. All drawing happens through Frame
-   primitives. The Frame value itself is immutable; the underlying
-   terminal buffer is mutated through FFI.
+   *Fit-content stacks*, for content-sized rows/columns where the
+   parent's extent is the union of its children's drawn areas:
+   - `VStack(children)` — children top-to-bottom
+   - `HStack(children)` — children left-to-right
+   - `Spacer::v(rows)` / `Spacer::h(cols)` — explicit gap
 
-4. **`trait View { fn render(frame: Frame) }`** — the universal
+   *Constraint-based splits*, for screen-shell geometry where the
+   parent owns a fixed area and partitions it among children:
+   - `vsplit([Sized])` / `hsplit([Sized])` — take a list of
+     `Sized{view, kind: SizeKind}` pairs.
+   - `SizeKind` has six variants: `Fixed(n)`, `Percent(n)`,
+     `Ratio(num, den)`, `Fill(weight)`, `AtLeast(n)`, `AtMost(n)`.
+     Mirrors ratatui's `Length`, `Percentage`, `Ratio`, `Fill`,
+     `Min`, `Max`.
+   - The solver (`solve(available, [SizeKind]) [Int]`) is a pure
+     function from total length + kinds to per-child sizes,
+     unit-testable in isolation. Layout went in with twelve inline
+     `test fn` cases for the solver covering all kinds and their
+     interactions.
+
+   The two stack families coexist deliberately: fit-content is the
+   right model when children determine the parent's size (e.g. a
+   modal that's as tall as its rows); constraint-based is the right
+   model when the parent has a fixed area to divide (e.g. the app
+   shell with a fixed tab bar, fixed status bar, and a body that
+   takes the rest). There is intentionally **no** `FitContent`
+   constraint that mixes the two — it requires a measure pass that
+   doubles render cost and doesn't compose cleanly with the other
+   kinds. Pick a stack flavor per axis instead.
+
+3. **`Frame`** — the drawable surface a view renders into. Wraps a
+   `vaxis::Vaxis` handle plus a pre-clipped `vaxis::Window`. Frame
+   is **mutable** during render: as a view draws, the frame tracks
+   the bounding rectangle of what was actually written. A parent
+   reads `child_frame.dimensions()` after delegating to a child to
+   discover how much space the child consumed, which is how
+   fit-content stacks compute their layout without a separate
+   measure pass.
+
+   All drawing happens through Frame methods (`draw_text`,
+   `draw_styled`, `clear`, `flush`). Composition happens through the
+   free function `view::sub` (see #5).
+
+4. **`trait View { fn render(mut frame: Frame) }`** — the universal
    component contract. Every component implements this trait. Real
-   trait dispatch is used (not a closed union).
+   trait dispatch is used (not a closed union). The frame is `mut`
+   because draws expand its tracked extent; the view itself never
+   mutates its own state during render.
 
 5. **`sub(frame: Frame, area: Rect) Frame`** — the framework's
    composition primitive, exposed as a free function in the `view`
@@ -103,36 +128,35 @@ Introduce a small framework layer at `tui/core/` that the rest of
    struct type. Revert to a method when that compiler bug is fixed.
 
 6. **A small set of primitive views**, factored by role rather than
-   by use case. Eight in total:
+   by use case:
 
    *Atoms* — produce visible content, no children:
-   - `Text(content, style, wrap)` — single-line or word-wrapped
-     styled text. Truncates to frame width when `wrap` is false.
-   - `Fill(char, style)` — fill the frame with one character.
+   - `Text` — a single line of styled text with explicit fg / bg /
+     bold / dim / italic / underline / reverse arguments.
 
-   *Layout* — arrange children in space:
-   - `VStack(children, constraints)` — stack top-to-bottom under
-     `Layout`-style constraints.
-   - `HStack(children, constraints)` — stack left-to-right.
-   - `ZStack(children)` — overlay children at the same position;
-     later children draw over earlier ones (for modals, popups).
-   - `Spacer` — placeholder view that consumes flex space when
-     paired with `Constraint::Fill(weight)`.
+   *Layout* — arrange children in space (see #2):
+   - `VStack`, `HStack`, `Spacer::v`, `Spacer::h` (fit-content)
+   - `vsplit`, `hsplit` (constraint-based, with `Sized`/`SizeKind`)
 
    *Container* — wrap a single child with decoration:
-   - `Box(child, border?, padding?, title?, background?)` — the
-     only decoration primitive. Border, padding, title, and
-     background fill are properties of `Box`, applied in a fixed
-     order (background → border → title in top border → padding →
-     child). Pure border is `Box{child, border: Single}`; pure
-     padding is `Box{child, padding: All(1)}`; the classic
-     "bordered titled panel" pattern is
-     `Box{child, border: Single, title: " Inbox "}`. Decoration
-     outside a border (margin) composes by nesting another `Box`.
+   - `Box(child, style: Style)` — the wrapping view.
 
-   *Behavior* — wrap a single child with state:
-   - `Scroll(child)` — child is logically larger than the frame;
-     view holds `scroll_offset` and clips to the visible window.
+   *Style* — the decoration *value* applied via `Box`, kept in its
+   own module so it doesn't couple to any particular view (cut 1 of
+   a future Lipgloss-flavored design where the same `Style` could
+   apply to anything). `Style` holds:
+   - `padding: Padding?`, `border: BorderStyle?`,
+     `border_title: View?` (the title is itself a view, so it can
+     be styled / composed), `background_char: Str?`
+   - `width: Int?`, `height: Int?` (explicit sizing when needed,
+     e.g. fullscreen overlays)
+   - text attributes that propagate to the box's own painted cells
+     (fg, bg, bold, dim, italic, underline, reverse)
+
+   `Box::new(child, style)` is the single wrapping constructor;
+   different decoration patterns are different `Style` values, not
+   different constructors. `Padding::all(n)`, `Padding::x(n)`,
+   `Padding::y(n)` are the padding factories.
 
    The set is deliberately primitive — there is no `Block`, no
    `Tabs`, no `List with selection`. Those are app-level
@@ -170,24 +194,50 @@ Introduce a small framework layer at `tui/core/` that the rest of
   If it stabilizes and proves reusable, extracting to a standalone
   Ard module is a follow-up — not a goal for the first cut.
 
-### Sequencing
+### Implementation status
 
-1. Implement `rect.ard`, `layout.ard`, and `view.ard`. The latter
-   holds **both** the `Frame` struct (with its draw primitives) **and**
-   the `View` trait. They share a file because Ard does not support
-   cross-file `impl` blocks and the `View` trait's method must mention
-   `Frame` — keeping them together avoids a cyclic import the moment
-   any Frame method ever needs to mention `View`.
-2. Implement `Box` as the first view; verify the composition chain
-   end-to-end (Box exercises decoration, child rendering, and the
-   `view::sub` composition primitive in one shot).
-3. Implement the layout views (`VStack`, `HStack`, `ZStack`,
-   `Spacer`) and the remaining atoms (`Text`, `Fill`).
-4. Add `Scroll` once a real screen needs it.
-5. Port a modal as the first real surface (smallest and most-bordered;
+Landed on branch `feat.tui-framework` (commits `591bd0c` through
+`ddfe76f`):
+
+- [x] `rect.ard`, `view.ard` (Frame + trait), `text.ard`, `box.ard`,
+  `style.ard`, `stack.ard` (fit-content stacks + constraint solver +
+  splits)
+- [x] `commands/core_demo.ard` smoke test renders fullscreen mock
+  inbox: tab bar + items + status bar pinned via `vsplit`
+- [x] Layout solver has twelve inline `test fn` cases (`ard test`
+  green)
+
+Remaining sequencing for downstream work:
+
+1. Port a modal as the first real surface (smallest and most-bordered;
    lowest risk for shaking out API gaps). Evaluate ergonomics.
-6. Iterate on the framework API based on what the port reveals.
-7. Port remaining screens incrementally.
+2. Iterate on the framework API based on what the port reveals.
+3. Port remaining screens incrementally (board, inbox, issue tabs).
+4. Add `Scroll` once one of those ports needs it.
+5. Per-view event handling — deferred to a separate ADR (see
+   Consequences).
+
+### Decisions worth flagging
+
+A handful of choices came up during implementation that are worth
+recording explicitly:
+
+- **Style is its own module**, not a property bag baked into `Box`.
+  Border / padding / title / fg / bg / attrs are widget-agnostic
+  decoration values. Today only `Box` consumes a `Style`; future
+  views can pull from the same module without depending on `Box`.
+  A later cut may unify text attributes and spatial decoration into
+  a single `styled(view, style)` operator that wraps any view
+  (Lipgloss-flavored) — this module is the home that lands in.
+- **Title is a `View?`**, not a `Str`. The title fragment composes
+  like any other view (it can be styled, padded, swapped for a
+  `Spacer`), and the `Box` doesn't have to know what's in it.
+- **No `FitContent` constraint kind.** Mixing intrinsic content size
+  with constraint solving requires a measure pass that doubles
+  render work. If you need content-sized children, use the
+  fit-content stacks; if you need to partition a known area, use
+  the constraint splits.
+
 
 ## Consequences
 
@@ -230,9 +280,5 @@ Introduce a small framework layer at `tui/core/` that the rest of
 - [ADR 0002](0002-interactive-terminal-explorer.md) — established the
   TUI as a first-class feature; this ADR addresses the structural
   consequences of that growth.
-- [akonwi/ard#172](https://github.com/akonwi/ard/issues/172) — trait
-  dispatch in the Go backend (fixed in v0.21.1).
-- [akonwi/ard#175](https://github.com/akonwi/ard/issues/175) — trait
-  coercion at storage positions (fixed on dev).
 - ratatui — the design influence for the immediate-mode + constraint-
   layout shape: https://ratatui.rs/
