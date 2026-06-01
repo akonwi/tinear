@@ -18,6 +18,7 @@
 // expand the parent extent — they're effectively skipped without
 // special-casing.
 
+use ard/testing
 use tinear/tui/core/view
 use tinear/tui/core/rect
 
@@ -124,4 +125,538 @@ fn Spacer::v(rows: Int) view::View {
 // Spacer of `cols` horizontal cells (zero height). Use in an HStack.
 fn Spacer::h(cols: Int) view::View {
   Spacer{w: cols, h: 0}
+}
+
+// ---- Constraint-based layout (VSplit / HSplit) -----------------------
+//
+// While `vstack` / `hstack` are fit-content (each child gets its
+// natural size), `vsplit` / `hsplit` carve the available major-axis
+// length according to per-child constraints. Models the common
+// pattern of fixed-height headers/footers around a body that fills
+// remaining space, plus column splits, plus minimum/maximum bounds.
+//
+// Constraint vocabulary mirrors ratatui's:
+//   Fixed(n)       — exactly n cells
+//   Percent(p)     — p% of available
+//   Ratio(a, b)    — a/b fraction of available
+//   Fill(w)        — grow with weight w into remaining space
+//   AtLeast(n)     — at least n; grow if room
+//   AtMost(n)      — at most n; shrink if needed
+//
+// Use the constructor helpers (`fixed`, `percent`, `ratio`, `fill`,
+// `at_least`, `at_most`) to attach a constraint to a child view,
+// then pass the resulting `Sized` list to `vsplit` or `hsplit`.
+
+// Constraint variants. Each is a payload-carrying struct that goes
+// into the SizeKind union.
+struct Fixed { value: Int }
+struct Percent { value: Int }
+struct Ratio { num: Int, den: Int }
+struct Fill { weight: Int }
+struct AtLeast { value: Int }
+struct AtMost { value: Int }
+
+type SizeKind = Fixed | Percent | Ratio | Fill | AtLeast | AtMost
+
+// A child view paired with its sizing in a VSplit / HSplit.
+struct Sized {
+  view: view::View,
+  kind: SizeKind,
+}
+
+// ---- Constructors ----------------------------------------------------
+
+fn fixed(view: view::View, value: Int) Sized {
+  Sized{view: view, kind: Fixed{value: value}}
+}
+
+fn percent(view: view::View, value: Int) Sized {
+  Sized{view: view, kind: Percent{value: value}}
+}
+
+fn ratio(view: view::View, num: Int, den: Int) Sized {
+  Sized{view: view, kind: Ratio{num: num, den: den}}
+}
+
+fn fill(view: view::View, weight: Int) Sized {
+  Sized{view: view, kind: Fill{weight: weight}}
+}
+
+fn at_least(view: view::View, value: Int) Sized {
+  Sized{view: view, kind: AtLeast{value: value}}
+}
+
+fn at_most(view: view::View, value: Int) Sized {
+  Sized{view: view, kind: AtMost{value: value}}
+}
+
+// ---- Solver ----------------------------------------------------------
+
+// True when the constraint participates in the flexible allocation
+// pass (Fill / AtLeast / AtMost) — i.e. is eligible to receive or
+// give up cells during phases 2–4.
+fn is_flex(k: SizeKind) Bool {
+  match k {
+    Fill(_) => true,
+    AtLeast(_) => true,
+    AtMost(_) => true,
+    _ => false,
+  }
+}
+
+// Subtract `amount` cells from flexible slots other than `exclude`,
+// distributed as evenly as possible. Used by `enforce_at_least`.
+fn steal_from_flex(mut alloc: [Int], kinds: [SizeKind], amount: Int, exclude: Int) {
+  mut victims: [Int] = []
+  for k, i in kinds {
+    if not (i == exclude) {
+      if is_flex(k) {
+        let _ = victims.push(i)
+      }
+    }
+  }
+  let n_victims = victims.size()
+  if n_victims > 0 {
+    let per = amount / n_victims
+    let extra = amount - per * n_victims
+    for v, j in victims {
+      let take = match j < extra {
+        true => per + 1,
+        false => per,
+      }
+      let cur = alloc.at(v)
+      let new_val = match cur - take < 0 {
+        true => 0,
+        false => cur - take,
+      }
+      alloc.set(v, new_val)
+    }
+  }
+}
+
+// Add `amount` cells to flexible slots other than `exclude`,
+// distributed as evenly as possible. Used by `enforce_at_most`.
+fn add_to_flex(mut alloc: [Int], kinds: [SizeKind], amount: Int, exclude: Int) {
+  mut recipients: [Int] = []
+  for k, i in kinds {
+    if not (i == exclude) {
+      if is_flex(k) {
+        let _ = recipients.push(i)
+      }
+    }
+  }
+  let n_recip = recipients.size()
+  if n_recip > 0 {
+    let per = amount / n_recip
+    let extra = amount - per * n_recip
+    for r, j in recipients {
+      let give = match j < extra {
+        true => per + 1,
+        false => per,
+      }
+      alloc.set(r, alloc.at(r) + give)
+    }
+  }
+}
+
+// Bump any AtLeast slot under its minimum up to the minimum,
+// stealing the deficit from other flexible slots.
+fn enforce_at_least(mut alloc: [Int], kinds: [SizeKind]) {
+  for k, i in kinds {
+    match k {
+      AtLeast(m) => {
+        let cur = alloc.at(i)
+        if cur < m.value {
+          let deficit = m.value - cur
+          alloc.set(i, m.value)
+          steal_from_flex(alloc, kinds, deficit, i)
+        }
+      },
+      _ => (),
+    }
+  }
+}
+
+// Cap any AtMost slot over its maximum at the maximum, giving the
+// surplus to other flexible slots.
+fn enforce_at_most(mut alloc: [Int], kinds: [SizeKind]) {
+  for k, i in kinds {
+    match k {
+      AtMost(m) => {
+        let cur = alloc.at(i)
+        if cur > m.value {
+          let surplus = cur - m.value
+          alloc.set(i, m.value)
+          add_to_flex(alloc, kinds, surplus, i)
+        }
+      },
+      _ => (),
+    }
+  }
+}
+
+// Compute integer allocations for a list of constraints against a
+// total available length. Returns a list of the same length as
+// `kinds`. The sum equals `available` when at least one flexible
+// (Fill / AtLeast / AtMost) slot is present; otherwise the sum is
+// whatever the rigid constraints produce (leftover space stays
+// unclaimed).
+//
+// Phases:
+//   1. Rigid — Fixed / Percent / Ratio compute against `available`.
+//   2. Distribute the remainder to flexible slots proportionally,
+//      weighted by Fill(w) (or 1 for AtLeast/AtMost).
+//   3. Enforce AtLeast then AtMost, iterating a few times to settle
+//      chains of constraints.
+//   4. Rounding fixup — give any leftover from integer division to
+//      the first flexible slot.
+fn solve(available: Int, kinds: [SizeKind]) [Int] {
+  let n = kinds.size()
+  mut alloc: [Int] = []
+  if n > 0 {
+    for _i in 0..(n - 1) {
+      let _ = alloc.push(0)
+    }
+  }
+
+  // Phase 1: rigid constraints
+  for k, i in kinds {
+    match k {
+      Fixed(f) => {
+        let _ = alloc.set(i, f.value)
+      },
+      Percent(p) => {
+        let _ = alloc.set(i, (p.value * available) / 100)
+      },
+      Ratio(r) => {
+        let val = match r.den == 0 {
+          true => 0,
+          false => (r.num * available) / r.den,
+        }
+        let _ = alloc.set(i, val)
+      },
+      _ => (),
+    }
+  }
+
+  // Phase 2: distribute remaining to flexible slots
+  mut rigid_total = 0
+  for a in alloc {
+    rigid_total = rigid_total + a
+  }
+  let raw_remaining = available - rigid_total
+  let remaining = match raw_remaining < 0 {
+    true => 0,
+    false => raw_remaining,
+  }
+
+  mut total_weight = 0
+  for k in kinds {
+    match k {
+      Fill(f) => {
+        total_weight = total_weight + f.weight
+      },
+      AtLeast(_) => {
+        total_weight = total_weight + 1
+      },
+      AtMost(_) => {
+        total_weight = total_weight + 1
+      },
+      _ => (),
+    }
+  }
+
+  if total_weight > 0 and remaining > 0 {
+    for k, i in kinds {
+      match k {
+        Fill(f) => {
+          let _ = alloc.set(i, (f.weight * remaining) / total_weight)
+        },
+        AtLeast(_) => {
+          let _ = alloc.set(i, remaining / total_weight)
+        },
+        AtMost(_) => {
+          let _ = alloc.set(i, remaining / total_weight)
+        },
+        _ => (),
+      }
+    }
+  }
+
+  // Phase 3: enforce AtLeast / AtMost. Iterate so chained
+  // constraints settle.
+  mut iter = 0
+  while iter < 4 {
+    enforce_at_least(alloc, kinds)
+    enforce_at_most(alloc, kinds)
+    iter = iter + 1
+  }
+
+  // Phase 4: rounding fixup. Integer division above leaves some
+  // cells unallocated; give them to the first flexible slot. Skip
+  // if there's no flexible slot — leftover space simply isn't
+  // claimed by the layout.
+  mut total = 0
+  for a in alloc {
+    total = total + a
+  }
+  let diff = available - total
+  if not (diff == 0) {
+    mut adjusted = false
+    for k, i in kinds {
+      if not adjusted {
+        if is_flex(k) {
+          let _ = alloc.set(i, alloc.at(i) + diff)
+          adjusted = true
+        }
+      }
+    }
+  }
+
+  alloc
+}
+
+// ---- VSplit / HSplit views -------------------------------------------
+
+// Vertical layout with explicit per-child sizing on the major axis
+// (height). Total height of children = available height (modulo
+// rounding when no flexible slot is present). Cross-axis width is
+// whatever the frame provides.
+struct VSplit {
+  children: [Sized],
+}
+
+impl view::View for VSplit {
+  fn render(mut frame: view::Frame) {
+    let avail_w = frame.width()
+    let avail_h = frame.height()
+
+    mut kinds: [SizeKind] = []
+    for c in self.children {
+      kinds.push(c.kind)
+    }
+    let heights = solve(avail_h, kinds)
+
+    mut y = 0
+    for c, i in self.children {
+      let h = heights.at(i)
+      if h <= 0 {
+        ()
+      } else {
+        let area = rect::Rect{x: 0, y: y, w: avail_w, h: h}
+        mut child_sub = view::sub(frame, area)
+        c.view.render(child_sub)
+        let d = child_sub.dimensions()
+        frame.expand(area.x + d.x, area.y + d.y, d.w, d.h)
+        y = y + h
+      }
+    }
+  }
+}
+
+// Horizontal layout with explicit per-child sizing on the major
+// axis (width).
+struct HSplit {
+  children: [Sized],
+}
+
+impl view::View for HSplit {
+  fn render(mut frame: view::Frame) {
+    let avail_w = frame.width()
+    let avail_h = frame.height()
+
+    mut kinds: [SizeKind] = []
+    for c in self.children {
+      kinds.push(c.kind)
+    }
+    let widths = solve(avail_w, kinds)
+
+    mut x = 0
+    for c, i in self.children {
+      let w = widths.at(i)
+      if w <= 0 {
+        ()
+      } else {
+        let area = rect::Rect{x: x, y: 0, w: w, h: avail_h}
+        mut child_sub = view::sub(frame, area)
+        c.view.render(child_sub)
+        let d = child_sub.dimensions()
+        frame.expand(area.x + d.x, area.y + d.y, d.w, d.h)
+        x = x + w
+      }
+    }
+  }
+}
+
+// Constructors return view::View so they compose across modules
+// (cross-module trait coercion happens in the impl's home module).
+fn vsplit(children: [Sized]) view::View {
+  VSplit{children: children}
+}
+
+fn hsplit(children: [Sized]) view::View {
+  HSplit{children: children}
+}
+
+// ---- Tests (solver) --------------------------------------------------
+//
+// `solve` is exercised here directly against synthetic SizeKind
+// lists. Run with `ard test`.
+
+// True when two integer lists have the same length and every element
+// matches by index.
+fn equal(a: [Int], b: [Int]) Bool {
+  if not (a.size() == b.size()) {
+    false
+  } else {
+    mut all_equal = true
+    for x, i in a {
+      if not (x == b.at(i)) {
+        all_equal = false
+      }
+    }
+    all_equal
+  }
+}
+
+// Render a list as `[a, b, c]` for clearer assertion failure messages.
+fn list_str(xs: [Int]) Str {
+  mut s = "["
+  for x, i in xs {
+    if i == 0 {
+      s = s + "{x}"
+    } else {
+      s = s + ", {x}"
+    }
+  }
+  s = s + "]"
+  s
+}
+
+test fn test_empty_kinds_returns_empty() Void!Str {
+  let kinds: [SizeKind] = []
+  let result = solve(100, kinds)
+  testing::assert(result.size() == 0, "Expected empty list, got {list_str(result)}")
+}
+
+test fn test_single_fixed_uses_specified_size() Void!Str {
+  let kinds: [SizeKind] = [Fixed{value: 30}]
+  let result = solve(100, kinds)
+  let expected: [Int] = [30]
+  testing::assert(equal(result, expected), "Expected [30], got {list_str(result)}")
+}
+
+test fn test_fixed_plus_fill_fills_remaining() Void!Str {
+  let kinds: [SizeKind] = [
+    Fixed{value: 3},
+    Fill{weight: 1},
+  ]
+  let result = solve(10, kinds)
+  let expected: [Int] = [3, 7]
+  testing::assert(equal(result, expected), "Expected [3, 7], got {list_str(result)}")
+}
+
+test fn test_three_row_screen_layout() Void!Str {
+  // The canonical "tab bar at top fixed, body fills, hint bar at
+  // bottom fixed" pattern.
+  let kinds: [SizeKind] = [
+    Fixed{value: 1},
+    Fill{weight: 1},
+    Fixed{value: 1},
+  ]
+  let result = solve(24, kinds)
+  let expected: [Int] = [1, 22, 1]
+  testing::assert(equal(result, expected), "Expected [1, 22, 1], got {list_str(result)}")
+}
+
+test fn test_multiple_fills_split_proportionally() Void!Str {
+  // Weights 1:2 against 9 cells → 3 and 6.
+  let kinds: [SizeKind] = [
+    Fill{weight: 1},
+    Fill{weight: 2},
+  ]
+  let result = solve(9, kinds)
+  let expected: [Int] = [3, 6]
+  testing::assert(equal(result, expected), "Expected [3, 6], got {list_str(result)}")
+}
+
+test fn test_percent_splits() Void!Str {
+  let kinds: [SizeKind] = [
+    Percent{value: 30},
+    Percent{value: 70},
+  ]
+  let result = solve(100, kinds)
+  let expected: [Int] = [30, 70]
+  testing::assert(equal(result, expected), "Expected [30, 70], got {list_str(result)}")
+}
+
+test fn test_ratio_splits() Void!Str {
+  // 1/3 and 2/3 of 9 → [3, 6]
+  let kinds: [SizeKind] = [
+    Ratio{num: 1, den: 3},
+    Ratio{num: 2, den: 3},
+  ]
+  let result = solve(9, kinds)
+  let expected: [Int] = [3, 6]
+  testing::assert(equal(result, expected), "Expected [3, 6], got {list_str(result)}")
+}
+
+test fn test_at_least_bumps_up_under_minimum() Void!Str {
+  // Both flexible, equal initial split (8 / 2 = 4 each), but the
+  // AtLeast(5) bumps to 5 and steals 1 from the Fill.
+  let kinds: [SizeKind] = [
+    Fill{weight: 1},
+    AtLeast{value: 5},
+  ]
+  let result = solve(8, kinds)
+  let expected: [Int] = [3, 5]
+  testing::assert(equal(result, expected), "Expected [3, 5], got {list_str(result)}")
+}
+
+test fn test_at_most_caps_above_maximum() Void!Str {
+  // Both flexible, equal initial split (10 / 2 = 5 each), but the
+  // AtMost(3) caps to 3 and gives 2 back to the Fill.
+  let kinds: [SizeKind] = [
+    AtMost{value: 3},
+    Fill{weight: 1},
+  ]
+  let result = solve(10, kinds)
+  let expected: [Int] = [3, 7]
+  testing::assert(equal(result, expected), "Expected [3, 7], got {list_str(result)}")
+}
+
+test fn test_at_least_when_already_satisfied_unchanged() Void!Str {
+  // AtLeast(2) gets 5 in the initial split — already above min, no
+  // redistribution.
+  let kinds: [SizeKind] = [
+    AtLeast{value: 2},
+    Fill{weight: 1},
+  ]
+  let result = solve(10, kinds)
+  let expected: [Int] = [5, 5]
+  testing::assert(equal(result, expected), "Expected [5, 5], got {list_str(result)}")
+}
+
+test fn test_mixed_fixed_percent_fill() Void!Str {
+  // Total 100, Fixed=10, Percent=30, Fill takes the remaining 60.
+  let kinds: [SizeKind] = [
+    Fixed{value: 10},
+    Percent{value: 30},
+    Fill{weight: 1},
+  ]
+  let result = solve(100, kinds)
+  let expected: [Int] = [10, 30, 60]
+  testing::assert(equal(result, expected), "Expected [10, 30, 60], got {list_str(result)}")
+}
+
+test fn test_no_flex_slot_leaves_leftover_unclaimed() Void!Str {
+  // 3 + 4 = 7, total available 20 — no flexible slot to absorb the
+  // leftover 13 cells, so the allocations stay at their rigid sizes.
+  let kinds: [SizeKind] = [
+    Fixed{value: 3},
+    Fixed{value: 4},
+  ]
+  let result = solve(20, kinds)
+  let expected: [Int] = [3, 4]
+  testing::assert(equal(result, expected), "Expected [3, 4], got {list_str(result)}")
 }

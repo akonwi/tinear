@@ -1,23 +1,16 @@
 use tinear/tui/core/box
-use tinear/tui/core/rect
 use tinear/tui/core/stack
 use tinear/tui/core/style
 use tinear/tui/core/text
 use tinear/tui/core/view
-use tinear/tui/tab_bar
 use tinear/vaxis
 
 // Framework demo / sketch toward a v2 UI.
 //
 // Renders the entire screen inside a single fullscreen Box. Inside:
-// a tab bar, a one-row gap, then a list of issue rows. The
-// keybinding hint bar is rendered separately into a sub-frame
-// pinned to the bottom row of the viewport — a deliberate
-// workaround until VStack grows a flex/grow Spacer that can claim
-// remaining space.
-//
-// Exercises Text (with styling), Box (explicit-sized), VStack,
-// HStack, Spacer, and direct sub-frame composition.
+// a tab bar pinned at the top, the items list filling the middle,
+// and a keybinding hint bar pinned at the bottom — all expressed
+// via stack::vsplit's constraint-based layout.
 
 fn run() {
   let vx = vaxis::new("tinear core demo").expect("vaxis::new")
@@ -25,7 +18,13 @@ fn run() {
   let term_w = frame.width()
   let term_h = frame.height()
 
-  let tabs = tab_bar::tab_bar(["Inbox", "My Issues"], active: 0)
+  // Tab bar — active tab gets reverse-video highlight, tabs are
+  // separated by vertical bars.
+  let tabs = stack::hstack([
+    text::new(" Inbox ", reverse: true),
+    text::new("│"),
+    text::new(" My Issues "),
+  ])
 
   let items = stack::vstack([
     text::new("AKO-123  Fix login bug"),
@@ -41,15 +40,18 @@ fn run() {
     text::new("q quit"),
   ])
 
-  // Top-and-middle of the screen — laid out top-down in the Box.
-  let upper = stack::vstack([
-    tabs,
-    stack::Spacer::v(1),
-    items,
+  // Screen layout: tabs fixed at top, items fill the middle, hints
+  // fixed at the bottom. A one-row spacer below the tabs gives the
+  // body a bit of breathing room.
+  let screen = stack::vsplit([
+    stack::fixed(tabs, 1),
+    stack::fixed(stack::Spacer::v(1), 1),
+    stack::fill(items, 1),
+    stack::fixed(hints, 1),
   ])
 
   let demo = box::new(
-    upper,
+    screen,
     style::Style{
       padding: style::Padding::x(1),
       width: term_w,
@@ -59,14 +61,6 @@ fn run() {
 
   frame.clear()
   demo.render(frame)
-
-  // Hint bar pinned to the bottom row of the viewport. Sub-frame
-  // matches the Box's horizontal padding (x: 1, w: term_w - 2) so
-  // the hints align with the content above.
-  let hint_area = rect::Rect{x: 1, y: term_h - 1, w: term_w - 2, h: 1}
-  mut hint_sub = view::sub(frame, hint_area)
-  hints.render(hint_sub)
-
   frame.flush()
 
   let _ = vaxis::next_event(vx)
