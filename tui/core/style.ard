@@ -1,41 +1,39 @@
-// Style — reusable, declaratively-described decoration applied to a
-// rendered region.
+// Decoration primitives and the `Style` bundle.
 //
-// A `Style` value bundles every property that decorates a view's
-// rendering surface: borders, padding, cell color, attributes, and
-// the optional title view drawn in a top border. Styles are passed
-// around and reused; views don't carry decoration knowledge.
-//
-// Apply a Style to any view with `styled(view, style)`:
+// `Style` is a reusable, declaratively-described decoration value
+// applied to a view's rendering surface. It bundles every property
+// that decorates the surface — borders, padding, cell color, attrs,
+// the optional title view in the top border — into one passable
+// piece of data:
 //
 //   let card = style::Style{
 //     border: style::BorderStyle::Rounded,
 //     padding: style::Padding::all(1),
 //     fg: 8,
 //   }
-//   style::styled(text::new("hello"), card)
+//   box::new(text::new("a"), card)
+//   box::new(text::new("b"), card)
 //
-// What Style currently affects:
+// Style is intentionally NOT coupled to any specific view. Today
+// only `box` consumes it; future views that want bordered, padded,
+// or colored decoration can take the same `Style` value without
+// depending on `box`.
+//
+// What `Style` currently affects (via Box's render):
 //   - The decoration ring (border)        — fg/bg/attrs applied
 //   - The optional title in the top edge  — fg/bg/attrs applied
 //   - The background fill (padding ring)  — fg/bg/attrs applied
 //
-// What Style currently does NOT affect (and why):
+// What `Style` does NOT yet affect (and why):
 //   - The child view's content cells. Text owns its intrinsic
 //     fg/bg/attrs because a wrapper view can't reach into a child's
-//     glyph rendering. A future cut may introduce a `TextStyle`
-//     value, or a frame-context mechanism that lets style propagate
-//     to children — both deliberately out of scope here.
-//
-// Styled fits content by default. The styled extent is exactly
-// (child extent + horizontal padding + 2*border) wide and tall —
-// roughly the Lipgloss model. For an explicit "stretch to this
-// size", add `width` / `height` fields later.
+//     glyph rendering. A future cut may add a frame-context
+//     mechanism that lets style propagate to children — out of
+//     scope here.
 
 use tinear/tui/core/view
-use tinear/tui/core/rect
 
-// ---- Data types -----------------------------------------------------
+// ---- Decoration types ----------------------------------------------
 
 // Border line style.
 enum BorderStyle {
@@ -68,17 +66,19 @@ fn Padding::y(size: Int) Padding {
   Padding{top: size, right: 0, bottom: size, left: 0}
 }
 
-// A reusable decoration bundle. Every field is optional; omit (or
-// pass `none`) any property you don't want. Construct directly:
-// `Style{border: ..., padding: ..., fg: ...}`.
+// ---- The Style bundle ----------------------------------------------
+
+// Reusable decoration bundle. Every field is optional; omit (or
+// pass `none`) any property you don't want. Construct directly as
+// a struct literal: `Style{border: ..., padding: ..., fg: ...}`.
 struct Style {
   padding: Padding?,
   border: BorderStyle?,
   // Title view rendered inline at the top of the border, in the
   // span between the corner glyphs. Has no effect when `border` is
   // absent. As a view it carries its own styling/padding — wrap a
-  // text in `styled(text, Style{padding: Padding::x(1)})` for the
-  // classic `┌ Demo ┐` look.
+  // text in `box::new(text, Style{padding: Padding::x(1)})` for
+  // the classic `┌ Demo ┐` look.
   border_title: view::View?,
   // Character drawn into every otherwise-empty cell of the styled
   // region. Useful for visible backgrounds, dim panels, diff fills.
@@ -93,236 +93,4 @@ struct Style {
   italic: Bool?,
   underline: Bool?,
   reverse: Bool?,
-}
-
-// ---- Internal drawing helpers --------------------------------------
-
-// Border glyphs for each line style. Order: TL, TR, BL, BR, H, V.
-struct BorderGlyphs {
-  tl: Str,
-  tr: Str,
-  bl: Str,
-  br: Str,
-  h: Str,
-  v: Str,
-}
-
-fn glyphs_for(b: BorderStyle) BorderGlyphs {
-  match b {
-    BorderStyle::Single => BorderGlyphs{tl: "┌", tr: "┐", bl: "└", br: "┘", h: "─", v: "│"},
-    BorderStyle::Double => BorderGlyphs{tl: "╔", tr: "╗", bl: "╚", br: "╝", h: "═", v: "║"},
-    BorderStyle::Rounded => BorderGlyphs{tl: "╭", tr: "╮", bl: "╰", br: "╯", h: "─", v: "│"},
-  }
-}
-
-// Draw a styled character at (x, y) using Style's fg/bg/attrs.
-// Optional fields fall back to terminal defaults / false.
-fn paint(mut frame: view::Frame, x: Int, y: Int, ch: Str, s: Style) {
-  let fg = match s.fg {
-    v => v,
-    _ => -1,
-  }
-  let bg = match s.bg {
-    v => v,
-    _ => -1,
-  }
-  let bold = match s.bold {
-    v => v,
-    _ => false,
-  }
-  let dim = match s.dim {
-    v => v,
-    _ => false,
-  }
-  let italic = match s.italic {
-    v => v,
-    _ => false,
-  }
-  let underline = match s.underline {
-    v => v,
-    _ => false,
-  }
-  let reverse = match s.reverse {
-    v => v,
-    _ => false,
-  }
-  frame.draw_styled(x, y, ch, fg, bg, bold, dim, italic, underline, reverse)
-}
-
-// Draw the border ring at (0, 0)..(w-1, h-1) using the given style.
-fn draw_border(mut frame: view::Frame, w: Int, h: Int, b: BorderStyle, s: Style) {
-  if w < 2 or h < 2 {
-    ()
-  } else {
-    let g = glyphs_for(b)
-
-    // Top edge (corners at 0 and w-1, dashes in between).
-    // Note: Ard's `a..b` is inclusive on both ends, so to iterate
-    // [1, w-2] we write `1..(w - 2)`.
-    paint(frame, 0, 0, g.tl, s)
-    for x in 1..(w - 2) {
-      paint(frame, x, 0, g.h, s)
-    }
-    paint(frame, w - 1, 0, g.tr, s)
-
-    // Vertical edges (rows 1..h-2; the corners cover rows 0 and h-1).
-    for y in 1..(h - 2) {
-      paint(frame, 0, y, g.v, s)
-      paint(frame, w - 1, y, g.v, s)
-    }
-
-    // Bottom edge
-    paint(frame, 0, h - 1, g.bl, s)
-    for x in 1..(w - 2) {
-      paint(frame, x, h - 1, g.h, s)
-    }
-    paint(frame, w - 1, h - 1, g.br, s)
-  }
-}
-
-// Paint the padding ring around a content rectangle within the
-// styled extent. Splits into four strips (top, bottom, left, right)
-// so the content cells aren't overwritten.
-fn fill_padding_ring(
-  mut frame: view::Frame,
-  extent_w: Int,
-  extent_h: Int,
-  content_x: Int,
-  content_y: Int,
-  content_w: Int,
-  content_h: Int,
-  s: Style,
-) {
-  let ch = match s.background_char {
-    c => c,
-    _ => " ",
-  }
-
-  // Ard's `a..b` is INCLUSIVE on both ends, so to iterate the
-  // half-open range [a, b) we write `a..(b - 1)`. Inverted ranges
-  // (b < a) iterate zero times, which makes the degenerate cases
-  // (e.g. content_y == 0 so no top padding) collapse correctly.
-
-  // Top strip: rows above the content, full extent width.
-  for y in 0..(content_y - 1) {
-    for x in 0..(extent_w - 1) {
-      paint(frame, x, y, ch, s)
-    }
-  }
-  // Bottom strip: rows below the content, full extent width.
-  for y in (content_y + content_h)..(extent_h - 1) {
-    for x in 0..(extent_w - 1) {
-      paint(frame, x, y, ch, s)
-    }
-  }
-  // Left strip: cells left of the content on content rows.
-  for y in content_y..(content_y + content_h - 1) {
-    for x in 0..(content_x - 1) {
-      paint(frame, x, y, ch, s)
-    }
-  }
-  // Right strip: cells right of the content on content rows.
-  for y in content_y..(content_y + content_h - 1) {
-    for x in (content_x + content_w)..(extent_w - 1) {
-      paint(frame, x, y, ch, s)
-    }
-  }
-}
-
-// ---- The Styled view -----------------------------------------------
-
-// Wraps a child view with a Style. Renders the child first to learn
-// its actual extent, then paints the surrounding decoration sized to
-// the child — Lipgloss-style fit-content.
-struct Styled {
-  child: view::View,
-  style: Style,
-}
-
-impl view::View for Styled {
-  fn render(mut frame: view::Frame) {
-    let s = self.style
-    let max_w = frame.width()
-    let max_h = frame.height()
-
-    let pad = match s.padding {
-      p => p,
-      _ => Padding{top: 0, right: 0, bottom: 0, left: 0},
-    }
-    let border_inset = match s.border.is_some() {
-      true => 1,
-      false => 0,
-    }
-
-    // 1. Render the child into a sub-frame at (border + pad.left,
-    //    border + pad.top), max available size. The child draws
-    //    only what it wants; we read the bounding box after.
-    let inner_x = border_inset + pad.left
-    let inner_y = border_inset + pad.top
-    let raw_inner_w = max_w - 2 * border_inset - pad.left - pad.right
-    let raw_inner_h = max_h - 2 * border_inset - pad.top - pad.bottom
-    let inner_w = match raw_inner_w < 0 {
-      true => 0,
-      false => raw_inner_w,
-    }
-    let inner_h = match raw_inner_h < 0 {
-      true => 0,
-      false => raw_inner_h,
-    }
-    let inner_area = rect::Rect{x: inner_x, y: inner_y, w: inner_w, h: inner_h}
-    mut child_sub = view::sub(frame, inner_area)
-    self.child.render(child_sub)
-    let dim = child_sub.dimensions()
-
-    // 2. Compute our extent from the child's drawn region. Content
-    //    sits in our coords at (inner_x + dim.x, inner_y + dim.y).
-    let content_x = inner_x + dim.x
-    let content_y = inner_y + dim.y
-    let content_w = dim.w
-    let content_h = dim.h
-    let extent_w = content_x + content_w + pad.right + border_inset
-    let extent_h = content_y + content_h + pad.bottom + border_inset
-
-    // 3. Paint the padding ring around the content (skipping child
-    //    cells). Fires when padding, border, bg, or background_char
-    //    suggest a visible region.
-    let needs_fill = s.bg.is_some() or s.background_char.is_some() or s.padding.is_some() or s.border.is_some()
-    if needs_fill {
-      fill_padding_ring(frame, extent_w, extent_h, content_x, content_y, content_w, content_h, s)
-    }
-
-    // 4. Border at the extent edges (overwrites the corresponding
-    //    fill cells with border glyphs).
-    match s.border {
-      b => draw_border(frame, extent_w, extent_h, b, s),
-      _ => (),
-    }
-
-    // 5. Title at top of border. Title renders into a sub-frame at
-    //    (1, 0) with the available interior width; its own render
-    //    paints only its content + padding, leaving the rest of the
-    //    top border as dashes drawn in step 4.
-    match s.border_title {
-      t => {
-        if s.border.is_some() {
-          let raw_title_w = extent_w - 2
-          let title_w = match raw_title_w < 0 {
-            true => 0,
-            false => raw_title_w,
-          }
-          let title_area = rect::Rect{x: 1, y: 0, w: title_w, h: 1}
-          mut title_sub = view::sub(frame, title_area)
-          t.render(title_sub)
-        }
-      },
-      _ => (),
-    }
-  }
-}
-
-// Apply a Style to any view. Returns a view so the result composes
-// further. (Cross-module trait coercion happens here, inside the
-// module that defines `impl View for Styled`.)
-fn styled(child: view::View, s: Style) view::View {
-  Styled{child: child, style: s}
 }

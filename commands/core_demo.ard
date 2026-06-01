@@ -1,9 +1,10 @@
+use tinear/tui/core/box
 use tinear/tui/core/style
 use tinear/tui/core/text
 use tinear/tui/core/view
 use tinear/vaxis
 
-// Temporary demo for tui/core/ Style + Text.
+// Temporary demo for tui/core/ Box + Text.
 // TODO: remove once the framework is wired into real screens.
 
 fn run() {
@@ -12,7 +13,7 @@ fn run() {
   // The title is itself a view — here a padded text — so its
   // breathing room around "Demo" comes from explicit padding
   // rather than baked-in spaces.
-  let title = style::styled(
+  let title = box::new(
     text::new("Demo"),
     style::Style{padding: style::Padding::x(1)},
   )
@@ -23,7 +24,7 @@ fn run() {
     border_title: title,
   }
 
-  let demo = style::styled(text::new("Hello, framework!"), demo_style)
+  let demo = box::new(text::new("Hello, framework!"), demo_style)
 
   mut frame = view::root(vx)
   frame.clear()
