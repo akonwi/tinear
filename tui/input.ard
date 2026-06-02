@@ -10,17 +10,28 @@ use tinear/vaxis
 //
 // Input composes its content with a Box. Consumers can override the base style
 // and dimensions through the constructor, but don't need to wrap it themselves.
+type OnSubmit = fn(Str)
+
 struct Input {
   value: Str,
   placeholder: Str,
   cursor: Int,
+  on_submit: OnSubmit?,
   style: style::Style?,
   width: Int?,
   height: Int?,
 }
 
-fn new(placeholder: Str, style: style::Style?, width: Int?, height: Int?) Input {
-  Input{value: "", placeholder: placeholder, cursor: 0, style: style, width: width, height: height}
+fn new(placeholder: Str, on_submit: OnSubmit?, style: style::Style?, width: Int?, height: Int?) Input {
+  Input{
+    value: "",
+    placeholder: placeholder,
+    cursor: 0,
+    on_submit: on_submit,
+    style: style,
+    width: width,
+    height: height,
+  }
 }
 
 fn min_int(a: Int, b: Int) Int {
@@ -197,6 +208,13 @@ impl Input {
     }
   }
 
+  fn submit() {
+    match self.on_submit {
+      cb => cb(self.value),
+      _ => (),
+    }
+  }
+
   fn mut handle_key(key: vaxis::KeyEvent) {
     match key.name {
       "Left" => {
@@ -212,6 +230,7 @@ impl Input {
       },
       "Home" => { self.cursor = 0 },
       "End" => { self.cursor = char_count(self.value) },
+      "Enter" => self.submit(),
       "BackSpace" => self.backspace(),
       "Delete" => self.delete(),
       _ => {
