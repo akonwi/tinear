@@ -21,6 +21,19 @@ fn App::new() App {
   App{tabs: tab_bar::new(["Inbox", "My Issues"])}
 }
 
+fn key_hints(labels: [Str]) view::View {
+  mut children: [view::View] = []
+
+  for label, idx in labels {
+    if idx > 0 {
+      children.push(stack::Spacer::h(2))
+    }
+    children.push(text::new(label))
+  }
+
+  stack::hstack(children)
+}
+
 impl App {
   fn render(mut frame: view::Frame) {
 
@@ -32,15 +45,7 @@ impl App {
       ],
     )
 
-    let hints = stack::hstack(
-      [
-        text::new("↑↓ select"),
-        text::new("  ·  "),
-        text::new("↵ open"),
-        text::new("  ·  "),
-        text::new("q quit"),
-      ],
-    )
+    let hints = key_hints(["↑↓ select", "↵ open"])
 
     // Screen layout: tabs fixed at top, items fill the middle, hints
     // fixed at the bottom. A one-row spacer below the tabs gives the
