@@ -3,6 +3,7 @@ use tinear/tui/core/stack
 use tinear/tui/core/style
 use tinear/tui/core/text
 use tinear/tui/core/view
+use tinear/tui/tab_bar
 use tinear/vaxis
 
 // Framework demo / sketch toward a v2 UI.
@@ -12,13 +13,16 @@ use tinear/vaxis
 // and a keybinding hint bar pinned at the bottom — all expressed
 // via stack::vsplit's constraint-based layout.
 
-struct App {}
+struct App {
+  tabs: tab_bar::TabBar,
+}
+
+fn App::new() App {
+  App{tabs: tab_bar::new(["Inbox", "My Issues"])}
+}
 
 impl App {
   fn render(mut frame: view::Frame) {
-    // Tab bar — active tab gets reverse-video highlight, tabs are
-    // separated by vertical bars.
-    let tabs = stack::hstack([text::new(" Inbox ", reverse: true), text::new("│"), text::new(" My Issues ")])
 
     let items = stack::vstack(
       [
@@ -43,7 +47,7 @@ impl App {
     // body a bit of breathing room.
     let screen = stack::vsplit(
       [
-        stack::fixed(tabs, 1),
+        stack::fixed(self.tabs, 1),
         stack::fixed(stack::Spacer::v(1), 1),
         stack::fill(items, 1),
         stack::fixed(hints, 1),
@@ -62,13 +66,18 @@ impl App {
     root.render(frame)
   }
 
-  fn handle_event(event: vaxis::Event) {}
+  fn mut handle_event(event: vaxis::Event) {
+    match event {
+      KeyEvent(key) => self.tabs.handle_key(key),
+      _ => (),
+    }
+  }
 }
 
 fn run() {
   let vx = vaxis::new("tinear core demo").expect("vaxis::new")
 
-  let app = App{}
+  mut app = App::new()
   mut running = true
 
   while running {

@@ -1,0 +1,103 @@
+use tinear/tui/core/view
+use tinear/vaxis
+
+// Stateful tab bar view.
+//
+// The selected tab lives inside TabBar. The app owns a concrete TabBar field,
+// forwards relevant events to it, and render derives the visible tabs from the
+// current selected index.
+struct TabBar {
+  labels: [Str],
+  selected: Int,
+}
+
+fn new(labels: [Str]) TabBar {
+  TabBar{labels: labels, selected: 0}
+}
+
+impl TabBar {
+  fn selected_index() Int { self.selected }
+
+  fn selected_label() Str {
+    match self.labels.size() == 0 {
+      true => "",
+      false => self.labels.at(self.selected),
+    }
+  }
+
+  fn mut select(index: Int) {
+    match self.labels.size() {
+      0 => (),
+      _ => {
+        match {
+          index < 0 => { self.selected = 0},
+          index >= self.labels.size() => { self.selected = self.labels.size() - 1 },
+          _ => { self.selected = index }
+        }
+      }
+    }
+  }
+
+  fn mut next() {
+    let next = self.selected + 1
+    self.selected = match next >= self.labels.size() {
+      true => 0,
+      false => next,
+    }
+  }
+
+  fn mut previous() {
+    match self.labels.size() == 0 {
+      true => { self.selected = 0 },
+      false => {
+        self.selected = match self.selected <= 0 {
+          true => self.labels.size() - 1,
+          false => self.selected - 1,
+        }
+      }
+    }
+  }
+
+  // Handle tab-bar-specific key events. Returns true when the event was
+  // consumed by the tab bar.
+  fn mut handle_key(key: vaxis::KeyEvent) Bool {
+    match key.name {
+      "Tab" => {
+        self.next()
+        true
+      },
+      "Left" => {
+        self.previous()
+        true
+      },
+      "Right" => {
+        self.next()
+        true
+      },
+      _ => false,
+    }
+  }
+}
+
+impl view::View for TabBar {
+  fn render(mut frame: view::Frame) {
+    mut x = 0
+    for label, idx in self.labels {
+      if idx > 0 {
+        frame.draw_text(x, 0, "│")
+        x = x + 1
+      }
+
+      let content = " " + label + " "
+      frame.draw_styled(
+        x, 0, content,
+        -1, -1,
+        false, false, false, false,
+        idx == self.selected,
+      )
+      // Tab labels are ASCII in current call sites; the separator above is
+      // handled explicitly as one display cell.
+      x = x + content.size()
+    }
+  }
+}
