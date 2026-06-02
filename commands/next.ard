@@ -119,9 +119,10 @@ fn run() {
     let event = vaxis::next_event(vx).expect("vaxis::next_event")
     match event {
       KeyEvent(key) => {
-        match key.text {
-          "Ctrl+c" => { running = false },
-          _ => app.handle_event(event),
+        if key.ctrl and key.name == "c" {
+          running = false
+        } else {
+          app.handle_event(event)
         }
       },
       _ => app.handle_event(event),

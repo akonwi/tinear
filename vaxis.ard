@@ -53,6 +53,14 @@ extern fn clipboard_push(vx: Vaxis, text: Str) Void = "ClipboardPush"
 
 // ---- Events ---------------------------------------------------------
 
+// Opaque handle to a single vaxis event. Constructed by `read_event`,
+// passed back into the accessor functions to extract its fields.
+// Backed by the underlying vaxis.Event interface; accessors
+// type-assert to the concrete variant.
+private extern type RawEvent = "vaxis.Event"
+
+extern fn event_key_pretty(e: RawEvent) Str = "EventKeyPretty"
+
 // Key press event. `name` is the plain key name without modifier
 // prefixes, taken from vaxis.Key.String() with modifiers cleared.
 // Examples: "Escape", "Enter", "Up", "Tab", "Space", "BackSpace",
@@ -63,13 +71,19 @@ extern fn clipboard_push(vx: Vaxis, text: Str) Void = "ClipboardPush"
 // non-textual keys (Enter, arrows, function keys, control combos).
 // Prefer `text` when implementing text inputs so you don't have to
 // uppercase/layout-translate characters yourself.
+
 struct KeyEvent {
+  raw: RawEvent,
   name: Str,
   text: Str,
   ctrl: Bool,
   shift: Bool,
   alt: Bool,
   meta: Bool,
+}
+
+impl KeyEvent {
+  fn pretty() Str { event_key_pretty(self.raw) }
 }
 
 // Mouse event. `button` is one of: "left", "middle", "right", "none",
@@ -132,12 +146,6 @@ type Event =
   | ColorThemeEvent
   | QuitEvent
 
-// Opaque handle to a single vaxis event. Constructed by `read_event`,
-// passed back into the accessor functions to extract its fields.
-// Backed by the underlying `vaxis.Event` interface; accessors
-// type-assert to the concrete variant.
-private extern type RawEvent = "vaxis.Event"
-
 extern fn read_event(vx: Vaxis) RawEvent = "ReadEvent"
 extern fn event_kind(e: RawEvent) Str = "EventKind"
 
@@ -178,6 +186,7 @@ fn map_event(raw: RawEvent) Event!Str {
   match kind {
     "key" => {
       let ev: Event = KeyEvent{
+        raw: raw,
         name: event_key_name(raw),
         text: event_key_text(raw),
         ctrl: event_key_ctrl(raw),

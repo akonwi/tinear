@@ -338,7 +338,17 @@ func firstCharacter(text string) string {
 // keyName returns the plain key name without modifier prefixes.
 func keyName(k vaxis.Key) string {
 	k.Modifiers = 0
-	return k.String()
+	name := k.String()
+	for {
+		trimmed := name
+		for _, prefix := range []string{"Meta+", "Hyper+", "Super+", "Ctrl+", "Alt+", "Shift+"} {
+			trimmed = strings.TrimPrefix(trimmed, prefix)
+		}
+		if trimmed == name {
+			return name
+		}
+		name = trimmed
+	}
 }
 
 func mouseButtonName(b vaxis.MouseButton) string {
@@ -498,10 +508,18 @@ func EventKeyMeta(e vaxis.Event) bool {
 // don't have to manually shift/layout characters.
 func EventKeyText(e vaxis.Event) string {
 	if k, ok := e.(vaxis.Key); ok {
+		return k.Text
+	}
+	return ""
+}
+
+func EventKeyPretty(e vaxis.Event) string {
+	if k, ok := e.(vaxis.Key); ok {
 		return k.String()
 	}
 	return ""
 }
+
 
 func EventMouseCol(e vaxis.Event) int {
 	if m, ok := e.(vaxis.Mouse); ok {
