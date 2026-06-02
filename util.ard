@@ -16,6 +16,7 @@ fn print_usage() {
   io::print("")
   io::print("Commands:")
   io::print("  login   Save an API key to ~/.tinear/config")
+  io::print("  next    Launch the experimental next TUI")
   io::print("  help    Show this help")
   io::print("")
   io::print("API key from LINEAR_API_KEY env var or ~/.tinear/config (JSON)")

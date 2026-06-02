@@ -202,7 +202,7 @@ Landed on branch `feat.tui-framework` (commits `591bd0c` through
 - [x] `rect.ard`, `view.ard` (Frame + trait), `text.ard`, `box.ard`,
   `style.ard`, `stack.ard` (fit-content stacks + constraint solver +
   splits)
-- [x] `commands/core_demo.ard` smoke test renders fullscreen mock
+- [x] `commands/next.ard` smoke test renders fullscreen mock
   inbox: tab bar + items + status bar pinned via `vsplit`
 - [x] Layout solver has twelve inline `test fn` cases (`ard test`
   green)

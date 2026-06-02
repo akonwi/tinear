@@ -2,7 +2,7 @@ use ard/argv
 use ard/io
 use ard/list as List
 
-use tinear/commands/core_demo
+use tinear/commands/next
 use tinear/commands/login
 use tinear/commands/tui
 use tinear/util
@@ -18,7 +18,7 @@ fn main() {
       match cmd {
         "help" => util::print_usage(),
         "login" => login::run(rest),
-        "core-demo" => core_demo::run(),
+        "next" => next::run(),
         _ => {
           io::print("Unknown command: {cmd}")
           io::print("")
