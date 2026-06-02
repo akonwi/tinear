@@ -3,14 +3,14 @@ use tinear/tui/core/style
 use tinear/tui/core/view
 use tinear/vaxis
 
-// Stateful single-line text input.
+// Stateful single-line input.
 //
 // Owns its current value and implements View for rendering. Event routing
 // stays app-owned: parent components call handle_key when this input is active.
 //
-// TextInput draws its own border/padding. Consumers can override the base style
+// Input draws its own border/padding. Consumers can override the base style
 // and dimensions through the constructor, but don't need to wrap it in a Box.
-struct TextInput {
+struct Input {
   value: Str,
   placeholder: Str,
   style: style::Style?,
@@ -18,8 +18,8 @@ struct TextInput {
   height: Int?,
 }
 
-fn new(placeholder: Str, style: style::Style?, width: Int?, height: Int?) TextInput {
-  TextInput{value: "", placeholder: placeholder, style: style, width: width, height: height}
+fn new(placeholder: Str, style: style::Style?, width: Int?, height: Int?) Input {
+  Input{value: "", placeholder: placeholder, style: style, width: width, height: height}
 }
 
 fn min_int(a: Int, b: Int) Int {
@@ -50,13 +50,13 @@ fn opt_or_border(v: style::BorderStyle?, fallback: style::BorderStyle) style::Bo
   }
 }
 
-struct TextInputContent {
+struct InputContent {
   content: Str,
   is_placeholder: Bool,
   cursor_x: Int,
 }
 
-impl view::View for TextInputContent {
+impl view::View for InputContent {
   fn render(mut frame: view::Frame) {
     frame.draw_styled(
       0, 0, self.content,
@@ -71,7 +71,7 @@ impl view::View for TextInputContent {
   }
 }
 
-impl TextInput {
+impl Input {
   fn value() Str { self.value }
 
   fn mut clear() {
@@ -126,10 +126,10 @@ impl TextInput {
   }
 }
 
-impl view::View for TextInput {
+impl view::View for Input {
   fn render(mut frame: view::Frame) {
     let content = self.display_value()
-    let content_view = TextInputContent{
+    let content_view = InputContent{
       content: content,
       is_placeholder: self.value.size() == 0,
       cursor_x: frame.rendered_width(self.value),
