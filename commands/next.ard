@@ -95,12 +95,7 @@ impl App {
           _ => (),
         }
       },
-      _ => {
-        match event {
-          KeyEvent(key) => self.welcome.handle_key(key),
-          _ => (),
-        }
-      },
+      _ => self.welcome.handle_event(event),
     }
   }
 }

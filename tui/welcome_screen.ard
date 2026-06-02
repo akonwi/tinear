@@ -52,6 +52,18 @@ impl WelcomeScreen {
       },
     }
   }
+
+  fn mut handle_event(event: vaxis::Event) {
+    match event {
+      KeyEvent(key) => self.handle_key(key),
+      PasteEvent(_) => {
+        if self.showing_input {
+          self.input.handle_event(event)
+        }
+      },
+      _ => (),
+    }
+  }
 }
 
 impl view::View for WelcomeScreen {
@@ -78,6 +90,7 @@ impl view::View for WelcomeScreen {
         draw_centered(frame, y + 9, "Or run `tinear login` / set LINEAR_API_KEY.", false)
       },
     }
+
   }
 }
 

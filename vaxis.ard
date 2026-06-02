@@ -99,10 +99,9 @@ struct FocusEvent {
   focused: Bool,
 }
 
-// Bracketed-paste boundary. started = true marks the beginning of a
-// paste; false marks the end. Keys within a paste arrive as KeyEvent.
+// Pasted text captured from a bracketed-paste sequence.
 struct PasteEvent {
-  started: Bool,
+  content: Str,
 }
 
 // Vaxis asked the app to redraw (e.g. after a SyncFunc).
@@ -172,6 +171,7 @@ extern fn event_color_theme_dark(e: RawEvent) Bool = "EventColorThemeDark"
 
 extern fn event_focus_focused(e: RawEvent) Bool = "EventFocusFocused"
 extern fn event_paste_started(e: RawEvent) Bool = "EventPasteStarted"
+extern fn event_paste_content(e: RawEvent) Str = "EventPasteContent"
 
 fn map_event(raw: RawEvent) Event!Str {
   let kind = event_kind(raw)
@@ -213,7 +213,7 @@ fn map_event(raw: RawEvent) Event!Str {
       Result::ok(ev)
     },
     "paste" => {
-      let ev: Event = PasteEvent{started: event_paste_started(raw)}
+      let ev: Event = PasteEvent{content: event_paste_content(raw)}
       Result::ok(ev)
     },
     "redraw" => {

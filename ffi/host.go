@@ -3,6 +3,7 @@ package ffi
 import (
 	"os/exec"
 	"runtime"
+	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -384,6 +385,10 @@ func mouseKindName(t vaxis.EventType) string {
 // that can unblock a ReadEvent call.
 type RefreshEvent struct{}
 
+type PasteEvent struct {
+	Content string
+}
+
 // PostRefreshEvent enqueues a RefreshEvent into the vaxis event loop.
 // Called from the Ard refresh fiber after each sleep interval.
 // PostEvent is non-blocking and drops silently if the queue is full,
@@ -396,9 +401,25 @@ func PostRefreshEvent(term *vaxis.Vaxis) {
 }
 
 // ReadEvent blocks until the next event from the terminal and returns
-// it. Non-press key events are filtered out at this layer.
+// it. Non-press key events are filtered out at this layer. Bracketed paste
+// boundaries are collapsed into a single PasteEvent carrying the pasted text.
 func ReadEvent(term *vaxis.Vaxis) vaxis.Event {
 	for ev := range term.Events() {
+		if _, ok := ev.(vaxis.PasteStartEvent); ok {
+			var content strings.Builder
+			for pasteEv := range term.Events() {
+				switch pasteEv := pasteEv.(type) {
+				case vaxis.PasteEndEvent:
+					return PasteEvent{Content: content.String()}
+				case vaxis.Key:
+					if pasteEv.EventType == vaxis.EventPaste {
+						content.WriteString(pasteEv.Text)
+					}
+				}
+			}
+			return PasteEvent{Content: content.String()}
+		}
+
 		if k, ok := ev.(vaxis.Key); ok && k.EventType != vaxis.EventPress {
 			continue
 		}
@@ -426,7 +447,7 @@ func EventKind(e vaxis.Event) string {
 		return "redraw"
 	case vaxis.FocusIn, vaxis.FocusOut:
 		return "focus"
-	case vaxis.PasteStartEvent, vaxis.PasteEndEvent:
+	case PasteEvent, vaxis.PasteStartEvent, vaxis.PasteEndEvent:
 		return "paste"
 	case vaxis.QuitEvent:
 		return "quit"
@@ -566,6 +587,13 @@ func EventFocusFocused(e vaxis.Event) bool {
 func EventPasteStarted(e vaxis.Event) bool {
 	_, isStart := e.(vaxis.PasteStartEvent)
 	return isStart
+}
+
+func EventPasteContent(e vaxis.Event) string {
+	if p, ok := e.(PasteEvent); ok {
+		return p.Content
+	}
+	return ""
 }
 
 func drainStartupEvents(vx *vaxis.Vaxis) {

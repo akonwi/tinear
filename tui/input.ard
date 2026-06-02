@@ -13,13 +13,14 @@ use tinear/vaxis
 struct Input {
   value: Str,
   placeholder: Str,
+  cursor: Int,
   style: style::Style?,
   width: Int?,
   height: Int?,
 }
 
 fn new(placeholder: Str, style: style::Style?, width: Int?, height: Int?) Input {
-  Input{value: "", placeholder: placeholder, style: style, width: width, height: height}
+  Input{value: "", placeholder: placeholder, cursor: 0, style: style, width: width, height: height}
 }
 
 fn min_int(a: Int, b: Int) Int {
@@ -50,24 +51,80 @@ fn opt_or_border(v: style::BorderStyle?, fallback: style::BorderStyle) style::Bo
   }
 }
 
+fn char_count(s: Str) Int {
+  mut count = 0
+  for _ in s {
+    count = count + 1
+  }
+  count
+}
+
+fn prefix(s: Str, n: Int) Str {
+  mut out = ""
+  mut idx = 0
+  for ch in s {
+    if idx < n {
+      out = "{out}{ch}"
+    }
+    idx = idx + 1
+  }
+  out
+}
+
+fn suffix(s: Str, n: Int) Str {
+  mut out = ""
+  mut idx = 0
+  for ch in s {
+    if idx >= n {
+      out = "{out}{ch}"
+    }
+    idx = idx + 1
+  }
+  out
+}
+
 struct InputContent {
-  content: Str,
-  is_placeholder: Bool,
-  cursor_x: Int,
+  value: Str,
+  placeholder: Str,
+  cursor: Int,
 }
 
 impl view::View for InputContent {
   fn render(mut frame: view::Frame) {
+    let is_placeholder = self.value.size() == 0
+    let content_w = frame.width()
+    let offset = match is_placeholder {
+      true => 0,
+      false => {
+        let max_cursor = match content_w <= 1 {
+          true => 0,
+          false => content_w - 1,
+        }
+        match self.cursor > max_cursor {
+          true => self.cursor - max_cursor,
+          false => 0,
+        }
+      },
+    }
+    let content = match is_placeholder {
+      true => self.placeholder,
+      false => prefix(suffix(self.value, offset), content_w),
+    }
+    let cursor_x = match is_placeholder {
+      true => 0,
+      false => self.cursor - offset,
+    }
+
     frame.draw_styled(
-      0, 0, self.content,
+      0, 0, content,
       -1, -1,
       false,
-      self.is_placeholder,
+      is_placeholder,
       false,
       false,
       false,
     )
-    frame.show_cursor(self.cursor_x, 0)
+    frame.show_cursor(cursor_x, 0)
   }
 }
 
@@ -76,6 +133,7 @@ impl Input {
 
   fn mut clear() {
     self.value = ""
+    self.cursor = 0
   }
 
   fn display_value() Str {
@@ -114,25 +172,71 @@ impl Input {
     }
   }
 
+  fn mut insert_text(text: Str) {
+    let before = prefix(self.value, self.cursor)
+    let after = suffix(self.value, self.cursor)
+    self.value = "{before}{text}{after}"
+    self.cursor = self.cursor + char_count(text)
+  }
+
+  fn mut backspace() {
+    if self.cursor > 0 {
+      let before = prefix(self.value, self.cursor - 1)
+      let after = suffix(self.value, self.cursor)
+      self.value = "{before}{after}"
+      self.cursor = self.cursor - 1
+    }
+  }
+
+  fn mut delete() {
+    let len = char_count(self.value)
+    if self.cursor < len {
+      let before = prefix(self.value, self.cursor)
+      let after = suffix(self.value, self.cursor + 1)
+      self.value = "{before}{after}"
+    }
+  }
+
   fn mut handle_key(key: vaxis::KeyEvent) {
     match key.name {
-      "BackSpace" => { self.value = vaxis::text_backspace(self.value) },
-      _ => {
-        if key.text.size() > 0 and not key.ctrl and not key.alt and not key.meta {
-          self.value = "{self.value}{key.text}"
+      "Left" => {
+        if self.cursor > 0 {
+          self.cursor = self.cursor - 1
         }
       },
+      "Right" => {
+        let len = char_count(self.value)
+        if self.cursor < len {
+          self.cursor = self.cursor + 1
+        }
+      },
+      "Home" => { self.cursor = 0 },
+      "End" => { self.cursor = char_count(self.value) },
+      "BackSpace" => self.backspace(),
+      "Delete" => self.delete(),
+      _ => {
+        if key.text.size() > 0 and not key.ctrl and not key.alt and not key.meta {
+          self.insert_text(key.text)
+        }
+      },
+    }
+  }
+
+  fn mut handle_event(event: vaxis::Event) {
+    match event {
+      KeyEvent(key) => self.handle_key(key),
+      PasteEvent(paste) => self.insert_text(paste.content),
+      _ => (),
     }
   }
 }
 
 impl view::View for Input {
   fn render(mut frame: view::Frame) {
-    let content = self.display_value()
     let content_view = InputContent{
-      content: content,
-      is_placeholder: self.value.size() == 0,
-      cursor_x: frame.rendered_width(self.value),
+      value: self.value,
+      placeholder: self.placeholder,
+      cursor: self.cursor,
     }
     box::new(content_view, self.resolved_style(frame)).render(frame)
   }
