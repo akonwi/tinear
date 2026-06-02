@@ -67,23 +67,14 @@ impl TabBar {
     }
   }
 
-  // Handle tab-bar-specific key events. Returns true when the event was
-  // consumed by the tab bar.
-  fn mut handle_key(key: vaxis::KeyEvent) Bool {
+  // Handle tab-bar-specific key events. Consumption/propagation semantics are
+  // intentionally left out until the framework grows focus tracking.
+  fn mut handle_key(key: vaxis::KeyEvent) {
     match key.name {
-      "Tab" => {
-        self.next()
-        true
-      },
-      "Left" => {
-        self.previous()
-        true
-      },
-      "Right" => {
-        self.next()
-        true
-      },
-      _ => false,
+      "Tab" => self.next(),
+      "Left" => self.previous(),
+      "Right" => self.next(),
+      _ => (),
     }
   }
 }
