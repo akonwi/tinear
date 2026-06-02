@@ -1,0 +1,39 @@
+use tinear/tui/core/view
+
+struct WelcomeScreen {}
+
+fn centered_x(mut frame: view::Frame, content: Str) Int {
+  let raw = (frame.width() - frame.rendered_width(content)) / 2
+  match raw < 0 {
+    true => 0,
+    false => raw,
+  }
+}
+
+fn centered_y(mut frame: view::Frame, height: Int) Int {
+  let raw = (frame.height() - height) / 2
+  match raw < 0 {
+    true => 0,
+    false => raw,
+  }
+}
+
+fn draw_centered(mut frame: view::Frame, y: Int, content: Str, bold: Bool) {
+  frame.draw_styled(centered_x(frame, content), y, content, -1, -1, bold, false, false, false, false)
+}
+
+impl view::View for WelcomeScreen {
+  fn render(mut frame: view::Frame) {
+    let y = centered_y(frame, 8)
+
+    draw_centered(frame, y, "▀█▀ ▀ █▀█ █▀▀ ▄▀█ █▀█", true)
+    draw_centered(frame, y + 1, " █  █ █ █ ██▄ █▀█ █▀▄", true)
+    draw_centered(frame, y + 4, "Welcome to tinear next", true)
+    draw_centered(frame, y + 6, "No Linear API token is configured yet.", false)
+    draw_centered(frame, y + 7, "Run `tinear login` or set LINEAR_API_KEY to continue.", false)
+  }
+}
+
+fn new() WelcomeScreen {
+  WelcomeScreen{}
+}

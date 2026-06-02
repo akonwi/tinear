@@ -68,6 +68,7 @@ impl Frame {
 
   fn mut width() Int { vaxis::window_width(self.window) }
   fn mut height() Int { vaxis::window_height(self.window) }
+  fn mut rendered_width(text: Str) Int { vaxis::rendered_width(self.vx, text) }
 
   // Bounding box of cells drawn through this frame so far.
   // Returns an empty Rect (w == 0, h == 0) if nothing's been drawn.

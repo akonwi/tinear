@@ -1,9 +1,13 @@
+use ard/maybe
+
 use tinear/tui/core/box
 use tinear/tui/core/stack
 use tinear/tui/core/style
 use tinear/tui/core/text
 use tinear/tui/core/view
 use tinear/tui/tab_bar
+use tinear/tui/welcome_screen
+use tinear/util
 use tinear/vaxis
 
 // Framework demo / sketch toward a v2 UI.
@@ -14,11 +18,12 @@ use tinear/vaxis
 // via stack::vsplit's constraint-based layout.
 
 struct App {
+  api_key: Str?,
   tabs: tab_bar::TabBar,
 }
 
-fn App::new() App {
-  App{tabs: tab_bar::new(["Inbox", "My Issues"])}
+fn App::new(api_key: Str?) App {
+  App{api_key: api_key, tabs: tab_bar::new(["Inbox", "My Issues"])}
 }
 
 fn key_hints(labels: [Str]) view::View {
@@ -35,8 +40,7 @@ fn key_hints(labels: [Str]) view::View {
 }
 
 impl App {
-  fn render(mut frame: view::Frame) {
-
+  fn authed_screen() view::View {
     let items = stack::vstack(
       [
         text::new("AKO-123  Fix login bug"),
@@ -50,7 +54,7 @@ impl App {
     // Screen layout: tabs fixed at top, items fill the middle, hints
     // fixed at the bottom. A one-row spacer below the tabs gives the
     // body a bit of breathing room.
-    let screen = stack::vsplit(
+    stack::vsplit(
       [
         stack::fixed(self.tabs, 1),
         stack::fixed(stack::Spacer::v(1), 1),
@@ -58,6 +62,13 @@ impl App {
         stack::fixed(hints, 1),
       ],
     )
+  }
+
+  fn render(mut frame: view::Frame) {
+    let screen = match self.api_key {
+      _key => self.authed_screen(),
+      _ => welcome_screen::new(),
+    }
 
     let root = box::new(
       screen,
@@ -72,17 +83,26 @@ impl App {
   }
 
   fn mut handle_event(event: vaxis::Event) {
-    match event {
-      KeyEvent(key) => self.tabs.handle_key(key),
+    match self.api_key {
+      _key => {
+        match event {
+          KeyEvent(key) => self.tabs.handle_key(key),
+          _ => (),
+        }
+      },
       _ => (),
     }
   }
 }
 
 fn run() {
-  let vx = vaxis::new("tinear core demo").expect("vaxis::new")
+  let api_key = match util::get_api_key() {
+    ok(key) => maybe::some(key),
+    err(_) => maybe::none(),
+  }
+  let vx = vaxis::new("tinear next").expect("vaxis::new")
 
-  mut app = App::new()
+  mut app = App::new(api_key)
   mut running = true
 
   while running {
