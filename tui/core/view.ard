@@ -70,6 +70,12 @@ impl Frame {
   fn mut height() Int { vaxis::window_height(self.window) }
   fn mut rendered_width(text: Str) Int { vaxis::rendered_width(self.vx, text) }
 
+  fn mut show_cursor(x: Int, y: Int) {
+    let col = vaxis::window_origin_col(self.window) + x
+    let row = vaxis::window_origin_row(self.window) + y
+    vaxis::show_cursor(self.vx, col, row)
+  }
+
   // Bounding box of cells drawn through this frame so far.
   // Returns an empty Rect (w == 0, h == 0) if nothing's been drawn.
   // Read by parent views to learn what their child actually rendered.

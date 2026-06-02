@@ -87,9 +87,14 @@ fn draw_border(mut frame: view::Frame, w: Int, h: Int, b: style::BorderStyle, s:
     paint(frame, w - 1, 0, g.tr, s)
 
     // Vertical edges (rows 1..h-2; the corners cover rows 0 and h-1).
-    for y in 1..(h - 2) {
+    // Use an explicit while loop here: range boundary behavior has varied
+    // during Ard upgrades, and missing this loop leaves boxes looking like
+    // horizontal rules with no sides.
+    mut y = 1
+    while y < h - 1 {
       paint(frame, 0, y, g.v, s)
       paint(frame, w - 1, y, g.v, s)
+      y = y + 1
     }
 
     // Bottom edge

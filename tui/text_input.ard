@@ -1,0 +1,139 @@
+use tinear/tui/core/box
+use tinear/tui/core/style
+use tinear/tui/core/view
+use tinear/vaxis
+
+// Stateful single-line text input.
+//
+// Owns its current value and implements View for rendering. Event routing
+// stays app-owned: parent components call handle_key when this input is active.
+//
+// TextInput draws its own border/padding. Consumers can override the base style
+// and dimensions through the constructor, but don't need to wrap it in a Box.
+struct TextInput {
+  value: Str,
+  placeholder: Str,
+  style: style::Style?,
+  width: Int?,
+  height: Int?,
+}
+
+fn new(placeholder: Str, style: style::Style?, width: Int?, height: Int?) TextInput {
+  TextInput{value: "", placeholder: placeholder, style: style, width: width, height: height}
+}
+
+fn min_int(a: Int, b: Int) Int {
+  match a < b {
+    true => a,
+    false => b,
+  }
+}
+
+fn opt_or_int(v: Int?, fallback: Int) Int {
+  match v {
+    n => n,
+    _ => fallback,
+  }
+}
+
+fn opt_or_padding(v: style::Padding?, fallback: style::Padding) style::Padding {
+  match v {
+    p => p,
+    _ => fallback,
+  }
+}
+
+fn opt_or_border(v: style::BorderStyle?, fallback: style::BorderStyle) style::BorderStyle {
+  match v {
+    b => b,
+    _ => fallback,
+  }
+}
+
+struct TextInputContent {
+  content: Str,
+  is_placeholder: Bool,
+  cursor_x: Int,
+}
+
+impl view::View for TextInputContent {
+  fn render(mut frame: view::Frame) {
+    frame.draw_styled(
+      0, 0, self.content,
+      -1, -1,
+      false,
+      self.is_placeholder,
+      false,
+      false,
+      false,
+    )
+    frame.show_cursor(self.cursor_x, 0)
+  }
+}
+
+impl TextInput {
+  fn value() Str { self.value }
+
+  fn mut clear() {
+    self.value = ""
+  }
+
+  fn display_value() Str {
+    match self.value.size() == 0 {
+      true => self.placeholder,
+      false => self.value,
+    }
+  }
+
+  fn resolved_style(mut frame: view::Frame) style::Style {
+    let default_width = min_int(frame.width(), 32)
+    let default_height = min_int(frame.height(), 3)
+
+    match self.style {
+      s => style::Style{
+        padding: opt_or_padding(s.padding, style::Padding::x(1)),
+        border: opt_or_border(s.border, style::BorderStyle::Single),
+        border_title: s.border_title,
+        background_char: s.background_char,
+        fg: s.fg,
+        bg: s.bg,
+        bold: s.bold,
+        dim: s.dim,
+        italic: s.italic,
+        underline: s.underline,
+        reverse: s.reverse,
+        width: opt_or_int(self.width, opt_or_int(s.width, default_width)),
+        height: opt_or_int(self.height, opt_or_int(s.height, default_height)),
+      },
+      _ => style::Style{
+        padding: style::Padding::x(1),
+        border: style::BorderStyle::Single,
+        width: opt_or_int(self.width, default_width),
+        height: opt_or_int(self.height, default_height),
+      },
+    }
+  }
+
+  fn mut handle_key(key: vaxis::KeyEvent) {
+    match key.name {
+      "BackSpace" => { self.value = vaxis::text_backspace(self.value) },
+      _ => {
+        if key.text.size() > 0 and not key.ctrl and not key.alt and not key.meta {
+          self.value = "{self.value}{key.text}"
+        }
+      },
+    }
+  }
+}
+
+impl view::View for TextInput {
+  fn render(mut frame: view::Frame) {
+    let content = self.display_value()
+    let content_view = TextInputContent{
+      content: content,
+      is_placeholder: self.value.size() == 0,
+      cursor_x: frame.rendered_width(self.value),
+    }
+    box::new(content_view, self.resolved_style(frame)).render(frame)
+  }
+}

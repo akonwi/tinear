@@ -1,6 +1,12 @@
+use tinear/tui/core/rect
 use tinear/tui/core/view
+use tinear/tui/text_input
+use tinear/vaxis
 
-struct WelcomeScreen {}
+struct WelcomeScreen {
+  input: text_input::TextInput,
+  showing_input: Bool,
+}
 
 fn centered_x(mut frame: view::Frame, content: Str) Int {
   let raw = (frame.width() - frame.rendered_width(content)) / 2
@@ -22,18 +28,59 @@ fn draw_centered(mut frame: view::Frame, y: Int, content: Str, bold: Bool) {
   frame.draw_styled(centered_x(frame, content), y, content, -1, -1, bold, false, false, false, false)
 }
 
+fn centered_width(mut frame: view::Frame, desired: Int) Int {
+  match desired > frame.width() {
+    true => frame.width(),
+    false => desired,
+  }
+}
+
+impl WelcomeScreen {
+  fn mut handle_key(key: vaxis::KeyEvent) {
+    match self.showing_input {
+      true => {
+        match key.name {
+          "Escape" => { self.showing_input = false },
+          _ => self.input.handle_key(key),
+        }
+      },
+      false => {
+        match key.name {
+          "Enter" => { self.showing_input = true },
+          _ => (),
+        }
+      },
+    }
+  }
+}
+
 impl view::View for WelcomeScreen {
   fn render(mut frame: view::Frame) {
-    let y = centered_y(frame, 8)
+    let y = centered_y(frame, 14)
 
     draw_centered(frame, y, "▀█▀ ▀ █▀█ █▀▀ ▄▀█ █▀█", true)
     draw_centered(frame, y + 1, " █  █ █ █ ██▄ █▀█ █▀▄", true)
     draw_centered(frame, y + 4, "Welcome to tinear next", true)
     draw_centered(frame, y + 6, "No Linear API token is configured yet.", false)
-    draw_centered(frame, y + 7, "Run `tinear login` or set LINEAR_API_KEY to continue.", false)
+
+    match self.showing_input {
+      true => {
+        draw_centered(frame, y + 8, "Enter your Linear API key", true)
+        let input_w = centered_width(frame, 32)
+        let input_x = (frame.width() - input_w) / 2
+        let input_area = rect::Rect{x: input_x, y: y + 10, w: input_w, h: 3}
+        mut input_frame = view::sub(frame, input_area)
+        self.input.render(input_frame)
+        draw_centered(frame, y + 13, "Esc cancels", false)
+      },
+      false => {
+        draw_centered(frame, y + 8, "Press Enter to provide an API key", true)
+        draw_centered(frame, y + 9, "Or run `tinear login` / set LINEAR_API_KEY.", false)
+      },
+    }
   }
 }
 
 fn new() WelcomeScreen {
-  WelcomeScreen{}
+  WelcomeScreen{input: text_input::new("Paste Linear API key"), showing_input: false}
 }
