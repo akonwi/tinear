@@ -14,7 +14,7 @@ use tinear/vaxis
 
 struct App {}
 
-impl view::View for App {
+impl App {
   fn render(mut frame: view::Frame) {
     // Tab bar — active tab gets reverse-video highlight, tabs are
     // separated by vertical bars.
@@ -59,25 +59,23 @@ impl view::View for App {
       },
     )
 
-    frame.clear()
     root.render(frame)
-    frame.flush()
   }
-}
 
-impl App {
   fn handle_event(event: vaxis::Event) {}
 }
 
 fn run() {
   let vx = vaxis::new("tinear core demo").expect("vaxis::new")
-  mut frame = view::root(vx)
 
   let app = App{}
   mut running = true
 
   while running {
+    mut frame = view::root(vx)
+    frame.clear()
     app.render(frame)
+    frame.flush()
     let event = vaxis::next_event(vx).expect("vaxis::next_event")
     match event {
       KeyEvent(key) => {
