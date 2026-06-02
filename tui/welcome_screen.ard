@@ -1,19 +1,10 @@
-use tinear/tui/core/rect
+use tinear/tui/core/stack
 use tinear/tui/core/view
 use tinear/tui/input
 use tinear/vaxis
 
 struct WelcomeScreen {
   input: input::Input,
-  showing_input: Bool,
-}
-
-fn centered_x(mut frame: view::Frame, content: Str) Int {
-  let raw = (frame.width() - frame.rendered_width(content)) / 2
-  match raw < 0 {
-    true => 0,
-    false => raw,
-  }
 }
 
 fn centered_y(mut frame: view::Frame, height: Int) Int {
@@ -24,10 +15,6 @@ fn centered_y(mut frame: view::Frame, height: Int) Int {
   }
 }
 
-fn draw_centered(mut frame: view::Frame, y: Int, content: Str, bold: Bool) {
-  frame.draw_styled(centered_x(frame, content), y, content, -1, -1, bold, false, false, false, false)
-}
-
 fn centered_width(mut frame: view::Frame, desired: Int) Int {
   match desired > frame.width() {
     true => frame.width(),
@@ -35,65 +22,71 @@ fn centered_width(mut frame: view::Frame, desired: Int) Int {
   }
 }
 
+struct CenteredText {
+  content: Str,
+  bold: Bool,
+}
+
+impl view::View for CenteredText {
+  fn render(mut frame: view::Frame) {
+    let raw_x = (frame.width() - frame.rendered_width(self.content)) / 2
+    let x = match raw_x < 0 {
+      true => 0,
+      false => raw_x,
+    }
+    frame.draw_styled(x, 0, self.content, -1, -1, self.bold, false, false, false, false)
+  }
+}
+
+fn centered_text(content: Str, bold: Bool) view::View {
+  CenteredText{content: content, bold: bold}
+}
+
+struct CenteredInput {
+  input: input::Input,
+  width: Int,
+}
+
+impl view::View for CenteredInput {
+  fn render(mut frame: view::Frame) {
+    let input_w = centered_width(frame, self.width)
+    let raw_x = (frame.width() - input_w) / 2
+    let input_x = match raw_x < 0 {
+      true => 0,
+      false => raw_x,
+    }
+    stack::hstack([stack::Spacer::h(input_x), self.input]).render(frame)
+  }
+}
+
 impl WelcomeScreen {
   fn mut handle_key(key: vaxis::KeyEvent) {
-    match self.showing_input {
-      true => {
-        match key.name {
-          "Escape" => { self.showing_input = false },
-          _ => self.input.handle_key(key),
-        }
-      },
-      false => {
-        match key.name {
-          "Enter" => { self.showing_input = true },
-          _ => (),
-        }
-      },
-    }
+    self.input.handle_key(key)
   }
 
   fn mut handle_event(event: vaxis::Event) {
-    match event {
-      KeyEvent(key) => self.handle_key(key),
-      PasteEvent(_) => {
-        if self.showing_input {
-          self.input.handle_event(event)
-        }
-      },
-      _ => (),
-    }
+    self.input.handle_event(event)
   }
 }
 
 impl view::View for WelcomeScreen {
   fn render(mut frame: view::Frame) {
-    let y = centered_y(frame, 14)
+    let top = centered_y(frame, 10)
+    let content = stack::vstack(
+      [
+        stack::Spacer::v(top),
+        centered_text("▀█▀ ▀ █▀█ █▀▀ ▄▀█ █▀█", true),
+        centered_text(" █  █ █ █ ██▄ █▀█ █▀▄", true),
+        stack::Spacer::v(2),
+        centered_text("Enter your Linear API key", true),
+        CenteredInput{input: self.input, width: 32},
+      ],
+    )
 
-    draw_centered(frame, y, "▀█▀ ▀ █▀█ █▀▀ ▄▀█ █▀█", true)
-    draw_centered(frame, y + 1, " █  █ █ █ ██▄ █▀█ █▀▄", true)
-    draw_centered(frame, y + 4, "Welcome to tinear next", true)
-    draw_centered(frame, y + 6, "No Linear API token is configured yet.", false)
-
-    match self.showing_input {
-      true => {
-        draw_centered(frame, y + 8, "Enter your Linear API key", true)
-        let input_w = centered_width(frame, 32)
-        let input_x = (frame.width() - input_w) / 2
-        let input_area = rect::Rect{x: input_x, y: y + 10, w: input_w, h: 3}
-        mut input_frame = view::sub(frame, input_area)
-        self.input.render(input_frame)
-        draw_centered(frame, y + 13, "Esc cancels", false)
-      },
-      false => {
-        draw_centered(frame, y + 8, "Press Enter to provide an API key", true)
-        draw_centered(frame, y + 9, "Or run `tinear login` / set LINEAR_API_KEY.", false)
-      },
-    }
-
+    content.render(frame)
   }
 }
 
 fn new() WelcomeScreen {
-  WelcomeScreen{input: input::new("Paste Linear API key"), showing_input: false}
+  WelcomeScreen{input: input::new("Paste Linear API key")}
 }

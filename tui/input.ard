@@ -8,8 +8,8 @@ use tinear/vaxis
 // Owns its current value and implements View for rendering. Event routing
 // stays app-owned: parent components call handle_key when this input is active.
 //
-// Input draws its own border/padding. Consumers can override the base style
-// and dimensions through the constructor, but don't need to wrap it in a Box.
+// Input composes its content with a Box. Consumers can override the base style
+// and dimensions through the constructor, but don't need to wrap it themselves.
 struct Input {
   value: Str,
   placeholder: Str,
