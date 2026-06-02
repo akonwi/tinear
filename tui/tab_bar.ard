@@ -1,4 +1,8 @@
 use tinear/tui/core/view
+use tinear/tui/core/text
+use tinear/tui/core/box
+use tinear/tui/core/rect
+use tinear/tui/core/style
 use tinear/vaxis
 
 // Stateful tab bar view.
@@ -39,10 +43,15 @@ impl TabBar {
   }
 
   fn mut next() {
-    let next = self.selected + 1
-    self.selected = match next >= self.labels.size() {
-      true => 0,
-      false => next,
+    match self.labels.size() == 0 {
+      true => { self.selected = 0 },
+      false => {
+        let next = self.selected + 1
+        self.selected = match next >= self.labels.size() {
+          true => 0,
+          false => next,
+        }
+      }
     }
   }
 
@@ -84,20 +93,29 @@ impl view::View for TabBar {
     mut x = 0
     for label, idx in self.labels {
       if idx > 0 {
-        frame.draw_text(x, 0, "│")
-        x = x + 1
+        let sep = text::new("│")
+        let sep_area = rect::Rect{x: x, y: 0, w: frame.width() - x, h: 1}
+        mut sep_sub = view::sub(frame, sep_area)
+        sep.render(sep_sub)
+        let sep_dim = sep_sub.dimensions()
+        frame.expand(x + sep_dim.x, sep_dim.y, sep_dim.w, sep_dim.h)
+        x = x + sep_dim.x + sep_dim.w
       }
 
-      let content = " " + label + " "
-      frame.draw_styled(
-        x, 0, content,
-        -1, -1,
-        false, false, false, false,
-        idx == self.selected,
+      let selected = idx == self.selected
+      let tab = box::new(
+        text::new(label, reverse: selected),
+        style::Style{
+          padding: style::Padding::x(1),
+          reverse: selected,
+        },
       )
-      // Tab labels are ASCII in current call sites; the separator above is
-      // handled explicitly as one display cell.
-      x = x + content.size()
+      let tab_area = rect::Rect{x: x, y: 0, w: frame.width() - x, h: 1}
+      mut tab_sub = view::sub(frame, tab_area)
+      tab.render(tab_sub)
+      let tab_dim = tab_sub.dimensions()
+      frame.expand(x + tab_dim.x, tab_dim.y, tab_dim.w, tab_dim.h)
+      x = x + tab_dim.x + tab_dim.w
     }
   }
 }
