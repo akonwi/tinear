@@ -122,7 +122,16 @@ struct ColorThemeEvent {
 // Application is shutting down.
 struct QuitEvent {}
 
-type Event = KeyEvent | MouseEvent | ResizeEvent | FocusEvent | PasteEvent | RedrawEvent | RefreshEvent | ColorThemeEvent | QuitEvent
+type Event =
+  | KeyEvent
+  | MouseEvent
+  | ResizeEvent
+  | FocusEvent
+  | PasteEvent
+  | RedrawEvent
+  | RefreshEvent
+  | ColorThemeEvent
+  | QuitEvent
 
 // Opaque handle to a single vaxis event. Constructed by `read_event`,
 // passed back into the accessor functions to extract its fields.
@@ -130,7 +139,7 @@ type Event = KeyEvent | MouseEvent | ResizeEvent | FocusEvent | PasteEvent | Red
 // type-assert to the concrete variant.
 private extern type RawEvent = "vaxis.Event"
 
-extern fn read_event(vx: Vaxis) RawEvent!Str = "ReadEvent"
+extern fn read_event(vx: Vaxis) RawEvent = "ReadEvent"
 extern fn event_kind(e: RawEvent) Str = "EventKind"
 
 // Enqueue a RefreshEvent into the vaxis event loop. Intended to be
@@ -164,10 +173,7 @@ extern fn event_color_theme_dark(e: RawEvent) Bool = "EventColorThemeDark"
 extern fn event_focus_focused(e: RawEvent) Bool = "EventFocusFocused"
 extern fn event_paste_started(e: RawEvent) Bool = "EventPasteStarted"
 
-// Blocking call: read the next event from the terminal and return it
-// as one of the Event variants.
-fn next_event(vx: Vaxis) Event!Str {
-  let raw = try read_event(vx)
+fn map_event(raw: RawEvent) Event!Str {
   let kind = event_kind(raw)
   match kind {
     "key" => {
@@ -228,6 +234,12 @@ fn next_event(vx: Vaxis) Event!Str {
     },
     _ => Result::err("unknown event kind: {kind}"),
   }
+}
+
+// Blocking call: read the next event from the terminal and return it
+// as one of the Event variants.
+fn next_event(vx: Vaxis) Event!Str {
+  map_event(read_event(vx))
 }
 
 extern fn root(vx: Vaxis) Window = "Root"

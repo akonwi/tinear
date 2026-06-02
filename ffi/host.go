@@ -397,10 +397,7 @@ func PostRefreshEvent(term *vaxis.Vaxis) {
 
 // ReadEvent blocks until the next event from the terminal and returns
 // it. Non-press key events are filtered out at this layer.
-func ReadEvent(term *vaxis.Vaxis) (vaxis.Event, error) {
-	if term == nil {
-		return vaxis.QuitEvent{}, nil
-	}
+func ReadEvent(term *vaxis.Vaxis) vaxis.Event {
 	for ev := range term.Events() {
 		if k, ok := ev.(vaxis.Key); ok && k.EventType != vaxis.EventPress {
 			continue
@@ -410,9 +407,9 @@ func ReadEvent(term *vaxis.Vaxis) (vaxis.Event, error) {
 		if r, ok := ev.(vaxis.Resize); ok {
 			term.Resize(r)
 		}
-		return ev, nil
+		return ev
 	}
-	return vaxis.QuitEvent{}, nil
+	return vaxis.QuitEvent{}
 }
 
 // EventKind returns a string discriminator the Ard side uses to dispatch
@@ -480,7 +477,7 @@ func EventKeyMeta(e vaxis.Event) bool {
 // don't have to manually shift/layout characters.
 func EventKeyText(e vaxis.Event) string {
 	if k, ok := e.(vaxis.Key); ok {
-		return k.Text
+		return k.String()
 	}
 	return ""
 }
@@ -586,5 +583,3 @@ func drainStartupEvents(vx *vaxis.Vaxis) {
 		}
 	}
 }
-
-

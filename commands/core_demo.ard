@@ -12,57 +12,83 @@ use tinear/vaxis
 // and a keybinding hint bar pinned at the bottom — all expressed
 // via stack::vsplit's constraint-based layout.
 
+struct App {}
+
+impl view::View for App {
+  fn render(mut frame: view::Frame) {
+    // Tab bar — active tab gets reverse-video highlight, tabs are
+    // separated by vertical bars.
+    let tabs = stack::hstack([text::new(" Inbox ", reverse: true), text::new("│"), text::new(" My Issues ")])
+
+    let items = stack::vstack(
+      [
+        text::new("AKO-123  Fix login bug"),
+        text::new("AKO-124  Add dark mode"),
+        text::new("AKO-125  Update README"),
+      ],
+    )
+
+    let hints = stack::hstack(
+      [
+        text::new("↑↓ select"),
+        text::new("  ·  "),
+        text::new("↵ open"),
+        text::new("  ·  "),
+        text::new("q quit"),
+      ],
+    )
+
+    // Screen layout: tabs fixed at top, items fill the middle, hints
+    // fixed at the bottom. A one-row spacer below the tabs gives the
+    // body a bit of breathing room.
+    let screen = stack::vsplit(
+      [
+        stack::fixed(tabs, 1),
+        stack::fixed(stack::Spacer::v(1), 1),
+        stack::fill(items, 1),
+        stack::fixed(hints, 1),
+      ],
+    )
+
+    let root = box::new(
+      screen,
+      style::Style{
+        padding: style::Padding::x(1),
+        width: frame.width(),
+        height: frame.height(),
+      },
+    )
+
+    frame.clear()
+    root.render(frame)
+    frame.flush()
+  }
+}
+
+impl App {
+  fn handle_event(event: vaxis::Event) {}
+}
+
 fn run() {
   let vx = vaxis::new("tinear core demo").expect("vaxis::new")
   mut frame = view::root(vx)
-  let term_w = frame.width()
-  let term_h = frame.height()
 
-  // Tab bar — active tab gets reverse-video highlight, tabs are
-  // separated by vertical bars.
-  let tabs = stack::hstack([
-    text::new(" Inbox ", reverse: true),
-    text::new("│"),
-    text::new(" My Issues "),
-  ])
+  let app = App{}
+  mut running = true
 
-  let items = stack::vstack([
-    text::new("AKO-123  Fix login bug"),
-    text::new("AKO-124  Add dark mode"),
-    text::new("AKO-125  Update README"),
-  ])
+  while running {
+    app.render(frame)
+    let event = vaxis::next_event(vx).expect("vaxis::next_event")
+    match event {
+      KeyEvent(key) => {
+        match key.text {
+          "Ctrl+c" => { running = false },
+          _ => app.handle_event(event),
+        }
+      },
+      _ => app.handle_event(event),
+    }
+  }
 
-  let hints = stack::hstack([
-    text::new("↑↓ select"),
-    text::new("  ·  "),
-    text::new("↵ open"),
-    text::new("  ·  "),
-    text::new("q quit"),
-  ])
-
-  // Screen layout: tabs fixed at top, items fill the middle, hints
-  // fixed at the bottom. A one-row spacer below the tabs gives the
-  // body a bit of breathing room.
-  let screen = stack::vsplit([
-    stack::fixed(tabs, 1),
-    stack::fixed(stack::Spacer::v(1), 1),
-    stack::fill(items, 1),
-    stack::fixed(hints, 1),
-  ])
-
-  let demo = box::new(
-    screen,
-    style::Style{
-      padding: style::Padding::x(1),
-      width: term_w,
-      height: term_h,
-    },
-  )
-
-  frame.clear()
-  demo.render(frame)
-  frame.flush()
-
-  let _ = vaxis::next_event(vx)
   vaxis::close(vx).expect("vaxis::close")
 }
