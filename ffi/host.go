@@ -399,6 +399,11 @@ type PasteEvent struct {
 	Content string
 }
 
+func IsPasteEvent(e vaxis.Event) bool {
+	_, ok := e.(PasteEvent)
+	return ok
+}
+
 // PostRefreshEvent enqueues a RefreshEvent into the vaxis event loop.
 // Called from the Ard refresh fiber after each sleep interval.
 // PostEvent is non-blocking and drops silently if the queue is full,
@@ -447,31 +452,43 @@ func ReadEvent(term *vaxis.Vaxis) vaxis.Event {
 	return vaxis.QuitEvent{}
 }
 
-// EventKind returns a string discriminator the Ard side uses to dispatch
-// to the right Event variant constructor.
-func EventKind(e vaxis.Event) string {
+func IsKeyEvent(e vaxis.Event) bool {
+	_, ok := e.(vaxis.Key)
+	return ok
+}
+
+func IsMouseEvent(e vaxis.Event) bool {
+	_, ok := e.(vaxis.Mouse)
+	return ok
+}
+
+func IsFocusEvent(e vaxis.Event) bool {
 	switch e.(type) {
-	case vaxis.Key:
-		return "key"
-	case vaxis.Mouse:
-		return "mouse"
-	case vaxis.Resize:
-		return "resize"
-	case vaxis.Redraw:
-		return "redraw"
 	case vaxis.FocusIn, vaxis.FocusOut:
-		return "focus"
-	case PasteEvent, vaxis.PasteStartEvent, vaxis.PasteEndEvent:
-		return "paste"
-	case vaxis.QuitEvent:
-		return "quit"
-	case RefreshEvent:
-		return "refresh"
-	case vaxis.ColorThemeUpdate:
-		return "color_theme"
+		return true
 	default:
-		return "unknown"
+		return false
 	}
+}
+
+func IsRedrawEvent(e vaxis.Event) bool {
+	_, ok := e.(vaxis.Redraw)
+	return ok
+}
+
+func IsRefreshEvent(e vaxis.Event) bool {
+	_, ok := e.(RefreshEvent)
+	return ok
+}
+
+func IsColorThemeEvent(e vaxis.Event) bool {
+	_, ok := e.(vaxis.ColorThemeUpdate)
+	return ok
+}
+
+func IsQuitEvent(e vaxis.Event) bool {
+	_, ok := e.(vaxis.QuitEvent)
+	return ok
 }
 
 func EventKeyName(e vaxis.Event) string {
@@ -523,7 +540,6 @@ func EventKeyPretty(e vaxis.Event) string {
 	}
 	return ""
 }
-
 
 func EventMouseCol(e vaxis.Event) int {
 	if m, ok := e.(vaxis.Mouse); ok {
@@ -593,6 +609,11 @@ func EventResizeYPixel(e vaxis.Event) int {
 		return r.YPixel
 	}
 	return 0
+}
+
+func IsResizeEvent(e vaxis.Event) bool {
+	_, ok := e.(vaxis.Resize)
+	return ok
 }
 
 func EventColorThemeDark(e vaxis.Event) bool {
