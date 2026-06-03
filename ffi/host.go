@@ -387,6 +387,52 @@ func mouseKindName(t vaxis.EventType) string {
 	}
 }
 
+func mouseButtonFromName(name string) vaxis.MouseButton {
+	switch name {
+	case "left":
+		return vaxis.MouseLeftButton
+	case "middle":
+		return vaxis.MouseMiddleButton
+	case "right":
+		return vaxis.MouseRightButton
+	case "wheel_up":
+		return vaxis.MouseWheelUp
+	case "wheel_down":
+		return vaxis.MouseWheelDown
+	case "wheel_left":
+		return vaxis.MouseWheelLeft
+	case "wheel_right":
+		return vaxis.MouseWheelRight
+	default:
+		return vaxis.MouseNoButton
+	}
+}
+
+func mouseKindFromName(name string) vaxis.EventType {
+	switch name {
+	case "release":
+		return vaxis.EventRelease
+	case "motion":
+		return vaxis.EventMotion
+	default:
+		return vaxis.EventPress
+	}
+}
+
+func modifiers(ctrl, shift, alt bool) vaxis.ModifierMask {
+	var mods vaxis.ModifierMask
+	if ctrl {
+		mods |= vaxis.ModCtrl
+	}
+	if shift {
+		mods |= vaxis.ModShift
+	}
+	if alt {
+		mods |= vaxis.ModAlt
+	}
+	return mods
+}
+
 type PasteEvent struct {
 	Content string
 }
@@ -396,8 +442,50 @@ func IsPasteEvent(e vaxis.Event) bool {
 	return ok
 }
 
+func PostKeyEvent(vx *vaxis.Vaxis, ev vaxis.Event) {
+	vx.PostEvent(ev)
+}
+
+func PostMouseEvent(vx *vaxis.Vaxis, col, row int, button, kind string, ctrl, shift, alt bool) {
+	vx.PostEvent(vaxis.Mouse{
+		Col:       col,
+		Row:       row,
+		Button:    mouseButtonFromName(button),
+		EventType: mouseKindFromName(kind),
+		Modifiers: modifiers(ctrl, shift, alt),
+	})
+}
+
+func PostResizeEvent(vx *vaxis.Vaxis, cols, rows, xPixel, yPixel int) {
+	vx.PostEvent(vaxis.Resize{Cols: cols, Rows: rows, XPixel: xPixel, YPixel: yPixel})
+}
+
+func PostFocusEvent(vx *vaxis.Vaxis, focused bool) {
+	if focused {
+		vx.PostEvent(vaxis.FocusIn{})
+	} else {
+		vx.PostEvent(vaxis.FocusOut{})
+	}
+}
+
+func PostPasteEvent(vx *vaxis.Vaxis, content string) {
+	vx.PostEvent(PasteEvent{Content: content})
+}
+
 func PostRedrawEvent(vx *vaxis.Vaxis) {
 	vx.PostEvent(vaxis.Redraw{})
+}
+
+func PostColorThemeEvent(vx *vaxis.Vaxis, dark bool) {
+	mode := vaxis.LightMode
+	if dark {
+		mode = vaxis.DarkMode
+	}
+	vx.PostEvent(vaxis.ColorThemeUpdate{Mode: mode})
+}
+
+func PostQuitEvent(vx *vaxis.Vaxis) {
+	vx.PostEvent(vaxis.QuitEvent{})
 }
 
 // ReadEvent blocks until the next event from the terminal and returns

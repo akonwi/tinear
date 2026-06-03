@@ -99,7 +99,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
   async::start(fn() {
     while {
       async::sleep(duration::from_minutes(5))
-      vaxis::post_redraw(vx)
+      vaxis::post(vx, vaxis::RedrawEvent{})
     }
   })
 

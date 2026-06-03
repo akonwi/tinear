@@ -84,7 +84,7 @@ impl WelcomeScreen {
           ok(_) => { self.login_err = maybe::none() },
           err(_) => { self.login_err = maybe::some(true) },
         }
-        vaxis::post_redraw(self.vx)
+        vaxis::post(self.vx, vaxis::RedrawEvent{})
       })
     }
   }

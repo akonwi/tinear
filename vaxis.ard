@@ -142,7 +142,15 @@ type Event =
   | QuitEvent
 
 extern fn read_event(vx: Vaxis) RawEvent = "ReadEvent"
-extern fn post_redraw(vx: Vaxis) Void = "PostRedrawEvent"
+
+private extern fn post_key_event(vx: Vaxis, raw: RawEvent) Void = "PostKeyEvent"
+private extern fn post_mouse_event(vx: Vaxis, col: Int, row: Int, button: Str, kind: Str, ctrl: Bool, shift: Bool, alt: Bool) Void = "PostMouseEvent"
+private extern fn post_resize_event(vx: Vaxis, cols: Int, rows: Int, x_pixel: Int, y_pixel: Int) Void = "PostResizeEvent"
+private extern fn post_focus_event(vx: Vaxis, focused: Bool) Void = "PostFocusEvent"
+private extern fn post_paste_event(vx: Vaxis, content: Str) Void = "PostPasteEvent"
+private extern fn post_redraw_event(vx: Vaxis) Void = "PostRedrawEvent"
+private extern fn post_color_theme_event(vx: Vaxis, dark: Bool) Void = "PostColorThemeEvent"
+private extern fn post_quit_event(vx: Vaxis) Void = "PostQuitEvent"
 
 private extern fn is_key_event(e: RawEvent) Bool = "IsKeyEvent"
 private extern fn is_mouse_event(e: RawEvent) Bool = "IsMouseEvent"
@@ -179,6 +187,21 @@ extern fn event_focus_focused(e: RawEvent) Bool = "EventFocusFocused"
 
 extern fn event_paste_started(e: RawEvent) Bool = "EventPasteStarted"
 extern fn event_paste_content(e: RawEvent) Str = "EventPasteContent"
+
+// Enqueue an event into vaxis's event loop. This is the Ard-side
+// escape hatch for waking the main loop from callbacks/fibers.
+fn post(vx: Vaxis, event: Event) {
+  match event {
+    KeyEvent(e) => post_key_event(vx, e.raw),
+    MouseEvent(e) => post_mouse_event(vx, e.col, e.row, e.button, e.kind, e.ctrl, e.shift, e.alt),
+    ResizeEvent(e) => post_resize_event(vx, e.cols, e.rows, e.x_pixel, e.y_pixel),
+    FocusEvent(e) => post_focus_event(vx, e.focused),
+    PasteEvent(e) => post_paste_event(vx, e.content),
+    RedrawEvent(_) => post_redraw_event(vx),
+    ColorThemeEvent(e) => post_color_theme_event(vx, e.dark),
+    QuitEvent(_) => post_quit_event(vx),
+  }
+}
 
 // Blocking call: read the next event from the terminal and return it
 // as one of the Event variants.
