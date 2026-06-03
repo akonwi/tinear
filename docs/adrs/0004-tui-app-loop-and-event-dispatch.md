@@ -80,7 +80,7 @@ fn run(mut app: App, vx: vaxis::Vaxis) {
     app.render(frame)
     frame.flush()
 
-    let event = vaxis::next_event(vx).expect("next_event")
+    let event = vaxis::next_event(vx)
     match event {
       vaxis::QuitEvent => break,
       _ => app.handle_event(event),

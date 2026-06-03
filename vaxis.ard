@@ -212,52 +212,47 @@ fn post(vx: Vaxis, event: Event) {
 }
 
 // Blocking call: read the next event from the terminal and return it
-// as one of the Event variants.
-fn next_event(vx: Vaxis) Event!Str {
+// as one of the Event variants. Unknown raw events are represented
+// as CustomEvent, so decoding is total.
+fn next_event(vx: Vaxis) Event {
   let raw = read_event(vx)
   match {
     is_key_event(raw) => {
-      Result::ok(
-        KeyEvent{
-          raw: raw,
-          name: event_key_name(raw),
-          text: event_key_text(raw),
-          ctrl: event_key_ctrl(raw),
-          shift: event_key_shift(raw),
-          alt: event_key_alt(raw),
-          meta: event_key_meta(raw),
-        },
-      )
+      KeyEvent{
+        raw: raw,
+        name: event_key_name(raw),
+        text: event_key_text(raw),
+        ctrl: event_key_ctrl(raw),
+        shift: event_key_shift(raw),
+        alt: event_key_alt(raw),
+        meta: event_key_meta(raw),
+      }
     },
     is_mouse_event(raw) => {
-      Result::ok(
-        MouseEvent{
-          col: event_mouse_col(raw),
-          row: event_mouse_row(raw),
-          button: event_mouse_button(raw),
-          kind: event_mouse_kind(raw),
-          ctrl: event_mouse_ctrl(raw),
-          shift: event_mouse_shift(raw),
-          alt: event_mouse_alt(raw),
-        },
-      )
+      MouseEvent{
+        col: event_mouse_col(raw),
+        row: event_mouse_row(raw),
+        button: event_mouse_button(raw),
+        kind: event_mouse_kind(raw),
+        ctrl: event_mouse_ctrl(raw),
+        shift: event_mouse_shift(raw),
+        alt: event_mouse_alt(raw),
+      }
     },
     is_resize_event(raw) => {
-      Result::ok(
-        ResizeEvent{
-          cols: event_resize_cols(raw),
-          rows: event_resize_rows(raw),
-          x_pixel: event_resize_x_pixel(raw),
-          y_pixel: event_resize_y_pixel(raw),
-        },
-      )
+      ResizeEvent{
+        cols: event_resize_cols(raw),
+        rows: event_resize_rows(raw),
+        x_pixel: event_resize_x_pixel(raw),
+        y_pixel: event_resize_y_pixel(raw),
+      }
     },
-    is_focus_event(raw) => Result::ok(FocusEvent{focused: event_focus_focused(raw)}),
-    is_paste_event(raw) => Result::ok(PasteEvent{content: event_paste_content(raw)}),
-    is_redraw_event(raw) => Result::ok(RedrawEvent{}),
-    is_color_theme_event(raw) => Result::ok(ColorThemeEvent{dark: event_color_theme_dark(raw)}),
-    is_quit_event(raw) => Result::ok(QuitEvent{}),
-    _ => Result::ok(CustomEvent{name: event_custom_name(raw)}),
+    is_focus_event(raw) => FocusEvent{focused: event_focus_focused(raw)},
+    is_paste_event(raw) => PasteEvent{content: event_paste_content(raw)},
+    is_redraw_event(raw) => RedrawEvent{},
+    is_color_theme_event(raw) => ColorThemeEvent{dark: event_color_theme_dark(raw)},
+    is_quit_event(raw) => QuitEvent{},
+    _ => CustomEvent{name: event_custom_name(raw)},
   }
 }
 

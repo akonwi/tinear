@@ -65,8 +65,8 @@ The Go module includes both.
 
 Key bits of the event API:
 
-- `vaxis::next_event(vx) Event!Str` — blocking; returns the typed `Event` union
-  (`KeyEvent | MouseEvent | ResizeEvent | FocusEvent | PasteEvent | RedrawEvent | QuitEvent`).
+- `vaxis::next_event(vx) Event` — blocking; returns the typed `Event` union
+  (`KeyEvent | MouseEvent | ResizeEvent | FocusEvent | PasteEvent | RedrawEvent | CustomEvent | ColorThemeEvent | QuitEvent`).
 - `KeyEvent.name` is the plain key name (no modifier prefixes): `"Escape"`,
   `"Enter"`, `"Up"`, `"Tab"`, `"a"`, etc.
 - `KeyEvent.text` is the rendered text (handles shift/layout/IME). Empty for

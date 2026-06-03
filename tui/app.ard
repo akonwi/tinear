@@ -134,7 +134,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
     }
     draw_screen(state)
 
-    let event = try vaxis::next_event(vx)
+    let event = vaxis::next_event(vx)
 
     match event {
       QuitEvent(_) => {

@@ -117,7 +117,7 @@ fn run() {
     frame.clear()
     app.render(frame)
     frame.flush()
-    let event = vaxis::next_event(vx).expect("vaxis::next_event")
+    let event = vaxis::next_event(vx)
     match event {
       KeyEvent(key) => {
         if key.ctrl and key.name == "c" {
