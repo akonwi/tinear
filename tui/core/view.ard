@@ -49,6 +49,7 @@ struct Frame {
 // via `frame.dimensions()`. This replaces an intrinsic-size method
 // — what the view actually rendered IS its size.
 trait View {
+  fn init()
   fn render(mut frame: Frame)
 }
 

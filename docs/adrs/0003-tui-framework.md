@@ -100,11 +100,14 @@ Introduce a small framework layer at `tui/core/` that the rest of
    `draw_styled`, `clear`, `flush`). Composition happens through the
    free function `view::sub` (see #5).
 
-4. **`trait View { fn render(mut frame: Frame) }`** — the universal
-   component contract. Every component implements this trait. Real
-   trait dispatch is used (not a closed union). The frame is `mut`
-   because draws expand its tracked extent; the view itself never
-   mutates its own state during render.
+4. **`trait View { fn init(); fn render(mut frame: Frame) }`** — the
+   universal component contract. Every component implements this trait.
+   `init` is the lifecycle hook for retained/stateful views that need
+   setup before the first render (fetching, callbacks, subscriptions);
+   primitive views implement it as a no-op. Real trait dispatch is used
+   (not a closed union). The frame is `mut` because draws expand its
+   tracked extent; the view itself never mutates its own state during
+   render.
 
 5. **`sub(frame: Frame, area: Rect) Frame`** — the framework's
    composition primitive, exposed as a free function in the `view`

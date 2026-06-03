@@ -29,6 +29,8 @@ struct VStack {
 }
 
 impl view::View for VStack {
+  fn init() {}
+
   fn render(mut frame: view::Frame) {
     let avail_w = frame.width()
     let avail_h = frame.height()
@@ -58,6 +60,8 @@ struct HStack {
 }
 
 impl view::View for HStack {
+  fn init() {}
+
   fn render(mut frame: view::Frame) {
     let avail_w = frame.width()
     let avail_h = frame.height()
@@ -110,6 +114,8 @@ struct Spacer {
 }
 
 impl view::View for Spacer {
+  fn init() {}
+
   fn render(mut frame: view::Frame) {
     // No drawing — just register the reserved region with the
     // frame's extent tracker so parents advance their cursors.
@@ -427,6 +433,8 @@ struct VSplit {
 }
 
 impl view::View for VSplit {
+  fn init() {}
+
   fn render(mut frame: view::Frame) {
     let avail_w = frame.width()
     let avail_h = frame.height()
@@ -461,6 +469,8 @@ struct HSplit {
 }
 
 impl view::View for HSplit {
+  fn init() {}
+
   fn render(mut frame: view::Frame) {
     let avail_w = frame.width()
     let avail_h = frame.height()

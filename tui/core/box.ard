@@ -163,6 +163,8 @@ struct Box {
 }
 
 impl view::View for Box {
+  fn init() {}
+
   fn render(mut frame: view::Frame) {
     let s = self.style
     let max_w = frame.width()

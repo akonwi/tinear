@@ -101,6 +101,8 @@ struct InputContent {
 }
 
 impl view::View for InputContent {
+  fn init() {}
+
   fn render(mut frame: view::Frame) {
     let is_placeholder = self.value.size() == 0
     let content_w = frame.width()
@@ -251,6 +253,8 @@ impl Input {
 }
 
 impl view::View for Input {
+  fn init() {}
+
   fn render(mut frame: view::Frame) {
     let content_view = InputContent{
       value: self.value,

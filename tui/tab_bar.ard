@@ -80,6 +80,8 @@ impl TabBar {
 }
 
 impl view::View for TabBar {
+  fn init() {}
+
   fn render(mut frame: view::Frame) {
     mut children: [view::View] = []
 

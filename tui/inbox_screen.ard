@@ -176,15 +176,6 @@ impl InboxScreen {
     }
   }
 
-  fn mut init() {
-    if self.api_key.is_empty() {
-      ()
-    } else if self.items.size() == 0 and not self.loading {
-      self.refresh()
-    } else {
-      ()
-    }
-  }
 
   fn mut handle_key(key: vaxis::KeyEvent) {
     match key.name {
@@ -218,6 +209,16 @@ impl InboxScreen {
 }
 
 impl view::View for InboxScreen {
+  fn mut init() {
+    if self.api_key.is_empty() {
+      ()
+    } else if self.items.size() == 0 and not self.loading {
+      self.refresh()
+    } else {
+      ()
+    }
+  }
+
   fn render(mut frame: view::Frame) {
     match self.loading {
       true => frame.draw_text(0, 0, "Loading inbox…"),

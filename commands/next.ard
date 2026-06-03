@@ -48,6 +48,11 @@ fn key_hints(labels: [Str]) view::View {
 }
 
 impl App {
+  fn mut init() {
+    self.welcome.init()
+    self.inbox.init()
+  }
+
   fn authed_screen() view::View {
     let body = match self.tabs.selected_label() {
       "Inbox" => self.inbox,
@@ -114,8 +119,7 @@ fn run() {
   let vx = vaxis::new("tinear next").expect("vaxis::new")
 
   mut app = App::new(vx, config)
-  app.welcome.init()
-  app.inbox.init()
+  app.init()
   mut running = true
 
   while running {

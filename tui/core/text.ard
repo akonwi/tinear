@@ -19,6 +19,8 @@ struct Text {
 }
 
 impl view::View for Text {
+  fn init() {}
+
   fn render(mut frame: view::Frame) {
     // Draw a single line at (0, 0). Vaxis clips the right edge
     // automatically when content overruns the frame width.
