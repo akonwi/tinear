@@ -123,6 +123,11 @@ struct PasteEvent {
 // Vaxis asked the app to redraw (e.g. after a SyncFunc or posted wakeup).
 struct RedrawEvent {}
 
+// Application-defined event posted into the vaxis loop.
+struct CustomEvent {
+  name: Str,
+}
+
 // Terminal color theme changed. dark = true for dark mode, false for light.
 struct ColorThemeEvent {
   dark: Bool,
@@ -138,6 +143,7 @@ type Event =
   | FocusEvent
   | PasteEvent
   | RedrawEvent
+  | CustomEvent
   | ColorThemeEvent
   | QuitEvent
 
@@ -149,6 +155,7 @@ private extern fn post_resize_event(vx: Vaxis, cols: Int, rows: Int, x_pixel: In
 private extern fn post_focus_event(vx: Vaxis, focused: Bool) Void = "PostFocusEvent"
 private extern fn post_paste_event(vx: Vaxis, content: Str) Void = "PostPasteEvent"
 private extern fn post_redraw_event(vx: Vaxis) Void = "PostRedrawEvent"
+private extern fn post_custom_event(vx: Vaxis, name: Str) Void = "PostCustomEvent"
 private extern fn post_color_theme_event(vx: Vaxis, dark: Bool) Void = "PostColorThemeEvent"
 private extern fn post_quit_event(vx: Vaxis) Void = "PostQuitEvent"
 
@@ -187,6 +194,7 @@ extern fn event_focus_focused(e: RawEvent) Bool = "EventFocusFocused"
 
 extern fn event_paste_started(e: RawEvent) Bool = "EventPasteStarted"
 extern fn event_paste_content(e: RawEvent) Str = "EventPasteContent"
+extern fn event_custom_name(e: RawEvent) Str = "EventCustomName"
 
 // Enqueue an event into vaxis's event loop. This is the Ard-side
 // escape hatch for waking the main loop from callbacks/fibers.
@@ -198,6 +206,7 @@ fn post(vx: Vaxis, event: Event) {
     FocusEvent(e) => post_focus_event(vx, e.focused),
     PasteEvent(e) => post_paste_event(vx, e.content),
     RedrawEvent(_) => post_redraw_event(vx),
+    CustomEvent(e) => post_custom_event(vx, e.name),
     ColorThemeEvent(e) => post_color_theme_event(vx, e.dark),
     QuitEvent(_) => post_quit_event(vx),
   }
@@ -249,7 +258,7 @@ fn next_event(vx: Vaxis) Event!Str {
     is_redraw_event(raw) => Result::ok(RedrawEvent{}),
     is_color_theme_event(raw) => Result::ok(ColorThemeEvent{dark: event_color_theme_dark(raw)}),
     is_quit_event(raw) => Result::ok(QuitEvent{}),
-    _ => Result::err("unknown vaxis event"),
+    _ => Result::ok(CustomEvent{name: event_custom_name(raw)}),
   }
 }
 

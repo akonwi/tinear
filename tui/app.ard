@@ -208,6 +208,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
       PasteEvent(_) => (),
       MouseEvent(_) => (),
       ColorThemeEvent(_) => (),
+      CustomEvent(_) => (),
       KeyEvent(k) => {
         if k.ctrl and k.name == "c" {
           running = false

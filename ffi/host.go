@@ -1,6 +1,7 @@
 package ffi
 
 import (
+	"fmt"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -437,6 +438,10 @@ type PasteEvent struct {
 	Content string
 }
 
+type CustomEvent struct {
+	Name string
+}
+
 func IsPasteEvent(e vaxis.Event) bool {
 	_, ok := e.(PasteEvent)
 	return ok
@@ -474,6 +479,10 @@ func PostPasteEvent(vx *vaxis.Vaxis, content string) {
 
 func PostRedrawEvent(vx *vaxis.Vaxis) {
 	vx.PostEvent(vaxis.Redraw{})
+}
+
+func PostCustomEvent(vx *vaxis.Vaxis, name string) {
+	vx.PostEvent(CustomEvent{Name: name})
 }
 
 func PostColorThemeEvent(vx *vaxis.Vaxis, dark bool) {
@@ -701,6 +710,13 @@ func EventPasteContent(e vaxis.Event) string {
 		return p.Content
 	}
 	return ""
+}
+
+func EventCustomName(e vaxis.Event) string {
+	if c, ok := e.(CustomEvent); ok {
+		return c.Name
+	}
+	return fmt.Sprintf("%T", e)
 }
 
 func drainStartupEvents(vx *vaxis.Vaxis) {
