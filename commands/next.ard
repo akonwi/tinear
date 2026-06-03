@@ -1,5 +1,4 @@
 use ard/io
-use ard/maybe
 
 use tinear/config
 use tinear/tui/core/box
@@ -7,6 +6,7 @@ use tinear/tui/core/stack
 use tinear/tui/core/style
 use tinear/tui/core/text
 use tinear/tui/core/view
+use tinear/tui/inbox_screen
 use tinear/tui/tab_bar
 use tinear/tui/welcome_screen
 use tinear/vaxis
@@ -21,6 +21,7 @@ use tinear/vaxis
 struct App {
   config: config::Config,
   tabs: tab_bar::TabBar,
+  inbox: inbox_screen::InboxScreen,
   welcome: welcome_screen::WelcomeScreen,
 }
 
@@ -28,6 +29,7 @@ fn App::new(vx: vaxis::Vaxis, config: config::Config) App {
   App{
     config: config,
     tabs: tab_bar::new(["Inbox", "My Issues"]),
+    inbox: inbox_screen::new(vx, config.api_key),
     welcome: welcome_screen::new(vx),
   }
 }
@@ -47,24 +49,21 @@ fn key_hints(labels: [Str]) view::View {
 
 impl App {
   fn authed_screen() view::View {
-    let items = stack::vstack(
-      [
-        text::new("AKO-123  Fix login bug"),
-        text::new("AKO-124  Add dark mode"),
-        text::new("AKO-125  Update README"),
-      ],
-    )
+    let body = match self.tabs.selected_label() {
+      "Inbox" => self.inbox,
+      _ => text::new("Coming soon"),
+    }
 
-    let hints = key_hints(["↑↓ select", "↵ open"])
+    let hints = key_hints(["↑↓ select", "r refresh", "↵ open"])
 
-    // Screen layout: tabs fixed at top, items fill the middle, hints
+    // Screen layout: tabs fixed at top, body fills the middle, hints
     // fixed at the bottom. A one-row spacer below the tabs gives the
     // body a bit of breathing room.
     stack::vsplit(
       [
         stack::fixed(self.tabs, 1),
         stack::fixed(stack::Spacer::v(1), 1),
-        stack::fill(items, 1),
+        stack::fill(body, 1),
         stack::fixed(hints, 1),
       ],
     )
@@ -93,7 +92,14 @@ impl App {
       false => self.welcome.handle_event(event),
       true => {
         match event {
-          KeyEvent(key) => self.tabs.handle_key(key),
+          KeyEvent(key) => {
+            self.tabs.handle_key(key)
+            match self.tabs.selected_label() {
+              "Inbox" => self.inbox.handle_key(key),
+              _ => (),
+            }
+          },
+          CustomEvent(_) => self.inbox.handle_event(event),
           _ => (),
         }
       },
@@ -109,6 +115,7 @@ fn run() {
 
   mut app = App::new(vx, config)
   app.welcome.init()
+  app.inbox.init()
   mut running = true
 
   while running {
@@ -129,7 +136,14 @@ fn run() {
       RedrawEvent => {
         // fixme: shouldn't be doing this on every redraw. eventually use a specific event
         match config::load() {
-          ok(cfg) => { app.config = cfg },
+          ok(cfg) => {
+            let had_auth = app.config.has_auth()
+            app.config = cfg
+            app.inbox.set_api_key(app.config.api_key)
+            if not had_auth and app.config.has_auth() {
+              app.inbox.init()
+            }
+          },
           err(_) => {},
         }
       },
