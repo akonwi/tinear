@@ -410,6 +410,10 @@ func PostRefreshEvent(term *vaxis.Vaxis) {
 	term.PostEvent(RefreshEvent{})
 }
 
+func PostRedrawEvent(vx *vaxis.Vaxis) {
+	vx.PostEvent(vaxis.Redraw{})
+}
+
 // ReadEvent blocks until the next event from the terminal and returns
 // it. Non-press key events are filtered out at this layer. Bracketed paste
 // boundaries are collapsed into a single PasteEvent carrying the pasted text.

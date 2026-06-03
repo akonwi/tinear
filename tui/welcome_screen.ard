@@ -1,10 +1,14 @@
+use ard/maybe
 use tinear/tui/core/stack
 use tinear/tui/core/view
 use tinear/tui/input
 use tinear/vaxis
+use tinear/commands/login
 
 struct WelcomeScreen {
+  vx: vaxis::Vaxis,
   input: input::Input,
+  login_err: Bool?
 }
 
 fn centered_y(mut frame: view::Frame, height: Int) Int {
@@ -25,6 +29,7 @@ fn centered_width(mut frame: view::Frame, desired: Int) Int {
 struct CenteredText {
   content: Str,
   bold: Bool,
+  fg: Int,
 }
 
 impl view::View for CenteredText {
@@ -34,12 +39,16 @@ impl view::View for CenteredText {
       true => 0,
       false => raw_x,
     }
-    frame.draw_styled(x, 0, self.content, -1, -1, self.bold, false, false, false, false)
+    frame.draw_styled(x, 0, self.content, self.fg, -1, self.bold, false, false, false, false)
   }
 }
 
 fn centered_text(content: Str, bold: Bool) view::View {
-  CenteredText{content: content, bold: bold}
+  CenteredText{content: content, bold: bold, fg: -1}
+}
+
+fn centered_error(content: Str) view::View {
+  CenteredText{content: content, bold: false, fg: 1}
 }
 
 struct CenteredInput {
@@ -67,26 +76,47 @@ impl WelcomeScreen {
   fn mut handle_event(event: vaxis::Event) {
     self.input.handle_event(event)
   }
+
+  fn mut init() {
+    if self.input.on_submit.is_none() {
+      self.input.on_submit = maybe::some(fn(val: Str) {
+        match login::login(val) {
+          ok(_) => { self.login_err = maybe::none() },
+          err(_) => { self.login_err = maybe::some(true) },
+        }
+        vaxis::post_redraw(self.vx)
+      })
+    }
+  }
 }
 
 impl view::View for WelcomeScreen {
   fn render(mut frame: view::Frame) {
-    let top = centered_y(frame, 10)
-    let content = stack::vstack(
-      [
-        stack::Spacer::v(top),
-        centered_text("▀█▀ ▀ █▀█ █▀▀ ▄▀█ █▀█", true),
-        centered_text(" █  █ █ █ ██▄ █▀█ █▀▄", true),
-        stack::Spacer::v(2),
-        centered_text("Enter your Linear API key", true),
-        CenteredInput{input: self.input, width: 32},
-      ],
-    )
+    let content_h = match self.login_err {
+      _err => 12,
+      _ => 10,
+    }
+    let top = centered_y(frame, content_h)
+    mut children: [view::View] = [
+      stack::Spacer::v(top),
+      centered_text("▀█▀ ▀ █▀█ █▀▀ ▄▀█ █▀█", true),
+      centered_text(" █  █ █ █ ██▄ █▀█ █▀▄", true),
+      stack::Spacer::v(2),
+      centered_text("Enter your Linear API key", true),
+      CenteredInput{input: self.input, width: 32},
+    ]
 
-    content.render(frame)
+    match self.login_err {
+      _err => {
+        children.push(centered_error("Invalid API token"))
+      },
+      _ => (),
+    }
+
+    stack::vstack(children).render(frame)
   }
 }
 
-fn new() WelcomeScreen {
-  WelcomeScreen{input: input::new("Paste Linear API key")}
+fn new(vx: vaxis::Vaxis) WelcomeScreen {
+  WelcomeScreen{vx: vx, input: input::new("Paste Linear API key"), login_err: maybe::none()}
 }

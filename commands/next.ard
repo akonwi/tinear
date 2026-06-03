@@ -23,11 +23,11 @@ struct App {
   welcome: welcome_screen::WelcomeScreen,
 }
 
-fn App::new(api_key: Str?) App {
+fn App::new(vx: vaxis::Vaxis, api_key: Str?) App {
   App{
     api_key: api_key,
     tabs: tab_bar::new(["Inbox", "My Issues"]),
-    welcome: welcome_screen::new(),
+    welcome: welcome_screen::new(vx),
   }
 }
 
@@ -107,7 +107,8 @@ fn run() {
   }
   let vx = vaxis::new("tinear next").expect("vaxis::new")
 
-  mut app = App::new(api_key)
+  mut app = App::new(vx, api_key)
+  app.welcome.init()
   mut running = true
 
   while running {
@@ -125,6 +126,7 @@ fn run() {
           app.handle_event(event)
         }
       },
+      RedrawEvent => (), // discard
       _ => app.handle_event(event),
     }
   }

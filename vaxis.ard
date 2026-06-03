@@ -155,6 +155,8 @@ extern fn event_kind(e: RawEvent) Str = "EventKind"
 // blocking next_event call.
 extern fn post_refresh_event(vx: Vaxis) Void = "PostRefreshEvent"
 
+extern fn post_redraw(vx: Vaxis) Void = "PostRedrawEvent"
+
 extern fn event_key_name(e: RawEvent) Str = "EventKeyName"
 extern fn event_key_text(e: RawEvent) Str = "EventKeyText"
 extern fn event_key_ctrl(e: RawEvent) Bool = "EventKeyCtrl"
