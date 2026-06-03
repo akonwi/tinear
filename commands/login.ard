@@ -4,29 +4,9 @@ use ard/fs
 use ard/io
 use ard/json
 
+use tinear/config
 use tinear/linear/client
 use tinear/tui/decode as decode_utils
-
-struct LoginConfig {
-  api_key: Str,
-}
-
-fn get_home_dir() Str!Str {
-  match env::get("HOME") {
-    h => Result::ok(h),
-    _ => Result::err("HOME is not set"),
-  }
-}
-
-fn get_config_dir() Str!Str {
-  let home = try get_home_dir()
-  Result::ok("{home}/.tinear")
-}
-
-fn get_config_path() Str!Str {
-  let dir = try get_config_dir()
-  Result::ok("{dir}/config.json")
-}
 
 fn require_non_empty(s: Str, msg: Str) Str!Str {
   match s.is_empty() {
@@ -39,24 +19,10 @@ fn fetch_user(api_key: Str) Dynamic!Str {
   client::graphql(api_key, "query \{ viewer \{ id name displayName email \} \}")
 }
 
-fn write_config(api_key: Str) Str!Str {
-  let config_dir = try get_config_dir()
-
-  if not fs::exists(config_dir) {
-    try fs::create_dir(config_dir)
-  }
-
-  let config_content = json::encode(LoginConfig{api_key: api_key}).expect("encode config")
-  let config_path = try get_config_path()
-  try fs::write(config_path, config_content)
-
-  Result::ok(config_path)
-}
-
 fn login(api_key: Str) Dynamic!Str {
   match fetch_user(api_key) {
     ok(data) => {
-      let config_path = try write_config(api_key)
+      let config_path = try config::write(api_key)
       Result::ok(data)
     },
     err(e) => Result::err("Invalid API key: {e}"),

@@ -1,5 +1,7 @@
+use ard/io
 use ard/maybe
 
+use tinear/config
 use tinear/tui/core/box
 use tinear/tui/core/stack
 use tinear/tui/core/style
@@ -7,7 +9,6 @@ use tinear/tui/core/text
 use tinear/tui/core/view
 use tinear/tui/tab_bar
 use tinear/tui/welcome_screen
-use tinear/util
 use tinear/vaxis
 
 // Framework demo / sketch toward a v2 UI.
@@ -18,14 +19,14 @@ use tinear/vaxis
 // via stack::vsplit's constraint-based layout.
 
 struct App {
-  api_key: Str?,
+  config: config::Config,
   tabs: tab_bar::TabBar,
   welcome: welcome_screen::WelcomeScreen,
 }
 
-fn App::new(vx: vaxis::Vaxis, api_key: Str?) App {
+fn App::new(vx: vaxis::Vaxis, config: config::Config) App {
   App{
-    api_key: api_key,
+    config: config,
     tabs: tab_bar::new(["Inbox", "My Issues"]),
     welcome: welcome_screen::new(vx),
   }
@@ -70,9 +71,9 @@ impl App {
   }
 
   fn render(mut frame: view::Frame) {
-    let screen = match self.api_key {
-      _key => self.authed_screen(),
-      _ => self.welcome,
+    let screen = match self.config.has_auth() {
+      true => self.authed_screen(),
+      false => self.welcome,
     }
 
     let root = box::new(
@@ -88,26 +89,25 @@ impl App {
   }
 
   fn mut handle_event(event: vaxis::Event) {
-    match self.api_key {
-      _key => {
+    match self.config.has_auth() {
+      false => self.welcome.handle_event(event),
+      true => {
         match event {
           KeyEvent(key) => self.tabs.handle_key(key),
           _ => (),
         }
       },
-      _ => self.welcome.handle_event(event),
     }
   }
 }
 
 fn run() {
-  let api_key = match util::get_api_key() {
-    ok(key) => maybe::some(key),
-    err(_) => maybe::none(),
+  let config = try config::load() -> err {
+    io::print("Unable to load config: {err}")
   }
   let vx = vaxis::new("tinear next").expect("vaxis::new")
 
-  mut app = App::new(vx, api_key)
+  mut app = App::new(vx, config)
   app.welcome.init()
   mut running = true
 
@@ -126,7 +126,13 @@ fn run() {
           app.handle_event(event)
         }
       },
-      RedrawEvent => (), // discard
+      RedrawEvent => {
+        // fixme: shouldn't be doing this on every redraw. eventually use a specific event
+        match config::load() {
+          ok(cfg) => { app.config = cfg },
+          err(_) => {},
+        }
+      },
       _ => app.handle_event(event),
     }
   }

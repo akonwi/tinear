@@ -19,8 +19,7 @@ ard run main.ard                            # run directly
 | Path | Purpose |
 |------|---------|
 | `main.ard` | Entrypoint, dispatches `help` / `login` / default-to-TUI |
-| `config.ard` | API key from `LINEAR_API_KEY` env var or `~/.tinear/config` |
-| `util.ard` | `get_api_key()` + `print_usage()` |
+| `config.ard` | load config and API key from env var or `~/.tinear/config` |
 | `linear/client.ard` | Shared GraphQL client (one `graphql()` function) |
 | `commands/login.ard` | Interactive `login` command (saves key to config) |
 | `commands/tui.ard` | Thin TUI entrypoint — delegates to `tui/app::run_loop` |

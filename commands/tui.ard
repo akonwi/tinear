@@ -1,12 +1,12 @@
 use tinear/tui/app
-use tinear/util
+use tinear/config
 use tinear/vaxis
 
 // Thin entrypoint: open vaxis, hand off to the TUI app's run_loop,
 // then clean up. Everything else lives under tinear/tui/*.
 fn run(args: [Str]) {
-  let api_key = util::get_api_key().expect("Failed to load API key")
+  let config = config::load().expect("Failed to load config")
   let vx = vaxis::new("Linear CLI").expect("open terminal")
-  app::run_loop(api_key, vx).expect("run TUI")
+  app::run_loop(config.api_key, vx).expect("run TUI")
   vaxis::close(vx).expect("close terminal")
 }
