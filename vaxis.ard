@@ -120,14 +120,8 @@ struct PasteEvent {
   content: Str,
 }
 
-// Vaxis asked the app to redraw (e.g. after a SyncFunc).
+// Vaxis asked the app to redraw (e.g. after a SyncFunc or posted wakeup).
 struct RedrawEvent {}
-
-// "Data is stale, refetch now" signal posted from outside the main
-// event loop (typically by a background fiber). Distinct from
-// RedrawEvent (terminal-level repaint) so handlers can refetch
-// without conflating the two concerns.
-struct RefreshEvent {}
 
 // Terminal color theme changed. dark = true for dark mode, false for light.
 struct ColorThemeEvent {
@@ -144,17 +138,10 @@ type Event =
   | FocusEvent
   | PasteEvent
   | RedrawEvent
-  | RefreshEvent
   | ColorThemeEvent
   | QuitEvent
 
 extern fn read_event(vx: Vaxis) RawEvent = "ReadEvent"
-// Enqueue a RefreshEvent into the vaxis event loop. Intended to be
-// called from an Ard fiber that owns the refresh schedule; the
-// queue is the only thread-safe way to wake the main loop's
-// blocking next_event call.
-extern fn post_refresh_event(vx: Vaxis) Void = "PostRefreshEvent"
-
 extern fn post_redraw(vx: Vaxis) Void = "PostRedrawEvent"
 
 private extern fn is_key_event(e: RawEvent) Bool = "IsKeyEvent"
@@ -163,7 +150,6 @@ private extern fn is_resize_event(e: RawEvent) Bool = "IsResizeEvent"
 private extern fn is_focus_event(e: RawEvent) Bool = "IsFocusEvent"
 private extern fn is_paste_event(e: RawEvent) Bool = "IsPasteEvent"
 private extern fn is_redraw_event(e: RawEvent) Bool = "IsRedrawEvent"
-private extern fn is_refresh_event(e: RawEvent) Bool = "IsRefreshEvent"
 private extern fn is_color_theme_event(e: RawEvent) Bool = "IsColorThemeEvent"
 private extern fn is_quit_event(e: RawEvent) Bool = "IsQuitEvent"
 
@@ -238,7 +224,6 @@ fn next_event(vx: Vaxis) Event!Str {
     is_focus_event(raw) => Result::ok(FocusEvent{focused: event_focus_focused(raw)}),
     is_paste_event(raw) => Result::ok(PasteEvent{content: event_paste_content(raw)}),
     is_redraw_event(raw) => Result::ok(RedrawEvent{}),
-    is_refresh_event(raw) => Result::ok(RefreshEvent{}),
     is_color_theme_event(raw) => Result::ok(ColorThemeEvent{dark: event_color_theme_dark(raw)}),
     is_quit_event(raw) => Result::ok(QuitEvent{}),
     _ => Result::err("unknown vaxis event"),

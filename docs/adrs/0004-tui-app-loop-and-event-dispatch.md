@@ -258,7 +258,7 @@ persistent source of truth that receives events.
   is similarly deferred.** The mechanism is the same as above: a
   way for code outside the synchronous event-handling path to push
   events into the queue. vaxis already exposes
-  `post_refresh_event`; whether and how to surface that to apps and
+  `post_redraw`; whether and how to surface that to apps and
   views is a future ADR.
 
 ## Related

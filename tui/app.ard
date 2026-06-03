@@ -91,7 +91,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
   mut running = true
 
   // Background refresh: an Ard fiber owns the schedule. Every 5
-  // minutes it pokes vaxis's event queue with a RefreshEvent, which
+  // minutes it posts a RedrawEvent into vaxis's event queue, which
   // wakes the main loop's blocking next_event call and lets it
   // refetch inbox + board. The fiber captures vx read-only (vaxis's
   // Go-side methods are thread-safe) and outlives this scope; the
@@ -99,7 +99,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
   async::start(fn() {
     while {
       async::sleep(duration::from_minutes(5))
-      vaxis::post_refresh_event(vx)
+      vaxis::post_redraw(vx)
     }
   })
 
@@ -141,12 +141,7 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
         running = false
       },
       ResizeEvent(_) => (),
-      RedrawEvent(_) => (),
-      FocusEvent(_) => (),
-      PasteEvent(_) => (),
-      MouseEvent(_) => (),
-      ColorThemeEvent(_) => (),
-      RefreshEvent(_) => {
+      RedrawEvent(_) => {
         // Background refresh: refetch inbox + board silently. Try to
         // preserve the inbox selection by id (a notification may have
         // shifted index after archive/new arrivals); clamp board
@@ -209,6 +204,10 @@ fn run_loop(api_key: Str, vx: vaxis::Vaxis) Void!Str {
           err(_) => (),
         }
       },
+      FocusEvent(_) => (),
+      PasteEvent(_) => (),
+      MouseEvent(_) => (),
+      ColorThemeEvent(_) => (),
       KeyEvent(k) => {
         if k.ctrl and k.name == "c" {
           running = false
