@@ -192,7 +192,6 @@ extern fn event_color_theme_dark(e: RawEvent) Bool = "EventColorThemeDark"
 
 extern fn event_focus_focused(e: RawEvent) Bool = "EventFocusFocused"
 
-extern fn event_paste_started(e: RawEvent) Bool = "EventPasteStarted"
 extern fn event_paste_content(e: RawEvent) Str = "EventPasteContent"
 extern fn event_custom_name(e: RawEvent) Str = "EventCustomName"
 

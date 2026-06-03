@@ -700,11 +700,6 @@ func EventFocusFocused(e vaxis.Event) bool {
 	_, isIn := e.(vaxis.FocusIn)
 	return isIn
 }
-func EventPasteStarted(e vaxis.Event) bool {
-	_, isStart := e.(vaxis.PasteStartEvent)
-	return isStart
-}
-
 func EventPasteContent(e vaxis.Event) string {
 	if p, ok := e.(PasteEvent); ok {
 		return p.Content
