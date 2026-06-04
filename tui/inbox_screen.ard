@@ -167,9 +167,7 @@ impl InboxScreen {
   }
 
   fn mut refresh() {
-    if self.api_key.is_empty() {
-      ()
-    } else {
+    if not self.api_key.is_empty() {
       self.loading = true
       self.error = maybe::none()
       vaxis::post(self.vx, vaxis::CustomEvent{name: "inbox.fetch"})
@@ -210,13 +208,7 @@ impl InboxScreen {
 
 impl view::View for InboxScreen {
   fn mut init() {
-    if self.api_key.is_empty() {
-      ()
-    } else if self.items.size() == 0 and not self.loading {
-      self.refresh()
-    } else {
-      ()
-    }
+    self.refresh()
   }
 
   fn mut handle_event(event: vaxis::Event) {

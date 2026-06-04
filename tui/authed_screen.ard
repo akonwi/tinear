@@ -1,0 +1,76 @@
+use tinear/tui/core/stack
+use tinear/tui/core/text
+use tinear/tui/core/view
+use tinear/tui/inbox_screen
+use tinear/tui/tab_bar
+use tinear/vaxis
+
+// Authenticated shell for the next TUI.
+//
+// Owns authenticated child state: top-level tabs and the inbox screen.
+struct AuthedScreen {
+  tabs: tab_bar::TabBar,
+  inbox: inbox_screen::InboxScreen,
+}
+
+fn new(vx: vaxis::Vaxis, api_key: Str) AuthedScreen {
+  AuthedScreen{
+    tabs: tab_bar::new(["Inbox", "My Issues"]),
+    inbox: inbox_screen::new(vx, api_key),
+  }
+}
+
+fn key_hints(labels: [Str]) view::View {
+  mut children: [view::View] = []
+
+  for label, idx in labels {
+    if idx > 0 {
+      children.push(stack::Spacer::h(2))
+    }
+    children.push(text::new(label))
+  }
+
+  stack::hstack(children)
+}
+
+impl view::View for AuthedScreen {
+  fn mut init() {
+    self.tabs.init()
+    self.inbox.init()
+  }
+
+  fn mut handle_event(event: vaxis::Event) {
+    match event {
+      KeyEvent(key) => {
+        self.tabs.handle_key(key)
+        match self.tabs.selected_label() {
+          "Inbox" => self.inbox.handle_key(key),
+          _ => (),
+        }
+      },
+      CustomEvent(_) => self.inbox.handle_event(event),
+      _ => (),
+    }
+  }
+
+  fn render(mut frame: view::Frame) {
+    let body = match self.tabs.selected_label() {
+      "Inbox" => self.inbox,
+      _ => text::new("Coming soon"),
+    }
+
+    let hints = key_hints(["↑↓ select", "r refresh", "↵ open"])
+
+    // Screen layout: tabs fixed at top, body fills the middle, hints
+    // fixed at the bottom. A one-row spacer below the tabs gives the
+    // body a bit of breathing room.
+    stack::vsplit(
+      [
+        stack::fixed(self.tabs, 1),
+        stack::fixed(stack::Spacer::v(1), 1),
+        stack::fill(body, 1),
+        stack::fixed(hints, 1),
+      ],
+    ).render(frame)
+  }
+}
