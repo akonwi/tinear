@@ -1,0 +1,16 @@
+use tinear/tui/api
+
+struct Store {
+  api_key: Str,
+  items: [Dynamic]
+}
+
+fn new(api_key: Str) Store {
+  Store{api_key: api_key, items: List::new<Dynamic>()}
+}
+
+impl Store {
+  fn load() [Dynamic]!Str {
+    api::fetch_inbox(self.api_key)
+  }
+}

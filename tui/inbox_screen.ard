@@ -1,6 +1,7 @@
 use ard/decode
 use ard/maybe
 
+use tinear/models/inbox
 use tinear/tui/api
 use tinear/tui/core/view
 use tinear/tui/decode as decode_utils
@@ -15,6 +16,7 @@ use tinear/vaxis
 struct InboxScreen {
   vx: vaxis::Vaxis,
   api_key: Str,
+  store: inbox::Store,
   items: [Dynamic],
   cursor: Int,
   loading: Bool,
@@ -26,6 +28,7 @@ fn new(vx: vaxis::Vaxis, api_key: Str) InboxScreen {
   InboxScreen{
     vx: vx,
     api_key: api_key,
+    store: inbox::new(api_key),
     items: items,
     cursor: 0,
     loading: false,
@@ -132,46 +135,17 @@ fn visible_start(cursor: Int, height: Int) Int {
 }
 
 impl InboxScreen {
-  fn mut set_api_key(api_key: Str) {
-    if self.api_key == api_key {
-      ()
-    } else {
-      let empty: [Dynamic] = []
-      self.api_key = api_key
-      self.items = empty
-      self.cursor = 0
-      self.loading = false
-      self.error = maybe::none()
-    }
-  }
-
-  fn mut perform_fetch() {
-    match api::fetch_inbox(self.api_key) {
-      ok(items) => {
-        self.items = items
-        self.cursor = match self.cursor >= self.items.size() {
-          true => match self.items.size() == 0 {
-            true => 0,
-            false => self.items.size() - 1,
-          },
-          false => self.cursor,
-        }
-        self.loading = false
-        self.error = maybe::none()
-      },
-      err(e) => {
-        self.loading = false
-        self.error = maybe::some(e)
-      },
-    }
-  }
-
   fn mut refresh() {
-    if not self.api_key.is_empty() {
-      self.loading = true
-      self.error = maybe::none()
-      vaxis::post(self.vx, vaxis::CustomEvent{name: "inbox.fetch"})
+    self.loading = true
+    self.error = maybe::none()
+    match self.store.load() {
+      ok => (),
+      err => {
+        self.error = maybe::some(err)
+      }
     }
+    self.loading = false
+    vaxis::post(self.vx, vaxis::RedrawEvent{})
   }
 
 
@@ -195,12 +169,6 @@ impl InboxScreen {
   fn mut handle_event(event: vaxis::Event) {
     match event {
       KeyEvent(key) => self.handle_key(key),
-      CustomEvent(e) => {
-        match e.name {
-          "inbox.fetch" => self.perform_fetch(),
-          _ => (),
-        }
-      },
       _ => (),
     }
   }
@@ -214,12 +182,6 @@ impl view::View for InboxScreen {
   fn mut handle_event(event: vaxis::Event) {
     match event {
       KeyEvent(key) => self.handle_key(key),
-      CustomEvent(e) => {
-        match e.name {
-          "inbox.fetch" => self.perform_fetch(),
-          _ => (),
-        }
-      },
       _ => (),
     }
   }
