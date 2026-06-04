@@ -102,6 +102,7 @@ struct InputContent {
 
 impl view::View for InputContent {
   fn init() {}
+  fn handle_event(event: vaxis::Event) {}
 
   fn render(mut frame: view::Frame) {
     let is_placeholder = self.value.size() == 0
@@ -254,6 +255,14 @@ impl Input {
 
 impl view::View for Input {
   fn init() {}
+
+  fn mut handle_event(event: vaxis::Event) {
+    match event {
+      KeyEvent(key) => self.handle_key(key),
+      PasteEvent(paste) => self.insert_text(paste.content),
+      _ => (),
+    }
+  }
 
   fn render(mut frame: view::Frame) {
     let content_view = InputContent{

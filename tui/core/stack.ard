@@ -21,6 +21,7 @@
 use ard/testing
 use tinear/tui/core/view
 use tinear/tui/core/rect
+use tinear/vaxis
 
 // Stack children top-to-bottom; total width = max child width,
 // total height = sum of child heights.
@@ -30,6 +31,7 @@ struct VStack {
 
 impl view::View for VStack {
   fn init() {}
+  fn handle_event(event: vaxis::Event) {}
 
   fn render(mut frame: view::Frame) {
     let avail_w = frame.width()
@@ -61,6 +63,7 @@ struct HStack {
 
 impl view::View for HStack {
   fn init() {}
+  fn handle_event(event: vaxis::Event) {}
 
   fn render(mut frame: view::Frame) {
     let avail_w = frame.width()
@@ -115,6 +118,7 @@ struct Spacer {
 
 impl view::View for Spacer {
   fn init() {}
+  fn handle_event(event: vaxis::Event) {}
 
   fn render(mut frame: view::Frame) {
     // No drawing — just register the reserved region with the
@@ -434,6 +438,7 @@ struct VSplit {
 
 impl view::View for VSplit {
   fn init() {}
+  fn handle_event(event: vaxis::Event) {}
 
   fn render(mut frame: view::Frame) {
     let avail_w = frame.width()
@@ -470,6 +475,7 @@ struct HSplit {
 
 impl view::View for HSplit {
   fn init() {}
+  fn handle_event(event: vaxis::Event) {}
 
   fn render(mut frame: view::Frame) {
     let avail_w = frame.width()

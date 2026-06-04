@@ -4,6 +4,7 @@
 // a future revision; for now `Text` is single-line only.
 
 use tinear/tui/core/view
+use tinear/vaxis
 
 struct Text {
   content: Str,
@@ -20,6 +21,8 @@ struct Text {
 
 impl view::View for Text {
   fn init() {}
+
+  fn handle_event(event: vaxis::Event) {}
 
   fn render(mut frame: view::Frame) {
     // Draw a single line at (0, 0). Vaxis clips the right edge

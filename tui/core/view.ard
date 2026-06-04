@@ -40,17 +40,19 @@ struct Frame {
   extent: rect::Rect,
 }
 
-// Every renderable view implements this trait. The method receives
-// a Frame pre-clipped to the view's region; views never see their
-// own position on the wider screen.
+// Every retained UI view implements this trait. `init` is called before
+// first render, `render` paints into the view's assigned Frame, and
+// `handle_event` lets stateful views respond to input/application events.
 //
-// `frame` is `mut` so the Frame can track the bounding box of cells
-// the view drew. After `render` returns, the caller reads that box
-// via `frame.dimensions()`. This replaces an intrinsic-size method
-// — what the view actually rendered IS its size.
+// `render` receives a Frame pre-clipped to the view's region; views never see
+// their own position on the wider screen. `frame` is `mut` so the Frame can
+// track the bounding box of cells the view drew. After `render` returns, the
+// caller reads that box via `frame.dimensions()`. This replaces an intrinsic-
+// size method — what the view actually rendered IS its size.
 trait View {
   fn init()
   fn render(mut frame: Frame)
+  fn handle_event(event: vaxis::Event)
 }
 
 impl Frame {
@@ -218,4 +220,12 @@ fn sub(frame: Frame, area: rect::Rect) Frame {
   let win = vaxis::subwindow(frame.window, area.x, area.y, area.w, area.h)
   let empty = rect::Rect{x: 0, y: 0, w: 0, h: 0}
   Frame{vx: frame.vx, window: win, extent: empty}
+}
+
+struct Empty {}
+
+impl View for Empty {
+  fn init() {}
+  fn handle_event(event: vaxis::Event) {}
+  fn render(mut frame: Frame) {}
 }

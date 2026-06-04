@@ -34,6 +34,7 @@ struct CenteredText {
 
 impl view::View for CenteredText {
   fn init() {}
+  fn handle_event(event: vaxis::Event) {}
 
   fn render(mut frame: view::Frame) {
     let raw_x = (frame.width() - frame.rendered_width(self.content)) / 2
@@ -60,6 +61,7 @@ struct CenteredInput {
 
 impl view::View for CenteredInput {
   fn init() {}
+  fn handle_event(event: vaxis::Event) {}
 
   fn render(mut frame: view::Frame) {
     let input_w = centered_width(frame, self.width)
@@ -97,6 +99,10 @@ impl WelcomeScreen {
 impl view::View for WelcomeScreen {
   fn mut init() {
     self.init_screen()
+  }
+
+  fn mut handle_event(event: vaxis::Event) {
+    self.input.handle_event(event)
   }
 
   fn render(mut frame: view::Frame) {

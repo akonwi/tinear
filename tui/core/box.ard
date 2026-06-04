@@ -15,6 +15,7 @@
 use tinear/tui/core/view
 use tinear/tui/core/rect
 use tinear/tui/core/style
+use tinear/vaxis
 
 // ---- Internal drawing helpers --------------------------------------
 
@@ -164,6 +165,7 @@ struct Box {
 
 impl view::View for Box {
   fn init() {}
+  fn handle_event(event: vaxis::Event) {}
 
   fn render(mut frame: view::Frame) {
     let s = self.style

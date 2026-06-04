@@ -82,6 +82,13 @@ impl TabBar {
 impl view::View for TabBar {
   fn init() {}
 
+  fn mut handle_event(event: vaxis::Event) {
+    match event {
+      KeyEvent(key) => self.handle_key(key),
+      _ => (),
+    }
+  }
+
   fn render(mut frame: view::Frame) {
     mut children: [view::View] = []
 
