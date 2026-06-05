@@ -2,6 +2,7 @@ use tinear/tui/core/stack
 use tinear/tui/core/text
 use tinear/tui/core/view
 use tinear/tui/inbox_screen
+use tinear/tui/my_issues_screen
 use tinear/tui/tab_bar
 use tinear/vaxis
 
@@ -12,6 +13,7 @@ struct AuthedScreen {
   vx: vaxis::Vaxis,
   tabs: tab_bar::TabBar,
   inbox: inbox_screen::InboxScreen,
+  my_issues: my_issues_screen::MyIssuesScreen,
 }
 
 fn new(vx: vaxis::Vaxis, api_key: Str) AuthedScreen {
@@ -19,6 +21,7 @@ fn new(vx: vaxis::Vaxis, api_key: Str) AuthedScreen {
     vx: vx,
     tabs: tab_bar::new(["Inbox", "My Issues"]),
     inbox: inbox_screen::new(vx, api_key),
+    my_issues: my_issues_screen::new(vx, api_key),
   }
 }
 
@@ -36,13 +39,14 @@ fn key_hints(labels: [Str]) view::View {
 }
 
 fn is_tab_key(key: vaxis::KeyEvent) Bool {
-  key.name == "Tab" or key.name == "Left" or key.name == "Right"
+  key.name == "Tab"
 }
 
 impl view::View for AuthedScreen {
   fn mut init() {
     self.tabs.init()
     self.inbox.init()
+    self.my_issues.init()
   }
 
   fn mut handle_event(event: vaxis::Event) {
@@ -56,6 +60,7 @@ impl view::View for AuthedScreen {
           _ => {
             match self.tabs.selected_label() {
               "Inbox" => self.inbox.handle_key(key),
+              "My Issues" => self.my_issues.handle_key(key),
               _ => (),
             }
           },
@@ -67,8 +72,9 @@ impl view::View for AuthedScreen {
   }
 
   fn render(mut frame: view::Frame) {
-    let body = match self.tabs.selected_label() {
+    let body: view::View = match self.tabs.selected_label() {
       "Inbox" => self.inbox,
+      "My Issues" => self.my_issues,
       _ => text::new("Coming soon"),
     }
 
