@@ -42,6 +42,27 @@ fn is_tab_key(key: vaxis::KeyEvent) Bool {
   key.name == "Tab"
 }
 
+fn repeat(ch: Str, count: Int) Str {
+  mut out = ""
+  if count > 0 {
+    for i in 0..(count - 1) {
+      out = out + ch
+    }
+  }
+  out
+}
+
+struct HorizontalRule {}
+
+impl view::View for HorizontalRule {
+  fn init() {}
+  fn handle_event(event: vaxis::Event) {}
+
+  fn render(mut frame: view::Frame) {
+    frame.draw_text(0, 0, repeat("─", frame.width()))
+  }
+}
+
 impl view::View for TabbedScreen {
   fn mut init() {
     self.tabs.init()
@@ -80,13 +101,12 @@ impl view::View for TabbedScreen {
 
     let hints = key_hints(["↑↓ select", "r refresh", "↵ open"])
 
-    // Screen layout: tabs fixed at top, body fills the middle, hints
-    // fixed at the bottom. A one-row spacer below the tabs gives the
-    // body a bit of breathing room.
+    // Screen layout: tabs fixed at top, separator line underneath,
+    // body fills the middle, hints fixed at the bottom.
     stack::vsplit(
       [
         stack::fixed(self.tabs, 1),
-        stack::fixed(stack::Spacer::v(1), 1),
+        stack::fixed(HorizontalRule{}, 1),
         stack::fill(body, 1),
         stack::fixed(hints, 1),
       ],
