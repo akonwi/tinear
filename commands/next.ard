@@ -62,9 +62,7 @@ impl App {
 }
 
 fn run() {
-  let config = try config::load() -> err {
-    io::print("Unable to load config: {err}")
-  }
+  let config = try config::load() -> err { io::print("Unable to load config: {err}") }
   let vx = vaxis::new("tinear next").expect("vaxis::new")
 
   mut app = App::new(vx, config)
@@ -96,7 +94,7 @@ fn run() {
               app.init()
             }
           },
-          err(_) => {},
+          err(_) => (),
         }
       },
       _ => app.handle_event(event),
