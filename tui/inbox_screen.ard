@@ -1,10 +1,7 @@
-use ard/decode
 use ard/maybe
 
 use tinear/models/inbox
-use tinear/tui/api
 use tinear/tui/core/view
-use tinear/tui/decode as decode_utils
 use tinear/tui/text
 use tinear/vaxis
 
@@ -31,92 +28,6 @@ fn new(vx: vaxis::Vaxis, api_key: Str) InboxScreen {
     loading: false,
     error: maybe::none(),
   }
-}
-
-fn format_type(n_type: Str) Str {
-  match n_type {
-    "issueAssignedToYou" => "assigned",
-    "issueNewComment" => "commented",
-    "issueCommentMention" => "mentioned",
-    "issueMention" => "mentioned",
-    "issueCommentReaction" => "reacted",
-    "issueEmojiReaction" => "reacted",
-    "issueStatusChanged" => "changed status",
-    "issueThreadResolved" => "resolved",
-    "issueUnassignedFromYou" => "unassigned",
-    "pullRequestApproved" => "approved",
-    "pullRequestChangesRequested" => "requested changes",
-    "pullRequestChecksFailed" => "checks failed",
-    "pullRequestComment" => "commented",
-    "pullRequestCommented" => "commented",
-    "pullRequestCommentMention" => "mentioned",
-    "pullRequestMention" => "mentioned",
-    "pullRequestReviewRequested" => "requested review",
-    "pullRequestReviewRerequested" => "re-requested review",
-    "pullRequestRemovedFromMergeQueue" => "removed from queue",
-    _ => n_type,
-  }
-}
-
-fn is_pr_type(n_type: Str) Bool {
-  n_type.starts_with("pullRequest")
-}
-
-struct IdTitle {
-  id: Str,
-  title: Str,
-}
-
-fn notif_id_and_title(notif: Dynamic, n_type: Str) IdTitle {
-  match is_pr_type(n_type) {
-    true => {
-      let pr_obj = decode_utils::optional_field(notif, "pullRequest")
-      let id = match pr_obj {
-        pr => {
-          let num = decode::run(pr, decode::field("number", decode::int)).expect("Missing PR number")
-          "PR #{num.to_str()}"
-        },
-        _ => "—",
-      }
-      let title = match pr_obj {
-        pr => decode::run(pr, decode::field("title", decode::string)).expect("Missing PR title"),
-        _ => "",
-      }
-      IdTitle{id: id, title: title}
-    },
-    false => {
-      let issue_obj = decode_utils::optional_field(notif, "issue")
-      let id = match issue_obj {
-        iss => decode::run(iss, decode::field("identifier", decode::string)).expect("Missing issue identifier"),
-        _ => "—",
-      }
-      let title = match issue_obj {
-        iss => decode::run(iss, decode::field("title", decode::string)).expect("Missing issue title"),
-        _ => "",
-      }
-      IdTitle{id: id, title: title}
-    },
-  }
-}
-
-fn row_text(notif: Dynamic, idx: Int, cursor: Int) Str {
-  let n_type = decode::run(notif, decode::field("type", decode::string)).expect("Missing type")
-  let type_label = format_type(n_type)
-
-  let actor_obj = decode_utils::optional_field(notif, "actor")
-  let actor_name = match actor_obj {
-    act => decode_utils::user_display_name(act),
-    _ => "—",
-  }
-
-  let info = notif_id_and_title(notif, n_type)
-  let cursor_mark = match idx == cursor {
-    true => "▸",
-    false => " ",
-  }
-
-  let id_part = text::pad_str(info.id, 10)
-  "{cursor_mark} {id_part} {actor_name} {type_label}  {info.title}"
 }
 
 fn visible_start(cursor: Int, height: Int) Int {
@@ -201,7 +112,7 @@ impl view::View for InboxScreen {
                 mut row = 0
                 for notif, idx in self.store.items {
                   if idx >= start and row < height {
-                    let line = text::truncate_with_ellipsis(row_text(notif, idx, self.cursor), frame.width())
+                    let line = text::truncate_with_ellipsis(notif.draw(idx, self.cursor), frame.width())
                     let selected = idx == self.cursor
                     frame.draw_styled(0, row, line, -1, -1, false, false, false, false, selected)
                     row = row + 1

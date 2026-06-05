@@ -1,17 +1,135 @@
+use ard/decode
+
 use tinear/tui/api
+use tinear/tui/decode as decode_utils
+use tinear/tui/text
+
+struct Item {
+  notification_id: Str,
+  notification_type: Str,
+  type_label: Str,
+  actor_name: Str,
+  target_id: Str,
+  title: Str,
+}
 
 struct Store {
   api_key: Str,
-  items: [Dynamic]
+  items: [Item]
 }
 
 fn new(api_key: Str) Store {
-  Store{api_key: api_key, items: List::new<Dynamic>()}
+  Store{api_key: api_key, items: List::new<Item>()}
+}
+
+fn format_type(n_type: Str) Str {
+  match n_type {
+    "issueAssignedToYou" => "assigned",
+    "issueNewComment" => "commented",
+    "issueCommentMention" => "mentioned",
+    "issueMention" => "mentioned",
+    "issueCommentReaction" => "reacted",
+    "issueEmojiReaction" => "reacted",
+    "issueStatusChanged" => "changed status",
+    "issueThreadResolved" => "resolved",
+    "issueUnassignedFromYou" => "unassigned",
+    "pullRequestApproved" => "approved",
+    "pullRequestChangesRequested" => "requested changes",
+    "pullRequestChecksFailed" => "checks failed",
+    "pullRequestComment" => "commented",
+    "pullRequestCommented" => "commented",
+    "pullRequestCommentMention" => "mentioned",
+    "pullRequestMention" => "mentioned",
+    "pullRequestReviewRequested" => "requested review",
+    "pullRequestReviewRerequested" => "re-requested review",
+    "pullRequestRemovedFromMergeQueue" => "removed from queue",
+    _ => n_type,
+  }
+}
+
+fn is_pr_type(n_type: Str) Bool {
+  n_type.starts_with("pullRequest")
+}
+
+struct IdTitle {
+  id: Str,
+  title: Str,
+}
+
+private fn dynamic_id_and_title(notif: Dynamic, n_type: Str) IdTitle {
+  match is_pr_type(n_type) {
+    true => {
+      let pr_obj = decode_utils::optional_field(notif, "pullRequest")
+      let id = match pr_obj {
+        pr => {
+          let num = decode::run(pr, decode::field("number", decode::int)).expect("Missing PR number")
+          "PR #{num.to_str()}"
+        },
+        _ => "—",
+      }
+      let title = match pr_obj {
+        pr => decode::run(pr, decode::field("title", decode::string)).expect("Missing PR title"),
+        _ => "",
+      }
+      IdTitle{id: id, title: title}
+    },
+    false => {
+      let issue_obj = decode_utils::optional_field(notif, "issue")
+      let id = match issue_obj {
+        iss => decode::run(iss, decode::field("identifier", decode::string)).expect("Missing issue identifier"),
+        _ => "—",
+      }
+      let title = match issue_obj {
+        iss => decode::run(iss, decode::field("title", decode::string)).expect("Missing issue title"),
+        _ => "",
+      }
+      IdTitle{id: id, title: title}
+    },
+  }
+}
+
+fn decode_item(notif: Dynamic) Item {
+  let notification_id = decode::run(notif, decode::field("id", decode::string)).expect("Missing notification id")
+  let n_type = decode::run(notif, decode::field("type", decode::string)).expect("Missing notification type")
+  let type_label = format_type(n_type)
+
+  let actor_obj = decode_utils::optional_field(notif, "actor")
+  let actor_name = match actor_obj {
+    act => decode_utils::user_display_name(act),
+    _ => "—",
+  }
+
+  let info = dynamic_id_and_title(notif, n_type)
+  Item{
+    notification_id: notification_id,
+    notification_type: n_type,
+    type_label: type_label,
+    actor_name: actor_name,
+    target_id: info.id,
+    title: info.title,
+  }
+}
+
+impl Item {
+  fn draw(idx: Int, cursor: Int) Str {
+    let cursor_mark = match idx == cursor {
+      true => "▸",
+      false => " ",
+    }
+
+    let id_part = text::pad_str(self.target_id, 10)
+    "{cursor_mark} {id_part} {self.actor_name} {self.type_label}  {self.title}"
+  }
 }
 
 impl Store {
   fn mut load() Void!Str {
-    self.items = try api::fetch_inbox(self.api_key)
+    let nodes = try api::fetch_inbox(self.api_key)
+    mut items: [Item] = []
+    for node in nodes {
+      items.push(decode_item(node))
+    }
+    self.items = items
     Result::ok(())
   }
 }
