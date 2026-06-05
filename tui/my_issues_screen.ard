@@ -1,11 +1,15 @@
 use ard/async
+use ard/decode
 use ard/duration
 use ard/maybe
 
 use tinear/models/issues
+use tinear/tui/api
 use tinear/tui/core/rect
 use tinear/tui/core/view
 use tinear/tui/issue_card
+use tinear/tui/picker_modal
+use tinear/tui/state
 use tinear/tui/text
 use tinear/vaxis
 
@@ -21,6 +25,8 @@ struct MyIssuesScreen {
   scroll: Int,
   loading: Bool,
   error: Str?,
+  state_picker: state::StatePicker?,
+  cycle_picker: state::CyclePicker?,
 }
 
 fn new(api_key: Str) MyIssuesScreen {
@@ -31,6 +37,8 @@ fn new(api_key: Str) MyIssuesScreen {
     scroll: 0,
     loading: false,
     error: maybe::none(),
+    state_picker: maybe::none(),
+    cycle_picker: maybe::none(),
   }
 }
 
@@ -96,6 +104,43 @@ fn repeat(ch: Str, count: Int) Str {
 }
 
 impl MyIssuesScreen {
+  fn selected_issue() Dynamic? {
+    match self.store.columns.size() == 0 {
+      true => maybe::none(),
+      false => {
+        let col = self.store.columns.at(self.col)
+        match col.issues.size() == 0 {
+          true => maybe::none(),
+          false => maybe::some(col.issues.at(self.row)),
+        }
+      },
+    }
+  }
+
+  fn mut open_state_picker() {
+    match self.selected_issue() {
+      issue => {
+        match api::open_state_picker(self.store.api_key, issue, true, 0) {
+          ok(p) => { self.state_picker = maybe::some(p) },
+          err(_) => (),
+        }
+      },
+      _ => (),
+    }
+  }
+
+  fn mut open_cycle_picker() {
+    match self.selected_issue() {
+      issue => {
+        match api::open_cycle_picker(self.store.api_key, issue, true, 0) {
+          ok(p) => { self.cycle_picker = maybe::some(p) },
+          err(_) => (),
+        }
+      },
+      _ => (),
+    }
+  }
+
   fn mut clamp_cursor() {
     match self.store.columns.size() == 0 {
       true => {
@@ -156,8 +201,130 @@ impl MyIssuesScreen {
     }
   }
 
+  fn mut confirm_state_picker(ctx: view::Context, p: state::StatePicker) {
+    let target = p.states.at(p.cursor)
+    let new_state_id = decode::run(target, decode::field("id", decode::string))
+      .expect("Missing state.id")
+    if new_state_id == p.current_state_id {
+      self.state_picker = maybe::none()
+    } else {
+      match api::update_issue_state(self.store.api_key, p.issue_id, new_state_id) {
+        ok(_) => {
+          self.state_picker = maybe::none()
+          self.refresh(ctx)
+        },
+        err(_) => (),
+      }
+    }
+  }
+
+  fn mut handle_state_picker_key(ctx: view::Context, key: vaxis::KeyEvent) {
+    match self.state_picker {
+      picker => {
+        mut p = picker
+        match key.name {
+          "Escape" => { self.state_picker = maybe::none() },
+          "Up" => {
+            if p.cursor > 0 {
+              p.cursor = p.cursor - 1
+              self.state_picker = maybe::some(p)
+            }
+          },
+          "k" => {
+            if p.cursor > 0 {
+              p.cursor = p.cursor - 1
+              self.state_picker = maybe::some(p)
+            }
+          },
+          "Down" => {
+            if p.cursor < p.states.size() - 1 {
+              p.cursor = p.cursor + 1
+              self.state_picker = maybe::some(p)
+            }
+          },
+          "j" => {
+            if p.cursor < p.states.size() - 1 {
+              p.cursor = p.cursor + 1
+              self.state_picker = maybe::some(p)
+            }
+          },
+          "Enter" => self.confirm_state_picker(ctx, p),
+          "Space" => self.confirm_state_picker(ctx, p),
+          _ => (),
+        }
+      },
+      _ => (),
+    }
+  }
+
+  fn mut confirm_cycle_picker(ctx: view::Context, p: state::CyclePicker) {
+    let target_cycle_id = match p.cursor == 0 {
+      true => "",
+      false => {
+        let c = p.cycles.at(p.cursor - 1)
+        decode::run(c, decode::field("id", decode::string)).expect("Missing cycle.id")
+      },
+    }
+    if target_cycle_id == p.current_cycle_id {
+      self.cycle_picker = maybe::none()
+    } else {
+      match api::update_issue_cycle(self.store.api_key, p.issue_id, target_cycle_id) {
+        ok(_) => {
+          self.cycle_picker = maybe::none()
+          self.refresh(ctx)
+        },
+        err(_) => (),
+      }
+    }
+  }
+
+  fn mut handle_cycle_picker_key(ctx: view::Context, key: vaxis::KeyEvent) {
+    match self.cycle_picker {
+      picker => {
+        mut p = picker
+        let row_count = p.cycles.size() + 1
+        match key.name {
+          "Escape" => { self.cycle_picker = maybe::none() },
+          "Up" => {
+            if p.cursor > 0 {
+              p.cursor = p.cursor - 1
+              self.cycle_picker = maybe::some(p)
+            }
+          },
+          "k" => {
+            if p.cursor > 0 {
+              p.cursor = p.cursor - 1
+              self.cycle_picker = maybe::some(p)
+            }
+          },
+          "Down" => {
+            if p.cursor < row_count - 1 {
+              p.cursor = p.cursor + 1
+              self.cycle_picker = maybe::some(p)
+            }
+          },
+          "j" => {
+            if p.cursor < row_count - 1 {
+              p.cursor = p.cursor + 1
+              self.cycle_picker = maybe::some(p)
+            }
+          },
+          "Enter" => self.confirm_cycle_picker(ctx, p),
+          "Space" => self.confirm_cycle_picker(ctx, p),
+          _ => (),
+        }
+      },
+      _ => (),
+    }
+  }
+
   fn mut handle_key(ctx: view::Context, key: vaxis::KeyEvent) {
-    match key.name {
+    if self.state_picker.is_some() {
+      self.handle_state_picker_key(ctx, key)
+    } else if self.cycle_picker.is_some() {
+      self.handle_cycle_picker_key(ctx, key)
+    } else {
+      match key.name {
       "Up" => {
         if self.row > 0 {
           self.row = self.row - 1
@@ -188,8 +355,11 @@ impl MyIssuesScreen {
       "h" => self.move_left(),
       "Right" => self.move_right(),
       "l" => self.move_right(),
-      "r" => self.refresh(ctx),
-      _ => (),
+        "r" => self.refresh(ctx),
+        "s" => self.open_state_picker(),
+        "y" => self.open_cycle_picker(),
+        _ => (),
+      }
     }
   }
 }
@@ -283,6 +453,15 @@ impl view::View for MyIssuesScreen {
           },
         }
       },
+    }
+
+    match self.state_picker {
+      p => picker_modal::state_picker(p).render(frame),
+      _ => (),
+    }
+    match self.cycle_picker {
+      p => picker_modal::cycle_picker(p).render(frame),
+      _ => (),
     }
   }
 }

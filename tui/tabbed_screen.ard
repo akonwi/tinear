@@ -100,7 +100,10 @@ impl view::View for TabbedScreen {
       _ => text::new("Coming soon"),
     }
 
-    let hints = key_hints(["↑↓ select", "r refresh", "↵ open"])
+    let hints = match self.tabs.selected_label() {
+      "My Issues" => key_hints(["↑↓←→ select", "s status", "y cycle", "r refresh"]),
+      _ => key_hints(["↑↓ select", "r refresh", "↵ open"]),
+    }
 
     // Screen layout: tabs fixed at top, separator line underneath,
     // body fills the middle, hints fixed at the bottom.
