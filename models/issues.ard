@@ -1,0 +1,27 @@
+use ard/decode
+
+use tinear/tui/api
+use tinear/tui/state
+
+// Store for the My Issues board data.
+//
+// The screen owns UI state (cursor/scroll/loading/error). The store owns the
+// loaded issue columns and knows how to fetch them from Linear.
+struct Store {
+  api_key: Str,
+  columns: [state::BoardColumn],
+}
+
+fn new(api_key: Str) Store {
+  Store{api_key: api_key, columns: []}
+}
+
+impl Store {
+  fn mut load() Void!Str {
+    let viewer = try api::fetch_viewer(self.api_key)
+    let viewer_id = decode::run(viewer, decode::field("id", decode::string))
+      .expect("Missing viewer id")
+    self.columns = try api::fetch_board(self.api_key, viewer_id)
+    Result::ok(())
+  }
+}

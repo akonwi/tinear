@@ -1,7 +1,7 @@
 use ard/decode
 use ard/maybe
 
-use tinear/tui/api
+use tinear/models/issues
 use tinear/tui/core/view
 use tinear/tui/state
 use tinear/tui/text
@@ -14,8 +14,7 @@ use tinear/vaxis
 // directly through the root vaxis window.
 struct MyIssuesScreen {
   vx: vaxis::Vaxis,
-  api_key: Str,
-  columns: [state::BoardColumn],
+  store: issues::Store,
   col: Int,
   row: Int,
   scroll: Int,
@@ -26,8 +25,7 @@ struct MyIssuesScreen {
 fn new(vx: vaxis::Vaxis, api_key: Str) MyIssuesScreen {
   MyIssuesScreen{
     vx: vx,
-    api_key: api_key,
-    columns: [],
+    store: issues::new(api_key),
     col: 0,
     row: 0,
     scroll: 0,
@@ -157,7 +155,7 @@ fn draw_board_card(
 
 impl MyIssuesScreen {
   fn mut clamp_cursor() {
-    match self.columns.size() == 0 {
+    match self.store.columns.size() == 0 {
       true => {
         self.col = 0
         self.row = 0
@@ -167,10 +165,10 @@ impl MyIssuesScreen {
         if self.col < 0 {
           self.col = 0
         }
-        if self.col >= self.columns.size() {
-          self.col = self.columns.size() - 1
+        if self.col >= self.store.columns.size() {
+          self.col = self.store.columns.size() - 1
         }
-        let col_size = self.columns.at(self.col).issues.size()
+        let col_size = self.store.columns.at(self.col).issues.size()
         if col_size == 0 {
           self.row = 0
         } else {
@@ -190,18 +188,8 @@ impl MyIssuesScreen {
     self.error = maybe::none()
     vaxis::post(self.vx, vaxis::RedrawEvent{})
 
-    match api::fetch_viewer(self.api_key) {
-      ok(viewer) => {
-        let viewer_id = decode::run(viewer, decode::field("id", decode::string))
-          .expect("Missing viewer id")
-        match api::fetch_board(self.api_key, viewer_id) {
-          ok(cols) => {
-            self.columns = cols
-            self.clamp_cursor()
-          },
-          err(e) => { self.error = maybe::some(e) },
-        }
-      },
+    match self.store.load() {
+      ok(_) => self.clamp_cursor(),
       err(e) => { self.error = maybe::some(e) },
     }
 
@@ -220,7 +208,7 @@ impl MyIssuesScreen {
   }
 
   fn mut move_right() {
-    if self.col + 1 < self.columns.size() {
+    if self.col + 1 < self.store.columns.size() {
       self.col = self.col + 1
       self.clamp_cursor()
     }
@@ -239,16 +227,16 @@ impl MyIssuesScreen {
         }
       },
       "Down" => {
-        if self.columns.size() > 0 {
-          let col_size = self.columns.at(self.col).issues.size()
+        if self.store.columns.size() > 0 {
+          let col_size = self.store.columns.at(self.col).issues.size()
           if self.row < col_size - 1 {
             self.row = self.row + 1
           }
         }
       },
       "j" => {
-        if self.columns.size() > 0 {
-          let col_size = self.columns.at(self.col).issues.size()
+        if self.store.columns.size() > 0 {
+          let col_size = self.store.columns.at(self.col).issues.size()
           if self.row < col_size - 1 {
             self.row = self.row + 1
           }
@@ -283,10 +271,10 @@ impl view::View for MyIssuesScreen {
         match self.error {
           _err => frame.draw_styled(0, 0, "Unable to load my issues", 1, -1, false, false, false, false, false),
           _ => {
-            match self.columns.size() == 0 {
+            match self.store.columns.size() == 0 {
               true => frame.draw_text(0, 0, "No issues assigned to you."),
               false => {
-                let col_count = self.columns.size()
+                let col_count = self.store.columns.size()
                 let col_w = board_column_width(frame.width(), col_count)
                 let gap = board_column_gap()
                 let visible_count = board_visible_count(frame.width(), col_count)
@@ -308,7 +296,7 @@ impl view::View for MyIssuesScreen {
                 }
 
                 mut x = 0
-                for col, col_idx in self.columns {
+                for col, col_idx in self.store.columns {
                   if col_idx >= scroll and col_idx < end_excl {
                     let suffix = match col.state_type == "completed" {
                       true => " · last 10",
