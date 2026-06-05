@@ -9,12 +9,14 @@ use tinear/vaxis
 //
 // Owns authenticated child state: top-level tabs and the inbox screen.
 struct AuthedScreen {
+  vx: vaxis::Vaxis,
   tabs: tab_bar::TabBar,
   inbox: inbox_screen::InboxScreen,
 }
 
 fn new(vx: vaxis::Vaxis, api_key: Str) AuthedScreen {
   AuthedScreen{
+    vx: vx,
     tabs: tab_bar::new(["Inbox", "My Issues"]),
     inbox: inbox_screen::new(vx, api_key),
   }
@@ -33,6 +35,10 @@ fn key_hints(labels: [Str]) view::View {
   stack::hstack(children)
 }
 
+fn is_tab_key(key: vaxis::KeyEvent) Bool {
+  key.name == "Tab" or key.name == "Left" or key.name == "Right"
+}
+
 impl view::View for AuthedScreen {
   fn mut init() {
     self.tabs.init()
@@ -42,10 +48,17 @@ impl view::View for AuthedScreen {
   fn mut handle_event(event: vaxis::Event) {
     match event {
       KeyEvent(key) => {
-        self.tabs.handle_key(key)
-        match self.tabs.selected_label() {
-          "Inbox" => self.inbox.handle_key(key),
-          _ => (),
+        match {
+          is_tab_key(key)  => {
+            self.tabs.handle_key(key)
+            vaxis::post(self.vx, vaxis::RedrawEvent{})
+          },
+          _ => {
+            match self.tabs.selected_label() {
+              "Inbox" => self.inbox.handle_key(key),
+              _ => (),
+            }
+          },
         }
       },
       CustomEvent(_) => self.inbox.handle_event(event),
