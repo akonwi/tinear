@@ -138,12 +138,15 @@ impl InboxScreen {
   fn mut refresh() {
     self.loading = true
     self.error = maybe::none()
+    vaxis::post(self.vx, vaxis::RedrawEvent{})
+
     match self.store.load() {
       ok => (),
       err => {
         self.error = maybe::some(err)
       }
     }
+
     self.loading = false
     vaxis::post(self.vx, vaxis::RedrawEvent{})
   }

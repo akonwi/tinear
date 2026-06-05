@@ -10,7 +10,8 @@ fn new(api_key: Str) Store {
 }
 
 impl Store {
-  fn load() [Dynamic]!Str {
-    api::fetch_inbox(self.api_key)
+  fn mut load() Void!Str {
+    self.items = try api::fetch_inbox(self.api_key)
+    Result::ok(())
   }
 }
