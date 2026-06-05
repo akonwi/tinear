@@ -1,7 +1,7 @@
 use ard/io
 
 use tinear/config
-use tinear/tui/authed_screen
+use tinear/tui/tabbed_screen
 use tinear/tui/core/box
 use tinear/tui/core/style
 use tinear/tui/core/view
@@ -36,7 +36,7 @@ impl App {
   fn mut init() {
     match self.config.has_auth() {
       true => {
-        mut screen = authed_screen::new(self.vx, self.config.api_key)
+        mut screen = tabbed_screen::new(self.vx, self.config.api_key)
         screen.init()
         self.screen = screen
       },

@@ -6,18 +6,18 @@ use tinear/tui/my_issues_screen
 use tinear/tui/tab_bar
 use tinear/vaxis
 
-// Authenticated shell for the next TUI.
+// Tabbed shell for the next TUI.
 //
 // Owns authenticated child state: top-level tabs and the inbox screen.
-struct AuthedScreen {
+struct TabbedScreen {
   vx: vaxis::Vaxis,
   tabs: tab_bar::TabBar,
   inbox: inbox_screen::InboxScreen,
   my_issues: my_issues_screen::MyIssuesScreen,
 }
 
-fn new(vx: vaxis::Vaxis, api_key: Str) AuthedScreen {
-  AuthedScreen{
+fn new(vx: vaxis::Vaxis, api_key: Str) TabbedScreen {
+  TabbedScreen{
     vx: vx,
     tabs: tab_bar::new(["Inbox", "My Issues"]),
     inbox: inbox_screen::new(vx, api_key),
@@ -42,7 +42,7 @@ fn is_tab_key(key: vaxis::KeyEvent) Bool {
   key.name == "Tab"
 }
 
-impl view::View for AuthedScreen {
+impl view::View for TabbedScreen {
   fn mut init() {
     self.tabs.init()
     self.inbox.init()
