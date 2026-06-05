@@ -42,6 +42,7 @@ impl Context {
   fn post_event(event: vaxis::Event) {
     vaxis::post(self.vx, event)
   }
+
 }
 
 fn context(vx: vaxis::Vaxis) Context {

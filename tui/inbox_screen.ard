@@ -1,3 +1,5 @@
+use ard/async
+use ard/duration
 use ard/maybe
 
 use tinear/models/inbox
@@ -26,6 +28,18 @@ fn new(api_key: Str) InboxScreen {
     loading: false,
     error: maybe::none(),
   }
+}
+
+fn refresh_event() Str { "inbox.refresh" }
+
+fn register_refresh_timer(ctx: view::Context) {
+  let event = refresh_event()
+  async::start(fn() {
+    while {
+      async::sleep(duration::from_minutes(5))
+      ctx.post(event)
+    }
+  })
 }
 
 fn visible_start(cursor: Int, height: Int) Int {
@@ -85,12 +99,18 @@ impl InboxScreen {
 
 impl view::View for InboxScreen {
   fn mut init(ctx: view::Context) {
+    register_refresh_timer(ctx)
     self.refresh(ctx)
   }
 
   fn mut handle_event(ctx: view::Context, event: vaxis::Event) {
     match event {
       KeyEvent(key) => self.handle_key(ctx, key),
+      CustomEvent(e) => {
+        if e.name == refresh_event() {
+          self.refresh(ctx)
+        }
+      },
       _ => (),
     }
   }

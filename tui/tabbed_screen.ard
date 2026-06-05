@@ -85,7 +85,10 @@ impl view::View for TabbedScreen {
           },
         }
       },
-      CustomEvent(_) => self.inbox.handle_event(ctx, event),
+      CustomEvent(_) => {
+        self.inbox.handle_event(ctx, event)
+        self.my_issues.handle_event(ctx, event)
+      },
       _ => (),
     }
   }
