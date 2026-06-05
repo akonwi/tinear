@@ -1,0 +1,69 @@
+use ard/async
+use ard/duration
+
+use tinear/tui/core/view
+use tinear/vaxis
+
+// Debug overlay for inspecting key events.
+//
+// It observes every event at the app root but never consumes anything. Key
+// events update the toast text; a delayed CustomEvent clears the active toast
+// after five seconds. The app still forwards the original event to the real
+// screen after this view observes it.
+struct KeyDebugToast {
+  vx: vaxis::Vaxis,
+  message: Str,
+  id: Int,
+}
+
+fn hide_event(id: Int) Str {
+  "debug.key_toast.hide.{id}"
+}
+
+fn new(vx: vaxis::Vaxis) KeyDebugToast {
+  KeyDebugToast{vx: vx, message: "", id: 0}
+}
+
+impl KeyDebugToast {
+  fn mut show(key: vaxis::KeyEvent) {
+    self.id = self.id + 1
+    let id = self.id
+    self.message = "key: {key.pretty()} name={key.name} text={key.text}"
+
+    let vx = self.vx
+    async::start(fn() {
+      async::sleep(duration::from_seconds(5))
+      vaxis::post(vx, vaxis::CustomEvent{name: hide_event(id)})
+    })
+  }
+}
+
+impl view::View for KeyDebugToast {
+  fn init() {}
+
+  fn mut handle_event(event: vaxis::Event) {
+    match event {
+      KeyEvent(key) => self.show(key),
+      CustomEvent(e) => {
+        if e.name == hide_event(self.id) {
+          self.message = ""
+        }
+      },
+      _ => (),
+    }
+  }
+
+  fn render(mut frame: view::Frame) {
+    if not self.message.is_empty() {
+      let content = " {self.message} "
+      let width = frame.rendered_width(content)
+      let raw_x = frame.width() - width
+      let x = match raw_x < 0 {
+        true => 0,
+        false => raw_x,
+      }
+      let y = frame.height() - 1
+      frame.draw_styled(x, y, content, -1, -1, false, false, false, false, true)
+    }
+  }
+}

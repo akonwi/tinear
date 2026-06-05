@@ -5,6 +5,7 @@ use tinear/tui/authed_screen
 use tinear/tui/core/box
 use tinear/tui/core/style
 use tinear/tui/core/view
+use tinear/tui/key_debug_toast
 use tinear/tui/welcome_screen
 use tinear/vaxis
 
@@ -19,6 +20,7 @@ struct App {
   vx: vaxis::Vaxis,
   config: config::Config,
   screen: view::View,
+  key_debug: key_debug_toast::KeyDebugToast,
 }
 
 fn App::new(vx: vaxis::Vaxis, config: config::Config) App {
@@ -26,6 +28,7 @@ fn App::new(vx: vaxis::Vaxis, config: config::Config) App {
     vx: vx,
     screen: view::Empty{},
     config: config,
+    key_debug: key_debug_toast::new(vx),
   }
 }
 
@@ -46,17 +49,18 @@ impl App {
   }
 
   fn render(mut frame: view::Frame) {
-    box::new(
-      self.screen,
-      style::Style{
-        padding: style::Padding::x(1),
-        width: frame.width(),
-        height: frame.height(),
-      },
-    ).render(frame)
+    let root_style = style::Style{
+      padding: style::Padding::x(1),
+      width: frame.width(),
+      height: frame.height(),
+    }
+
+    box::new(self.screen, root_style).render(frame)
+    self.key_debug.render(frame)
   }
 
   fn mut handle_event(event: vaxis::Event) {
+    self.key_debug.handle_event(event)
     self.screen.handle_event(event)
   }
 }
