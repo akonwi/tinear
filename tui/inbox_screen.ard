@@ -105,7 +105,20 @@ impl view::View for InboxScreen {
           _err => frame.draw_styled(0, 0, "Unable to load inbox", 1, -1, false, false, false, false, false),
           _ => {
             match self.store.items.size() == 0 {
-              true => frame.draw_text(0, 0, "Inbox empty"),
+              true => {
+                let msg = "Inbox empty"
+                let raw_x = (frame.width() - frame.rendered_width(msg)) / 2
+                let x = match raw_x < 0 {
+                  true => 0,
+                  false => raw_x,
+                }
+                let raw_y = frame.height() / 2
+                let y = match raw_y < 0 {
+                  true => 0,
+                  false => raw_y,
+                }
+                frame.draw_text(x, y, msg)
+              },
               false => {
                 let height = frame.height()
                 let start = visible_start(self.cursor, height)
