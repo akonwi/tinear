@@ -6,7 +6,6 @@ use tinear/vaxis
 use tinear/commands/login
 
 struct WelcomeScreen {
-  vx: vaxis::Vaxis,
   input: input::Input,
   login_err: Bool?
 }
@@ -33,8 +32,8 @@ struct CenteredText {
 }
 
 impl view::View for CenteredText {
-  fn init() {}
-  fn handle_event(event: vaxis::Event) {}
+  fn init(ctx: view::Context) {}
+  fn handle_event(ctx: view::Context, event: vaxis::Event) {}
 
   fn render(mut frame: view::Frame) {
     let raw_x = (frame.width() - frame.rendered_width(self.content)) / 2
@@ -60,8 +59,8 @@ struct CenteredInput {
 }
 
 impl view::View for CenteredInput {
-  fn init() {}
-  fn handle_event(event: vaxis::Event) {}
+  fn init(ctx: view::Context) {}
+  fn handle_event(ctx: view::Context, event: vaxis::Event) {}
 
   fn render(mut frame: view::Frame) {
     let input_w = centered_width(frame, self.width)
@@ -79,30 +78,30 @@ impl WelcomeScreen {
     self.input.handle_key(key)
   }
 
-  fn mut handle_event(event: vaxis::Event) {
-    self.input.handle_event(event)
+  fn mut handle_event(ctx: view::Context, event: vaxis::Event) {
+    self.input.handle_event(ctx, event)
   }
 
-  fn mut init_screen() {
+  fn mut init_screen(ctx: view::Context) {
     if self.input.on_submit.is_none() {
       self.input.on_submit = maybe::some(fn(val: Str) {
         match login::login(val) {
           ok(_) => { self.login_err = maybe::none() },
           err(_) => { self.login_err = maybe::some(true) },
         }
-        vaxis::post(self.vx, vaxis::RedrawEvent{})
+        ctx.redraw()
       })
     }
   }
 }
 
 impl view::View for WelcomeScreen {
-  fn mut init() {
-    self.init_screen()
+  fn mut init(ctx: view::Context) {
+    self.init_screen(ctx)
   }
 
-  fn mut handle_event(event: vaxis::Event) {
-    self.input.handle_event(event)
+  fn mut handle_event(ctx: view::Context, event: vaxis::Event) {
+    self.input.handle_event(ctx, event)
   }
 
   fn render(mut frame: view::Frame) {
@@ -131,6 +130,6 @@ impl view::View for WelcomeScreen {
   }
 }
 
-fn new(vx: vaxis::Vaxis) WelcomeScreen {
-  WelcomeScreen{vx: vx, input: input::new("Paste Linear API key"), login_err: maybe::none()}
+fn new() WelcomeScreen {
+  WelcomeScreen{input: input::new("Paste Linear API key"), login_err: maybe::none()}
 }

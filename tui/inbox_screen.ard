@@ -11,7 +11,6 @@ use tinear/vaxis
 // InboxScreen field, forwards inbox-specific events to it, and renders it as
 // the body for the Inbox tab.
 struct InboxScreen {
-  vx: vaxis::Vaxis,
   api_key: Str,
   store: inbox::Store,
   cursor: Int,
@@ -19,9 +18,8 @@ struct InboxScreen {
   error: Str?,
 }
 
-fn new(vx: vaxis::Vaxis, api_key: Str) InboxScreen {
+fn new(api_key: Str) InboxScreen {
   InboxScreen{
-    vx: vx,
     api_key: api_key,
     store: inbox::new(api_key),
     cursor: 0,
@@ -43,10 +41,10 @@ fn visible_start(cursor: Int, height: Int) Int {
 }
 
 impl InboxScreen {
-  fn mut refresh() {
+  fn mut refresh(ctx: view::Context) {
     self.loading = true
     self.error = maybe::none()
-    vaxis::post(self.vx, vaxis::RedrawEvent{})
+    ctx.redraw()
 
     match self.store.load() {
       ok => (),
@@ -56,11 +54,11 @@ impl InboxScreen {
     }
 
     self.loading = false
-    vaxis::post(self.vx, vaxis::RedrawEvent{})
+    ctx.redraw()
   }
 
 
-  fn mut handle_key(key: vaxis::KeyEvent) {
+  fn mut handle_key(ctx: view::Context, key: vaxis::KeyEvent) {
     match key.name {
       "Up" => {
         if self.cursor > 0 {
@@ -72,27 +70,27 @@ impl InboxScreen {
           self.cursor = self.cursor + 1
         }
       },
-      "r" => self.refresh(),
+      "r" => self.refresh(ctx),
       _ => (),
     }
   }
 
-  fn mut handle_event(event: vaxis::Event) {
+  fn mut handle_event(ctx: view::Context, event: vaxis::Event) {
     match event {
-      KeyEvent(key) => self.handle_key(key),
+      KeyEvent(key) => self.handle_key(ctx, key),
       _ => (),
     }
   }
 }
 
 impl view::View for InboxScreen {
-  fn mut init() {
-    self.refresh()
+  fn mut init(ctx: view::Context) {
+    self.refresh(ctx)
   }
 
-  fn mut handle_event(event: vaxis::Event) {
+  fn mut handle_event(ctx: view::Context, event: vaxis::Event) {
     match event {
-      KeyEvent(key) => self.handle_key(key),
+      KeyEvent(key) => self.handle_key(ctx, key),
       _ => (),
     }
   }

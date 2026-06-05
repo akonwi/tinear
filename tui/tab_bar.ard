@@ -80,9 +80,9 @@ impl TabBar {
 }
 
 impl view::View for TabBar {
-  fn init() {}
+  fn init(ctx: view::Context) {}
 
-  fn mut handle_event(event: vaxis::Event) {
+  fn mut handle_event(ctx: view::Context, event: vaxis::Event) {
     match event {
       KeyEvent(key) => self.handle_key(key),
       _ => (),

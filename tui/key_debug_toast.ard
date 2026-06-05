@@ -11,7 +11,6 @@ use tinear/vaxis
 // after five seconds. The app still forwards the original event to the real
 // screen after this view observes it.
 struct KeyDebugToast {
-  vx: vaxis::Vaxis,
   message: Str,
   id: Int,
 }
@@ -20,30 +19,29 @@ fn hide_event(id: Int) Str {
   "debug.key_toast.hide.{id}"
 }
 
-fn new(vx: vaxis::Vaxis) KeyDebugToast {
-  KeyDebugToast{vx: vx, message: "", id: 0}
+fn new() KeyDebugToast {
+  KeyDebugToast{message: "", id: 0}
 }
 
 impl KeyDebugToast {
-  fn mut show(key: vaxis::KeyEvent) {
+  fn mut show(ctx: view::Context, key: vaxis::KeyEvent) {
     self.id = self.id + 1
     let id = self.id
     self.message = "key: {key.pretty()} name={key.name} text={key.text}"
 
-    let vx = self.vx
     async::start(fn() {
       async::sleep(duration::from_seconds(5))
-      vaxis::post(vx, vaxis::CustomEvent{name: hide_event(id)})
+      ctx.post(hide_event(id))
     })
   }
 }
 
 impl view::View for KeyDebugToast {
-  fn init() {}
+  fn init(ctx: view::Context) {}
 
-  fn mut handle_event(event: vaxis::Event) {
+  fn mut handle_event(ctx: view::Context, event: vaxis::Event) {
     match event {
-      KeyEvent(key) => self.show(key),
+      KeyEvent(key) => self.show(ctx, key),
       CustomEvent(e) => {
         if e.name == hide_event(self.id) {
           self.message = ""

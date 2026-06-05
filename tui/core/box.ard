@@ -164,8 +164,8 @@ struct Box {
 }
 
 impl view::View for Box {
-  fn init() {}
-  fn handle_event(event: vaxis::Event) {}
+  fn init(ctx: view::Context) {}
+  fn handle_event(ctx: view::Context, event: vaxis::Event) {}
 
   fn render(mut frame: view::Frame) {
     let s = self.style

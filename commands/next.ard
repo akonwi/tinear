@@ -18,6 +18,7 @@ use tinear/vaxis
 
 struct App {
   vx: vaxis::Vaxis,
+  ctx: view::Context,
   config: config::Config,
   screen: view::View,
   key_debug: key_debug_toast::KeyDebugToast,
@@ -26,9 +27,10 @@ struct App {
 fn App::new(vx: vaxis::Vaxis, config: config::Config) App {
   App{
     vx: vx,
+    ctx: view::context(vx),
     screen: view::Empty{},
     config: config,
-    key_debug: key_debug_toast::new(vx),
+    key_debug: key_debug_toast::new(),
   }
 }
 
@@ -36,13 +38,13 @@ impl App {
   fn mut init() {
     match self.config.has_auth() {
       true => {
-        mut screen = tabbed_screen::new(self.vx, self.config.api_key)
-        screen.init()
+        mut screen = tabbed_screen::new(self.config.api_key)
+        screen.init(self.ctx)
         self.screen = screen
       },
       false => {
-        mut w = welcome_screen::new(self.vx)
-        w.init()
+        mut w = welcome_screen::new()
+        w.init(self.ctx)
         self.screen = w
       },
     }
@@ -60,8 +62,8 @@ impl App {
   }
 
   fn mut handle_event(event: vaxis::Event) {
-    self.key_debug.handle_event(event)
-    self.screen.handle_event(event)
+    self.key_debug.handle_event(self.ctx, event)
+    self.screen.handle_event(self.ctx, event)
   }
 }
 

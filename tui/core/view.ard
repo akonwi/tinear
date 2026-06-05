@@ -23,6 +23,31 @@
 use tinear/vaxis
 use tinear/tui/core/rect
 
+// Framework services available to retained views during lifecycle and event
+// handling. Views ask Context for framework effects instead of reaching through
+// to the vaxis module directly.
+struct Context {
+  vx: vaxis::Vaxis,
+}
+
+impl Context {
+  fn redraw() {
+    vaxis::post(self.vx, vaxis::RedrawEvent{})
+  }
+
+  fn post(name: Str) {
+    vaxis::post(self.vx, vaxis::CustomEvent{name: name})
+  }
+
+  fn post_event(event: vaxis::Event) {
+    vaxis::post(self.vx, event)
+  }
+}
+
+fn context(vx: vaxis::Vaxis) Context {
+  Context{vx: vx}
+}
+
 // A Frame is the drawable surface a view renders into. It wraps the
 // underlying vaxis Window plus the Vaxis handle, and tracks the
 // bounding box of cells that have been drawn through it.
@@ -50,9 +75,9 @@ struct Frame {
 // caller reads that box via `frame.dimensions()`. This replaces an intrinsic-
 // size method — what the view actually rendered IS its size.
 trait View {
-  fn init()
+  fn init(ctx: Context)
   fn render(mut frame: Frame)
-  fn handle_event(event: vaxis::Event)
+  fn handle_event(ctx: Context, event: vaxis::Event)
 }
 
 impl Frame {
@@ -225,7 +250,7 @@ fn sub(frame: Frame, area: rect::Rect) Frame {
 struct Empty {}
 
 impl View for Empty {
-  fn init() {}
-  fn handle_event(event: vaxis::Event) {}
+  fn init(ctx: Context) {}
+  fn handle_event(ctx: Context, event: vaxis::Event) {}
   fn render(mut frame: Frame) {}
 }

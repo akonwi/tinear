@@ -10,18 +10,16 @@ use tinear/vaxis
 //
 // Owns authenticated child state: top-level tabs and the inbox screen.
 struct TabbedScreen {
-  vx: vaxis::Vaxis,
   tabs: tab_bar::TabBar,
   inbox: inbox_screen::InboxScreen,
   my_issues: my_issues_screen::MyIssuesScreen,
 }
 
-fn new(vx: vaxis::Vaxis, api_key: Str) TabbedScreen {
+fn new(api_key: Str) TabbedScreen {
   TabbedScreen{
-    vx: vx,
     tabs: tab_bar::new(["Inbox", "My Issues"]),
-    inbox: inbox_screen::new(vx, api_key),
-    my_issues: my_issues_screen::new(vx, api_key),
+    inbox: inbox_screen::new(api_key),
+    my_issues: my_issues_screen::new(api_key),
   }
 }
 
@@ -55,8 +53,8 @@ fn repeat(ch: Str, count: Int) Str {
 struct HorizontalRule {}
 
 impl view::View for HorizontalRule {
-  fn init() {}
-  fn handle_event(event: vaxis::Event) {}
+  fn init(ctx: view::Context) {}
+  fn handle_event(ctx: view::Context, event: vaxis::Event) {}
 
   fn render(mut frame: view::Frame) {
     frame.draw_text(0, 0, repeat("─", frame.width()))
@@ -64,30 +62,30 @@ impl view::View for HorizontalRule {
 }
 
 impl view::View for TabbedScreen {
-  fn mut init() {
-    self.tabs.init()
-    self.inbox.init()
-    self.my_issues.init()
+  fn mut init(ctx: view::Context) {
+    self.tabs.init(ctx)
+    self.inbox.init(ctx)
+    self.my_issues.init(ctx)
   }
 
-  fn mut handle_event(event: vaxis::Event) {
+  fn mut handle_event(ctx: view::Context, event: vaxis::Event) {
     match event {
       KeyEvent(key) => {
         match {
           is_tab_key(key)  => {
             self.tabs.handle_key(key)
-            vaxis::post(self.vx, vaxis::RedrawEvent{})
+            ctx.redraw()
           },
           _ => {
             match self.tabs.selected_label() {
-              "Inbox" => self.inbox.handle_key(key),
-              "My Issues" => self.my_issues.handle_key(key),
+              "Inbox" => self.inbox.handle_key(ctx, key),
+              "My Issues" => self.my_issues.handle_key(ctx, key),
               _ => (),
             }
           },
         }
       },
-      CustomEvent(_) => self.inbox.handle_event(event),
+      CustomEvent(_) => self.inbox.handle_event(ctx, event),
       _ => (),
     }
   }

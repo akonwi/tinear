@@ -30,8 +30,8 @@ struct VStack {
 }
 
 impl view::View for VStack {
-  fn init() {}
-  fn handle_event(event: vaxis::Event) {}
+  fn init(ctx: view::Context) {}
+  fn handle_event(ctx: view::Context, event: vaxis::Event) {}
 
   fn render(mut frame: view::Frame) {
     let avail_w = frame.width()
@@ -62,8 +62,8 @@ struct HStack {
 }
 
 impl view::View for HStack {
-  fn init() {}
-  fn handle_event(event: vaxis::Event) {}
+  fn init(ctx: view::Context) {}
+  fn handle_event(ctx: view::Context, event: vaxis::Event) {}
 
   fn render(mut frame: view::Frame) {
     let avail_w = frame.width()
@@ -117,8 +117,8 @@ struct Spacer {
 }
 
 impl view::View for Spacer {
-  fn init() {}
-  fn handle_event(event: vaxis::Event) {}
+  fn init(ctx: view::Context) {}
+  fn handle_event(ctx: view::Context, event: vaxis::Event) {}
 
   fn render(mut frame: view::Frame) {
     // No drawing — just register the reserved region with the
@@ -437,8 +437,8 @@ struct VSplit {
 }
 
 impl view::View for VSplit {
-  fn init() {}
-  fn handle_event(event: vaxis::Event) {}
+  fn init(ctx: view::Context) {}
+  fn handle_event(ctx: view::Context, event: vaxis::Event) {}
 
   fn render(mut frame: view::Frame) {
     let avail_w = frame.width()
@@ -474,8 +474,8 @@ struct HSplit {
 }
 
 impl view::View for HSplit {
-  fn init() {}
-  fn handle_event(event: vaxis::Event) {}
+  fn init(ctx: view::Context) {}
+  fn handle_event(ctx: view::Context, event: vaxis::Event) {}
 
   fn render(mut frame: view::Frame) {
     let avail_w = frame.width()
