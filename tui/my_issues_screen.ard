@@ -1,9 +1,9 @@
-use ard/decode
 use ard/maybe
 
 use tinear/models/issues
+use tinear/tui/core/rect
 use tinear/tui/core/view
-use tinear/tui/state
+use tinear/tui/issue_card
 use tinear/tui/text
 use tinear/vaxis
 
@@ -81,76 +81,6 @@ fn repeat(ch: Str, count: Int) Str {
     }
   }
   out
-}
-
-fn draw_board_card(
-  mut frame: view::Frame,
-  issue: Dynamic,
-  x: Int,
-  y: Int,
-  col_w: Int,
-  is_selected: Bool,
-  is_last: Bool,
-) Int {
-  let identifier = decode::run(issue, decode::field("identifier", decode::string))
-    .expect("Missing identifier")
-  let title = decode::run(issue, decode::field("title", decode::string))
-    .expect("Missing title")
-  let priority = decode::run(issue, decode::field("priority", decode::nullable(decode::int)))
-    .expect("Missing priority")
-
-  let cursor = match is_selected {
-    true => "▸",
-    false => " ",
-  }
-  let glyph = state::priority_glyph(priority)
-  let title_indent = 3
-  let title_w = col_w - title_indent
-  let wrapped = text::wrap_title(title, title_w)
-  let has_line2 = not wrapped.line2.is_empty()
-  let card_h = match has_line2 {
-    true => 3,
-    false => 2,
-  }
-
-  // For the selected card, paint the whole card rectangle first. Then draw
-  // text on top with the same reverse style. This highlights the card box,
-  // not just the cells occupied by glyphs.
-  if is_selected {
-    for row in 0..(card_h - 1) {
-      frame.draw_styled(x, y + row, repeat(" ", col_w), -1, -1, false, false, false, false, true)
-    }
-  }
-
-  let header = "{cursor}{glyph} {identifier}"
-  frame.draw_styled(
-    x, y,
-    text::truncate_with_ellipsis(header, col_w),
-    -1, -1, false, false, false, false, is_selected,
-  )
-
-  frame.draw_styled(
-    x + title_indent, y + 1,
-    text::truncate_with_ellipsis(wrapped.line1, title_w),
-    -1, -1, false, false, false, false, is_selected,
-  )
-
-  if has_line2 {
-    frame.draw_styled(
-      x + title_indent, y + 2,
-      text::truncate_with_ellipsis(wrapped.line2, title_w),
-      -1, -1, false, false, false, false, is_selected,
-    )
-  }
-
-  let divider_y = y + card_h
-
-  mut next_y = divider_y
-  if not is_last {
-    frame.draw_text(x, divider_y, repeat("━", col_w - 1))
-    next_y = divider_y + 2
-  }
-  next_y
 }
 
 impl MyIssuesScreen {
@@ -312,7 +242,11 @@ impl view::View for MyIssuesScreen {
                       if card_y + 1 < frame.height() {
                         let is_last = card_idx == last_idx
                         let is_selected = col_idx == self.col and card_idx == self.row
-                        card_y = draw_board_card(frame, issue, x, card_y, col_w, is_selected, is_last)
+                        let area = rect::Rect{x: x, y: card_y, w: col_w, h: frame.height() - card_y}
+                        mut card_frame = view::sub(frame, area)
+                        issue_card::new(issue, is_selected, is_last).render(card_frame)
+                        let drawn = card_frame.dimensions()
+                        card_y = card_y + drawn.y + drawn.h
                       }
                     }
 
