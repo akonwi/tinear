@@ -13,13 +13,13 @@ struct Item {
   title: Str,
 }
 
-struct Store {
+struct InboxStore {
   api_key: Str,
   items: [Item]
 }
 
-fn new(api_key: Str) Store {
-  Store{api_key: api_key, items: List::new<Item>()}
+fn new(api_key: Str) InboxStore {
+  InboxStore{api_key: api_key, items: List::new<Item>()}
 }
 
 fn format_type(n_type: Str) Str {
@@ -122,7 +122,7 @@ impl Item {
   }
 }
 
-impl Store {
+impl InboxStore {
   fn mut load() Void!Str {
     let nodes = try api::fetch_inbox(self.api_key)
     mut items: [Item] = []

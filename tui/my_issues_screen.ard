@@ -19,7 +19,7 @@ use tinear/vaxis
 // the original board view, adapted to draw through core::Frame instead of
 // directly through the root vaxis window.
 struct MyIssuesScreen {
-  store: issues::Store,
+  store: issues::IssuesStore,
   col: Int,
   row: Int,
   scroll: Int,
@@ -42,10 +42,10 @@ fn new(api_key: Str) MyIssuesScreen {
   }
 }
 
-fn refresh_event() Str { "my_issues.refresh" }
+let refresh_event = "my_issues.refresh"
 
 fn register_refresh_timer(ctx: view::Context) {
-  let event = refresh_event()
+  let event = refresh_event
   async::start(fn() {
     while {
       async::sleep(duration::from_minutes(5))
@@ -374,7 +374,7 @@ impl view::View for MyIssuesScreen {
     match event {
       KeyEvent(key) => self.handle_key(ctx, key),
       CustomEvent(e) => {
-        if e.name == refresh_event() {
+        if e.name == refresh_event {
           self.refresh(ctx)
         }
       },

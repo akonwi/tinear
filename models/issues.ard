@@ -7,16 +7,16 @@ use tinear/tui/state
 //
 // The screen owns UI state (cursor/scroll/loading/error). The store owns the
 // loaded issue columns and knows how to fetch them from Linear.
-struct Store {
+struct IssuesStore {
   api_key: Str,
   columns: [state::BoardColumn],
 }
 
-fn new(api_key: Str) Store {
-  Store{api_key: api_key, columns: []}
+fn new(api_key: Str) IssuesStore {
+  IssuesStore{api_key: api_key, columns: []}
 }
 
-impl Store {
+impl IssuesStore {
   fn mut load() Void!Str {
     let viewer = try api::fetch_viewer(self.api_key)
     let viewer_id = decode::run(viewer, decode::field("id", decode::string))

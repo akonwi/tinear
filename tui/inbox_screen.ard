@@ -14,7 +14,7 @@ use tinear/vaxis
 // the body for the Inbox tab.
 struct InboxScreen {
   api_key: Str,
-  store: inbox::Store,
+  store: inbox::InboxStore,
   cursor: Int,
   loading: Bool,
   error: Str?,
@@ -30,10 +30,10 @@ fn new(api_key: Str) InboxScreen {
   }
 }
 
-fn refresh_event() Str { "inbox.refresh" }
+let refresh_event = "inbox.refresh"
 
 fn register_refresh_timer(ctx: view::Context) {
-  let event = refresh_event()
+  let event = refresh_event
   async::start(fn() {
     while {
       async::sleep(duration::from_minutes(5))
@@ -107,7 +107,7 @@ impl view::View for InboxScreen {
     match event {
       KeyEvent(key) => self.handle_key(ctx, key),
       CustomEvent(e) => {
-        if e.name == refresh_event() {
+        if e.name == refresh_event {
           self.refresh(ctx)
         }
       },
