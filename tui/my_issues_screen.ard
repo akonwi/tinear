@@ -2,6 +2,7 @@ use ard/async
 use ard/decode
 use ard/duration
 use ard/maybe
+use ard/testing
 
 use tinear/models/issues
 use tinear/tui/api
@@ -101,6 +102,55 @@ fn repeat(ch: Str, count: Int) Str {
     }
   }
   out
+}
+
+fn visible_scroll(scroll: Int, selected: Int, visible_count: Int, col_count: Int) Int {
+  let safe_visible = match visible_count < 1 {
+    true => 1,
+    false => visible_count,
+  }
+  let max_scroll = match col_count > safe_visible {
+    true => col_count - safe_visible,
+    false => 0,
+  }
+  let clamped = match scroll > max_scroll {
+    true => max_scroll,
+    false => match scroll < 0 {
+      true => 0,
+      false => scroll,
+    },
+  }
+
+  let with_selected = match selected < clamped {
+    true => selected,
+    false => match selected >= clamped + safe_visible {
+      true => selected - safe_visible + 1,
+      false => clamped,
+    },
+  }
+
+  match with_selected > max_scroll {
+    true => max_scroll,
+    false => match with_selected < 0 {
+      true => 0,
+      false => with_selected,
+    },
+  }
+}
+
+test fn test_visible_scroll_keeps_initial_columns_still() Void!Str {
+  testing::assert(visible_scroll(0, 0, 3, 6) == 0, "selected first column should not scroll")
+  testing::assert(visible_scroll(0, 2, 3, 6) == 0, "selected last visible column should not scroll")
+}
+
+test fn test_visible_scroll_moves_right_when_selected_overflows() Void!Str {
+  testing::assert(visible_scroll(0, 3, 3, 6) == 1, "selected one past right edge should scroll right")
+  testing::assert(visible_scroll(0, 5, 3, 6) == 3, "selected final column should clamp at max scroll")
+}
+
+test fn test_visible_scroll_moves_left_when_selected_before_scroll() Void!Str {
+  testing::assert(visible_scroll(3, 2, 3, 6) == 2, "selected before left edge should scroll left")
+  testing::assert(visible_scroll(3, 0, 3, 6) == 0, "selected first column should scroll to start")
 }
 
 impl MyIssuesScreen {
@@ -397,17 +447,7 @@ impl view::View for MyIssuesScreen {
                 let gap = board_column_gap()
                 let visible_count = board_visible_count(frame.width(), col_count)
 
-                let max_scroll = match col_count > visible_count {
-                  true => col_count - visible_count,
-                  false => 0,
-                }
-                let scroll = match self.scroll > max_scroll {
-                  true => max_scroll,
-                  false => match self.scroll < 0 {
-                    true => 0,
-                    false => self.scroll,
-                  },
-                }
+                let scroll = visible_scroll(self.scroll, self.col, visible_count, col_count)
                 let end_excl = match scroll + visible_count > col_count {
                   true => col_count,
                   false => scroll + visible_count,
