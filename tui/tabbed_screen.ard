@@ -1,6 +1,3 @@
-use ard/testing
-
-use tinear/tui/core/rect
 use tinear/tui/core/stack
 use tinear/tui/core/text
 use tinear/tui/core/view
@@ -121,29 +118,4 @@ impl view::View for TabbedScreen {
       ],
     ).render(frame)
   }
-}
-
-private extern fn test_vaxis() vaxis::Vaxis = "TestVaxisNil"
-private extern fn test_window() vaxis::Window = "TestWindowZero"
-private extern fn reset_render_marks() Void = "TestResetRenderMarks"
-private extern fn was_rendered(id: Int) Bool = "TestWasRendered"
-
-fn test_frame(ctx: view::Context) view::Frame {
-  view::Frame{vx: ctx.vx, window: test_window(), tree: ctx.tree, node_id: ctx.node_id, extent: rect::Rect{x: 0, y: 0, w: 0, h: 0}}
-}
-
-test fn test_registered_tab_field_mutation_is_visible_to_render_delegation() Void!Str {
-  reset_render_marks()
-  let vx = test_vaxis()
-  let ctx = view::context(vx)
-  mut frame = test_frame(ctx)
-  mut screen = new("test-api-key")
-
-  ctx.add_child(screen.tabs)
-  screen.tabs.next()
-  screen.sync_active_child()
-  frame.render_child(0)
-
-  try testing::assert(was_rendered(1001), "tree-owned tab bar should render mutated tab field")
-  testing::assert(not was_rendered(1000), "tree-owned tab bar should not render stale tab field")
 }

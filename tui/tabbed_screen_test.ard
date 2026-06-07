@@ -1,0 +1,70 @@
+use ard/testing
+
+use tinear/tui/core/rect
+use tinear/tui/core/text
+use tinear/tui/core/view
+use tinear/tui/tabbed_screen
+use tinear/vaxis
+
+private extern fn test_vaxis() vaxis::Vaxis = "TestVaxisNil"
+private extern fn test_window(width: Int, height: Int) vaxis::Window = "TestWindow"
+private extern fn test_line(y: Int) Str = "TestLine"
+private extern fn reset_render_marks() Void = "TestResetRenderMarks"
+private extern fn was_rendered(id: Int) Bool = "TestWasRendered"
+
+fn test_frame(ctx: view::Context, width: Int, height: Int) view::Frame {
+  view::Frame{vx: ctx.vx, window: test_window(width, height), tree: ctx.tree, node_id: ctx.node_id, extent: rect::Rect{x: 0, y: 0, w: 0, h: 0}}
+}
+
+fn screen_context_with_children(mut screen: tabbed_screen::TabbedScreen) view::Context {
+  let vx = test_vaxis()
+  let ctx = view::context(vx)
+  ctx.add_child(screen.tabs)
+  mut inbox = text::new("Inbox body")
+  mut my_issues = text::new("My Issues body")
+  ctx.add_child(inbox)
+  ctx.add_child(my_issues)
+  ctx
+}
+
+test fn test_registered_tab_field_mutation_is_visible_to_render_delegation() Void!Str {
+  reset_render_marks()
+  let vx = test_vaxis()
+  let ctx = view::context(vx)
+  mut frame = test_frame(ctx, 0, 0)
+  mut screen = tabbed_screen::new("test-api-key")
+
+  ctx.add_child(screen.tabs)
+  screen.tabs.next()
+  screen.sync_active_child()
+  frame.render_child(0)
+
+  try testing::assert(was_rendered(1001), "tree-owned tab bar should render mutated tab field")
+  testing::assert(not was_rendered(1000), "tree-owned tab bar should not render stale tab field")
+}
+
+test fn test_tabbed_screen_renders_tabs_separator_body_and_inbox_hints() Void!Str {
+  mut screen = tabbed_screen::new("test-api-key")
+  let ctx = screen_context_with_children(screen)
+  mut frame = test_frame(ctx, 40, 6)
+
+  screen.render(frame)
+
+  try testing::assert(test_line(0).starts_with(" Inbox │ My Issues "), "expected tab bar, got '{test_line(0)}'")
+  try testing::assert(test_line(1) == "────────────────────────────────────────", "expected separator, got '{test_line(1)}'")
+  try testing::assert(test_line(2).starts_with("Inbox body"), "expected inbox body child, got '{test_line(2)}'")
+  testing::assert(test_line(5).starts_with("↑↓ select  r refresh  ↵ open"), "expected inbox key hints, got '{test_line(5)}'")
+}
+
+test fn test_tabbed_screen_renders_my_issues_body_and_hints_after_tab_change() Void!Str {
+  mut screen = tabbed_screen::new("test-api-key")
+  screen.tabs.select(1)
+  screen.sync_active_child()
+  let ctx = screen_context_with_children(screen)
+  mut frame = test_frame(ctx, 50, 6)
+
+  screen.render(frame)
+
+  try testing::assert(test_line(2).starts_with("My Issues body"), "expected my issues body child, got '{test_line(2)}'")
+  testing::assert(test_line(5).starts_with("↑↓←→ select  s status  y cycle  r refresh"), "expected my issues key hints, got '{test_line(5)}'")
+}

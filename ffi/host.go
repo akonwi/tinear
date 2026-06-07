@@ -32,8 +32,69 @@ func TestVaxisNil() *vaxis.Vaxis {
 
 var testRenderMarks = map[int]bool{}
 
+type testCell struct {
+	Grapheme  string
+	Fg        int
+	Bg        int
+	Bold      bool
+	Dim       bool
+	Italic    bool
+	Underline bool
+	Reverse   bool
+}
+
+var testScreenWidth int
+var testScreenHeight int
+var testScreenCells []testCell
+
 func TestWindowZero() vaxis.Window {
 	return vaxis.Window{}
+}
+
+func TestResetScreen(width, height int) {
+	if width < 0 {
+		width = 0
+	}
+	if height < 0 {
+		height = 0
+	}
+	testScreenWidth = width
+	testScreenHeight = height
+	testScreenCells = make([]testCell, width*height)
+}
+
+func TestWindow(width, height int) vaxis.Window {
+	TestResetScreen(width, height)
+	return vaxis.Window{Width: width, Height: height}
+}
+
+func TestCellGrapheme(x, y int) string {
+	if x < 0 || y < 0 || x >= testScreenWidth || y >= testScreenHeight {
+		return ""
+	}
+	return testScreenCells[y*testScreenWidth+x].Grapheme
+}
+
+func TestCellReverse(x, y int) bool {
+	if x < 0 || y < 0 || x >= testScreenWidth || y >= testScreenHeight {
+		return false
+	}
+	return testScreenCells[y*testScreenWidth+x].Reverse
+}
+
+func TestLine(y int) string {
+	if y < 0 || y >= testScreenHeight {
+		return ""
+	}
+	var b strings.Builder
+	for x := 0; x < testScreenWidth; x++ {
+		g := TestCellGrapheme(x, y)
+		if g == "" {
+			g = " "
+		}
+		b.WriteString(g)
+	}
+	return b.String()
 }
 
 func TestResetRenderMarks() {
@@ -273,12 +334,20 @@ func WindowOriginRow(win vaxis.Window) int {
 }
 
 func WindowClear(win vaxis.Window) {
+	if win.Vx == nil {
+		writeTestFill(win, testCell{Grapheme: " "})
+		return
+	}
 	win.Clear()
 }
 
 func WindowDrawText(win vaxis.Window, x int, y int, text string) {
 	width, height := win.Size()
 	if x < 0 || y < 0 || x >= width || y >= height {
+		return
+	}
+	if win.Vx == nil {
+		writeTestText(win, x, y, text, testCell{})
 		return
 	}
 	win.New(x, y, width-x, 1).Print(vaxis.Segment{Text: text})
@@ -289,6 +358,10 @@ func WindowDrawTextStyle(win vaxis.Window, x int, y int, text string, fg int, bg
 	if x < 0 || y < 0 || x >= width || y >= height {
 		return
 	}
+	if win.Vx == nil {
+		writeTestText(win, x, y, text, testCell{Fg: fg, Bg: bg, Bold: bold, Dim: dim, Italic: italic, Underline: underline, Reverse: reverse})
+		return
+	}
 	win.New(x, y, width-x, 1).Print(vaxis.Segment{Text: text, Style: makeStyle(fg, bg, bold, dim, italic, underline, reverse)})
 }
 
@@ -297,10 +370,17 @@ func WindowFill(win vaxis.Window, text string, fg int, bg int, bold bool, dim bo
 	if text != "" {
 		ch = firstCharacter(text)
 	}
+	if win.Vx == nil {
+		writeTestFill(win, testCell{Grapheme: ch, Fg: fg, Bg: bg, Bold: bold, Dim: dim, Italic: italic, Underline: underline, Reverse: reverse})
+		return
+	}
 	win.Fill(vaxis.Cell{Character: vaxis.Character{Grapheme: ch, Width: 1}, Style: makeStyle(fg, bg, bold, dim, italic, underline, reverse)})
 }
 
 func WindowShowCursor(win vaxis.Window, x int, y int) {
+	if win.Vx == nil {
+		return
+	}
 	win.ShowCursor(x, y, vaxis.CursorBlock)
 }
 
@@ -339,6 +419,58 @@ func makeStyle(fg int, bg int, bold bool, dim bool, italic bool, underline bool,
 		style.UnderlineStyle = vaxis.UnderlineSingle
 	}
 	return style
+}
+
+func testWindowOrigin(win vaxis.Window) (int, int) {
+	col := 0
+	row := 0
+	w := win
+	for {
+		col += w.Column
+		row += w.Row
+		if w.Parent == nil {
+			return col, row
+		}
+		w = *w.Parent
+	}
+}
+
+func writeTestCell(win vaxis.Window, x, y int, cell testCell) {
+	width, height := win.Size()
+	if x < 0 || y < 0 || x >= width || y >= height {
+		return
+	}
+	absX, absY := testWindowOrigin(win)
+	absX += x
+	absY += y
+	if absX < 0 || absY < 0 || absX >= testScreenWidth || absY >= testScreenHeight {
+		return
+	}
+	testScreenCells[absY*testScreenWidth+absX] = cell
+}
+
+func writeTestText(win vaxis.Window, x, y int, text string, style testCell) {
+	col := x
+	for _, r := range text {
+		if r == '\n' {
+			col = x
+			y++
+			continue
+		}
+		cell := style
+		cell.Grapheme = string(r)
+		writeTestCell(win, col, y, cell)
+		col++
+	}
+}
+
+func writeTestFill(win vaxis.Window, cell testCell) {
+	width, height := win.Size()
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			writeTestCell(win, x, y, cell)
+		}
+	}
 }
 
 func colorFromInt(value int) vaxis.Color {

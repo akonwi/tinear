@@ -1,0 +1,71 @@
+use ard/decode
+use ard/testing
+
+use tinear/tui/core/rect
+use tinear/tui/core/view
+use tinear/tui/picker_modal
+use tinear/tui/state
+use tinear/vaxis
+
+private extern fn test_vaxis() vaxis::Vaxis = "TestVaxisNil"
+private extern fn test_window(width: Int, height: Int) vaxis::Window = "TestWindow"
+private extern fn test_line(y: Int) Str = "TestLine"
+
+fn test_frame(width: Int, height: Int) view::Frame {
+  let vx = test_vaxis()
+  let ctx = view::context(vx)
+  view::Frame{vx: vx, window: test_window(width, height), tree: ctx.tree, node_id: ctx.node_id, extent: rect::Rect{x: 0, y: 0, w: 0, h: 0}}
+}
+
+fn state_obj(id: Str, name: Str) Dynamic {
+  decode::from_json("\{\"id\":\"{id}\",\"name\":\"{name}\"\}").expect("parse test state")
+}
+
+fn cycle_obj(id: Str, number: Int, name: Str) Dynamic {
+  decode::from_json(
+    "\{\"id\":\"{id}\",\"number\":{number.to_str()},\"name\":\"{name}\",\"startsAt\":null\}",
+  ).expect("parse test cycle")
+}
+
+test fn test_state_picker_renders_centered_modal_chrome() Void!Str {
+  mut frame = test_frame(60, 12)
+  let picker = state::StatePicker{
+    issue_id: "issue-1",
+    issue_identifier: "AKO-123",
+    current_state_id: "todo",
+    team_name: "Agents",
+    states: [state_obj("todo", "Todo"), state_obj("done", "Done")],
+    cursor: 1,
+    from_board: true,
+    tab_idx: 0,
+  }
+
+  picker_modal::state_picker(picker).render(frame)
+
+  try testing::assert(test_line(2).starts_with("     ┌"), "modal should be horizontally centered, got '{test_line(2)}'")
+  try testing::assert(test_line(3).contains("Status — AKO-123 (Agents)"), "header should include issue/team, got '{test_line(3)}'")
+  try testing::assert(test_line(5).contains("Todo  (current)"), "current state row should be marked, got '{test_line(5)}'")
+  try testing::assert(test_line(6).contains("▸ Done"), "cursor row should be marked, got '{test_line(6)}'")
+  testing::assert(test_line(8).contains("↵ confirm"), "footer should include confirm hint, got '{test_line(8)}'")
+}
+
+test fn test_cycle_picker_renders_no_cycle_and_cycle_rows() Void!Str {
+  mut frame = test_frame(60, 12)
+  let picker = state::CyclePicker{
+    issue_id: "issue-1",
+    issue_identifier: "AKO-123",
+    current_cycle_id: "",
+    team_name: "Agents",
+    cycles: [cycle_obj("cycle-1", 12, "Sprint 12")],
+    cursor: 0,
+    from_board: true,
+    tab_idx: 0,
+  }
+
+  picker_modal::cycle_picker(picker).render(frame)
+
+  try testing::assert(test_line(2).starts_with("  ┌"), "cycle modal should be centered, got '{test_line(2)}'")
+  try testing::assert(test_line(3).contains("Cycle — AKO-123 (Agents)"), "header should include issue/team, got '{test_line(3)}'")
+  try testing::assert(test_line(5).contains("▸ (no cycle)  (current)"), "no-cycle row should be selected/current, got '{test_line(5)}'")
+  testing::assert(test_line(6).contains("Sprint 12"), "cycle row should render cycle name, got '{test_line(6)}'")
+}
