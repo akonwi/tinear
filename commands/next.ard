@@ -18,34 +18,31 @@ use tinear/vaxis
 
 struct App {
   vx: vaxis::Vaxis,
-  ctx: view::Context,
   config: config::Config,
-  screen: view::View,
+  screen: mut view::View,
   key_debug: key_debug_toast::KeyDebugToast,
 }
 
 fn App::new(vx: vaxis::Vaxis, config: config::Config) App {
+  mut screen: view::View = view::Empty{}
   App{
     vx: vx,
-    ctx: view::context(vx),
-    screen: view::Empty{},
+    screen: screen,
     config: config,
     key_debug: key_debug_toast::new(),
   }
 }
 
 impl App {
-  fn mut init() {
+  fn mut init(ctx: view::Context) {
     match self.config.has_auth() {
       true => {
-        mut screen = tabbed_screen::new(self.config.api_key)
-        screen.init(self.ctx)
-        self.screen = screen
+        self.screen = tabbed_screen::new(self.config.api_key)
+        ctx.add_child(self.screen)
       },
       false => {
-        mut w = welcome_screen::new()
-        w.init(self.ctx)
-        self.screen = w
+        self.screen = welcome_screen::new()
+        ctx.add_child(self.screen)
       },
     }
   }
@@ -61,9 +58,9 @@ impl App {
     self.key_debug.render(frame)
   }
 
-  fn mut handle_event(event: vaxis::Event) {
-    self.key_debug.handle_event(self.ctx, event)
-    self.screen.handle_event(self.ctx, event)
+  fn mut handle_event(ctx: view::Context, event: vaxis::Event) {
+    self.key_debug.handle_event(ctx, event)
+    self.screen.handle_event(ctx, event)
   }
 }
 
@@ -72,7 +69,8 @@ fn run() {
   let vx = vaxis::new("tinear next").expect("vaxis::new")
 
   mut app = App::new(vx, config)
-  app.init()
+  let ctx = view::context(vx)
+  app.init(ctx)
   mut running = true
 
   while running {
@@ -87,7 +85,7 @@ fn run() {
         if key.ctrl and key.name == "c" {
           running = false
         } else {
-          app.handle_event(event)
+          app.handle_event(ctx, event)
         }
       },
       RedrawEvent => {
@@ -97,13 +95,13 @@ fn run() {
             let had_auth = app.config.has_auth()
             app.config = cfg
             if not had_auth and app.config.has_auth() {
-              app.init()
+              app.init(ctx)
             }
           },
           err(_) => (),
         }
       },
-      _ => app.handle_event(event),
+      _ => app.handle_event(ctx, event),
     }
   }
 

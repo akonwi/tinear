@@ -10,16 +10,19 @@ use tinear/vaxis
 //
 // Owns authenticated child state: top-level tabs and the inbox screen.
 struct TabbedScreen {
-  tabs: tab_bar::TabBar,
-  inbox: inbox_screen::InboxScreen,
-  my_issues: my_issues_screen::MyIssuesScreen,
+  tabs: mut tab_bar::TabBar,
+  inbox: mut inbox_screen::InboxScreen,
+  my_issues: mut my_issues_screen::MyIssuesScreen,
 }
 
 fn new(api_key: Str) TabbedScreen {
+  mut tabs = tab_bar::new(["Inbox", "My Issues"])
+  mut inbox = inbox_screen::new(api_key)
+  mut my_issues = my_issues_screen::new(api_key)
   TabbedScreen{
-    tabs: tab_bar::new(["Inbox", "My Issues"]),
-    inbox: inbox_screen::new(api_key),
-    my_issues: my_issues_screen::new(api_key),
+    tabs: tabs,
+    inbox: inbox,
+    my_issues: my_issues,
   }
 }
 
@@ -63,9 +66,9 @@ impl view::View for HorizontalRule {
 
 impl view::View for TabbedScreen {
   fn mut init(ctx: view::Context) {
-    self.tabs.init(ctx)
-    self.inbox.init(ctx)
-    self.my_issues.init(ctx)
+    ctx.add_child(self.tabs)
+    ctx.add_child(self.inbox)
+    ctx.add_child(self.my_issues)
   }
 
   fn mut handle_event(ctx: view::Context, event: vaxis::Event) {

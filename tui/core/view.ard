@@ -25,9 +25,21 @@ use tinear/tui/core/rect
 
 // Framework services available to retained views during lifecycle and event
 // handling. Views ask Context for framework effects instead of reaching through
-// to the vaxis module directly.
+// to the vaxis module directly. The context is scoped to the currently mounted
+// node, so child registration attaches under `node_id` in `tree`.
 struct Context {
   vx: vaxis::Vaxis,
+  tree: mut ViewTree,
+  node_id: Int,
+}
+
+struct ViewTree {
+  nodes: [TreeNode],
+}
+
+struct TreeNode {
+  view: View,
+  children: [Int],
 }
 
 impl Context {
@@ -43,10 +55,6 @@ impl Context {
     vaxis::post(self.vx, event)
   }
 
-}
-
-fn context(vx: vaxis::Vaxis) Context {
-  Context{vx: vx}
 }
 
 // A Frame is the drawable surface a view renders into. It wraps the
@@ -79,6 +87,38 @@ trait View {
   fn init(ctx: Context)
   fn render(mut frame: Frame)
   fn handle_event(ctx: Context, event: vaxis::Event)
+}
+
+impl Context {
+  // Register `child` as a child of the view currently represented by this
+  // context. The tree owns the node relationship and initializes the child with
+  // a child-scoped context.
+  fn add_child(mut child: View) {
+    let child_id = self.tree.nodes.size()
+
+    mut nodes = self.tree.nodes
+    nodes.push(TreeNode{view: child, children: []})
+
+    mut parent = nodes.at(self.node_id)
+    mut children = parent.children
+    children.push(child_id)
+    parent.children = children
+    nodes.set(self.node_id, parent)
+    self.tree.nodes = nodes
+
+    let child_ctx = Context{vx: self.vx, tree: self.tree, node_id: child_id}
+    child.init(child_ctx)
+
+    mut updated = self.tree.nodes
+    mut child_node = updated.at(child_id)
+    child_node.view = child
+    updated.set(child_id, child_node)
+    self.tree.nodes = updated
+  }
+
+  fn child_count() Int {
+    self.tree.nodes.at(self.node_id).children.size()
+  }
 }
 
 impl Frame {
@@ -254,4 +294,12 @@ impl View for Empty {
   fn init(ctx: Context) {}
   fn handle_event(ctx: Context, event: vaxis::Event) {}
   fn render(mut frame: Frame) {}
+}
+
+fn context(vx: vaxis::Vaxis) Context {
+  mut tree = ViewTree{nodes: []}
+  mut nodes = tree.nodes
+  nodes.push(TreeNode{view: Empty{}, children: []})
+  tree.nodes = nodes
+  Context{vx: vx, tree: tree, node_id: 0}
 }
