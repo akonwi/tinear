@@ -26,6 +26,10 @@ func OpenURL(url string) error {
 	return cmd.Start()
 }
 
+func TestVaxisNil() *vaxis.Vaxis {
+	return nil
+}
+
 func New(title string) (*vaxis.Vaxis, error) {
 	vx, err := vaxis.New(vaxis.Options{DisableKittyKeyboard: true})
 	if err != nil {

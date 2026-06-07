@@ -1,0 +1,76 @@
+use ard/testing
+
+use tinear/tui/core/view
+use tinear/vaxis
+
+private extern fn test_vaxis() vaxis::Vaxis = "TestVaxisNil"
+
+struct InitChild {
+  initialized: Bool,
+}
+
+impl view::View for InitChild {
+  fn mut init(ctx: view::Context) {
+    self.initialized = true
+  }
+
+  fn render(mut frame: view::Frame) {}
+  fn handle_event(ctx: view::Context, event: vaxis::Event) {}
+}
+
+struct ChildWithGrandchild {
+  grandchild: mut InitChild,
+}
+
+fn child_with_grandchild() ChildWithGrandchild {
+  mut grandchild = InitChild{initialized: false}
+  ChildWithGrandchild{grandchild: grandchild}
+}
+
+impl view::View for ChildWithGrandchild {
+  fn mut init(ctx: view::Context) {
+    ctx.add_child(self.grandchild)
+  }
+
+  fn render(mut frame: view::Frame) {}
+  fn handle_event(ctx: view::Context, event: vaxis::Event) {}
+}
+
+struct ParentWithChild {
+  child: mut InitChild,
+}
+
+fn parent_with_child() ParentWithChild {
+  mut child = InitChild{initialized: false}
+  ParentWithChild{child: child}
+}
+
+impl ParentWithChild {
+  fn init_child(ctx: view::Context) {
+    ctx.add_child(self.child)
+  }
+}
+
+test fn test_context_add_child_initializes_retained_child_field() Void!Str {
+  let vx = test_vaxis()
+  let ctx = view::context(vx)
+  let parent = parent_with_child()
+
+  parent.init_child(ctx)
+
+  try testing::assert(ctx.child_count() == 1, "root should have one registered child")
+  testing::assert(parent.child.initialized, "add_child should initialize the retained child field")
+}
+
+test fn test_context_add_child_scopes_nested_children_to_child_node() Void!Str {
+  let vx = test_vaxis()
+  let ctx = view::context(vx)
+  mut child = child_with_grandchild()
+
+  ctx.add_child(child)
+
+  let child_ctx = view::Context{vx: vx, tree: ctx.tree, node_id: 1}
+  try testing::assert(ctx.child_count() == 1, "root should have one direct child")
+  try testing::assert(child_ctx.child_count() == 1, "registered child should own its nested child")
+  testing::assert(child.grandchild.initialized, "nested add_child should initialize retained grandchild field")
+}
