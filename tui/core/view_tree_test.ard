@@ -84,6 +84,17 @@ test fn test_context_add_child_scopes_nested_children_to_child_node() Void!Str {
   testing::assert(child.grandchild.initialized, "nested add_child should initialize retained grandchild field")
 }
 
+test fn test_context_add_overlay_initializes_retained_overlay_field() Void!Str {
+  let vx = test_vaxis()
+  let ctx = view::context(vx)
+  let parent = parent_with_child()
+
+  ctx.add_overlay(parent.child)
+
+  try testing::assert(ctx.overlay_count() == 1, "root should have one registered overlay")
+  testing::assert(parent.child.initialized, "add_overlay should initialize the retained overlay field")
+}
+
 struct DispatchChild {
   stop: Bool,
   mutate_event: Bool,
@@ -155,6 +166,22 @@ test fn test_context_dispatch_event_stops_after_child_stops() Void!Str {
   let second_ctx = view::Context{vx: vx, tree: ctx.tree, node_id: 2}
   try testing::assert(first_ctx.child_count() == 1, "stopping child should receive dispatched event")
   testing::assert(second_ctx.child_count() == 0, "sibling after stopping child should not receive dispatched event")
+}
+
+test fn test_context_dispatch_event_visits_overlays_before_children() Void!Str {
+  let vx = test_vaxis()
+  let ctx = view::context(vx)
+  mut overlay = dispatch_child(true, false, true)
+  mut child = dispatch_child(false, false, true)
+
+  ctx.add_overlay(overlay)
+  ctx.add_child(child)
+  ctx.dispatch_event(vaxis::CustomEvent{name: "original"})
+
+  let overlay_ctx = view::Context{vx: vx, tree: ctx.tree, node_id: 1}
+  let child_ctx = view::Context{vx: vx, tree: ctx.tree, node_id: 2}
+  try testing::assert(overlay_ctx.child_count() == 1, "overlay should receive dispatched event first")
+  testing::assert(child_ctx.child_count() == 0, "stopped overlay should prevent child dispatch")
 }
 
 test fn test_context_dispatch_event_uses_fresh_event_for_each_receiver() Void!Str {
@@ -229,6 +256,21 @@ test fn test_context_render_children_renders_each_registered_child() Void!Str {
   let second_ctx = view::Context{vx: vx, tree: ctx.tree, node_id: 2}
   try testing::assert(first_ctx.child_count() == 1, "render_children should render the first child")
   testing::assert(second_ctx.child_count() == 1, "render_children should render the second child")
+}
+
+test fn test_context_render_overlays_renders_registered_overlays() Void!Str {
+  reset_render_marks()
+  let vx = test_vaxis()
+  let ctx = view::context(vx)
+  mut frame = test_frame(ctx)
+  mut overlay = render_then_dispatch_child(7)
+
+  ctx.add_overlay(overlay)
+  frame.render_overlays()
+  ctx.dispatch_event(vaxis::CustomEvent{name: "after-render"})
+
+  let overlay_ctx = view::Context{vx: vx, tree: ctx.tree, node_id: 1}
+  testing::assert(overlay_ctx.child_count() == 1, "render_overlays should render registered overlays")
 }
 
 struct ActiveChild {

@@ -2,11 +2,10 @@ use ard/maybe
 use tinear/tui/core/stack
 use tinear/tui/core/view
 use tinear/tui/input
-use tinear/vaxis
 use tinear/commands/login
 
 struct WelcomeScreen {
-  input: input::Input,
+  input: mut input::Input,
   login_err: Bool?
 }
 
@@ -74,14 +73,6 @@ impl view::View for CenteredInput {
 }
 
 impl WelcomeScreen {
-  fn mut handle_key(key: vaxis::KeyEvent) {
-    self.input.handle_key(key)
-  }
-
-  fn mut handle_event(ctx: view::Context, mut event: view::Event) {
-    self.input.handle_event(ctx, event)
-  }
-
   fn mut init_screen(ctx: view::Context) {
     if self.input.on_submit.is_none() {
       self.input.on_submit = maybe::some(fn(val: Str) {
@@ -98,11 +89,10 @@ impl WelcomeScreen {
 impl view::View for WelcomeScreen {
   fn mut init(ctx: view::Context) {
     self.init_screen(ctx)
+    ctx.add_child(self.input)
   }
 
-  fn mut handle_event(ctx: view::Context, mut event: view::Event) {
-    self.input.handle_event(ctx, event)
-  }
+  fn handle_event(ctx: view::Context, mut event: view::Event) {}
 
   fn render(mut frame: view::Frame) {
     let content_h = match self.login_err {
@@ -131,5 +121,6 @@ impl view::View for WelcomeScreen {
 }
 
 fn new() WelcomeScreen {
-  WelcomeScreen{input: input::new("Paste Linear API key"), login_err: maybe::none()}
+  mut key_input = input::new("Paste Linear API key")
+  WelcomeScreen{input: key_input, login_err: maybe::none()}
 }

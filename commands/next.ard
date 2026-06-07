@@ -20,21 +20,23 @@ struct App {
   vx: vaxis::Vaxis,
   config: config::Config,
   screen: mut view::View,
-  key_debug: key_debug_toast::KeyDebugToast,
+  key_debug: mut key_debug_toast::KeyDebugToast,
 }
 
 fn App::new(vx: vaxis::Vaxis, config: config::Config) App {
   mut screen: view::View = view::Empty{}
+  mut key_debug = key_debug_toast::new()
   App{
     vx: vx,
     config: config,
     screen: screen,
-    key_debug: key_debug_toast::new(),
+    key_debug: key_debug,
   }
 }
 
 impl App {
   fn mut init(ctx: view::Context) {
+    ctx.add_overlay(self.key_debug)
     match self.config.has_auth() {
       true => {
         self.screen = tabbed_screen::new(self.config.api_key)
@@ -55,12 +57,9 @@ impl App {
     }
 
     box::new(self.screen, root_style).render(frame)
-    self.key_debug.render(frame)
   }
 
   fn mut handle_event(ctx: view::Context, event: vaxis::Event) {
-    mut debug_event = view::event(event)
-    self.key_debug.handle_event(ctx, mut debug_event)
     ctx.dispatch_event(event)
   }
 }

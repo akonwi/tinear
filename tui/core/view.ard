@@ -40,6 +40,7 @@ struct ViewTree {
 struct TreeNode {
   view: mut View,
   children: [Int],
+  overlays: [Int],
 }
 
 impl Context {
@@ -125,6 +126,28 @@ fn render_node(mut frame: Frame, node_id: Int) {
   frame.node_id = parent_id
 }
 
+fn render_overlay_node(mut frame: Frame, node_id: Int) {
+  let parent_id = frame.node_id
+  frame.node_id = node_id
+
+  mut node = frame.tree.nodes.at(node_id)
+  node.view.render(frame)
+
+  mut nodes = frame.tree.nodes
+  mut latest_node = nodes.at(node_id)
+  latest_node.view = node.view
+  nodes.set(node_id, latest_node)
+  frame.tree.nodes = nodes
+  frame.node_id = parent_id
+}
+
+fn render_root_overlays(mut frame: Frame) {
+  let overlays = frame.tree.nodes.at(0).overlays
+  for overlay_id in overlays {
+    render_overlay_node(mut frame, overlay_id)
+  }
+}
+
 fn dispatch_node(ctx: Context, node_id: Int, raw: vaxis::Event) Bool {
   let node_ctx = Context{vx: ctx.vx, tree: ctx.tree, node_id: node_id}
   mut node = ctx.tree.nodes.at(node_id)
@@ -138,6 +161,15 @@ fn dispatch_node(ctx: Context, node_id: Int, raw: vaxis::Event) Bool {
   ctx.tree.nodes = nodes
 
   mut stopped = local_event.is_stopped()
+  if not stopped {
+    let latest = ctx.tree.nodes.at(node_id)
+    for overlay_id in latest.overlays {
+      if dispatch_node(ctx, overlay_id, raw) {
+        stopped = true
+        break
+      }
+    }
+  }
   if not stopped {
     let latest = ctx.tree.nodes.at(node_id)
     for child_id in latest.children {
@@ -158,7 +190,7 @@ impl Context {
     let child_id = self.tree.nodes.size()
 
     mut nodes = self.tree.nodes
-    nodes.push(TreeNode{view: child, children: []})
+    nodes.push(TreeNode{view: child, children: [], overlays: []})
 
     mut parent = nodes.at(self.node_id)
     mut children = parent.children
@@ -179,6 +211,33 @@ impl Context {
 
   fn child_count() Int {
     self.tree.nodes.at(self.node_id).children.size()
+  }
+
+  fn add_overlay(mut child: View) {
+    let child_id = self.tree.nodes.size()
+
+    mut nodes = self.tree.nodes
+    nodes.push(TreeNode{view: child, children: [], overlays: []})
+
+    mut parent = nodes.at(self.node_id)
+    mut overlays = parent.overlays
+    overlays.push(child_id)
+    parent.overlays = overlays
+    nodes.set(self.node_id, parent)
+    self.tree.nodes = nodes
+
+    let child_ctx = Context{vx: self.vx, tree: self.tree, node_id: child_id}
+    child.init(child_ctx)
+
+    mut updated = self.tree.nodes
+    mut child_node = updated.at(child_id)
+    child_node.view = child
+    updated.set(child_id, child_node)
+    self.tree.nodes = updated
+  }
+
+  fn overlay_count() Int {
+    self.tree.nodes.at(self.node_id).overlays.size()
   }
 
   fn dispatch_event(raw: vaxis::Event) {
@@ -204,6 +263,13 @@ impl Frame {
     let children = self.tree.nodes.at(self.node_id).children
     for child_id in children {
       render_node(mut self, child_id)
+    }
+  }
+
+  fn mut render_overlays() {
+    let overlays = self.tree.nodes.at(self.node_id).overlays
+    for overlay_id in overlays {
+      render_overlay_node(mut self, overlay_id)
     }
   }
 
@@ -338,6 +404,7 @@ impl Frame {
   // practice it should only be invoked once per draw pass, on the
   // root frame.
   fn mut flush() {
+    render_root_overlays(mut self)
     vaxis::render(self.vx)
   }
 }
@@ -401,7 +468,7 @@ fn context(vx: vaxis::Vaxis) Context {
   mut tree = ViewTree{nodes: []}
   mut nodes = tree.nodes
   mut empty: View = Empty{}
-  nodes.push(TreeNode{view: empty, children: []})
+  nodes.push(TreeNode{view: empty, children: [], overlays: []})
   tree.nodes = nodes
   Context{vx: vx, tree: tree, node_id: 0}
 }
