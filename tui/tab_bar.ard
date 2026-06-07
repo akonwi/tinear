@@ -5,6 +5,8 @@ use tinear/tui/core/stack
 use tinear/tui/core/style
 use tinear/vaxis
 
+private extern fn test_mark_tab_selected(index: Int) Void = "TestMarkTabSelected"
+
 // Stateful tab bar view.
 //
 // The selected tab lives inside TabBar. The app owns a concrete TabBar field,
@@ -82,14 +84,10 @@ impl TabBar {
 impl view::View for TabBar {
   fn init(ctx: view::Context) {}
 
-  fn mut handle_event(ctx: view::Context, event: vaxis::Event) {
-    match event {
-      KeyEvent(key) => self.handle_key(key),
-      _ => (),
-    }
-  }
+  fn handle_event(ctx: view::Context, mut event: view::Event) {}
 
   fn render(mut frame: view::Frame) {
+    test_mark_tab_selected(self.selected)
     mut children: [view::View] = []
 
     for label, idx in self.labels {

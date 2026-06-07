@@ -39,8 +39,8 @@ impl KeyDebugToast {
 impl view::View for KeyDebugToast {
   fn init(ctx: view::Context) {}
 
-  fn mut handle_event(ctx: view::Context, event: vaxis::Event) {
-    match event {
+  fn mut handle_event(ctx: view::Context, mut event: view::Event) {
+    match event.raw {
       KeyEvent(key) => self.show(ctx, key),
       CustomEvent(e) => {
         if e.name == hide_event(self.id) {

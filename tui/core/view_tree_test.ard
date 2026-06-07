@@ -1,9 +1,18 @@
 use ard/testing
 
+use tinear/tui/core/rect
 use tinear/tui/core/view
 use tinear/vaxis
 
 private extern fn test_vaxis() vaxis::Vaxis = "TestVaxisNil"
+private extern fn test_window() vaxis::Window = "TestWindowZero"
+private extern fn reset_render_marks() Void = "TestResetRenderMarks"
+private extern fn mark_rendered(id: Int) Void = "TestMarkRendered"
+private extern fn was_rendered(id: Int) Bool = "TestWasRendered"
+
+fn test_frame(ctx: view::Context) view::Frame {
+  view::Frame{vx: ctx.vx, window: test_window(), tree: ctx.tree, node_id: ctx.node_id, extent: rect::Rect{x: 0, y: 0, w: 0, h: 0}}
+}
 
 struct InitChild {
   initialized: Bool,
@@ -15,7 +24,7 @@ impl view::View for InitChild {
   }
 
   fn render(mut frame: view::Frame) {}
-  fn handle_event(ctx: view::Context, event: vaxis::Event) {}
+  fn handle_event(ctx: view::Context, mut event: view::Event) {}
 }
 
 struct ChildWithGrandchild {
@@ -33,7 +42,7 @@ impl view::View for ChildWithGrandchild {
   }
 
   fn render(mut frame: view::Frame) {}
-  fn handle_event(ctx: view::Context, event: vaxis::Event) {}
+  fn handle_event(ctx: view::Context, mut event: view::Event) {}
 }
 
 struct ParentWithChild {
@@ -73,4 +82,257 @@ test fn test_context_add_child_scopes_nested_children_to_child_node() Void!Str {
   try testing::assert(ctx.child_count() == 1, "root should have one direct child")
   try testing::assert(child_ctx.child_count() == 1, "registered child should own its nested child")
   testing::assert(child.grandchild.initialized, "nested add_child should initialize retained grandchild field")
+}
+
+struct DispatchChild {
+  stop: Bool,
+  mutate_event: Bool,
+  add_only_for_original: Bool,
+  grandchild: mut InitChild,
+}
+
+fn dispatch_child(stop: Bool, mutate_event: Bool, add_only_for_original: Bool) DispatchChild {
+  mut grandchild = InitChild{initialized: false}
+  DispatchChild{stop: stop, mutate_event: mutate_event, add_only_for_original: add_only_for_original, grandchild: grandchild}
+}
+
+impl view::View for DispatchChild {
+  fn init(ctx: view::Context) {}
+  fn render(mut frame: view::Frame) {}
+
+  fn mut handle_event(ctx: view::Context, mut event: view::Event) {
+    mut should_add = not self.add_only_for_original
+    match event.raw {
+      CustomEvent(e) => {
+        if e.name == "original" {
+          should_add = true
+        }
+      },
+      _ => (),
+    }
+
+    if self.mutate_event {
+      event.raw = vaxis::CustomEvent{name: "changed"}
+    }
+
+    if should_add {
+      ctx.add_child(self.grandchild)
+    }
+
+    if self.stop {
+      event.stop()
+    }
+  }
+}
+
+test fn test_context_dispatch_event_visits_children_top_down() Void!Str {
+  let vx = test_vaxis()
+  let ctx = view::context(vx)
+  mut first = dispatch_child(false, false, true)
+  mut second = dispatch_child(false, false, true)
+
+  ctx.add_child(first)
+  ctx.add_child(second)
+  ctx.dispatch_event(vaxis::CustomEvent{name: "original"})
+
+  let first_ctx = view::Context{vx: vx, tree: ctx.tree, node_id: 1}
+  let second_ctx = view::Context{vx: vx, tree: ctx.tree, node_id: 2}
+  try testing::assert(first_ctx.child_count() == 1, "first child should receive dispatched event")
+  testing::assert(second_ctx.child_count() == 1, "second child should receive dispatched event")
+}
+
+test fn test_context_dispatch_event_stops_after_child_stops() Void!Str {
+  let vx = test_vaxis()
+  let ctx = view::context(vx)
+  mut first = dispatch_child(true, false, true)
+  mut second = dispatch_child(false, false, true)
+
+  ctx.add_child(first)
+  ctx.add_child(second)
+  ctx.dispatch_event(vaxis::CustomEvent{name: "original"})
+
+  let first_ctx = view::Context{vx: vx, tree: ctx.tree, node_id: 1}
+  let second_ctx = view::Context{vx: vx, tree: ctx.tree, node_id: 2}
+  try testing::assert(first_ctx.child_count() == 1, "stopping child should receive dispatched event")
+  testing::assert(second_ctx.child_count() == 0, "sibling after stopping child should not receive dispatched event")
+}
+
+test fn test_context_dispatch_event_uses_fresh_event_for_each_receiver() Void!Str {
+  let vx = test_vaxis()
+  let ctx = view::context(vx)
+  mut first = dispatch_child(false, true, false)
+  mut second = dispatch_child(false, false, true)
+
+  ctx.add_child(first)
+  ctx.add_child(second)
+  ctx.dispatch_event(vaxis::CustomEvent{name: "original"})
+
+  let first_ctx = view::Context{vx: vx, tree: ctx.tree, node_id: 1}
+  let second_ctx = view::Context{vx: vx, tree: ctx.tree, node_id: 2}
+  try testing::assert(first_ctx.child_count() == 1, "first child should receive dispatched event")
+  testing::assert(second_ctx.child_count() == 1, "second child should receive a fresh wrapper around the original event")
+}
+
+struct RenderThenDispatchChild {
+  id: Int,
+  grandchild: mut InitChild,
+}
+
+fn render_then_dispatch_child(id: Int) RenderThenDispatchChild {
+  mut grandchild = InitChild{initialized: false}
+  RenderThenDispatchChild{id: id, grandchild: grandchild}
+}
+
+impl view::View for RenderThenDispatchChild {
+  fn init(ctx: view::Context) {}
+
+  fn render(mut frame: view::Frame) {
+    mark_rendered(self.id)
+  }
+
+  fn mut handle_event(ctx: view::Context, mut event: view::Event) {
+    if was_rendered(self.id) {
+      ctx.add_child(self.grandchild)
+    }
+  }
+}
+
+test fn test_context_render_child_renders_tree_owned_child_state() Void!Str {
+  reset_render_marks()
+  let vx = test_vaxis()
+  let ctx = view::context(vx)
+  mut frame = test_frame(ctx)
+  mut child = render_then_dispatch_child(1)
+
+  ctx.add_child(child)
+  frame.render_child(0)
+  ctx.dispatch_event(vaxis::CustomEvent{name: "after-render"})
+
+  let child_ctx = view::Context{vx: vx, tree: ctx.tree, node_id: 1}
+  testing::assert(child_ctx.child_count() == 1, "render_child should render the tree-owned child")
+}
+
+test fn test_context_render_children_renders_each_registered_child() Void!Str {
+  reset_render_marks()
+  let vx = test_vaxis()
+  let ctx = view::context(vx)
+  mut frame = test_frame(ctx)
+  mut first = render_then_dispatch_child(1)
+  mut second = render_then_dispatch_child(2)
+
+  ctx.add_child(first)
+  ctx.add_child(second)
+  frame.render_children()
+  ctx.dispatch_event(vaxis::CustomEvent{name: "after-render"})
+
+  let first_ctx = view::Context{vx: vx, tree: ctx.tree, node_id: 1}
+  let second_ctx = view::Context{vx: vx, tree: ctx.tree, node_id: 2}
+  try testing::assert(first_ctx.child_count() == 1, "render_children should render the first child")
+  testing::assert(second_ctx.child_count() == 1, "render_children should render the second child")
+}
+
+struct ActiveChild {
+  active: Bool,
+  grandchild: mut InitChild,
+}
+
+fn active_child() ActiveChild {
+  mut grandchild = InitChild{initialized: false}
+  ActiveChild{active: false, grandchild: grandchild}
+}
+
+impl view::View for ActiveChild {
+  fn init(ctx: view::Context) {}
+  fn render(mut frame: view::Frame) {}
+
+  fn mut handle_event(ctx: view::Context, mut event: view::Event) {
+    if self.active {
+      ctx.add_child(self.grandchild)
+    }
+  }
+}
+
+struct ActivatingParent {
+  child: mut ActiveChild,
+}
+
+fn activating_parent() ActivatingParent {
+  mut child = active_child()
+  ActivatingParent{child: child}
+}
+
+impl view::View for ActivatingParent {
+  fn mut init(ctx: view::Context) {
+    ctx.add_child(self.child)
+  }
+
+  fn render(mut frame: view::Frame) {}
+
+  fn mut handle_event(ctx: view::Context, mut event: view::Event) {
+    self.child.active = true
+  }
+}
+
+test fn test_context_dispatch_parent_child_field_mutation_is_visible_to_child_node() Void!Str {
+  let vx = test_vaxis()
+  let ctx = view::context(vx)
+  mut parent = activating_parent()
+
+  ctx.add_child(parent)
+  ctx.dispatch_event(vaxis::CustomEvent{name: "activate"})
+
+  let child_ctx = view::Context{vx: vx, tree: ctx.tree, node_id: 2}
+  testing::assert(child_ctx.child_count() == 1, "parent child-field mutation should be visible when dispatch reaches child node")
+}
+
+struct RenderIdChild {
+  id: Int,
+}
+
+impl view::View for RenderIdChild {
+  fn init(ctx: view::Context) {}
+
+  fn render(mut frame: view::Frame) {
+    mark_rendered(self.id)
+  }
+
+  fn handle_event(ctx: view::Context, mut event: view::Event) {}
+}
+
+struct UpdatingRenderParent {
+  child: mut RenderIdChild,
+}
+
+fn updating_render_parent() UpdatingRenderParent {
+  mut child = RenderIdChild{id: 1}
+  UpdatingRenderParent{child: child}
+}
+
+impl view::View for UpdatingRenderParent {
+  fn mut init(ctx: view::Context) {
+    ctx.add_child(self.child)
+  }
+
+  fn render(mut frame: view::Frame) {
+    frame.render_child(0)
+  }
+
+  fn mut handle_event(ctx: view::Context, mut event: view::Event) {
+    self.child.id = 2
+  }
+}
+
+test fn test_context_dispatch_parent_child_field_mutation_is_visible_to_render_delegation() Void!Str {
+  reset_render_marks()
+  let vx = test_vaxis()
+  let ctx = view::context(vx)
+  mut frame = test_frame(ctx)
+  mut parent = updating_render_parent()
+
+  ctx.add_child(parent)
+  ctx.dispatch_event(vaxis::CustomEvent{name: "change-child-render-state"})
+  frame.render_child(0)
+
+  try testing::assert(was_rendered(2), "render delegation should render updated child state")
+  testing::assert(not was_rendered(1), "render delegation should not render stale child state")
 }

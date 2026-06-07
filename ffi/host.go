@@ -30,6 +30,28 @@ func TestVaxisNil() *vaxis.Vaxis {
 	return nil
 }
 
+var testRenderMarks = map[int]bool{}
+
+func TestWindowZero() vaxis.Window {
+	return vaxis.Window{}
+}
+
+func TestResetRenderMarks() {
+	testRenderMarks = map[int]bool{}
+}
+
+func TestMarkRendered(id int) {
+	testRenderMarks[id] = true
+}
+
+func TestWasRendered(id int) bool {
+	return testRenderMarks[id]
+}
+
+func TestMarkTabSelected(index int) {
+	testRenderMarks[1000+index] = true
+}
+
 func New(title string) (*vaxis.Vaxis, error) {
 	vx, err := vaxis.New(vaxis.Options{DisableKittyKeyboard: true})
 	if err != nil {

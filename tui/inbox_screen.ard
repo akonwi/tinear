@@ -18,6 +18,7 @@ struct InboxScreen {
   cursor: Int,
   loading: Bool,
   error: Str?,
+  active: Bool,
 }
 
 fn new(api_key: Str) InboxScreen {
@@ -27,6 +28,7 @@ fn new(api_key: Str) InboxScreen {
     cursor: 0,
     loading: false,
     error: maybe::none(),
+    active: false,
   }
 }
 
@@ -89,8 +91,8 @@ impl InboxScreen {
     }
   }
 
-  fn mut handle_event(ctx: view::Context, event: vaxis::Event) {
-    match event {
+  fn mut handle_event(ctx: view::Context, mut event: view::Event) {
+    match event.raw {
       KeyEvent(key) => self.handle_key(ctx, key),
       _ => (),
     }
@@ -103,9 +105,13 @@ impl view::View for InboxScreen {
     self.refresh(ctx)
   }
 
-  fn mut handle_event(ctx: view::Context, event: vaxis::Event) {
-    match event {
-      KeyEvent(key) => self.handle_key(ctx, key),
+  fn mut handle_event(ctx: view::Context, mut event: view::Event) {
+    match event.raw {
+      KeyEvent(key) => {
+        if self.active {
+          self.handle_key(ctx, key)
+        }
+      },
       CustomEvent(e) => {
         if e.name == refresh_event {
           self.refresh(ctx)

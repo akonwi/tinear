@@ -27,8 +27,8 @@ fn App::new(vx: vaxis::Vaxis, config: config::Config) App {
   mut screen: view::View = view::Empty{}
   App{
     vx: vx,
-    screen: screen,
     config: config,
+    screen: screen,
     key_debug: key_debug_toast::new(),
   }
 }
@@ -59,8 +59,9 @@ impl App {
   }
 
   fn mut handle_event(ctx: view::Context, event: vaxis::Event) {
-    self.key_debug.handle_event(ctx, event)
-    self.screen.handle_event(ctx, event)
+    mut debug_event = view::event(event)
+    self.key_debug.handle_event(ctx, mut debug_event)
+    ctx.dispatch_event(event)
   }
 }
 
@@ -74,7 +75,7 @@ fn run() {
   mut running = true
 
   while running {
-    mut frame = view::root(vx)
+    mut frame = view::root(ctx)
     vaxis::hide_cursor(vx)
     frame.clear()
     app.render(frame)

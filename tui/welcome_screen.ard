@@ -33,7 +33,7 @@ struct CenteredText {
 
 impl view::View for CenteredText {
   fn init(ctx: view::Context) {}
-  fn handle_event(ctx: view::Context, event: vaxis::Event) {}
+  fn handle_event(ctx: view::Context, mut event: view::Event) {}
 
   fn render(mut frame: view::Frame) {
     let raw_x = (frame.width() - frame.rendered_width(self.content)) / 2
@@ -60,7 +60,7 @@ struct CenteredInput {
 
 impl view::View for CenteredInput {
   fn init(ctx: view::Context) {}
-  fn handle_event(ctx: view::Context, event: vaxis::Event) {}
+  fn handle_event(ctx: view::Context, mut event: view::Event) {}
 
   fn render(mut frame: view::Frame) {
     let input_w = centered_width(frame, self.width)
@@ -78,7 +78,7 @@ impl WelcomeScreen {
     self.input.handle_key(key)
   }
 
-  fn mut handle_event(ctx: view::Context, event: vaxis::Event) {
+  fn mut handle_event(ctx: view::Context, mut event: view::Event) {
     self.input.handle_event(ctx, event)
   }
 
@@ -100,7 +100,7 @@ impl view::View for WelcomeScreen {
     self.init_screen(ctx)
   }
 
-  fn mut handle_event(ctx: view::Context, event: vaxis::Event) {
+  fn mut handle_event(ctx: view::Context, mut event: view::Event) {
     self.input.handle_event(ctx, event)
   }
 

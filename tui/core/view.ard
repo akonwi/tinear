@@ -38,7 +38,7 @@ struct ViewTree {
 }
 
 struct TreeNode {
-  view: View,
+  view: mut View,
   children: [Int],
 }
 
@@ -69,6 +69,8 @@ impl Context {
 struct Frame {
   vx: vaxis::Vaxis,
   window: vaxis::Window,
+  tree: mut ViewTree,
+  node_id: Int,
   // Bounding box of cells drawn through this frame so far. Empty
   // (w == 0 and h == 0) when nothing has been drawn yet.
   extent: rect::Rect,
@@ -83,10 +85,69 @@ struct Frame {
 // track the bounding box of cells the view drew. After `render` returns, the
 // caller reads that box via `frame.dimensions()`. This replaces an intrinsic-
 // size method — what the view actually rendered IS its size.
+struct Event {
+  raw: vaxis::Event,
+  stopped: Bool,
+}
+
+fn event(raw: vaxis::Event) Event {
+  Event{raw: raw, stopped: false}
+}
+
+impl Event {
+  fn mut stop() {
+    self.stopped = true
+  }
+
+  fn is_stopped() Bool {
+    self.stopped
+  }
+}
+
 trait View {
   fn init(ctx: Context)
   fn render(mut frame: Frame)
-  fn handle_event(ctx: Context, event: vaxis::Event)
+  fn handle_event(ctx: Context, mut event: Event)
+}
+
+fn render_node(mut frame: Frame, node_id: Int) {
+  let parent_id = frame.node_id
+  frame.node_id = node_id
+
+  mut node = frame.tree.nodes.at(node_id)
+  node.view.render(frame)
+
+  mut nodes = frame.tree.nodes
+  mut latest_node = nodes.at(node_id)
+  latest_node.view = node.view
+  nodes.set(node_id, latest_node)
+  frame.tree.nodes = nodes
+  frame.node_id = parent_id
+}
+
+fn dispatch_node(ctx: Context, node_id: Int, raw: vaxis::Event) Bool {
+  let node_ctx = Context{vx: ctx.vx, tree: ctx.tree, node_id: node_id}
+  mut node = ctx.tree.nodes.at(node_id)
+  mut local_event = event(raw)
+  node.view.handle_event(node_ctx, mut local_event)
+
+  mut nodes = ctx.tree.nodes
+  mut latest_node = nodes.at(node_id)
+  latest_node.view = node.view
+  nodes.set(node_id, latest_node)
+  ctx.tree.nodes = nodes
+
+  mut stopped = local_event.is_stopped()
+  if not stopped {
+    let latest = ctx.tree.nodes.at(node_id)
+    for child_id in latest.children {
+      if dispatch_node(ctx, child_id, raw) {
+        stopped = true
+        break
+      }
+    }
+  }
+  stopped
 }
 
 impl Context {
@@ -119,9 +180,33 @@ impl Context {
   fn child_count() Int {
     self.tree.nodes.at(self.node_id).children.size()
   }
+
+  fn dispatch_event(raw: vaxis::Event) {
+    dispatch_node(self, self.node_id, raw)
+  }
 }
 
 impl Frame {
+  fn mut render_child(index: Int) {
+    let child_id = self.tree.nodes.at(self.node_id).children.at(index)
+    render_node(mut self, child_id)
+  }
+
+  fn mut render_child_or(index: Int, child: View) {
+    let count = self.tree.nodes.at(self.node_id).children.size()
+    match index < count {
+      true => self.render_child(index),
+      false => child.render(self),
+    }
+  }
+
+  fn mut render_children() {
+    let children = self.tree.nodes.at(self.node_id).children
+    for child_id in children {
+      render_node(mut self, child_id)
+    }
+  }
+
   // The frame's own bounds, in its local coordinate space. Always
   // origin-zero: a view asking for its area gets (0, 0, w, h). This
   // is the maximum size the view may draw into, not the size it
@@ -260,10 +345,10 @@ impl Frame {
 // Construct a root Frame covering the entire terminal. Use this
 // once at the top of a draw pass; sub-frames flow from `sub` below
 // it.
-fn root(vx: vaxis::Vaxis) Frame {
-  let win = vaxis::root(vx)
+fn root(ctx: Context) Frame {
+  let win = vaxis::root(ctx.vx)
   let empty = rect::Rect{x: 0, y: 0, w: 0, h: 0}
-  Frame{vx: vx, window: win, extent: empty}
+  Frame{vx: ctx.vx, window: win, tree: ctx.tree, node_id: ctx.node_id, extent: empty}
 }
 
 // Carve out a sub-region of `frame` as a new Frame. The returned
@@ -285,21 +370,38 @@ fn root(vx: vaxis::Vaxis) Frame {
 fn sub(frame: Frame, area: rect::Rect) Frame {
   let win = vaxis::subwindow(frame.window, area.x, area.y, area.w, area.h)
   let empty = rect::Rect{x: 0, y: 0, w: 0, h: 0}
-  Frame{vx: frame.vx, window: win, extent: empty}
+  Frame{vx: frame.vx, window: win, tree: frame.tree, node_id: frame.node_id, extent: empty}
+}
+
+struct ChildSlot {
+  index: Int,
+}
+
+impl View for ChildSlot {
+  fn init(ctx: Context) {}
+  fn handle_event(ctx: Context, mut event: Event) {}
+  fn render(mut frame: Frame) {
+    frame.render_child(self.index)
+  }
+}
+
+fn child(index: Int) View {
+  ChildSlot{index: index}
 }
 
 struct Empty {}
 
 impl View for Empty {
   fn init(ctx: Context) {}
-  fn handle_event(ctx: Context, event: vaxis::Event) {}
+  fn handle_event(ctx: Context, mut event: Event) {}
   fn render(mut frame: Frame) {}
 }
 
 fn context(vx: vaxis::Vaxis) Context {
   mut tree = ViewTree{nodes: []}
   mut nodes = tree.nodes
-  nodes.push(TreeNode{view: Empty{}, children: []})
+  mut empty: View = Empty{}
+  nodes.push(TreeNode{view: empty, children: []})
   tree.nodes = nodes
   Context{vx: vx, tree: tree, node_id: 0}
 }

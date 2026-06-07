@@ -28,6 +28,7 @@ struct MyIssuesScreen {
   error: Str?,
   state_picker: state::StatePicker?,
   cycle_picker: state::CyclePicker?,
+  active: Bool,
 }
 
 fn new(api_key: Str) MyIssuesScreen {
@@ -40,6 +41,7 @@ fn new(api_key: Str) MyIssuesScreen {
     error: maybe::none(),
     state_picker: maybe::none(),
     cycle_picker: maybe::none(),
+    active: false,
   }
 }
 
@@ -420,9 +422,13 @@ impl view::View for MyIssuesScreen {
     self.refresh(ctx)
   }
 
-  fn mut handle_event(ctx: view::Context, event: vaxis::Event) {
-    match event {
-      KeyEvent(key) => self.handle_key(ctx, key),
+  fn mut handle_event(ctx: view::Context, mut event: view::Event) {
+    match event.raw {
+      KeyEvent(key) => {
+        if self.active {
+          self.handle_key(ctx, key)
+        }
+      }
       CustomEvent(e) => {
         if e.name == refresh_event {
           self.refresh(ctx)

@@ -1,3 +1,6 @@
+use ard/testing
+
+use tinear/tui/core/rect
 use tinear/tui/core/stack
 use tinear/tui/core/text
 use tinear/tui/core/view
@@ -18,7 +21,9 @@ struct TabbedScreen {
 fn new(api_key: Str) TabbedScreen {
   mut tabs = tab_bar::new(["Inbox", "My Issues"])
   mut inbox = inbox_screen::new(api_key)
+  inbox.active = true
   mut my_issues = my_issues_screen::new(api_key)
+  my_issues.active = false
   TabbedScreen{
     tabs: tabs,
     inbox: inbox,
@@ -57,10 +62,18 @@ struct HorizontalRule {}
 
 impl view::View for HorizontalRule {
   fn init(ctx: view::Context) {}
-  fn handle_event(ctx: view::Context, event: vaxis::Event) {}
+  fn handle_event(ctx: view::Context, mut event: view::Event) {}
 
   fn render(mut frame: view::Frame) {
     frame.draw_text(0, 0, repeat("─", frame.width()))
+  }
+}
+
+impl TabbedScreen {
+  fn mut sync_active_child() {
+    let active = self.tabs.selected_label()
+    self.inbox.active = active == "Inbox"
+    self.my_issues.active = active == "My Issues"
   }
 }
 
@@ -71,26 +84,15 @@ impl view::View for TabbedScreen {
     ctx.add_child(self.my_issues)
   }
 
-  fn mut handle_event(ctx: view::Context, event: vaxis::Event) {
-    match event {
+  fn mut handle_event(ctx: view::Context, mut event: view::Event) {
+    match event.raw {
       KeyEvent(key) => {
-        match {
-          is_tab_key(key)  => {
-            self.tabs.handle_key(key)
-            ctx.redraw()
-          },
-          _ => {
-            match self.tabs.selected_label() {
-              "Inbox" => self.inbox.handle_key(ctx, key),
-              "My Issues" => self.my_issues.handle_key(ctx, key),
-              _ => (),
-            }
-          },
+        if is_tab_key(key) {
+          self.tabs.handle_key(key)
+          self.sync_active_child()
+          ctx.redraw()
+          event.stop()
         }
-      },
-      CustomEvent(_) => {
-        self.inbox.handle_event(ctx, event)
-        self.my_issues.handle_event(ctx, event)
       },
       _ => (),
     }
@@ -98,8 +100,8 @@ impl view::View for TabbedScreen {
 
   fn render(mut frame: view::Frame) {
     let body: view::View = match self.tabs.selected_label() {
-      "Inbox" => self.inbox,
-      "My Issues" => self.my_issues,
+      "Inbox" => view::child(1),
+      "My Issues" => view::child(2),
       _ => text::new("Coming soon"),
     }
 
@@ -112,11 +114,36 @@ impl view::View for TabbedScreen {
     // body fills the middle, hints fixed at the bottom.
     stack::vsplit(
       [
-        stack::fixed(self.tabs, 1),
+        stack::fixed(view::child(0), 1),
         stack::fixed(HorizontalRule{}, 1),
         stack::fill(body, 1),
         stack::fixed(hints, 1),
       ],
     ).render(frame)
   }
+}
+
+private extern fn test_vaxis() vaxis::Vaxis = "TestVaxisNil"
+private extern fn test_window() vaxis::Window = "TestWindowZero"
+private extern fn reset_render_marks() Void = "TestResetRenderMarks"
+private extern fn was_rendered(id: Int) Bool = "TestWasRendered"
+
+fn test_frame(ctx: view::Context) view::Frame {
+  view::Frame{vx: ctx.vx, window: test_window(), tree: ctx.tree, node_id: ctx.node_id, extent: rect::Rect{x: 0, y: 0, w: 0, h: 0}}
+}
+
+test fn test_registered_tab_field_mutation_is_visible_to_render_delegation() Void!Str {
+  reset_render_marks()
+  let vx = test_vaxis()
+  let ctx = view::context(vx)
+  mut frame = test_frame(ctx)
+  mut screen = new("test-api-key")
+
+  ctx.add_child(screen.tabs)
+  screen.tabs.next()
+  screen.sync_active_child()
+  frame.render_child(0)
+
+  try testing::assert(was_rendered(1001), "tree-owned tab bar should render mutated tab field")
+  testing::assert(not was_rendered(1000), "tree-owned tab bar should not render stale tab field")
 }

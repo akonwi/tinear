@@ -102,7 +102,7 @@ struct InputContent {
 
 impl view::View for InputContent {
   fn init(ctx: view::Context) {}
-  fn handle_event(ctx: view::Context, event: vaxis::Event) {}
+  fn handle_event(ctx: view::Context, mut event: view::Event) {}
 
   fn render(mut frame: view::Frame) {
     let is_placeholder = self.value.size() == 0
@@ -244,8 +244,8 @@ impl Input {
     }
   }
 
-  fn mut handle_event(ctx: view::Context, event: vaxis::Event) {
-    match event {
+  fn mut handle_event(ctx: view::Context, mut event: view::Event) {
+    match event.raw {
       KeyEvent(key) => self.handle_key(key),
       PasteEvent(paste) => self.insert_text(paste.content),
       _ => (),
@@ -256,8 +256,8 @@ impl Input {
 impl view::View for Input {
   fn init(ctx: view::Context) {}
 
-  fn mut handle_event(ctx: view::Context, event: vaxis::Event) {
-    match event {
+  fn mut handle_event(ctx: view::Context, mut event: view::Event) {
+    match event.raw {
       KeyEvent(key) => self.handle_key(key),
       PasteEvent(paste) => self.insert_text(paste.content),
       _ => (),
