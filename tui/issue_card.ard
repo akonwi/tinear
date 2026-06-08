@@ -2,6 +2,7 @@ use tinear/models/issues
 use tinear/tui/core/view
 use tinear/tui/state
 use tinear/tui/text
+use tinear/vaxis
 
 // Issue card used by the My Issues board.
 //
@@ -31,11 +32,29 @@ fn repeat(ch: Str, count: Int) Str {
 impl view::View for IssueCard {
   fn init(ctx: view::Context) {}
 
-  fn handle_event(ctx: view::Context, mut event: view::Event) {}
+  fn handle_event(ctx: view::Context, mut event: view::Event) {
+    match event.raw {
+      KeyEvent(e) => {
+        match e.name {
+          "Enter" => {
+            if self.selected {
+              ctx.dispatch_event(vaxis::CustomEvent{
+                name: "issue.selected",
+                payload: Dynamic::from(self.issue.id)
+              })
+              event.stop()
+            }
+          },
+          _ => (),
+        }
+      },
+      _ => (),
+    }
+  }
 
   fn render(mut frame: view::Frame) {
     let col_w = frame.width()
-    let identifier = self.issue.id
+    let identifier = self.issue.identifier
     let title = self.issue.title
     let priority = self.issue.priority
 

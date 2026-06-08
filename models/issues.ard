@@ -12,6 +12,7 @@ use tinear/tui/state
 struct Issue {
   raw: Dynamic,
   id: Str,
+  identifier: Str,
   title: Str,
   description: Str?,
   priority: Int?,
@@ -111,6 +112,7 @@ fn decode_issue(raw: Dynamic) Issue {
   Issue{
     raw: raw,
     id: decode::run(raw, decode::field("id", decode::string)).expect("Missing issue.id"),
+    identifier: decode::run(raw, decode::field("identifier", decode::string)).expect("Missing issue.identifier"),
     title: decode::run(raw, decode::field("title", decode::string)).expect("Missing issue.title"),
     description: nullable_str(raw, "description"),
     priority: nullable_int(raw, "priority"),
