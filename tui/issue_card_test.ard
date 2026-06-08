@@ -1,6 +1,7 @@
 use ard/decode
 use ard/testing
 
+use tinear/models/issues
 use tinear/tui/core/rect
 use tinear/tui/core/view
 use tinear/tui/issue_card
@@ -17,13 +18,14 @@ fn test_frame(width: Int, height: Int) view::Frame {
   view::Frame{vx: vx, window: test_window(width, height), tree: ctx.tree, node_id: ctx.node_id, extent: rect::Rect{x: 0, y: 0, w: 0, h: 0}}
 }
 
-fn test_issue(title: Str) Dynamic {
-  decode::from_json(
-    "\{\"identifier\":\"AKO-123\",\"title\":\"{title}\",\"priority\":2\}",
+fn test_issue(title: Str) issues::Issue {
+  let raw = decode::from_json(
+    "\{\"id\":\"AKO-123\",\"title\":\"{title}\",\"description\":null,\"priority\":2,\"state\":\{\"id\":\"state-1\",\"name\":\"Started\",\"type\":\"started\",\"position\":1.0\},\"team\":\{\"id\":\"team-1\",\"name\":\"Core\",\"key\":\"AKO\"\},\"project\":null,\"assignee\":null,\"cycle\":null\}",
   ).expect("parse test issue")
+  issues::decode_issue(raw)
 }
 
-test fn test_issue_card_renders_identifier_priority_and_title() Void!Str {
+test fn test_issue_card_renders_id_priority_and_title() Void!Str {
   mut frame = test_frame(20, 6)
 
   issue_card::new(test_issue("Fix login bug"), false, true).render(frame)

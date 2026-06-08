@@ -1,19 +1,144 @@
 use ard/decode
 
 use tinear/tui/api
+use tinear/tui/decode as decode_utils
 use tinear/tui/state
+
+// Typed issue model used by the next TUI.
+//
+// `raw` is kept as an escape hatch for older API helpers that still expect the
+// Linear GraphQL Dynamic shape (state/cycle pickers, mutations, etc.). Rendering
+// code should prefer the typed fields.
+struct Issue {
+  raw: Dynamic,
+  id: Str,
+  title: Str,
+  description: Str?,
+  priority: Int?,
+  state_id: Str,
+  state_name: Str,
+  state_type: Str,
+  state_position: Float,
+  team_id: Str,
+  team_name: Str,
+  team_key: Str,
+  project_name: Str,
+  assignee_name: Str,
+  cycle_id: Str,
+  cycle_label: Str,
+}
+
+// A column on the My Issues board: a workflow state name + the issues currently
+// in it. Unlike the legacy app's `tui/state::BoardColumn`, issues are decoded
+// into typed `Issue` structs.
+struct BoardColumn {
+  name: Str,
+  state_type: Str,
+  position: Float,
+  issues: [Issue],
+}
 
 // Store for the My Issues board data.
 //
 // The screen owns UI state (cursor/scroll/loading/error). The store owns the
-// loaded issue columns and knows how to fetch them from Linear.
+// loaded issue columns and knows how to fetch/decode them from Linear.
 struct IssuesStore {
   api_key: Str,
-  columns: [state::BoardColumn],
+  columns: [BoardColumn],
 }
 
 fn new(api_key: Str) IssuesStore {
   IssuesStore{api_key: api_key, columns: []}
+}
+
+fn optional_str(data: Dynamic, name: Str, fallback: Str) Str {
+  match decode_utils::optional_field(data, name) {
+    v => decode::run(v, decode::string).expect("field not string"),
+    _ => fallback,
+  }
+}
+
+fn nullable_str(data: Dynamic, name: Str) Str? {
+  decode::run(data, decode::field(name, decode::nullable(decode::string)))
+    .expect("nullable string field missing")
+}
+
+fn nullable_int(data: Dynamic, name: Str) Int? {
+  decode::run(data, decode::field(name, decode::nullable(decode::int)))
+    .expect("nullable int field missing")
+}
+
+fn nested_str(data: Dynamic, name: Str, nested: Str, fallback: Str) Str {
+  match decode_utils::optional_field(data, name) {
+    obj => optional_str(obj, nested, fallback),
+    _ => fallback,
+  }
+}
+
+fn user_display_name_opt(data: Dynamic, name: Str) Str {
+  match decode_utils::optional_field(data, name) {
+    user => decode_utils::user_display_name(user),
+    _ => "—",
+  }
+}
+
+fn cycle_id(raw: Dynamic) Str {
+  match decode_utils::optional_field(raw, "cycle") {
+    cycle => optional_str(cycle, "id", ""),
+    _ => "",
+  }
+}
+
+fn cycle_label(raw: Dynamic) Str {
+  match decode_utils::optional_field(raw, "cycle") {
+    cycle => {
+      let number = decode::run(cycle, decode::field("number", decode::int))
+        .expect("Missing cycle.number")
+      let name = decode::run(cycle, decode::field("name", decode::nullable(decode::string)))
+        .expect("Missing cycle.name")
+      match name {
+        n => n,
+        _ => "Cycle {number}",
+      }
+    },
+    _ => "—",
+  }
+}
+
+fn decode_issue(raw: Dynamic) Issue {
+  let state = decode::run(raw, decode::field("state", decode::dynamic)).expect("Missing state")
+  let team = decode::run(raw, decode::field("team", decode::dynamic)).expect("Missing team")
+  Issue{
+    raw: raw,
+    id: decode::run(raw, decode::field("id", decode::string)).expect("Missing issue.id"),
+    title: decode::run(raw, decode::field("title", decode::string)).expect("Missing issue.title"),
+    description: nullable_str(raw, "description"),
+    priority: nullable_int(raw, "priority"),
+    state_id: decode::run(state, decode::field("id", decode::string)).expect("Missing state.id"),
+    state_name: decode::run(state, decode::field("name", decode::string)).expect("Missing state.name"),
+    state_type: decode::run(state, decode::field("type", decode::string)).expect("Missing state.type"),
+    state_position: decode::run(state, decode::field("position", decode::float)).expect("Missing state.position"),
+    team_id: decode::run(team, decode::field("id", decode::string)).expect("Missing team.id"),
+    team_name: decode::run(team, decode::field("name", decode::string)).expect("Missing team.name"),
+    team_key: decode::run(team, decode::field("key", decode::string)).expect("Missing team.key"),
+    project_name: nested_str(raw, "project", "name", "—"),
+    assignee_name: user_display_name_opt(raw, "assignee"),
+    cycle_id: cycle_id(raw),
+    cycle_label: cycle_label(raw),
+  }
+}
+
+fn decode_column(raw: state::BoardColumn) BoardColumn {
+  mut issues: [Issue] = []
+  for issue in raw.issues {
+    issues.push(decode_issue(issue))
+  }
+  BoardColumn{
+    name: raw.name,
+    state_type: raw.state_type,
+    position: raw.position,
+    issues: issues,
+  }
 }
 
 impl IssuesStore {
@@ -21,7 +146,12 @@ impl IssuesStore {
     let viewer = try api::fetch_viewer(self.api_key)
     let viewer_id = decode::run(viewer, decode::field("id", decode::string))
       .expect("Missing viewer id")
-    self.columns = try api::fetch_board(self.api_key, viewer_id)
+    let raw_columns = try api::fetch_board(self.api_key, viewer_id)
+    mut columns: [BoardColumn] = []
+    for col in raw_columns {
+      columns.push(decode_column(col))
+    }
+    self.columns = columns
     Result::ok(())
   }
 }

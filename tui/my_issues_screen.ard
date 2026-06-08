@@ -156,7 +156,7 @@ test fn test_visible_scroll_moves_left_when_selected_before_scroll() Void!Str {
 }
 
 impl MyIssuesScreen {
-  fn selected_issue() Dynamic? {
+  fn selected_issue() issues::Issue? {
     match self.store.columns.size() == 0 {
       true => maybe::none(),
       false => {
@@ -172,7 +172,7 @@ impl MyIssuesScreen {
   fn mut open_state_picker() {
     match self.selected_issue() {
       issue => {
-        match api::open_state_picker(self.store.api_key, issue, true, 0) {
+        match api::open_state_picker(self.store.api_key, issue.raw, true, 0) {
           ok(p) => { self.state_picker = maybe::some(p) },
           err(_) => (),
         }
@@ -184,7 +184,7 @@ impl MyIssuesScreen {
   fn mut open_cycle_picker() {
     match self.selected_issue() {
       issue => {
-        match api::open_cycle_picker(self.store.api_key, issue, true, 0) {
+        match api::open_cycle_picker(self.store.api_key, issue.raw, true, 0) {
           ok(p) => { self.cycle_picker = maybe::some(p) },
           err(_) => (),
         }

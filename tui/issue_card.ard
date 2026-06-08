@@ -1,9 +1,7 @@
-use ard/decode
-
+use tinear/models/issues
 use tinear/tui/core/view
 use tinear/tui/state
 use tinear/tui/text
-use tinear/vaxis
 
 // Issue card used by the My Issues board.
 //
@@ -11,12 +9,12 @@ use tinear/vaxis
 // within that width, optionally paints a full-card reverse-video background
 // when selected, and reserves divider/blank space when another card follows.
 struct IssueCard {
-  issue: Dynamic,
+  issue: issues::Issue,
   selected: Bool,
   last: Bool,
 }
 
-fn new(issue: Dynamic, selected: Bool, last: Bool) IssueCard {
+fn new(issue: issues::Issue, selected: Bool, last: Bool) IssueCard {
   IssueCard{issue: issue, selected: selected, last: last}
 }
 
@@ -37,12 +35,9 @@ impl view::View for IssueCard {
 
   fn render(mut frame: view::Frame) {
     let col_w = frame.width()
-    let identifier = decode::run(self.issue, decode::field("identifier", decode::string))
-      .expect("Missing identifier")
-    let title = decode::run(self.issue, decode::field("title", decode::string))
-      .expect("Missing title")
-    let priority = decode::run(self.issue, decode::field("priority", decode::nullable(decode::int)))
-      .expect("Missing priority")
+    let identifier = self.issue.id
+    let title = self.issue.title
+    let priority = self.issue.priority
 
     let cursor = match self.selected {
       true => "▸",
