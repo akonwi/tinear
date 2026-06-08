@@ -37,7 +37,10 @@ type UiStringIntent string
 func (i UiStringIntent) IntentType() ui.IntentType { return ui.IntentType(i) }
 
 func UiRun(root ui.Widget) error {
-	return ui.Run(root)
+	shortcuts := ui.DefaultShortcuts()
+	delete(shortcuts, "Tab")
+	delete(shortcuts, "Shift+Tab")
+	return ui.Run(root, ui.WithShortcuts(shortcuts))
 }
 
 func UiActions[T ~int](child ui.Widget, bindings map[string]func(ui.EventContext, string) T) ui.Widget {
