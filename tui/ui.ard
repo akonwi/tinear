@@ -78,10 +78,29 @@ fn stateful(build: fn(State) Widget) Widget {
   })
 }
 
-extern fn text(value: Str) Widget = "UiText"
-extern fn text_bold(value: Str) Widget = "UiTextBold"
+extern type Style = "projectffi.UiStyle"
+
+// Internal FFI boundary. Use `style` in Ard code so omitted attrs default here.
+extern fn style_raw(bold: Bool, reverse: Bool) Style = "UiStyleNew"
+
+fn bool_or(value: Bool?, fallback: Bool) Bool {
+  match value {
+    v => v,
+    _ => fallback,
+  }
+}
+
+fn style(bold: Bool?, reverse: Bool?) Style {
+  style_raw(
+    bold: bool_or(bold, false),
+    reverse: bool_or(reverse, false),
+  )
+}
+
+extern fn text(value: Str, style: Style?) Widget = "UiText"
 extern fn row(children: [Widget]) Widget = "UiRow"
 extern fn column(children: [Widget]) Widget = "UiColumn"
+extern fn column_stretch(children: [Widget]) Widget = "UiColumnStretch"
 
 // Vertical column that sizes to its contents instead of expanding to fill its
 // parent. Useful inside `center` when the content block should be centered.
@@ -91,5 +110,6 @@ extern fn center(child: Widget) Widget = "UiCenter"
 extern fn padding_all(all: Int, child: Widget) Widget = "UiPaddingAll"
 extern fn sized_box(width: Int, height: Int) Widget = "UiSizedBox"
 extern fn expanded(child: Widget) Widget = "UiExpanded"
+extern fn divider() Widget = "UiDivider"
 extern fn text_field(value: Str, placeholder: Str, min_width: Int, obscure: Bool, on_changed: fn(EventContext, Str), on_submitted: fn(EventContext, Str)) Widget = "UiTextField"
 extern fn button(label: Str, on_pressed: fn(EventContext)) Widget = "UiButton"

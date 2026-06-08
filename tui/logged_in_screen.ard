@@ -1,0 +1,91 @@
+use tinear/tui/ui
+
+fn selected_tab(state: ui::State) Str {
+  let tab = state.get_str("tab")
+  match tab {
+    "" => "Inbox",
+    _ => tab,
+  }
+}
+
+fn set_tab(state: ui::State, tab: Str) {
+  state.set_str("tab", tab)
+}
+
+fn toggle_tab(state: ui::State) {
+  match selected_tab(state) {
+    "Inbox" => set_tab(state, "My Issues"),
+    _ => set_tab(state, "Inbox"),
+  }
+}
+
+fn tab_label(label: Str, selected: Bool) ui::Widget {
+  let padded = " {label} "
+  match selected {
+    true => ui::text(padded, style: ui::style(reverse: true)),
+    false => ui::text(padded),
+  }
+}
+
+fn tab_bar(tab: Str) ui::Widget {
+  ui::row([
+    tab_label("Inbox", tab == "Inbox"),
+    ui::text("│"),
+    tab_label("My Issues", tab == "My Issues"),
+  ])
+}
+
+fn body(tab: Str) ui::Widget {
+  match tab {
+    "My Issues" => ui::center(ui::text("My Issues will be ported next.")),
+    _ => ui::center(ui::text("Inbox will be ported next.")),
+  }
+}
+
+fn footer(tab: Str) ui::Widget {
+  let hints = match tab {
+    "My Issues" => "Tab switch  ↑↓←→ select  s status  y cycle  r refresh",
+    _ => "Tab switch  ↑↓ select  r refresh  ↵ open",
+  }
+  ui::text(hints)
+}
+
+fn content(state: ui::State) ui::Widget {
+  let tab = selected_tab(state)
+  ui::column_stretch([
+    tab_bar(tab),
+    ui::divider(),
+    ui::expanded(body(tab)),
+    ui::divider(),
+    footer(tab),
+  ])
+}
+
+fn new() ui::Widget {
+  ui::stateful(fn(state: ui::State) ui::Widget {
+    ui::actions(
+      child: ui::shortcuts(
+        child: content(state),
+        bindings: [
+          "Tab": "tabs.next",
+          "1": "tabs.inbox",
+          "2": "tabs.my_issues",
+        ],
+      ),
+      bindings: [
+        "tabs.next": fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          toggle_tab(state)
+          ui::EventResult::handled
+        },
+        "tabs.inbox": fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          set_tab(state, "Inbox")
+          ui::EventResult::handled
+        },
+        "tabs.my_issues": fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          set_tab(state, "My Issues")
+          ui::EventResult::handled
+        },
+      ],
+    )
+  })
+}

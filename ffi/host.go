@@ -126,12 +126,32 @@ func UiSetStateBool(ctx *UiStateContext, key string, value bool) {
 	ctx.state.SetState(func() { ctx.state.values[key] = value })
 }
 
-func UiText(value string) ui.Widget {
-	return ui.Text{Value: value}
+type UiStyle struct {
+	Bold    bool
+	Reverse bool
 }
 
-func UiTextBold(value string) ui.Widget {
-	return ui.Text{Value: value, Style: ui.Style{Attribute: ui.AttrBold}}
+func UiStyleNew(bold bool, reverse bool) UiStyle {
+	return UiStyle{Bold: bold, Reverse: reverse}
+}
+
+func (s UiStyle) vaxisStyle() ui.Style {
+	style := ui.Style{}
+	if s.Bold {
+		style.Attribute |= ui.AttrBold
+	}
+	if s.Reverse {
+		style.Attribute |= ui.AttrReverse
+	}
+	return style
+}
+
+func UiText(value string, style ardruntime.Maybe[UiStyle]) ui.Widget {
+	widget := ui.Text{Value: value}
+	if style.IsSome() {
+		widget.Style = style.Value().vaxisStyle()
+	}
+	return widget
 }
 
 func UiRow(children []ui.Widget) ui.Widget {
@@ -140,6 +160,14 @@ func UiRow(children []ui.Widget) ui.Widget {
 
 func UiColumn(children []ui.Widget) ui.Widget {
 	return ui.Column(children...)
+}
+
+func UiColumnStretch(children []ui.Widget) ui.Widget {
+	return ui.Flex{
+		Axis:               ui.Vertical,
+		CrossAxisAlignment: ui.CrossAxisStretch,
+		Children:           children,
+	}
 }
 
 func UiColumnMin(children []ui.Widget) ui.Widget {
@@ -165,6 +193,10 @@ func UiSizedBox(width int, height int) ui.Widget {
 
 func UiExpanded(child ui.Widget) ui.Widget {
 	return ui.Expanded(child)
+}
+
+func UiDivider() ui.Widget {
+	return ui.Divider{}
 }
 
 func UiTextField(value string, placeholder string, minWidth int, obscure bool, onChanged func(ui.EventContext, string), onSubmitted func(ui.EventContext, string)) ui.Widget {

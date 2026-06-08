@@ -2,22 +2,9 @@ use ard/io
 
 use tinear/commands/login
 use tinear/config
+use tinear/tui/logged_in_screen
 use tinear/tui/ui
 use tinear/tui/welcome_screen
-
-fn logo_lines() [ui::Widget] {
-  [
-    ui::text_bold("▀█▀ ▀ █▀█ █▀▀ ▄▀█ █▀█"),
-    ui::text_bold(" █  █ █ █ ██▄ █▀█ █▀▄"),
-  ]
-}
-
-fn authorized_screen() ui::Widget {
-  mut children = logo_lines()
-  children.push(ui::sized_box(0, 2))
-  children.push(ui::text("Authorized. Tabs will be ported next."))
-  ui::center(ui::padding_all(1, ui::column_min(children)))
-}
 
 fn app_content(cfg: config::Config) ui::Widget {
   let initial_auth = cfg.has_auth()
@@ -27,7 +14,7 @@ fn app_content(cfg: config::Config) ui::Widget {
       false => initial_auth,
     }
     match authed {
-      true => authorized_screen(),
+      true => logged_in_screen::new(),
       false => welcome_screen::new(state, fn(api_key: Str) Bool {
         match login::login(api_key) {
           ok(_) => true,

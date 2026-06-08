@@ -2,8 +2,8 @@ use tinear/tui/ui
 
 fn logo_lines() [ui::Widget] {
   [
-    ui::text_bold("▀█▀ ▀ █▀█ █▀▀ ▄▀█ █▀█"),
-    ui::text_bold(" █  █ █ █ ██▄ █▀█ █▀▄"),
+    ui::text("▀█▀ ▀ █▀█ █▀▀ ▄▀█ █▀█", style: ui::style(bold: true)),
+    ui::text(" █  █ █ █ ██▄ █▀█ █▀▄", style: ui::style(bold: true)),
   ]
 }
 
