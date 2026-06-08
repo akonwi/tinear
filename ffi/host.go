@@ -63,6 +63,10 @@ func UiShortcuts(child ui.Widget, bindings map[string]string) ui.Widget {
 	return ui.Shortcuts{Bindings: mapped, Child: child}
 }
 
+func UiFocusable(child ui.Widget) ui.Widget {
+	return ui.Focus(nil, child)
+}
+
 func UiQuit(ctx ui.EventContext) {
 	ctx.Quit()
 }

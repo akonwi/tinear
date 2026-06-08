@@ -45,7 +45,7 @@ fn render_rows(store: inbox::InboxStore, cursor: Int) ui::Widget {
   for item, idx in store.items {
     rows.push(render_item(item, idx == cursor))
   }
-  ui::column_stretch(rows)
+  ui::focusable(ui::column_stretch(rows))
 }
 
 fn content(store: inbox::InboxStore, loading: Bool, error: Str, cursor: Int) ui::Widget {

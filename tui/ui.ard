@@ -34,6 +34,10 @@ extern fn actions(child: Widget, bindings: [Str:fn(EventContext, Str) EventResul
 // values are intent names.
 extern fn shortcuts(child: Widget, bindings: [Str:Str]) Widget = "UiShortcuts"
 
+// Make `child` an event focus target. Ancestor shortcuts/actions can then
+// receive keyboard events through the focused path.
+extern fn focusable(child: Widget) Widget = "UiFocusable"
+
 // Request that the current UI app exits. Usually called from an action handler.
 extern fn quit(ctx: EventContext) Void = "UiQuit"
 
