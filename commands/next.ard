@@ -13,8 +13,13 @@ fn app_content(cfg: config::Config) ui::Widget {
       true => true,
       false => initial_auth,
     }
+    let state_api_key = state.get_str("api_key")
+    let api_key = match state_api_key {
+      "" => cfg.api_key,
+      _ => state_api_key,
+    }
     match authed {
-      true => logged_in_screen::new(),
+      true => logged_in_screen::new(api_key),
       false => welcome_screen::new(state, fn(api_key: Str) Bool {
         match login::login(api_key) {
           ok(_) => true,
@@ -29,7 +34,7 @@ fn root(cfg: config::Config) ui::Widget {
   let quit_intent = "tinear.quit"
   ui::actions(
     child: ui::shortcuts(
-      child: app_content(cfg),
+      child: ui::padding_horizontal(1, app_content(cfg)),
       bindings: [
         "q": quit_intent,
         "Ctrl+c": quit_intent,

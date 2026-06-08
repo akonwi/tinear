@@ -1,3 +1,4 @@
+use tinear/tui/inbox_view
 use tinear/tui/ui
 
 fn selected_tab(state: ui::State) Str {
@@ -35,10 +36,10 @@ fn tab_bar(tab: Str) ui::Widget {
   ])
 }
 
-fn body(tab: Str) ui::Widget {
+fn body(tab: Str, inbox: ui::Widget) ui::Widget {
   match tab {
     "My Issues" => ui::center(ui::text("My Issues will be ported next.")),
-    _ => ui::center(ui::text("Inbox will be ported next.")),
+    _ => inbox,
   }
 }
 
@@ -50,22 +51,23 @@ fn footer(tab: Str) ui::Widget {
   ui::text(hints)
 }
 
-fn content(state: ui::State) ui::Widget {
+fn content(state: ui::State, inbox: ui::Widget) ui::Widget {
   let tab = selected_tab(state)
   ui::column_stretch([
     tab_bar(tab),
     ui::divider(),
-    ui::expanded(body(tab)),
+    ui::expanded(body(tab, inbox)),
     ui::divider(),
     footer(tab),
   ])
 }
 
-fn new() ui::Widget {
+fn new(api_key: Str) ui::Widget {
+  let inbox = inbox_view::new(api_key)
   ui::stateful(fn(state: ui::State) ui::Widget {
     ui::actions(
       child: ui::shortcuts(
-        child: content(state),
+        child: content(state, inbox),
         bindings: [
           "Tab": "tabs.next",
           "1": "tabs.inbox",

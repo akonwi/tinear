@@ -14,8 +14,8 @@ fn submit_login(state: ui::State, on_login: fn(Str) Bool, api_key: Str) {
       let ok = on_login(api_key)
       state.set_bool("error", not ok)
       if ok {
+        state.set_str("api_key", api_key)
         state.set_bool("authed", true)
-        state.set_str("api_key", "")
       }
     },
   }

@@ -129,6 +129,23 @@ func UiSetStateBool(ctx *UiStateContext, key string, value bool) {
 	ctx.state.SetState(func() { ctx.state.values[key] = value })
 }
 
+func UiStateInt(ctx *UiStateContext, key string) int {
+	if ctx == nil || ctx.state == nil {
+		return 0
+	}
+	if value, ok := ctx.state.values[key].(int); ok {
+		return value
+	}
+	return 0
+}
+
+func UiSetStateInt(ctx *UiStateContext, key string, value int) {
+	if ctx == nil || ctx.state == nil {
+		return
+	}
+	ctx.state.SetState(func() { ctx.state.values[key] = value })
+}
+
 type UiStyle struct {
 	Bold    bool
 	Reverse bool
@@ -157,8 +174,160 @@ func UiText(value string, style ardruntime.Maybe[UiStyle]) ui.Widget {
 	return widget
 }
 
-func UiRow(children []ui.Widget) ui.Widget {
-	return ui.Row(children...)
+type uiTextLine struct {
+	Value string
+	Style UiStyle
+}
+
+type renderTextLine struct {
+	ui.LeafRenderObject
+	Value string
+	Style ui.Style
+	chars []ui.Character
+}
+
+func UiTextLine(value string, style ardruntime.Maybe[UiStyle]) ui.Widget {
+	lineStyle := UiStyle{}
+	if style.IsSome() {
+		lineStyle = style.Value()
+	}
+	return uiTextLine{Value: value, Style: lineStyle}
+}
+
+func (w uiTextLine) CreateRenderObject(ctx ui.BuildContext) ui.RenderObject {
+	return &renderTextLine{Value: w.Value, Style: w.Style.vaxisStyle()}
+}
+
+func (w uiTextLine) UpdateRenderObject(ctx ui.BuildContext, ro ui.RenderObject) {
+	r := ro.(*renderTextLine)
+	r.Value = w.Value
+	r.Style = w.Style.vaxisStyle()
+	r.Base().MarkNeedsLayout()
+}
+
+func (r *renderTextLine) Layout(ctx ui.LayoutContext, c ui.Constraints) {
+	r.chars = ctx.Characters(r.Value)
+	width := ctx.MeasureText(r.Value, r.Style).Width
+	if c.HasBoundedWidth() {
+		width = c.MaxWidth
+	}
+	r.SetSize(c.Constrain(ui.Size{Width: width, Height: 1}))
+}
+
+func (r *renderTextLine) DryLayout(ctx ui.LayoutContext, c ui.Constraints) ui.Size {
+	width := ctx.MeasureText(r.Value, r.Style).Width
+	if c.HasBoundedWidth() {
+		width = c.MaxWidth
+	}
+	return c.Constrain(ui.Size{Width: width, Height: 1})
+}
+
+func (r *renderTextLine) Paint(p *ui.Painter, off ui.Offset) {
+	size := r.Size()
+	blank := ui.Cell{Character: ui.Character{Grapheme: " ", Width: 1}, Style: r.Style}
+	for x := 0; x < size.Width; x++ {
+		p.DrawCell(ui.Point{X: off.X + x, Y: off.Y}, blank)
+	}
+	x := 0
+	for _, ch := range r.chars {
+		if x+ch.Width > size.Width {
+			break
+		}
+		p.DrawCell(ui.Point{X: off.X + x, Y: off.Y}, ui.Cell{Character: ch, Style: r.Style})
+		x += ch.Width
+	}
+}
+
+type uiBackground struct {
+	Child ui.Widget
+	Style UiStyle
+}
+
+type renderBackground struct {
+	ui.SingleChildRenderObject
+	Style ui.Style
+}
+
+func uiStyledBackground(child ui.Widget, style UiStyle) ui.Widget {
+	return uiBackground{Child: child, Style: style}
+}
+
+func (w uiBackground) WidgetChild() ui.Widget {
+	return w.Child
+}
+
+func (w uiBackground) CreateRenderObject(ctx ui.BuildContext) ui.RenderObject {
+	return &renderBackground{Style: w.Style.vaxisStyle()}
+}
+
+func (w uiBackground) UpdateRenderObject(ctx ui.BuildContext, ro ui.RenderObject) {
+	r := ro.(*renderBackground)
+	r.Style = w.Style.vaxisStyle()
+	r.MarkNeedsLayout()
+}
+
+func (r *renderBackground) Layout(ctx ui.LayoutContext, c ui.Constraints) {
+	width := 0
+	height := 0
+	if child := r.Child(); child != nil {
+		childConstraints := c
+		if c.HasBoundedWidth() {
+			childConstraints.MinWidth = c.MaxWidth
+			childConstraints.MaxWidth = c.MaxWidth
+		}
+		child.Layout(ctx, childConstraints)
+		size := child.Base().Size()
+		width = size.Width
+		height = size.Height
+	}
+	if c.HasBoundedWidth() {
+		width = c.MaxWidth
+	}
+	r.SetSize(c.Constrain(ui.Size{Width: width, Height: height}))
+}
+
+func (r *renderBackground) DryLayout(ctx ui.LayoutContext, c ui.Constraints) ui.Size {
+	width := 0
+	height := 0
+	if child := r.Child(); child != nil {
+		childConstraints := c
+		if c.HasBoundedWidth() {
+			childConstraints.MinWidth = c.MaxWidth
+			childConstraints.MaxWidth = c.MaxWidth
+		}
+		size := ui.DryLayout(ctx, child, childConstraints)
+		width = size.Width
+		height = size.Height
+	}
+	if c.HasBoundedWidth() {
+		width = c.MaxWidth
+	}
+	return c.Constrain(ui.Size{Width: width, Height: height})
+}
+
+func (r *renderBackground) Paint(p *ui.Painter, off ui.Offset) {
+	size := r.Size()
+	blank := ui.Cell{Character: ui.Character{Grapheme: " ", Width: 1}, Style: r.Style}
+	for y := 0; y < size.Height; y++ {
+		for x := 0; x < size.Width; x++ {
+			p.DrawCell(ui.Point{X: off.X + x, Y: off.Y + y}, blank)
+		}
+	}
+	if child := r.Child(); child != nil {
+		child.Paint(p, off)
+	}
+}
+
+func (r *renderBackground) HitTest(*ui.HitTestResult, ui.Point) bool {
+	return false
+}
+
+func UiRow(children []ui.Widget, style ardruntime.Maybe[UiStyle]) ui.Widget {
+	row := ui.Row(children...)
+	if style.IsSome() {
+		return uiStyledBackground(row, style.Value())
+	}
+	return row
 }
 
 func UiColumn(children []ui.Widget) ui.Widget {
@@ -190,8 +359,16 @@ func UiPaddingAll(all int, child ui.Widget) ui.Widget {
 	return ui.Padding(ui.All(all), child)
 }
 
+func UiPaddingHorizontal(horizontal int, child ui.Widget) ui.Widget {
+	return ui.Padding(ui.Symmetric(horizontal, 0), child)
+}
+
 func UiSizedBox(width int, height int) ui.Widget {
 	return ui.SizedBox{Width: width, Height: height}
+}
+
+func UiSizedBoxChild(width int, height int, child ui.Widget) ui.Widget {
+	return ui.SizedBox{Width: width, Height: height, Child: child}
 }
 
 func UiExpanded(child ui.Widget) ui.Widget {

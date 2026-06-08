@@ -44,6 +44,8 @@ extern fn state_str(ctx: StateContext, key: Str) Str = "UiStateString"
 extern fn set_state_str(ctx: StateContext, key: Str, value: Str) Void = "UiSetStateString"
 extern fn state_bool(ctx: StateContext, key: Str) Bool = "UiStateBool"
 extern fn set_state_bool(ctx: StateContext, key: Str, value: Bool) Void = "UiSetStateBool"
+extern fn state_int(ctx: StateContext, key: Str) Int = "UiStateInt"
+extern fn set_state_int(ctx: StateContext, key: Str, value: Int) Void = "UiSetStateInt"
 
 // Ergonomic Ard wrapper around the Go-owned state context. This keeps the raw
 // extern pointer out of app code while still allowing vaxis/ui to own lifecycle
@@ -67,6 +69,14 @@ impl State {
 
   fn set_bool(key: Str, value: Bool) {
     set_state_bool(ctx: self.ctx, key: key, value: value)
+  }
+
+  fn get_int(key: Str) Int {
+    state_int(self.ctx, key)
+  }
+
+  fn set_int(key: Str, value: Int) {
+    set_state_int(ctx: self.ctx, key: key, value: value)
   }
 }
 
@@ -98,7 +108,8 @@ fn style(bold: Bool?, reverse: Bool?) Style {
 }
 
 extern fn text(value: Str, style: Style?) Widget = "UiText"
-extern fn row(children: [Widget]) Widget = "UiRow"
+extern fn text_line(value: Str, style: Style?) Widget = "UiTextLine"
+extern fn row(children: [Widget], style: Style?) Widget = "UiRow"
 extern fn column(children: [Widget]) Widget = "UiColumn"
 extern fn column_stretch(children: [Widget]) Widget = "UiColumnStretch"
 
@@ -108,7 +119,9 @@ extern fn column_min(children: [Widget]) Widget = "UiColumnMin"
 
 extern fn center(child: Widget) Widget = "UiCenter"
 extern fn padding_all(all: Int, child: Widget) Widget = "UiPaddingAll"
+extern fn padding_horizontal(horizontal: Int, child: Widget) Widget = "UiPaddingHorizontal"
 extern fn sized_box(width: Int, height: Int) Widget = "UiSizedBox"
+extern fn sized_box_child(width: Int, height: Int, child: Widget) Widget = "UiSizedBoxChild"
 extern fn expanded(child: Widget) Widget = "UiExpanded"
 extern fn divider() Widget = "UiDivider"
 extern fn text_field(value: Str, placeholder: Str, min_width: Int, obscure: Bool, on_changed: fn(EventContext, Str), on_submitted: fn(EventContext, Str)) Widget = "UiTextField"

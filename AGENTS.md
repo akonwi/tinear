@@ -63,6 +63,17 @@ ard run main.ard                            # run directly
 `vaxis.ard` lives at the project root with `ffi/host.go` holding the Go bindings.
 The Go module includes both.
 
+### `vaxis/ui` binding conventions
+
+- Primitive widget factory functions should accept a nullable `style: Style?`
+  argument when the underlying widget/rendering can be styled.
+- Prefer a consistent, discoverable API like `ui::text(value, style: ...)` and
+  `ui::row(children, style: ...)` over use-case-specific helpers such as
+  `text_reverse`, `background`, or other single-purpose styling wrappers.
+- Keep FFI-only details private/internal when possible. Public Ard functions
+  should translate ergonomic nullable/default arguments into the required Go FFI
+  shape.
+
 Key bits of the event API:
 
 - `vaxis::next_event(vx) Event` — blocking; returns the typed `Event` union

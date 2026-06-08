@@ -1,0 +1,120 @@
+use tinear/models/inbox
+use tinear/tui/ui
+
+fn clamp_cursor(cursor: Int, count: Int) Int {
+  match {
+    count <= 0 => 0,
+    cursor < 0 => 0,
+    cursor >= count => count - 1,
+    _ => cursor
+  }
+}
+
+fn row_text(value: Str, selected: Bool) ui::Widget {
+  match selected {
+    true => ui::text(value, style: ui::style(reverse: true)),
+    false => ui::text(value),
+  }
+}
+
+fn row_line(value: Str, selected: Bool) ui::Widget {
+  match selected {
+    true => ui::text_line(value, style: ui::style(reverse: true)),
+    false => ui::text_line(value),
+  }
+}
+
+fn render_item(item: inbox::Item, selected: Bool) ui::Widget {
+  let children = [
+    ui::sized_box_child(10, 1, row_text(item.target_id, selected)),
+    row_text(" ", selected),
+    row_text(item.actor_name, selected),
+    row_text(" ", selected),
+    row_text(item.type_label, selected),
+    row_text("  ", selected),
+    ui::expanded(row_line(item.title, selected)),
+  ]
+  match selected {
+    true => ui::row(children: children, style: ui::style(reverse: true)),
+    false => ui::row(children),
+  }
+}
+
+fn render_rows(store: inbox::InboxStore, cursor: Int) ui::Widget {
+  mut rows: [ui::Widget] = []
+  for item, idx in store.items {
+    rows.push(render_item(item, idx == cursor))
+  }
+  ui::column_stretch(rows)
+}
+
+fn content(store: inbox::InboxStore, loading: Bool, error: Str, cursor: Int) ui::Widget {
+  if loading {
+    ui::text("Loading inbox…")
+  } else if not error.is_empty() {
+    ui::text("Unable to load inbox", style: ui::style(bold: true))
+  } else if store.items.size() == 0 {
+    ui::center(ui::text("Inbox empty"))
+  } else {
+    render_rows(store, cursor)
+  }
+}
+
+fn new(api_key: Str) ui::Widget {
+  mut store = inbox::new(api_key)
+  mut loaded = false
+  mut loading = false
+  mut error = ""
+
+  ui::stateful(fn(state: ui::State) ui::Widget {
+    if not loaded {
+      loading = true
+      match store.load() {
+        ok(_) => { error = "" },
+        err(e) => { error = e },
+      }
+      loading = false
+      loaded = true
+    }
+
+    let cursor = clamp_cursor(state.get_int("cursor"), store.items.size())
+    ui::actions(
+      child: ui::shortcuts(
+        child: content(
+          store: store,
+          loading: loading,
+          error: error,
+          cursor: cursor,
+        ),
+        bindings: [
+          "Up": "inbox.previous",
+          "k": "inbox.previous",
+          "Down": "inbox.next",
+          "j": "inbox.next",
+          "r": "inbox.refresh",
+        ],
+      ),
+      bindings: [
+        "inbox.previous": fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          state.set_int("cursor", clamp_cursor(cursor - 1, store.items.size()))
+          ui::EventResult::handled
+        },
+        "inbox.next": fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          state.set_int("cursor", clamp_cursor(cursor + 1, store.items.size()))
+          ui::EventResult::handled
+        },
+        "inbox.refresh": fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          loading = true
+          match store.load() {
+            ok(_) => { error = "" },
+            err(e) => { error = e },
+          }
+          loading = false
+          loaded = true
+          state.set_int("cursor", clamp_cursor(cursor, store.items.size()))
+          ui::EventResult::handled
+        },
+      ],
+    )
+  })
+}
