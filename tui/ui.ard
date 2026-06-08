@@ -19,19 +19,16 @@ enum EventResult {
   handled,
 }
 
-extern type ActionFunc = "projectffi.UiStringActionFunc"
+
 
 // Start a vaxis/ui app with `root` as the root widget. App-level behavior such
 // as quit shortcuts should be composed into `root` with `actions`/`shortcuts`.
 extern fn run(root: Widget) Void!Str = "UiRun"
 
-extern fn action_func(handler: fn(EventContext, Str) EventResult) ActionFunc = "UiActionFunc"
-
 // Wrap `child` with action handlers. When a descendant invokes an intent,
 // vaxis/ui searches outward through ancestor `actions` widgets for a matching
-// handler. Map keys are intent names; handlers return `event_handled()` or
-// `event_ignored()`.
-extern fn actions(child: Widget, bindings: [Str:ActionFunc]) Widget = "UiActions"
+// handler. Map keys are intent names.
+extern fn actions(child: Widget, bindings: [Str:fn(EventContext, Str) EventResult]) Widget = "UiActions"
 
 // Wrap `child` with shortcut mappings. Key patterns use vaxis/ui's
 // Key.MatchString format, e.g. "q", "Enter", "Ctrl+c", "Shift+Tab". Map

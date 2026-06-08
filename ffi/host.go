@@ -3,7 +3,6 @@ package ffi
 import (
 	"fmt"
 	"os/exec"
-	"reflect"
 	goruntime "runtime"
 	"strings"
 	"time"
@@ -35,37 +34,19 @@ func TestVaxisNil() *vaxis.Vaxis {
 
 type UiStringIntent string
 
-type UiStringActionFunc func(ui.EventContext, string) ui.EventResult
-
 func (i UiStringIntent) IntentType() ui.IntentType { return ui.IntentType(i) }
 
 func UiRun(root ui.Widget) error {
 	return ui.Run(root)
 }
 
-func UiActionFunc(handler any) UiStringActionFunc {
-	return func(ctx ui.EventContext, intent string) ui.EventResult {
-		if handler == nil {
-			return ui.EventIgnored
-		}
-		result := reflect.ValueOf(handler).Call([]reflect.Value{reflect.ValueOf(ctx), reflect.ValueOf(intent)})
-		if len(result) == 0 {
-			return ui.EventIgnored
-		}
-		return ui.EventResult(result[0].Int())
-	}
-}
-
-func UiActions(child ui.Widget, bindings map[string]UiStringActionFunc) ui.Widget {
+func UiActions[T ~int](child ui.Widget, bindings map[string]func(ui.EventContext, string) T) ui.Widget {
 	mapped := map[ui.IntentType]ui.ActionFunc{}
 	for name, handler := range bindings {
 		intentName := name
 		action := handler
 		mapped[ui.IntentType(intentName)] = func(ctx ui.EventContext, intent ui.Intent) ui.EventResult {
-			if action == nil {
-				return ui.EventIgnored
-			}
-			return action(ctx, string(intent.IntentType()))
+			return ui.EventResult(action(ctx, string(intent.IntentType())))
 		}
 	}
 	return ui.Actions{Bindings: mapped, Child: child}

@@ -93,10 +93,10 @@ fn root(cfg: config::Config) ui::Widget {
       ],
     ),
     bindings: [
-      quit_intent: ui::action_func(fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+      quit_intent: fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
         ui::quit(ctx)
         ui::EventResult::handled
-      }),
+      },
     ],
   )
 }
