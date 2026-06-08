@@ -11,23 +11,23 @@ fn logo_lines() [ui::Widget] {
   ]
 }
 
-fn submit_login(ctx: ui::StateContext, on_login: fn(Str) Bool, api_key: Str) {
+fn submit_login(state: ui::State, on_login: fn(Str) Bool, api_key: Str) {
   match api_key.is_empty() {
-    true => ui::set_state_bool(ctx, "error", true),
+    true => state.set_bool("error", true),
     false => {
       let ok = on_login(api_key)
-      ui::set_state_bool(ctx, "error", not ok)
+      state.set_bool("error", not ok)
       if ok {
-        ui::set_state_bool(ctx, "authed", true)
-        ui::set_state_str(ctx, "api_key", "")
+        state.set_bool("authed", true)
+        state.set_str("api_key", "")
       }
     },
   }
 }
 
-fn welcome_screen(ctx: ui::StateContext, on_login: fn(Str) Bool) ui::Widget {
-  let api_key = ui::state_str(ctx, "api_key")
-  let has_error = ui::state_bool(ctx, "error")
+fn welcome_screen(state: ui::State, on_login: fn(Str) Bool) ui::Widget {
+  let api_key = state.get_str("api_key")
+  let has_error = state.get_bool("error")
   mut children = logo_lines()
   children.push(ui::sized_box(0, 2))
   children.push(ui::text("Enter your Linear API key"))
@@ -38,16 +38,16 @@ fn welcome_screen(ctx: ui::StateContext, on_login: fn(Str) Bool) ui::Widget {
     min_width: 48,
     obscure: false,
     on_changed: fn(_event_ctx: ui::EventContext, value: Str) {
-      ui::set_state_str(ctx, "api_key", value)
-      ui::set_state_bool(ctx, "error", false)
+      state.set_str("api_key", value)
+      state.set_bool("error", false)
     },
     on_submitted: fn(_event_ctx: ui::EventContext, value: Str) {
-      submit_login(ctx, on_login, value)
+      submit_login(state: state, on_login: on_login, api_key: value)
     },
   ))
   children.push(ui::sized_box(0, 1))
   children.push(ui::button("Login", fn(_event_ctx: ui::EventContext) {
-    submit_login(ctx, on_login, ui::state_str(ctx, "api_key"))
+    submit_login(state: state, on_login: on_login, api_key: state.get_str("api_key"))
   }))
   if has_error {
     children.push(ui::sized_box(0, 1))
@@ -65,14 +65,14 @@ fn authorized_screen() ui::Widget {
 
 fn app_content(cfg: config::Config) ui::Widget {
   let initial_auth = cfg.has_auth()
-  ui::stateful(fn(ctx: ui::StateContext) ui::Widget {
-    let authed = match ui::state_bool(ctx, "authed") {
+  ui::stateful(fn(state: ui::State) ui::Widget {
+    let authed = match state.get_bool("authed") {
       true => true,
       false => initial_auth,
     }
     match authed {
       true => authorized_screen(),
-      false => welcome_screen(ctx, fn(api_key: Str) Bool {
+      false => welcome_screen(state, fn(api_key: Str) Bool {
         match login::login(api_key) {
           ok(_) => true,
           err(_) => false,
