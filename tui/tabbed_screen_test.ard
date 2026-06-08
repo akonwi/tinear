@@ -68,3 +68,17 @@ test fn test_tabbed_screen_renders_my_issues_body_and_hints_after_tab_change() V
   try testing::assert(test_line(2).starts_with("My Issues body"), "expected my issues body child, got '{test_line(2)}'")
   testing::assert(test_line(5).starts_with("↑↓←→ select  s status  y cycle  r refresh"), "expected my issues key hints, got '{test_line(5)}'")
 }
+
+test fn test_tabbed_screen_opens_empty_issue_tab_on_issue_selected_event() Void!Str {
+  mut screen = tabbed_screen::new("test-api-key")
+  let ctx = screen_context_with_children(screen)
+  mut event = view::event(vaxis::CustomEvent{name: "issue.selected", payload: Dynamic::from("AKO-123")})
+  mut frame = test_frame(ctx, 60, 6)
+
+  screen.handle_event(ctx, event)
+  screen.render(frame)
+
+  try testing::assert(event.is_stopped(), "issue.selected event should be consumed")
+  try testing::assert(test_line(0).starts_with(" Inbox │ My Issues │ AKO-123 "), "expected opened issue tab, got '{test_line(0)}'")
+  testing::assert(test_line(2).starts_with("Issue AKO-123 details will load here"), "expected empty issue tab body, got '{test_line(2)}'")
+}

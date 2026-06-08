@@ -86,6 +86,8 @@ Key bits of the event API:
   the byte-based versions are only safe for ASCII.
 - **Auth header**: `Authorization: <raw key>` — no `Bearer` prefix. Linear
   rejects it.
+- **Named args**: when calling a function with more than two arguments, use
+  named arguments for readability.
 
 ## Commands
 

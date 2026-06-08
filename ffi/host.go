@@ -3,19 +3,22 @@ package ffi
 import (
 	"fmt"
 	"os/exec"
-	"runtime"
+	"reflect"
+	goruntime "runtime"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"git.sr.ht/~rockorager/vaxis"
+	"git.sr.ht/~rockorager/vaxis/ui"
+	ardruntime "github.com/akonwi/ard/runtime"
 )
 
 // OpenURL launches the system's default browser/handler for the given URL.
 func OpenURL(url string) error {
 	var cmd *exec.Cmd
-	switch runtime.GOOS {
+	switch goruntime.GOOS {
 	case "darwin":
 		cmd = exec.Command("open", url)
 	case "windows":
@@ -28,6 +31,186 @@ func OpenURL(url string) error {
 
 func TestVaxisNil() *vaxis.Vaxis {
 	return nil
+}
+
+type UiStringIntent string
+
+type UiStringActionFunc func(ui.EventContext, string) ui.EventResult
+
+func (i UiStringIntent) IntentType() ui.IntentType { return ui.IntentType(i) }
+
+func UiRun(root ui.Widget) error {
+	return ui.Run(root)
+}
+
+func UiActionFunc(handler any) UiStringActionFunc {
+	return func(ctx ui.EventContext, intent string) ui.EventResult {
+		if handler == nil {
+			return ui.EventIgnored
+		}
+		result := reflect.ValueOf(handler).Call([]reflect.Value{reflect.ValueOf(ctx), reflect.ValueOf(intent)})
+		if len(result) == 0 {
+			return ui.EventIgnored
+		}
+		return ui.EventResult(result[0].Int())
+	}
+}
+
+func UiActions(child ui.Widget, bindings map[string]UiStringActionFunc) ui.Widget {
+	mapped := map[ui.IntentType]ui.ActionFunc{}
+	for name, handler := range bindings {
+		intentName := name
+		action := handler
+		mapped[ui.IntentType(intentName)] = func(ctx ui.EventContext, intent ui.Intent) ui.EventResult {
+			if action == nil {
+				return ui.EventIgnored
+			}
+			return action(ctx, string(intent.IntentType()))
+		}
+	}
+	return ui.Actions{Bindings: mapped, Child: child}
+}
+
+func UiShortcuts(child ui.Widget, bindings map[string]string) ui.Widget {
+	mapped := map[string]ui.Intent{}
+	for binding, intentName := range bindings {
+		mapped[binding] = UiStringIntent(intentName)
+	}
+	return ui.Shortcuts{Bindings: mapped, Child: child}
+}
+
+func UiQuit(ctx ui.EventContext) {
+	ctx.Quit()
+}
+
+type UiStateContext struct{ state *ardState }
+
+type ardStateful struct {
+	build func(*UiStateContext) ui.Widget
+}
+
+type ardState struct {
+	ui.StateBase
+	values map[string]any
+	build  func(*UiStateContext) ui.Widget
+}
+
+func UiStateful(build func(*UiStateContext) ui.Widget) ui.Widget {
+	return ardStateful{build: build}
+}
+
+func (w ardStateful) CreateState() ui.State {
+	return &ardState{values: map[string]any{}, build: w.build}
+}
+
+func (s *ardState) DidUpdateWidget(old ui.Widget) {
+	s.build = s.Widget().(ardStateful).build
+}
+
+func (s *ardState) Build(ctx ui.BuildContext) ui.Widget {
+	return s.build(&UiStateContext{state: s})
+}
+
+func UiStateString(ctx *UiStateContext, key string) string {
+	if ctx == nil || ctx.state == nil {
+		return ""
+	}
+	if value, ok := ctx.state.values[key].(string); ok {
+		return value
+	}
+	return ""
+}
+
+func UiSetStateString(ctx *UiStateContext, key string, value string) {
+	if ctx == nil || ctx.state == nil {
+		return
+	}
+	ctx.state.SetState(func() { ctx.state.values[key] = value })
+}
+
+func UiStateBool(ctx *UiStateContext, key string) bool {
+	if ctx == nil || ctx.state == nil {
+		return false
+	}
+	if value, ok := ctx.state.values[key].(bool); ok {
+		return value
+	}
+	return false
+}
+
+func UiSetStateBool(ctx *UiStateContext, key string, value bool) {
+	if ctx == nil || ctx.state == nil {
+		return
+	}
+	ctx.state.SetState(func() { ctx.state.values[key] = value })
+}
+
+func UiText(value string) ui.Widget {
+	return ui.Text{Value: value}
+}
+
+func UiTextBold(value string) ui.Widget {
+	return ui.Text{Value: value, Style: ui.Style{Attribute: ui.AttrBold}}
+}
+
+func UiRow(children []ui.Widget) ui.Widget {
+	return ui.Row(children...)
+}
+
+func UiColumn(children []ui.Widget) ui.Widget {
+	return ui.Column(children...)
+}
+
+func UiColumnMin(children []ui.Widget) ui.Widget {
+	return ui.Flex{
+		Axis:               ui.Vertical,
+		MainAxisSize:       ui.MainAxisSizeMin,
+		CrossAxisAlignment: ui.CrossAxisCenter,
+		Children:           children,
+	}
+}
+
+func UiCenter(child ui.Widget) ui.Widget {
+	return ui.Center(child)
+}
+
+func UiPaddingAll(all int, child ui.Widget) ui.Widget {
+	return ui.Padding(ui.All(all), child)
+}
+
+func UiSizedBox(width int, height int) ui.Widget {
+	return ui.SizedBox{Width: width, Height: height}
+}
+
+func UiExpanded(child ui.Widget) ui.Widget {
+	return ui.Expanded(child)
+}
+
+func UiTextField(value string, placeholder string, minWidth int, obscure bool, onChanged func(ui.EventContext, string), onSubmitted func(ui.EventContext, string)) ui.Widget {
+	return ui.TextField{
+		Value:       value,
+		Placeholder: placeholder,
+		MinWidth:    minWidth,
+		ObscureText: obscure,
+		OnChanged: func(ctx ui.EventContext, next string) {
+			if onChanged != nil {
+				onChanged(ctx, next)
+			}
+		},
+		OnSubmitted: func(ctx ui.EventContext, submitted string) {
+			if onSubmitted != nil {
+				onSubmitted(ctx, submitted)
+			}
+		},
+	}
+}
+
+func UiButton(label string, onPressed func(ui.EventContext)) ui.Widget {
+	return ui.Button{Label: label, OnPressed: func(ctx ui.EventContext) {
+		if onPressed != nil {
+			onPressed(ctx)
+		}
+	}}
 }
 
 var testRenderMarks = map[int]bool{}
@@ -597,7 +780,8 @@ type PasteEvent struct {
 }
 
 type CustomEvent struct {
-	Name string
+	Name    string
+	Payload ardruntime.Maybe[any]
 }
 
 func IsPasteEvent(e vaxis.Event) bool {
@@ -639,8 +823,8 @@ func PostRedrawEvent(vx *vaxis.Vaxis) {
 	vx.PostEvent(vaxis.Redraw{})
 }
 
-func PostCustomEvent(vx *vaxis.Vaxis, name string) {
-	vx.PostEvent(CustomEvent{Name: name})
+func PostCustomEvent(vx *vaxis.Vaxis, name string, payload ardruntime.Maybe[any]) {
+	vx.PostEvent(CustomEvent{Name: name, Payload: payload})
 }
 
 func PostColorThemeEvent(vx *vaxis.Vaxis, dark bool) {
@@ -870,6 +1054,13 @@ func EventCustomName(e vaxis.Event) string {
 		return c.Name
 	}
 	return fmt.Sprintf("%T", e)
+}
+
+func EventCustomPayload(e vaxis.Event) ardruntime.Maybe[any] {
+	if c, ok := e.(CustomEvent); ok {
+		return c.Payload
+	}
+	return ardruntime.None[any]()
 }
 
 func drainStartupEvents(vx *vaxis.Vaxis) {

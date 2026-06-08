@@ -1,3 +1,5 @@
+use ard/decode
+
 use tinear/tui/core/stack
 use tinear/tui/core/text
 use tinear/tui/core/view
@@ -13,6 +15,7 @@ struct TabbedScreen {
   tabs: mut tab_bar::TabBar,
   inbox: mut inbox_screen::InboxScreen,
   my_issues: mut my_issues_screen::MyIssuesScreen,
+  issue_tab_ids: [Str],
 }
 
 fn new(api_key: Str) TabbedScreen {
@@ -25,6 +28,7 @@ fn new(api_key: Str) TabbedScreen {
     tabs: tabs,
     inbox: inbox,
     my_issues: my_issues,
+    issue_tab_ids: [],
   }
 }
 
@@ -72,6 +76,29 @@ impl TabbedScreen {
     self.inbox.active = active == "Inbox"
     self.my_issues.active = active == "My Issues"
   }
+
+  fn mut open_empty_issue_tab(issue_id: Str) {
+    // Re-select an existing issue tab instead of opening duplicates.
+    mut found = false
+    for existing, idx in self.issue_tab_ids {
+      if existing == issue_id {
+        self.tabs.select(idx + 2)
+        found = true
+      }
+    }
+
+    if not found {
+      mut ids = self.issue_tab_ids
+      ids.push(issue_id)
+      self.issue_tab_ids = ids
+      self.tabs.push_and_select(issue_id)
+    }
+    self.sync_active_child()
+  }
+
+  fn issue_tab_body(label: Str) view::View {
+    text::new("Issue {label} details will load here")
+  }
 }
 
 impl view::View for TabbedScreen {
@@ -91,18 +118,31 @@ impl view::View for TabbedScreen {
           event.stop()
         }
       },
+      CustomEvent(custom) => {
+        if custom.name == "issue.selected" {
+          match custom.payload {
+            payload => {
+              let issue_id = decode::run(payload, decode::string).expect("issue.selected payload must be a string")
+              self.open_empty_issue_tab(issue_id)
+              event.stop()
+            },
+            _ => (),
+          }
+        }
+      },
       _ => (),
     }
   }
 
   fn render(mut frame: view::Frame) {
-    let body: view::View = match self.tabs.selected_label() {
+    let selected = self.tabs.selected_label()
+    let body: view::View = match selected {
       "Inbox" => view::child(1),
       "My Issues" => view::child(2),
-      _ => text::new("Coming soon"),
+      _ => self.issue_tab_body(selected),
     }
 
-    let hints = match self.tabs.selected_label() {
+    let hints = match selected {
       "My Issues" => key_hints(["↑↓←→ select", "s status", "y cycle", "r refresh"]),
       _ => key_hints(["↑↓ select", "r refresh", "↵ open"]),
     }

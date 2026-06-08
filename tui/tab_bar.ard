@@ -44,6 +44,18 @@ impl TabBar {
     }
   }
 
+  fn mut push(label: Str) Int {
+    mut labels = self.labels
+    labels.push(label)
+    self.labels = labels
+    self.labels.size() - 1
+  }
+
+  fn mut push_and_select(label: Str) {
+    let idx = self.push(label)
+    self.select(idx)
+  }
+
   fn mut next() {
     match self.labels.size() == 0 {
       true => { self.selected = 0 },

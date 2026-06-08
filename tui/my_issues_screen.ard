@@ -193,6 +193,18 @@ impl MyIssuesScreen {
     }
   }
 
+  fn activate_selected_issue(ctx: view::Context) {
+    match self.selected_issue() {
+      issue => {
+        ctx.post_event(vaxis::CustomEvent{
+          name: "issue.selected",
+          payload: Dynamic::from(issue.id),
+        })
+      },
+      _ => (),
+    }
+  }
+
   fn mut clamp_cursor() {
     match self.store.columns.size() == 0 {
       true => {
@@ -407,6 +419,7 @@ impl MyIssuesScreen {
       "h" => self.move_left(),
       "Right" => self.move_right(),
       "l" => self.move_right(),
+        "Enter" => self.activate_selected_issue(ctx),
         "r" => self.refresh(ctx),
         "s" => self.open_state_picker(),
         "y" => self.open_cycle_picker(),

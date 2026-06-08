@@ -38,7 +38,7 @@ impl view::View for IssueCard {
         match e.name {
           "Enter" => {
             if self.selected {
-              ctx.dispatch_event(vaxis::CustomEvent{
+              ctx.post_event(vaxis::CustomEvent{
                 name: "issue.selected",
                 payload: Dynamic::from(self.issue.id)
               })

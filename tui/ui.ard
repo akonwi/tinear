@@ -1,0 +1,66 @@
+// Thin Ard bindings for git.sr.ht/~rockorager/vaxis/ui.
+//
+// These bindings intentionally expose real Go ui types instead of opaque any
+// handles so Ard-generated Go can pass values to host wrappers without casts.
+
+extern type Widget = "ui.Widget"
+extern type EventContext = "ui.EventContext"
+extern type BuildContext = "ui.BuildContext"
+extern type State = "ui.State"
+extern type StateContext = "*projectffi.UiStateContext"
+
+// Intents are semantic action names, e.g. "tinear.quit" or "issue.open".
+// Shortcuts map key presses to intent names; Actions map intent names to
+// behavior. This keeps keybindings separate from application behavior and
+// allows multiple keys to invoke the same intent.
+// Mirrors vaxis/ui EventResult values: Ignored = 0, Handled = 1.
+enum EventResult {
+  ignored,
+  handled,
+}
+
+extern type ActionFunc = "projectffi.UiStringActionFunc"
+
+// Start a vaxis/ui app with `root` as the root widget. App-level behavior such
+// as quit shortcuts should be composed into `root` with `actions`/`shortcuts`.
+extern fn run(root: Widget) Void!Str = "UiRun"
+
+extern fn action_func(handler: fn(EventContext, Str) EventResult) ActionFunc = "UiActionFunc"
+
+// Wrap `child` with action handlers. When a descendant invokes an intent,
+// vaxis/ui searches outward through ancestor `actions` widgets for a matching
+// handler. Map keys are intent names; handlers return `event_handled()` or
+// `event_ignored()`.
+extern fn actions(child: Widget, bindings: [Str:ActionFunc]) Widget = "UiActions"
+
+// Wrap `child` with shortcut mappings. Key patterns use vaxis/ui's
+// Key.MatchString format, e.g. "q", "Enter", "Ctrl+c", "Shift+Tab". Map
+// values are intent names.
+extern fn shortcuts(child: Widget, bindings: [Str:Str]) Widget = "UiShortcuts"
+
+// Request that the current UI app exits. Usually called from an action handler.
+extern fn quit(ctx: EventContext) Void = "UiQuit"
+
+// Generic Ard-backed stateful widget. `build` is called by vaxis/ui with a
+// StateContext; use the state_* helpers below for small retained values.
+extern fn stateful(build: fn(StateContext) Widget) Widget = "UiStateful"
+extern fn state_str(ctx: StateContext, key: Str) Str = "UiStateString"
+extern fn set_state_str(ctx: StateContext, key: Str, value: Str) Void = "UiSetStateString"
+extern fn state_bool(ctx: StateContext, key: Str) Bool = "UiStateBool"
+extern fn set_state_bool(ctx: StateContext, key: Str, value: Bool) Void = "UiSetStateBool"
+
+extern fn text(value: Str) Widget = "UiText"
+extern fn text_bold(value: Str) Widget = "UiTextBold"
+extern fn row(children: [Widget]) Widget = "UiRow"
+extern fn column(children: [Widget]) Widget = "UiColumn"
+
+// Vertical column that sizes to its contents instead of expanding to fill its
+// parent. Useful inside `center` when the content block should be centered.
+extern fn column_min(children: [Widget]) Widget = "UiColumnMin"
+
+extern fn center(child: Widget) Widget = "UiCenter"
+extern fn padding_all(all: Int, child: Widget) Widget = "UiPaddingAll"
+extern fn sized_box(width: Int, height: Int) Widget = "UiSizedBox"
+extern fn expanded(child: Widget) Widget = "UiExpanded"
+extern fn text_field(value: Str, placeholder: Str, min_width: Int, obscure: Bool, on_changed: fn(EventContext, Str), on_submitted: fn(EventContext, Str)) Widget = "UiTextField"
+extern fn button(label: Str, on_pressed: fn(EventContext)) Widget = "UiButton"

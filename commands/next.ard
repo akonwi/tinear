@@ -1,109 +1,107 @@
 use ard/io
 
+use tinear/commands/login
 use tinear/config
-use tinear/tui/tabbed_screen
-use tinear/tui/core/box
-use tinear/tui/core/style
-use tinear/tui/core/view
-use tinear/tui/key_debug_toast
-use tinear/tui/welcome_screen
-use tinear/vaxis
+use tinear/tui/ui
 
-// Framework demo / sketch toward a v2 UI.
-//
-// Renders the entire screen inside a single fullscreen Box. Inside:
-// a tab bar pinned at the top, the items list filling the middle,
-// and a keybinding hint bar pinned at the bottom — all expressed
-// via stack::vsplit's constraint-based layout.
-
-struct App {
-  vx: vaxis::Vaxis,
-  config: config::Config,
-  screen: mut view::View,
-  key_debug: mut key_debug_toast::KeyDebugToast,
+fn logo_lines() [ui::Widget] {
+  [
+    ui::text_bold("▀█▀ ▀ █▀█ █▀▀ ▄▀█ █▀█"),
+    ui::text_bold(" █  █ █ █ ██▄ █▀█ █▀▄"),
+  ]
 }
 
-fn App::new(vx: vaxis::Vaxis, config: config::Config) App {
-  mut screen: view::View = view::Empty{}
-  mut key_debug = key_debug_toast::new()
-  App{
-    vx: vx,
-    config: config,
-    screen: screen,
-    key_debug: key_debug,
+fn submit_login(ctx: ui::StateContext, on_login: fn(Str) Bool, api_key: Str) {
+  match api_key.is_empty() {
+    true => ui::set_state_bool(ctx, "error", true),
+    false => {
+      let ok = on_login(api_key)
+      ui::set_state_bool(ctx, "error", not ok)
+      if ok {
+        ui::set_state_bool(ctx, "authed", true)
+        ui::set_state_str(ctx, "api_key", "")
+      }
+    },
   }
 }
 
-impl App {
-  fn mut init(ctx: view::Context) {
-    ctx.add_overlay(self.key_debug)
-    match self.config.has_auth() {
-      true => {
-        self.screen = tabbed_screen::new(self.config.api_key)
-        ctx.add_child(self.screen)
-      },
-      false => {
-        self.screen = welcome_screen::new()
-        ctx.add_child(self.screen)
-      },
+fn welcome_screen(ctx: ui::StateContext, on_login: fn(Str) Bool) ui::Widget {
+  let api_key = ui::state_str(ctx, "api_key")
+  let has_error = ui::state_bool(ctx, "error")
+  mut children = logo_lines()
+  children.push(ui::sized_box(0, 2))
+  children.push(ui::text("Enter your Linear API key"))
+  children.push(ui::sized_box(0, 1))
+  children.push(ui::text_field(
+    value: api_key,
+    placeholder: "Paste Linear API key",
+    min_width: 48,
+    obscure: false,
+    on_changed: fn(_event_ctx: ui::EventContext, value: Str) {
+      ui::set_state_str(ctx, "api_key", value)
+      ui::set_state_bool(ctx, "error", false)
+    },
+    on_submitted: fn(_event_ctx: ui::EventContext, value: Str) {
+      submit_login(ctx, on_login, value)
+    },
+  ))
+  children.push(ui::sized_box(0, 1))
+  children.push(ui::button("Login", fn(_event_ctx: ui::EventContext) {
+    submit_login(ctx, on_login, ui::state_str(ctx, "api_key"))
+  }))
+  if has_error {
+    children.push(ui::sized_box(0, 1))
+    children.push(ui::text("Invalid API token"))
+  }
+  ui::center(ui::padding_all(1, ui::column_min(children)))
+}
+
+fn authorized_screen() ui::Widget {
+  mut children = logo_lines()
+  children.push(ui::sized_box(0, 2))
+  children.push(ui::text("Authorized. Tabs will be ported next."))
+  ui::center(ui::padding_all(1, ui::column_min(children)))
+}
+
+fn app_content(cfg: config::Config) ui::Widget {
+  let initial_auth = cfg.has_auth()
+  ui::stateful(fn(ctx: ui::StateContext) ui::Widget {
+    let authed = match ui::state_bool(ctx, "authed") {
+      true => true,
+      false => initial_auth,
     }
-  }
-
-  fn render(mut frame: view::Frame) {
-    let root_style = style::Style{
-      padding: style::Padding::x(1),
-      width: frame.width(),
-      height: frame.height(),
+    match authed {
+      true => authorized_screen(),
+      false => welcome_screen(ctx, fn(api_key: Str) Bool {
+        match login::login(api_key) {
+          ok(_) => true,
+          err(_) => false,
+        }
+      }),
     }
+  })
+}
 
-    box::new(self.screen, root_style).render(frame)
-  }
-
-  fn mut handle_event(ctx: view::Context, event: vaxis::Event) {
-    ctx.dispatch_event(event)
-  }
+fn root(cfg: config::Config) ui::Widget {
+  let quit_intent = "tinear.quit"
+  ui::actions(
+    child: ui::shortcuts(
+      child: app_content(cfg),
+      bindings: [
+        "q": quit_intent,
+        "Ctrl+c": quit_intent,
+      ],
+    ),
+    bindings: [
+      quit_intent: ui::action_func(fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+        ui::quit(ctx)
+        ui::EventResult::handled
+      }),
+    ],
+  )
 }
 
 fn run() {
-  let config = try config::load() -> err { io::print("Unable to load config: {err}") }
-  let vx = vaxis::new("tinear next").expect("vaxis::new")
-
-  mut app = App::new(vx, config)
-  let ctx = view::context(vx)
-  app.init(ctx)
-  mut running = true
-
-  while running {
-    mut frame = view::root(ctx)
-    vaxis::hide_cursor(vx)
-    frame.clear()
-    app.render(frame)
-    frame.flush()
-    let event = vaxis::next_event(vx)
-    match event {
-      KeyEvent(key) => {
-        if key.ctrl and key.name == "c" {
-          running = false
-        } else {
-          app.handle_event(ctx, event)
-        }
-      },
-      RedrawEvent => {
-        // fixme: shouldn't be doing this on every redraw. eventually use a specific event
-        match config::load() {
-          ok(cfg) => {
-            let had_auth = app.config.has_auth()
-            app.config = cfg
-            if not had_auth and app.config.has_auth() {
-              app.init(ctx)
-            }
-          },
-          err(_) => (),
-        }
-      },
-      _ => app.handle_event(ctx, event),
-    }
-  }
-
-  vaxis::close(vx).expect("vaxis::close")
+  let cfg = try config::load() -> err { io::print("Unable to load config: {err}") }
+  try ui::run(root(cfg)) -> err { io::print("Unable to run next UI: {err}") }
 }
