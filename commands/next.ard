@@ -3,57 +3,13 @@ use ard/io
 use tinear/commands/login
 use tinear/config
 use tinear/tui/ui
+use tinear/tui/welcome_screen
 
 fn logo_lines() [ui::Widget] {
   [
     ui::text_bold("▀█▀ ▀ █▀█ █▀▀ ▄▀█ █▀█"),
     ui::text_bold(" █  █ █ █ ██▄ █▀█ █▀▄"),
   ]
-}
-
-fn submit_login(state: ui::State, on_login: fn(Str) Bool, api_key: Str) {
-  match api_key.is_empty() {
-    true => state.set_bool("error", true),
-    false => {
-      let ok = on_login(api_key)
-      state.set_bool("error", not ok)
-      if ok {
-        state.set_bool("authed", true)
-        state.set_str("api_key", "")
-      }
-    },
-  }
-}
-
-fn welcome_screen(state: ui::State, on_login: fn(Str) Bool) ui::Widget {
-  let api_key = state.get_str("api_key")
-  let has_error = state.get_bool("error")
-  mut children = logo_lines()
-  children.push(ui::sized_box(0, 2))
-  children.push(ui::text("Enter your Linear API key"))
-  children.push(ui::sized_box(0, 1))
-  children.push(ui::text_field(
-    value: api_key,
-    placeholder: "Paste Linear API key",
-    min_width: 48,
-    obscure: false,
-    on_changed: fn(_event_ctx: ui::EventContext, value: Str) {
-      state.set_str("api_key", value)
-      state.set_bool("error", false)
-    },
-    on_submitted: fn(_event_ctx: ui::EventContext, value: Str) {
-      submit_login(state: state, on_login: on_login, api_key: value)
-    },
-  ))
-  children.push(ui::sized_box(0, 1))
-  children.push(ui::button("Login", fn(_event_ctx: ui::EventContext) {
-    submit_login(state: state, on_login: on_login, api_key: state.get_str("api_key"))
-  }))
-  if has_error {
-    children.push(ui::sized_box(0, 1))
-    children.push(ui::text("Invalid API token"))
-  }
-  ui::center(ui::padding_all(1, ui::column_min(children)))
 }
 
 fn authorized_screen() ui::Widget {
@@ -72,7 +28,7 @@ fn app_content(cfg: config::Config) ui::Widget {
     }
     match authed {
       true => authorized_screen(),
-      false => welcome_screen(state, fn(api_key: Str) Bool {
+      false => welcome_screen::new(state, fn(api_key: Str) Bool {
         match login::login(api_key) {
           ok(_) => true,
           err(_) => false,
