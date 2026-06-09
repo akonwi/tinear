@@ -143,7 +143,6 @@ fn border(top: Bool?, right: Bool?, bottom: Bool?, left: Bool?, style: Style?) B
 }
 
 extern fn text(value: Str, style: Style?) Widget = "UiText"
-extern fn text_line(value: Str, style: Style?) Widget = "UiTextLine"
 extern fn row(children: [Widget], style: Style?) Widget = "UiRow"
 extern fn column(children: [Widget]) Widget = "UiColumn"
 extern fn column_stretch(children: [Widget]) Widget = "UiColumnStretch"

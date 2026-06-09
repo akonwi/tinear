@@ -28,8 +28,8 @@ fn row_text(value: Str, selected: Bool) ui::Widget {
 
 fn row_line(value: Str, selected: Bool) ui::Widget {
   match selected {
-    true => ui::text_line(value, style: ui::style(reverse: true)),
-    false => ui::text_line(value),
+    true => ui::box(ui::text(value), style: ui::style(reverse: true)),
+    false => ui::text(value),
   }
 }
 
