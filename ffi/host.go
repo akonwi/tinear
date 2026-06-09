@@ -55,18 +55,87 @@ func UiActions[T ~int](child ui.Widget, bindings map[string]func(ui.EventContext
 	return ui.Actions{Bindings: mapped, Child: child}
 }
 
+type uiShortcutsCompat struct {
+	Bindings map[string]ui.Intent
+	Child    ui.Widget
+}
+
+type renderShortcutsCompat struct {
+	ui.SingleChildRenderObject
+	Bindings map[string]ui.Intent
+}
+
 func UiShortcuts(child ui.Widget, bindings map[string]string) ui.Widget {
 	mapped := map[string]ui.Intent{}
 	for binding, intentName := range bindings {
 		mapped[binding] = UiStringIntent(intentName)
 	}
-	return ui.Shortcuts{Bindings: mapped, Child: child}
+	return uiShortcutsCompat{Bindings: mapped, Child: child}
+}
+
+func (w uiShortcutsCompat) WidgetChild() ui.Widget {
+	return w.Child
+}
+
+func (w uiShortcutsCompat) CreateRenderObject(ctx ui.BuildContext) ui.RenderObject {
+	return &renderShortcutsCompat{Bindings: w.Bindings}
+}
+
+func (w uiShortcutsCompat) UpdateRenderObject(ctx ui.BuildContext, ro ui.RenderObject) {
+	ro.(*renderShortcutsCompat).Bindings = w.Bindings
+}
+
+func (r *renderShortcutsCompat) Layout(ctx ui.LayoutContext, c ui.Constraints) {
+	if child := r.Child(); child != nil {
+		child.Layout(ctx, c)
+		r.SetSize(child.Base().Size())
+		return
+	}
+	r.SetSize(c.Constrain(ui.Size{}))
+}
+
+func (r *renderShortcutsCompat) DryLayout(ctx ui.LayoutContext, c ui.Constraints) ui.Size {
+	if child := r.Child(); child != nil {
+		return ui.DryLayout(ctx, child, c)
+	}
+	return c.Constrain(ui.Size{})
+}
+
+func (r *renderShortcutsCompat) Paint(p *ui.Painter, off ui.Offset) {
+	if child := r.Child(); child != nil {
+		child.Paint(p, off)
+	}
+}
+
+func (r *renderShortcutsCompat) HitTest(*ui.HitTestResult, ui.Point) bool {
+	return false
+}
+
+func (r *renderShortcutsCompat) HandleEvent(ctx ui.EventContext, ev ui.Event) ui.EventResult {
+	key, ok := ev.(ui.Key)
+	if !ok || key.EventType == ui.EventRelease {
+		return ui.EventIgnored
+	}
+	for binding, intent := range r.Bindings {
+		if shortcutKeyMatches(key, binding) && ctx.Invoke(intent) == ui.EventHandled {
+			return ui.EventHandled
+		}
+	}
+	return ui.EventIgnored
+}
+
+func shortcutKeyMatches(key ui.Key, binding string) bool {
+	if key.MatchString(binding) {
+		return true
+	}
+	// vaxis 0.16 has no MatchString spelling for keypad Enter. Treat it as
+	// Enter so app shortcuts don't have to know about that backend wart.
+	return strings.EqualFold(binding, "Enter") && key.Keycode == vaxis.KeyKeyPadEnter
 }
 
 func UiFocusable(child ui.Widget) ui.Widget {
 	return ui.Focus(nil, child)
 }
-
 
 type uiKeyDebug struct{ Child ui.Widget }
 
@@ -161,6 +230,10 @@ func (r *renderKeyDebug) HandleEvent(ctx ui.EventContext, ev ui.Event) ui.EventR
 	return ui.EventIgnored
 }
 
+func UiRequestFrame(ctx ui.EventContext) {
+	ctx.Runtime().Dispatch(func() {})
+}
+
 func UiQuit(ctx ui.EventContext) {
 	ctx.Quit()
 }
@@ -225,6 +298,12 @@ func UiSetStateBool(ctx *UiStateContext, key string, value bool) {
 		return
 	}
 	ctx.state.SetState(func() { ctx.state.values[key] = value })
+}
+
+func UiSetStateBoolDispatched(eventCtx ui.EventContext, stateCtx *UiStateContext, key string, value bool) {
+	eventCtx.Runtime().Dispatch(func() {
+		UiSetStateBool(stateCtx, key, value)
+	})
 }
 
 func UiStateInt(ctx *UiStateContext, key string) int {
@@ -475,6 +554,21 @@ func UiExpanded(child ui.Widget) ui.Widget {
 
 func UiDivider() ui.Widget {
 	return ui.Divider{}
+}
+
+func UiDividerVertical() ui.Widget {
+	return ui.Divider{Axis: ui.Vertical}
+}
+
+func UiOverlayModal(child ui.Widget, modal ui.Widget) ui.Widget {
+	return ui.Overlay{
+		Child: child,
+		Entries: []ui.OverlayEntry{{Modal: true, Child: modal}},
+	}
+}
+
+func UiDialog(title string, child ui.Widget, width int, onDismiss func(ui.EventContext)) ui.Widget {
+	return ui.Dialog{Title: title, Child: child, Width: width, OnDismiss: onDismiss}
 }
 
 func UiTextField(value string, placeholder string, minWidth int, obscure bool, onChanged func(ui.EventContext, string), onSubmitted func(ui.EventContext, string)) ui.Widget {

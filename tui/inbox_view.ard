@@ -48,13 +48,25 @@ fn render_rows(store: inbox::InboxStore, cursor: Int) ui::Widget {
   ui::focusable(ui::column_stretch(rows))
 }
 
-fn content(store: inbox::InboxStore, loading: Bool, error: Str, cursor: Int) ui::Widget {
+fn detail_placeholder(store: inbox::InboxStore, cursor: Int, on_dismiss: fn(ui::EventContext)) ui::Widget {
+  let item = store.items.at(cursor)
+  ui::dialog(
+    title: "Inbox detail",
+    child: ui::text("{item.target_id} — {item.title}\n\nDetail loading/rendering will be implemented next.\n\nEsc closes this placeholder."),
+    width: 60,
+    on_dismiss: on_dismiss,
+  )
+}
+
+fn content(store: inbox::InboxStore, loading: Bool, error: Str, cursor: Int, detail_open: Bool, on_detail_dismiss: fn(ui::EventContext)) ui::Widget {
   if loading {
     ui::text("Loading inbox…")
   } else if not error.is_empty() {
     ui::text("Unable to load inbox", style: ui::style(bold: true))
   } else if store.items.size() == 0 {
     ui::center(ui::text("Inbox empty"))
+  } else if detail_open {
+    ui::overlay_modal(render_rows(store, cursor), detail_placeholder(store, cursor, on_detail_dismiss))
   } else {
     render_rows(store, cursor)
   }
@@ -78,6 +90,7 @@ fn new(api_key: Str) ui::Widget {
     }
 
     let cursor = clamp_cursor(state.get_int("cursor"), store.items.size())
+    let detail_open = state.get_bool("detail_open")
     ui::actions(
       child: ui::shortcuts(
         child: content(
@@ -85,12 +98,24 @@ fn new(api_key: Str) ui::Widget {
           loading: loading,
           error: error,
           cursor: cursor,
+          detail_open: detail_open,
+          on_detail_dismiss: fn(ctx: ui::EventContext) {
+            state.set_bool("detail_open", false)
+            ui::request_frame(ctx)
+          },
         ),
         bindings: [
           "Up": "inbox.previous",
           "k": "inbox.previous",
           "Down": "inbox.next",
           "j": "inbox.next",
+          "Enter": "inbox.open_detail",
+          "\r": "inbox.open_detail",
+          "\n": "inbox.open_detail",
+          "Ctrl+m": "inbox.open_detail",
+          "Space": "inbox.open_detail",
+          "Escape": "inbox.close_detail",
+          "Esc": "inbox.close_detail",
           "r": "inbox.refresh",
         ],
       ),
@@ -112,6 +137,18 @@ fn new(api_key: Str) ui::Widget {
           loading = false
           loaded = true
           state.set_int("cursor", clamp_cursor(cursor, store.items.size()))
+          ui::EventResult::handled
+        },
+        "inbox.open_detail": fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          if store.items.size() > 0 {
+            state.set_bool("detail_open", true)
+            ui::request_frame(ctx)
+          }
+          ui::EventResult::handled
+        },
+        "inbox.close_detail": fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          state.set_bool("detail_open", false)
+          ui::request_frame(ctx)
           ui::EventResult::handled
         },
       ],
