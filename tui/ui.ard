@@ -54,7 +54,6 @@ extern fn state_str(ctx: StateContext, key: Str) Str = "UiStateString"
 extern fn set_state_str(ctx: StateContext, key: Str, value: Str) Void = "UiSetStateString"
 extern fn state_bool(ctx: StateContext, key: Str) Bool = "UiStateBool"
 extern fn set_state_bool(ctx: StateContext, key: Str, value: Bool) Void = "UiSetStateBool"
-extern fn set_state_bool_dispatched(event_ctx: EventContext, state_ctx: StateContext, key: Str, value: Bool) Void = "UiSetStateBoolDispatched"
 extern fn state_int(ctx: StateContext, key: Str) Int = "UiStateInt"
 extern fn set_state_int(ctx: StateContext, key: Str, value: Int) Void = "UiSetStateInt"
 
@@ -80,15 +79,6 @@ impl State {
 
   fn set_bool(key: Str, value: Bool) {
     set_state_bool(ctx: self.ctx, key: key, value: value)
-  }
-
-  fn set_bool_dispatched(event_ctx: EventContext, key: Str, value: Bool) {
-    set_state_bool_dispatched(
-      event_ctx: event_ctx,
-      state_ctx: self.ctx,
-      key: key,
-      value: value,
-    )
   }
 
   fn get_int(key: Str) Int {

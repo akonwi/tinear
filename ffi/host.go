@@ -300,12 +300,6 @@ func UiSetStateBool(ctx *UiStateContext, key string, value bool) {
 	ctx.state.SetState(func() { ctx.state.values[key] = value })
 }
 
-func UiSetStateBoolDispatched(eventCtx ui.EventContext, stateCtx *UiStateContext, key string, value bool) {
-	eventCtx.Runtime().Dispatch(func() {
-		UiSetStateBool(stateCtx, key, value)
-	})
-}
-
 func UiStateInt(ctx *UiStateContext, key string) int {
 	if ctx == nil || ctx.state == nil {
 		return 0
