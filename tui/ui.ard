@@ -44,6 +44,10 @@ extern fn key_debug(child: Widget) Widget = "UiKeyDebug"
 // Request a follow-up frame from inside an event/action handler.
 extern fn request_frame(ctx: EventContext) Void = "UiRequestFrame"
 
+// Run `callback` on the UI runtime after a short delay. Useful when a state
+// change should paint first and then kick off follow-up work.
+extern fn dispatch_after(ctx: EventContext, delay_ms: Int, callback: fn()) Void = "UiDispatchAfter"
+
 // Request that the current UI app exits. Usually called from an action handler.
 extern fn quit(ctx: EventContext) Void = "UiQuit"
 
@@ -99,9 +103,10 @@ fn stateful(build: fn(State) Widget) Widget {
 }
 
 extern type Style = "projectffi.UiStyle"
+extern type BoxBorder = "projectffi.UiBoxBorder"
 
 // Internal FFI boundary. Use `style` in Ard code so omitted attrs default here.
-extern fn style_raw(bold: Bool, reverse: Bool) Style = "UiStyleNew"
+extern fn style_raw(bold: Bool, reverse: Bool, foreground: Str) Style = "UiStyleNew"
 
 fn bool_or(value: Bool?, fallback: Bool) Bool {
   match value {
@@ -110,10 +115,30 @@ fn bool_or(value: Bool?, fallback: Bool) Bool {
   }
 }
 
-fn style(bold: Bool?, reverse: Bool?) Style {
+fn str_or(value: Str?, fallback: Str) Str {
+  match value {
+    v => v,
+    _ => fallback,
+  }
+}
+
+fn style(bold: Bool?, reverse: Bool?, foreground: Str?) Style {
   style_raw(
     bold: bool_or(bold, false),
     reverse: bool_or(reverse, false),
+    foreground: str_or(foreground, ""),
+  )
+}
+
+extern fn border_raw(top: Bool, right: Bool, bottom: Bool, left: Bool, style: Style?) BoxBorder = "UiBorderNew"
+
+fn border(top: Bool?, right: Bool?, bottom: Bool?, left: Bool?, style: Style?) BoxBorder {
+  border_raw(
+    top: bool_or(top, false),
+    right: bool_or(right, false),
+    bottom: bool_or(bottom, false),
+    left: bool_or(left, false),
+    style: style,
   )
 }
 
@@ -132,10 +157,15 @@ extern fn padding_all(all: Int, child: Widget) Widget = "UiPaddingAll"
 extern fn padding_horizontal(horizontal: Int, child: Widget) Widget = "UiPaddingHorizontal"
 extern fn sized_box(width: Int, height: Int) Widget = "UiSizedBox"
 extern fn sized_box_child(width: Int, height: Int, child: Widget) Widget = "UiSizedBoxChild"
+extern fn constrained_width(width: Int, child: Widget) Widget = "UiConstrainedWidth"
 extern fn expanded(child: Widget) Widget = "UiExpanded"
-extern fn divider() Widget = "UiDivider"
-extern fn divider_vertical() Widget = "UiDividerVertical"
+extern fn divider_raw(style: Style?, vertical: Bool) Widget = "UiDivider"
+
+fn divider(style: Style?, vertical: Bool?) Widget {
+  divider_raw(style: style, vertical: bool_or(vertical, false))
+}
+
 extern fn overlay_modal(child: Widget, modal: Widget) Widget = "UiOverlayModal"
-extern fn dialog(title: Str, child: Widget, width: Int, on_dismiss: fn(EventContext)) Widget = "UiDialog"
+extern fn box(child: Widget, border: BoxBorder?, style: Style?) Widget = "UiBox"
 extern fn text_field(value: Str, placeholder: Str, min_width: Int, obscure: Bool, on_changed: fn(EventContext, Str), on_submitted: fn(EventContext, Str)) Widget = "UiTextField"
 extern fn button(label: Str, on_pressed: fn(EventContext)) Widget = "UiButton"

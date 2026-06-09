@@ -1,4 +1,5 @@
 use tinear/tui/inbox_view
+use tinear/tui/hints
 use tinear/tui/ui
 
 fn selected_tab(state: ui::State) Str {
@@ -44,11 +45,10 @@ fn body(tab: Str, inbox: ui::Widget) ui::Widget {
 }
 
 fn footer(tab: Str) ui::Widget {
-  let hints = match tab {
-    "My Issues" => "Tab switch  ↑↓←→ select  s status  y cycle  r refresh",
-    _ => "Tab switch  ↑↓ select  r refresh  ↵ open",
+  match tab {
+    "My Issues" => hints::bar(["Tab switch", "↑↓←→ select", "s status", "y cycle", "r refresh"]),
+    _ => hints::bar(["Tab switch", "↑↓ select", "r refresh", "↵ open"]),
   }
-  ui::text(hints)
 }
 
 fn content(state: ui::State, inbox: ui::Widget) ui::Widget {

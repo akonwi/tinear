@@ -1,4 +1,13 @@
+use ard/decode
+use ard/maybe
+
 use tinear/models/inbox
+use tinear/os
+use tinear/tui/decode as decode_utils
+use tinear/tui/hints
+use tinear/tui/modal
+use tinear/tui/state
+use tinear/tui/text
 use tinear/tui/ui
 
 fn clamp_cursor(cursor: Int, count: Int) Int {
@@ -48,17 +57,232 @@ fn render_rows(store: inbox::InboxStore, cursor: Int) ui::Widget {
   ui::focusable(ui::column_stretch(rows))
 }
 
-fn detail_placeholder(store: inbox::InboxStore, cursor: Int, on_dismiss: fn(ui::EventContext)) ui::Widget {
-  let item = store.items.at(cursor)
-  ui::dialog(
-    title: "Inbox detail",
-    child: ui::text("{item.target_id} — {item.title}\n\nDetail loading/rendering will be implemented next.\n\nEsc closes this placeholder."),
-    width: 60,
+fn field_string(data: Dynamic, name: Str, fallback: Str) Str {
+  match decode::run(data, decode::field(name, decode::string)) {
+    ok(v) => v,
+    err(_) => fallback,
+  }
+}
+
+fn nullable_string(data: Dynamic, name: Str, fallback: Str) Str {
+  match decode::run(data, decode::field(name, decode::nullable(decode::string))) {
+    ok(v) => match v {
+      s => s,
+      _ => fallback,
+    },
+    err(_) => fallback,
+  }
+}
+
+fn optional_name(data: Dynamic, name: Str) Str {
+  match decode_utils::optional_field(data, name) {
+    obj => decode::run(obj, decode::field("name", decode::string)).expect("Missing name"),
+    _ => "—",
+  }
+}
+
+fn optional_user_name(data: Dynamic, name: Str) Str {
+  match decode_utils::optional_field(data, name) {
+    obj => decode_utils::user_display_name(obj),
+    _ => "—",
+  }
+}
+
+fn is_pr_type(n_type: Str) Bool {
+  n_type.starts_with("pullRequest")
+}
+
+fn is_issue_comment_type(n_type: Str) Bool {
+  n_type == "issueNewComment" or n_type == "issueCommentMention" or n_type == "issueCommentReaction"
+}
+
+fn is_pr_comment_type(n_type: Str) Bool {
+  n_type == "pullRequestComment" or n_type == "pullRequestCommented" or n_type == "pullRequestCommentMention"
+}
+
+fn relevant_url(notif: Dynamic) Str {
+  let n_type = field_string(notif, "type", "")
+  if is_pr_type(n_type) {
+    let pr_url = match decode_utils::optional_field(notif, "pullRequest") {
+      pr => field_string(pr, "url", ""),
+      _ => "",
+    }
+    if is_pr_comment_type(n_type) {
+      let cid = nullable_string(notif, "pullRequestCommentId", "")
+      match pr_url.is_empty() {
+        true => "",
+        false => match cid.is_empty() {
+          true => pr_url,
+          false => "{pr_url}#issuecomment-{cid}",
+        },
+      }
+    } else {
+      pr_url
+    }
+  } else {
+    match decode_utils::optional_field(notif, "issue") {
+      issue => field_string(issue, "url", ""),
+      _ => nullable_string(notif, "url", ""),
+    }
+  }
+}
+
+fn status_transition(notif: Dynamic) Str {
+  let issue_obj = decode_utils::optional_field(notif, "issue")
+  let empty: [Dynamic] = []
+  let entries = match issue_obj {
+    iss => match decode::run(iss, decode::path(["history", "nodes"], decode::list(decode::dynamic))) {
+      ok(nodes) => nodes,
+      err(_) => empty,
+    },
+    _ => empty,
+  }
+  mut from_name = ""
+  mut to_name = ""
+  for entry in entries {
+    if from_name.is_empty() {
+      let f = match decode_utils::optional_field(entry, "fromState") {
+        v => field_string(v, "name", ""),
+        _ => "",
+      }
+      let t = match decode_utils::optional_field(entry, "toState") {
+        v => field_string(v, "name", ""),
+        _ => "",
+      }
+      if not f.is_empty() and not t.is_empty() {
+        from_name = f
+        to_name = t
+      }
+    }
+  }
+  match from_name.is_empty() {
+    true => "(no transition recorded)",
+    false => "{from_name} → {to_name}",
+  }
+}
+
+fn issue_update_text(notif: Dynamic, n_type: Str) Str {
+  if is_issue_comment_type(n_type) {
+    match decode_utils::optional_field(notif, "comment") {
+      c => {
+        let author = optional_user_name(c, "user")
+        let created = text::format_date(field_string(c, "createdAt", ""))
+        let body = field_string(c, "body", "(comment body unavailable)")
+        "Comment\n{author} · {created}\n\n{body}"
+      },
+      _ => "Comment\n(comment body unavailable)",
+    }
+  } else if n_type == "issueStatusChanged" {
+    "Status change\n{status_transition(notif)}"
+  } else {
+    match decode_utils::optional_field(notif, "issue") {
+      issue => {
+        let desc = nullable_string(issue, "description", "")
+        match desc.is_empty() {
+          true => "Latest event\n{field_string(notif, "type", n_type)}",
+          false => "Description\n{desc}",
+        }
+      },
+      _ => "Latest event\n{n_type}",
+    }
+  }
+}
+
+fn issue_detail_text(item: inbox::Item, notif: Dynamic) Str {
+  let n_type = field_string(notif, "type", item.notification_type)
+  let actor = optional_user_name(notif, "actor")
+  let created = text::format_date(nullable_string(notif, "createdAt", ""))
+  match decode_utils::optional_field(notif, "issue") {
+    issue => {
+      let status = optional_name(issue, "state")
+      let team = optional_name(issue, "team")
+      let project = optional_name(issue, "project")
+      let assignee = optional_user_name(issue, "assignee")
+      let priority = match decode::run(issue, decode::field("priority", decode::nullable(decode::int))) {
+        ok(p) => state::priority_label(p),
+        err(_) => "—",
+      }
+      "{item.target_id} — {item.title}\n\nStatus: {status}\nTeam: {team}\nProject: {project}\nAssignee: {assignee}\nPriority: {priority}\n\nUpdate\n{actor} {item.type_label} · {created}\n\n{issue_update_text(notif, n_type)}"
+    },
+    _ => "{item.target_id} — {item.title}\n\nUpdate\n{actor} {item.type_label} · {created}",
+  }
+}
+
+fn pr_detail_text(item: inbox::Item, notif: Dynamic) Str {
+  let n_type = field_string(notif, "type", item.notification_type)
+  let actor = optional_user_name(notif, "actor")
+  let created = text::format_date(nullable_string(notif, "createdAt", ""))
+  match decode_utils::optional_field(notif, "pullRequest") {
+    pr => {
+      let status = field_string(pr, "status", "—")
+      let source = field_string(pr, "sourceBranch", "—")
+      let target = field_string(pr, "targetBranch", "—")
+      let author = optional_user_name(pr, "creator")
+      let opened = text::format_date(field_string(pr, "openedAt", ""))
+      let update = match is_pr_comment_type(n_type) {
+        true => "Update\n{actor} {item.type_label} · {created}\n\n{nullable_string(notif, "subtitle", "(comment body unavailable)")}",
+        false => "Update\n{actor} {item.type_label} · {created}",
+      }
+      "Status: {status}\nBranch: {source} → {target}\nAuthor: {author}\nOpened: {opened}\n\n{update}"
+    },
+    _ => "Update\n{actor} {item.type_label} · {created}",
+  }
+}
+
+fn detail_text(item: inbox::Item, detail: Dynamic) Str {
+  match is_pr_type(item.notification_type) {
+    true => pr_detail_text(item, detail),
+    false => issue_detail_text(item, detail),
+  }
+}
+
+fn detail_body(item: inbox::Item, loading_detail: Bool, detail_error: Str, detail: Dynamic?) ui::Widget {
+  let header = match is_pr_type(item.notification_type) {
+    true => "",
+    false => "{item.target_id} — {item.title}\n\n",
+  }
+  if loading_detail {
+    ui::text("{header}Loading detail…")
+  } else if not detail_error.is_empty() {
+    ui::text("{header}Unable to load detail\n{detail_error}")
+  } else {
+    match detail {
+      d => ui::text(detail_text(item, d)),
+      _ => ui::text("{item.target_id} — {item.title}\n\nNo detail loaded."),
+    }
+  }
+}
+
+fn detail_title(item: inbox::Item) Str {
+  match is_pr_type(item.notification_type) {
+    true => "{item.target_id} — {item.title}",
+    false => item.target_id,
+  }
+}
+
+fn detail_footer() ui::Widget {
+  hints::bar(["o open", "⌫ delete", "r refresh", "Esc close"])
+}
+
+fn detail_modal(item: inbox::Item, loading_detail: Bool, detail_error: Str, detail: Dynamic?, on_dismiss: fn(ui::EventContext)) ui::Widget {
+  modal::dialog(
+    title: detail_title(item),
+    child: ui::column_stretch([
+      detail_body(
+        item: item,
+        loading_detail: loading_detail,
+        detail_error: detail_error,
+        detail: detail,
+      ),
+      ui::sized_box(1, 1),
+    ]),
+    footer: detail_footer(),
+    width: 72,
     on_dismiss: on_dismiss,
   )
 }
 
-fn content(store: inbox::InboxStore, loading: Bool, error: Str, cursor: Int, detail_open: Bool, on_detail_dismiss: fn(ui::EventContext)) ui::Widget {
+fn content(store: inbox::InboxStore, loading: Bool, error: Str, cursor: Int, detail_open: Bool, loading_detail: Bool, detail_error: Str, detail: Dynamic?, on_detail_dismiss: fn(ui::EventContext)) ui::Widget {
   if loading {
     ui::text("Loading inbox…")
   } else if not error.is_empty() {
@@ -66,7 +290,17 @@ fn content(store: inbox::InboxStore, loading: Bool, error: Str, cursor: Int, det
   } else if store.items.size() == 0 {
     ui::center(ui::text("Inbox empty"))
   } else if detail_open {
-    ui::overlay_modal(render_rows(store, cursor), detail_placeholder(store, cursor, on_detail_dismiss))
+    let item = store.items.at(cursor)
+    ui::overlay_modal(
+      render_rows(store, cursor),
+      detail_modal(
+        item: item,
+        loading_detail: loading_detail,
+        detail_error: detail_error,
+        detail: detail,
+        on_dismiss: on_detail_dismiss,
+      ),
+    )
   } else {
     render_rows(store, cursor)
   }
@@ -77,6 +311,9 @@ fn new(api_key: Str) ui::Widget {
   mut loaded = false
   mut loading = false
   mut error = ""
+  mut detail_id = ""
+  mut detail_error = ""
+  mut detail: Dynamic? = maybe::none()
 
   ui::stateful(fn(state: ui::State) ui::Widget {
     if not loaded {
@@ -91,6 +328,7 @@ fn new(api_key: Str) ui::Widget {
 
     let cursor = clamp_cursor(state.get_int("cursor"), store.items.size())
     let detail_open = state.get_bool("detail_open")
+    let loading_detail = state.get_bool("is_loading")
     ui::actions(
       child: ui::shortcuts(
         child: content(
@@ -99,8 +337,14 @@ fn new(api_key: Str) ui::Widget {
           error: error,
           cursor: cursor,
           detail_open: detail_open,
+          loading_detail: loading_detail,
+          detail_error: detail_error,
+          detail: detail,
           on_detail_dismiss: fn(ctx: ui::EventContext) {
             state.set_bool("detail_open", false)
+            state.set_bool("is_loading", false)
+            detail_error = ""
+            detail = maybe::none()
             ui::request_frame(ctx)
           },
         ),
@@ -116,16 +360,22 @@ fn new(api_key: Str) ui::Widget {
           "Space": "inbox.open_detail",
           "Escape": "inbox.close_detail",
           "Esc": "inbox.close_detail",
+          "o": "inbox.open_browser",
+          "BackSpace": "inbox.archive_detail",
           "r": "inbox.refresh",
         ],
       ),
       bindings: [
         "inbox.previous": fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-          state.set_int("cursor", clamp_cursor(cursor - 1, store.items.size()))
+          if not detail_open {
+            state.set_int("cursor", clamp_cursor(cursor - 1, store.items.size()))
+          }
           ui::EventResult::handled
         },
         "inbox.next": fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-          state.set_int("cursor", clamp_cursor(cursor + 1, store.items.size()))
+          if not detail_open {
+            state.set_int("cursor", clamp_cursor(cursor + 1, store.items.size()))
+          }
           ui::EventResult::handled
         },
         "inbox.refresh": fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
@@ -137,17 +387,88 @@ fn new(api_key: Str) ui::Widget {
           loading = false
           loaded = true
           state.set_int("cursor", clamp_cursor(cursor, store.items.size()))
+          if detail_open {
+            state.set_bool("detail_open", false)
+            state.set_bool("is_loading", false)
+            detail_error = ""
+            detail = maybe::none()
+          }
           ui::EventResult::handled
         },
         "inbox.open_detail": fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
-          if store.items.size() > 0 {
+          if (not detail_open) and store.items.size() > 0 {
+            let selected = store.items.at(cursor)
+            let target_id = selected.notification_id
+            detail_id = target_id
+            detail_error = ""
+            detail = maybe::none()
+            state.set_bool("is_loading", true)
             state.set_bool("detail_open", true)
             ui::request_frame(ctx)
+            ui::dispatch_after(ctx, 16, fn() {
+              if detail_id == target_id {
+                match store.load_detail(target_id) {
+                  ok(d) => {
+                    detail = maybe::some(d)
+                    detail_error = ""
+                  },
+                  err(e) => {
+                    detail = maybe::none()
+                    detail_error = e
+                  },
+                }
+                state.set_bool("is_loading", false)
+              }
+            })
+          }
+          ui::EventResult::handled
+        },
+        "inbox.open_browser": fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          if detail_open {
+            match detail {
+              d => {
+                let target = relevant_url(d)
+                if not target.is_empty() {
+                  let _ = os::open_url(target)
+                }
+              },
+              _ => (),
+            }
+          }
+          ui::EventResult::handled
+        },
+        "inbox.archive_detail": fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          if detail_open and store.items.size() > 0 {
+            let selected = store.items.at(cursor)
+            match store.archive(selected.notification_id) {
+              ok(_) => {
+                state.set_bool("detail_open", false)
+                state.set_bool("is_loading", false)
+                detail_error = ""
+                detail = maybe::none()
+                loading = true
+                match store.load() {
+                  ok(_) => { error = "" },
+                  err(e) => { error = e },
+                }
+                loading = false
+                loaded = true
+                state.set_int("cursor", clamp_cursor(cursor, store.items.size()))
+                ui::request_frame(ctx)
+              },
+              err(e) => {
+                detail_error = e
+                ui::request_frame(ctx)
+              },
+            }
           }
           ui::EventResult::handled
         },
         "inbox.close_detail": fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
           state.set_bool("detail_open", false)
+          state.set_bool("is_loading", false)
+          detail_error = ""
+          detail = maybe::none()
           ui::request_frame(ctx)
           ui::EventResult::handled
         },

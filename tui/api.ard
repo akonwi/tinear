@@ -84,6 +84,14 @@ fn fetch_inbox(api_key: Str) [Dynamic]!Str {
   Result::ok(nodes)
 }
 
+fn fetch_notification_detail(api_key: Str, notification_id: Str) Dynamic!Str {
+  let query = "query \{ notification(id: \"{notification_id}\") \{ id type createdAt title subtitle url ... on IssueNotification \{ comment \{ id body createdAt user \{ name displayName \} \} issue \{ id identifier title url description priority state \{ name \} team \{ name key \} project \{ name \} assignee \{ name displayName \} comments(first: 30) \{ nodes \{ id body createdAt user \{ name displayName \} \} \} history(first: 10) \{ nodes \{ id createdAt fromState \{ name \} toState \{ name \} \} \} \} \} ... on PullRequestNotification \{ pullRequestCommentId pullRequest \{ id number title url status sourceBranch targetBranch openedAt creator \{ name displayName \} \} \} actor \{ id name displayName \} \} \}"
+  let data = try client::graphql(api_key, query)
+  let notification = decode::run(data, decode::field("notification", decode::dynamic))
+    .expect("Missing notification")
+  Result::ok(notification)
+}
+
 // Comments for a specific issue. Returned by createdAt ascending,
 // which is Linear's default order.
 fn fetch_issue_comments(api_key: Str, issue_id: Str) [Dynamic]!Str {

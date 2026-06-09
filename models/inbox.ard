@@ -132,4 +132,12 @@ impl InboxStore {
     self.items = items
     Result::ok(())
   }
+
+  fn load_detail(notification_id: Str) Dynamic!Str {
+    api::fetch_notification_detail(self.api_key, notification_id)
+  }
+
+  fn archive(notification_id: Str) Void!Str {
+    api::archive_notification(self.api_key, notification_id)
+  }
 }

@@ -1,0 +1,12 @@
+use tinear/tui/ui
+
+fn bar(labels: [Str]) ui::Widget {
+  mut children: [ui::Widget] = []
+  for label, idx in labels {
+    if idx > 0 {
+      children.push(ui::text("  "))
+    }
+    children.push(ui::text(label))
+  }
+  ui::row(children)
+}

@@ -234,6 +234,13 @@ func UiRequestFrame(ctx ui.EventContext) {
 	ctx.Runtime().Dispatch(func() {})
 }
 
+func UiDispatchAfter(ctx ui.EventContext, delayMs int, callback func()) {
+	runtime := ctx.Runtime()
+	time.AfterFunc(time.Duration(delayMs)*time.Millisecond, func() {
+		runtime.Dispatch(callback)
+	})
+}
+
 func UiQuit(ctx ui.EventContext) {
 	ctx.Quit()
 }
@@ -318,21 +325,30 @@ func UiSetStateInt(ctx *UiStateContext, key string, value int) {
 }
 
 type UiStyle struct {
-	Bold    bool
-	Reverse bool
+	Bold       bool
+	Reverse    bool
+	Foreground string
 }
 
-func UiStyleNew(bold bool, reverse bool) UiStyle {
-	return UiStyle{Bold: bold, Reverse: reverse}
+func UiStyleNew(bold bool, reverse bool, foreground string) UiStyle {
+	return UiStyle{Bold: bold, Reverse: reverse, Foreground: foreground}
 }
 
 func (s UiStyle) vaxisStyle() ui.Style {
+	return s.vaxisStyleWithTheme(ui.Theme{})
+}
+
+func (s UiStyle) vaxisStyleWithTheme(theme ui.Theme) ui.Style {
 	style := ui.Style{}
 	if s.Bold {
 		style.Attribute |= ui.AttrBold
 	}
 	if s.Reverse {
 		style.Attribute |= ui.AttrReverse
+	}
+	switch s.Foreground {
+	case "border":
+		style.Foreground = theme.Border
 	}
 	return style
 }
@@ -517,7 +533,7 @@ func UiColumnMin(children []ui.Widget) ui.Widget {
 	return ui.Flex{
 		Axis:               ui.Vertical,
 		MainAxisSize:       ui.MainAxisSizeMin,
-		CrossAxisAlignment: ui.CrossAxisCenter,
+		CrossAxisAlignment: ui.CrossAxisStretch,
 		Children:           children,
 	}
 }
@@ -542,16 +558,38 @@ func UiSizedBoxChild(width int, height int, child ui.Widget) ui.Widget {
 	return ui.SizedBox{Width: width, Height: height, Child: child}
 }
 
+func UiConstrainedWidth(width int, child ui.Widget) ui.Widget {
+	return ui.ConstrainedBox{Constraints: ui.Constraints{MinWidth: width, MaxWidth: width}, Child: child}
+}
+
 func UiExpanded(child ui.Widget) ui.Widget {
 	return ui.Expanded(child)
 }
 
-func UiDivider() ui.Widget {
-	return ui.Divider{}
+type uiThemedDivider struct {
+	Style    ardruntime.Maybe[UiStyle]
+	Vertical bool
 }
 
-func UiDividerVertical() ui.Widget {
-	return ui.Divider{Axis: ui.Vertical}
+func (w uiThemedDivider) CreateState() ui.State { return &uiThemedDividerState{} }
+
+type uiThemedDividerState struct{ ui.StateBase }
+
+func (s *uiThemedDividerState) Build(ctx ui.BuildContext) ui.Widget {
+	w := s.Widget().(uiThemedDivider)
+	widget := ui.Divider{}
+	if w.Vertical {
+		widget.Axis = ui.Vertical
+	}
+	if w.Style.IsSome() {
+		theme := ui.MustDepend[ui.Theme](ctx)
+		widget.Style = w.Style.Value().vaxisStyleWithTheme(theme)
+	}
+	return widget
+}
+
+func UiDivider(style ardruntime.Maybe[UiStyle], vertical bool) ui.Widget {
+	return uiThemedDivider{Style: style, Vertical: vertical}
 }
 
 func UiOverlayModal(child ui.Widget, modal ui.Widget) ui.Widget {
@@ -561,8 +599,54 @@ func UiOverlayModal(child ui.Widget, modal ui.Widget) ui.Widget {
 	}
 }
 
-func UiDialog(title string, child ui.Widget, width int, onDismiss func(ui.EventContext)) ui.Widget {
-	return ui.Dialog{Title: title, Child: child, Width: width, OnDismiss: onDismiss}
+type UiBoxBorder struct {
+	Top   bool
+	Right bool
+	Bottom bool
+	Left  bool
+	Style ardruntime.Maybe[UiStyle]
+}
+
+func UiBorderNew(top bool, right bool, bottom bool, left bool, style ardruntime.Maybe[UiStyle]) UiBoxBorder {
+	return UiBoxBorder{Top: top, Right: right, Bottom: bottom, Left: left, Style: style}
+}
+
+type uiBox struct {
+	Child  ui.Widget
+	Border ardruntime.Maybe[UiBoxBorder]
+	Style  ardruntime.Maybe[UiStyle]
+}
+
+func (w uiBox) CreateState() ui.State { return &uiBoxState{} }
+
+type uiBoxState struct{ ui.StateBase }
+
+func (s *uiBoxState) Build(ctx ui.BuildContext) ui.Widget {
+	w := s.Widget().(uiBox)
+	theme := ui.MustDepend[ui.Theme](ctx)
+	decoration := ui.Decoration{}
+	if w.Style.IsSome() {
+		decoration.Style = w.Style.Value().vaxisStyleWithTheme(theme)
+	}
+	if w.Border.IsSome() {
+		b := w.Border.Value()
+		borderStyle := ui.Style{Foreground: theme.Border}
+		if b.Style.IsSome() {
+			borderStyle = b.Style.Value().vaxisStyleWithTheme(theme)
+		}
+		decoration.Border = ui.Border{
+			Top:    b.Top,
+			Right:  b.Right,
+			Bottom: b.Bottom,
+			Left:   b.Left,
+			Style:  borderStyle,
+		}
+	}
+	return ui.DecoratedBox(decoration, w.Child)
+}
+
+func UiBox(child ui.Widget, border ardruntime.Maybe[UiBoxBorder], style ardruntime.Maybe[UiStyle]) ui.Widget {
+	return uiBox{Child: child, Border: border, Style: style}
 }
 
 func UiTextField(value string, placeholder string, minWidth int, obscure bool, onChanged func(ui.EventContext, string), onSubmitted func(ui.EventContext, string)) ui.Widget {
