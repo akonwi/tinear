@@ -546,7 +546,7 @@ func UiDivider(style ardruntime.Maybe[UiStyle], vertical bool) ui.Widget {
 func UiOverlayModal(child ui.Widget, modal ui.Widget) ui.Widget {
 	return ui.Overlay{
 		Child: child,
-		Entries: []ui.OverlayEntry{{Modal: true, Child: modal}},
+		Entries: []ui.OverlayEntry{{Child: modal}},
 	}
 }
 
