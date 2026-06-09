@@ -32,7 +32,7 @@ fn tab_label(label: Str, selected: Bool) ui::Widget {
 fn tab_bar(tab: Str) ui::Widget {
   ui::row([
     tab_label("Inbox", tab == "Inbox"),
-    ui::text("│"),
+    ui::divider(style: ui::style(foreground: "border"), vertical: true),
     tab_label("My Issues", tab == "My Issues"),
   ])
 }
@@ -51,13 +51,17 @@ fn footer(tab: Str) ui::Widget {
   }
 }
 
+fn screen_separator() ui::Widget {
+  ui::divider(style: ui::style(foreground: "border"))
+}
+
 fn content(state: ui::State, inbox: ui::Widget) ui::Widget {
   let tab = selected_tab(state)
   ui::column_stretch([
     tab_bar(tab),
-    ui::divider(),
+    screen_separator(),
     ui::expanded(body(tab, inbox)),
-    ui::divider(),
+    screen_separator(),
     footer(tab),
   ])
 }
