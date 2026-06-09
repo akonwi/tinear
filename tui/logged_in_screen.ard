@@ -47,7 +47,7 @@ fn body(tab: Str, inbox: ui::Widget) ui::Widget {
 fn footer(tab: Str) ui::Widget {
   match tab {
     "My Issues" => hints::bar(["Tab switch", "↑↓←→ select", "s status", "y cycle", "r refresh"]),
-    _ => hints::bar(["Tab switch", "↑↓ select", "r refresh", "↵ open"]),
+    _ => hints::bar(["Tab switch", "↑↓ select", "⌫ delete", "r refresh", "↵ open"]),
   }
 }
 
