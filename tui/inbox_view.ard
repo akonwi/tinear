@@ -220,7 +220,7 @@ fn pr_detail_text(item: inbox::Item, notif: Dynamic) Str {
       let author = optional_user_name(pr, "creator")
       let opened = text::format_date(field_string(pr, "openedAt", ""))
       let update = match is_pr_comment_type(n_type) {
-        true => "Update\n{actor} {item.type_label} · {created}\n\n{nullable_string(notif, "subtitle", "(comment body unavailable)")}",
+        true => "Comment\n{actor} · {created}\n\n{nullable_string(notif, "subtitle", "(comment body unavailable)")}",
         false => "Update\n{actor} {item.type_label} · {created}",
       }
       "Status: {status}\nBranch: {source} → {target}\nAuthor: {author}\nOpened: {opened}\n\n{update}"
