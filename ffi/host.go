@@ -353,17 +353,32 @@ func (s UiStyle) vaxisStyleWithTheme(theme ui.Theme) ui.Style {
 	return style
 }
 
-func UiText(value string, style ardruntime.Maybe[UiStyle]) ui.Widget {
-	widget := ui.Text{Value: value}
-	if style.IsSome() {
-		widget.Style = style.Value().vaxisStyle()
+type uiThemedText struct {
+	Value string
+	Style ardruntime.Maybe[UiStyle]
+}
+
+func (w uiThemedText) CreateState() ui.State { return &uiThemedTextState{} }
+
+type uiThemedTextState struct{ ui.StateBase }
+
+func (s *uiThemedTextState) Build(ctx ui.BuildContext) ui.Widget {
+	w := s.Widget().(uiThemedText)
+	widget := ui.Text{Value: w.Value}
+	if w.Style.IsSome() {
+		theme := ui.MustDepend[ui.Theme](ctx)
+		widget.Style = w.Style.Value().vaxisStyleWithTheme(theme)
 	}
 	return widget
 }
 
+func UiText(value string, style ardruntime.Maybe[UiStyle]) ui.Widget {
+	return uiThemedText{Value: value, Style: style}
+}
+
 type uiTextLine struct {
 	Value string
-	Style UiStyle
+	Style ardruntime.Maybe[UiStyle]
 }
 
 type renderTextLine struct {
@@ -374,21 +389,25 @@ type renderTextLine struct {
 }
 
 func UiTextLine(value string, style ardruntime.Maybe[UiStyle]) ui.Widget {
-	lineStyle := UiStyle{}
-	if style.IsSome() {
-		lineStyle = style.Value()
+	return uiTextLine{Value: value, Style: style}
+}
+
+func (w uiTextLine) resolvedStyle(ctx ui.BuildContext) ui.Style {
+	if w.Style.IsSome() {
+		theme := ui.MustDepend[ui.Theme](ctx)
+		return w.Style.Value().vaxisStyleWithTheme(theme)
 	}
-	return uiTextLine{Value: value, Style: lineStyle}
+	return ui.Style{}
 }
 
 func (w uiTextLine) CreateRenderObject(ctx ui.BuildContext) ui.RenderObject {
-	return &renderTextLine{Value: w.Value, Style: w.Style.vaxisStyle()}
+	return &renderTextLine{Value: w.Value, Style: w.resolvedStyle(ctx)}
 }
 
 func (w uiTextLine) UpdateRenderObject(ctx ui.BuildContext, ro ui.RenderObject) {
 	r := ro.(*renderTextLine)
 	r.Value = w.Value
-	r.Style = w.Style.vaxisStyle()
+	r.Style = w.resolvedStyle(ctx)
 	r.Base().MarkNeedsLayout()
 }
 
