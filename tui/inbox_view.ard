@@ -307,7 +307,7 @@ fn content(store: inbox::InboxStore, loading: Bool, error: Str, cursor: Int, det
 }
 
 fn new(api_key: Str) ui::Widget {
-  mut store = inbox::new(api_key)
+  let store = inbox::new(api_key)
   mut detail: Dynamic? = maybe::none()
 
   ui::stateful(fn(state: ui::State) ui::Widget {
