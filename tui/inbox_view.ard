@@ -261,7 +261,7 @@ fn detail_title(item: inbox::Item) Str {
 }
 
 fn detail_footer() ui::Widget {
-  hints::bar(["o open", "⌫ delete", "r refresh", "Esc close"])
+  hints::bar(["o open", "⌫ delete", "Esc close"])
 }
 
 fn detail_modal(item: inbox::Item, loading_detail: Bool, detail_error: Str, detail: Dynamic?, on_dismiss: fn(ui::EventContext)) ui::Widget {
@@ -308,33 +308,31 @@ fn content(store: inbox::InboxStore, loading: Bool, error: Str, cursor: Int, det
 
 fn new(api_key: Str) ui::Widget {
   mut store = inbox::new(api_key)
-  mut loaded = false
-  mut loading = false
-  mut error = ""
   mut detail_id = ""
   mut detail_error = ""
   mut detail: Dynamic? = maybe::none()
 
   ui::stateful(fn(state: ui::State) ui::Widget {
-    if not loaded {
-      loading = true
+    if not state.get_bool("inbox_loaded") {
+      state.set_bool("inbox_loading", true)
       match store.load() {
-        ok(_) => { error = "" },
-        err(e) => { error = e },
+        ok(_) => { state.set_str("error", "") },
+        err(e) => { state.set_str("error", e) },
       }
-      loading = false
-      loaded = true
+      state.set_bool("inbox_loaded", true)
+      state.set_bool("inbox_loading", false)
     }
 
     let cursor = clamp_cursor(state.get_int("cursor"), store.items.size())
     let detail_open = state.get_bool("detail_open")
+    let loading = state.get_bool("inbox_loading")
     let loading_detail = state.get_bool("is_loading")
     ui::actions(
       child: ui::shortcuts(
         child: content(
           store: store,
           loading: loading,
-          error: error,
+          error: state.get_str("error"),
           cursor: cursor,
           detail_open: detail_open,
           loading_detail: loading_detail,
@@ -345,7 +343,6 @@ fn new(api_key: Str) ui::Widget {
             state.set_bool("is_loading", false)
             detail_error = ""
             detail = maybe::none()
-            ui::request_frame(ctx)
           },
         ),
         bindings: [
@@ -378,20 +375,17 @@ fn new(api_key: Str) ui::Widget {
           }
           ui::EventResult::handled
         },
-        "inbox.refresh": fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-          loading = true
-          match store.load() {
-            ok(_) => { error = "" },
-            err(e) => { error = e },
-          }
-          loading = false
-          loaded = true
-          state.set_int("cursor", clamp_cursor(cursor, store.items.size()))
-          if detail_open {
-            state.set_bool("detail_open", false)
-            state.set_bool("is_loading", false)
-            detail_error = ""
-            detail = maybe::none()
+        "inbox.refresh": fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          if (not detail_open) and (not state.get_bool("inbox_loading")) {
+            state.set_bool("inbox_loading", true)
+            ui::dispatch_after(ctx, 16, fn() {
+              match store.load() {
+                ok(_) => { state.set_str("error", "") },
+                err(e) => { state.set_str("error", e) },
+              }
+              state.set_bool("inbox_loaded", true)
+              state.set_bool("inbox_loading", false)
+            })
           }
           ui::EventResult::handled
         },
@@ -404,7 +398,6 @@ fn new(api_key: Str) ui::Widget {
             detail = maybe::none()
             state.set_bool("is_loading", true)
             state.set_bool("detail_open", true)
-            ui::request_frame(ctx)
             ui::dispatch_after(ctx, 16, fn() {
               if detail_id == target_id {
                 match store.load_detail(target_id) {
@@ -446,19 +439,15 @@ fn new(api_key: Str) ui::Widget {
                 state.set_bool("is_loading", false)
                 detail_error = ""
                 detail = maybe::none()
-                loading = true
                 match store.load() {
-                  ok(_) => { error = "" },
-                  err(e) => { error = e },
+                  ok(_) => { state.set_str("error", "") },
+                  err(e) => { state.set_str("error", e) },
                 }
-                loading = false
-                loaded = true
+                state.set_bool("inbox_loaded", true)
                 state.set_int("cursor", clamp_cursor(cursor, store.items.size()))
-                ui::request_frame(ctx)
               },
               err(e) => {
                 detail_error = e
-                ui::request_frame(ctx)
               },
             }
           }
@@ -469,7 +458,6 @@ fn new(api_key: Str) ui::Widget {
           state.set_bool("is_loading", false)
           detail_error = ""
           detail = maybe::none()
-          ui::request_frame(ctx)
           ui::EventResult::handled
         },
       ],
