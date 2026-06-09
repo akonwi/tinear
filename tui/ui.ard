@@ -38,6 +38,9 @@ extern fn shortcuts(child: Widget, bindings: [Str:Str]) Widget = "UiShortcuts"
 // receive keyboard events through the focused path.
 extern fn focusable(child: Widget) Widget = "UiFocusable"
 
+// Debug helper: overlays the last key event as a short-lived toast.
+extern fn key_debug(child: Widget) Widget = "UiKeyDebug"
+
 // Request that the current UI app exits. Usually called from an action handler.
 extern fn quit(ctx: EventContext) Void = "UiQuit"
 

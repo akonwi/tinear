@@ -67,6 +67,100 @@ func UiFocusable(child ui.Widget) ui.Widget {
 	return ui.Focus(nil, child)
 }
 
+
+type uiKeyDebug struct{ Child ui.Widget }
+
+type renderKeyDebug struct {
+	ui.SingleChildRenderObject
+	last  string
+	chars []ui.Character
+	seq   int
+}
+
+func UiKeyDebug(child ui.Widget) ui.Widget {
+	return uiKeyDebug{Child: child}
+}
+
+func (w uiKeyDebug) WidgetChild() ui.Widget {
+	return w.Child
+}
+
+func (w uiKeyDebug) CreateRenderObject(ctx ui.BuildContext) ui.RenderObject {
+	return &renderKeyDebug{}
+}
+
+func (w uiKeyDebug) UpdateRenderObject(ctx ui.BuildContext, ro ui.RenderObject) {}
+
+func (r *renderKeyDebug) Layout(ctx ui.LayoutContext, c ui.Constraints) {
+	if child := r.Child(); child != nil {
+		child.Layout(ctx, c)
+		r.SetSize(child.Base().Size())
+		return
+	}
+	r.SetSize(c.Constrain(ui.Size{}))
+}
+
+func (r *renderKeyDebug) DryLayout(ctx ui.LayoutContext, c ui.Constraints) ui.Size {
+	if child := r.Child(); child != nil {
+		return ui.DryLayout(ctx, child, c)
+	}
+	return c.Constrain(ui.Size{})
+}
+
+func (r *renderKeyDebug) HitTest(*ui.HitTestResult, ui.Point) bool {
+	return false
+}
+
+func (r *renderKeyDebug) Paint(p *ui.Painter, off ui.Offset) {
+	if child := r.Child(); child != nil {
+		child.Paint(p, off)
+	}
+	if r.last == "" {
+		return
+	}
+	style := ui.Style{Attribute: ui.AttrReverse}
+	width := 0
+	for _, ch := range r.chars {
+		width += ch.Width
+	}
+	width += 2
+	size := r.Size()
+	x := off.X + max(0, size.Width-width)
+	y := off.Y
+	blank := ui.Cell{Character: ui.Character{Grapheme: " ", Width: 1}, Style: style}
+	for i := 0; i < width; i++ {
+		p.DrawCell(ui.Point{X: x + i, Y: y}, blank)
+	}
+	cx := x + 1
+	for _, ch := range r.chars {
+		p.DrawCell(ui.Point{X: cx, Y: y}, ui.Cell{Character: ch, Style: style})
+		cx += ch.Width
+	}
+}
+
+func (r *renderKeyDebug) HandleEvent(ctx ui.EventContext, ev ui.Event) ui.EventResult {
+	key, ok := ev.(ui.Key)
+	if !ok || ctx.Phase() != ui.CapturePhase {
+		return ui.EventIgnored
+	}
+	r.seq++
+	seq := r.seq
+	r.last = fmt.Sprintf("key %q code=%d text=%q mods=%d", key.String(), key.Keycode, key.Text, key.Modifiers)
+	r.chars = vaxis.Characters(r.last)
+	r.MarkNeedsPaint()
+	runtime := ctx.Runtime()
+	time.AfterFunc(3*time.Second, func() {
+		runtime.Dispatch(func() {
+			if r.seq == seq {
+				r.last = ""
+				r.chars = nil
+				r.MarkNeedsPaint()
+			}
+		})
+	})
+	return ui.EventIgnored
+}
+
 func UiQuit(ctx ui.EventContext) {
 	ctx.Quit()
 }

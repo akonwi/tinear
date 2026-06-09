@@ -34,7 +34,7 @@ fn root(cfg: config::Config) ui::Widget {
   let quit_intent = "tinear.quit"
   ui::actions(
     child: ui::shortcuts(
-      child: ui::padding_horizontal(1, app_content(cfg)),
+      child: ui::key_debug(ui::padding_horizontal(1, app_content(cfg))),
       bindings: [
         "q": quit_intent,
         "Ctrl+c": quit_intent,
