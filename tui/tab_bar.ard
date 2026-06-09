@@ -13,12 +13,14 @@ private extern fn test_mark_tab_selected(index: Int) Void = "TestMarkTabSelected
 // forwards relevant events to it, and render derives the visible tabs from the
 // current selected index.
 struct TabBar {
-  labels: [Str],
-  selected: Int,
+  labels: mut [Str],
+  selected: mut Int,
 }
 
 fn new(labels: [Str]) TabBar {
-  TabBar{labels: labels, selected: 0}
+  mut mutable_labels = labels
+  mut selected = 0
+  TabBar{labels: mutable_labels, selected: selected}
 }
 
 impl TabBar {
@@ -31,7 +33,7 @@ impl TabBar {
     }
   }
 
-  fn mut select(index: Int) {
+  fn select(index: Int) {
     match self.labels.size() {
       0 => (),
       _ => {
@@ -44,19 +46,19 @@ impl TabBar {
     }
   }
 
-  fn mut push(label: Str) Int {
+  fn push(label: Str) Int {
     mut labels = self.labels
     labels.push(label)
     self.labels = labels
     self.labels.size() - 1
   }
 
-  fn mut push_and_select(label: Str) {
+  fn push_and_select(label: Str) {
     let idx = self.push(label)
     self.select(idx)
   }
 
-  fn mut next() {
+  fn next() {
     match self.labels.size() == 0 {
       true => { self.selected = 0 },
       false => {
@@ -69,7 +71,7 @@ impl TabBar {
     }
   }
 
-  fn mut previous() {
+  fn previous() {
     match self.labels.size() == 0 {
       true => { self.selected = 0 },
       false => {
@@ -83,7 +85,7 @@ impl TabBar {
 
   // Handle tab-bar-specific key events. Consumption/propagation semantics are
   // intentionally left out until the framework grows focus tracking.
-  fn mut handle_key(key: vaxis::KeyEvent) {
+  fn handle_key(key: vaxis::KeyEvent) {
     match key.name {
       "Tab" => self.next(),
       "Left" => self.previous(),

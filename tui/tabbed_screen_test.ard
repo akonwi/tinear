@@ -3,6 +3,7 @@ use ard/testing
 use tinear/tui/core/rect
 use tinear/tui/core/text
 use tinear/tui/core/view
+use tinear/tui/tab_bar
 use tinear/tui/tabbed_screen
 use tinear/vaxis
 
@@ -32,11 +33,10 @@ test fn test_registered_tab_field_mutation_is_visible_to_render_delegation() Voi
   let vx = test_vaxis()
   let ctx = view::context(vx)
   mut frame = test_frame(ctx, 0, 0)
-  mut screen = tabbed_screen::new("test-api-key")
+  mut tabs = tab_bar::new(["Inbox", "My Issues"])
 
-  ctx.add_child(screen.tabs)
-  screen.tabs.next()
-  screen.sync_active_child()
+  ctx.add_child(tabs)
+  tabs.next()
   frame.render_child(0)
 
   try testing::assert(was_rendered(1001), "tree-owned tab bar should render mutated tab field")
@@ -57,9 +57,7 @@ test fn test_tabbed_screen_renders_tabs_separator_body_and_inbox_hints() Void!St
 }
 
 test fn test_tabbed_screen_renders_my_issues_body_and_hints_after_tab_change() Void!Str {
-  mut screen = tabbed_screen::new("test-api-key")
-  screen.tabs.select(1)
-  screen.sync_active_child()
+  mut screen = tabbed_screen::new_with_selected_tab("test-api-key", 1)
   let ctx = screen_context_with_children(screen)
   mut frame = test_frame(ctx, 50, 6)
 

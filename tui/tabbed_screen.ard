@@ -32,6 +32,15 @@ fn new(api_key: Str) TabbedScreen {
   }
 }
 
+fn new_with_selected_tab(api_key: Str, tab_index: Int) TabbedScreen {
+  mut screen = new(api_key)
+  screen.tabs.select(tab_index)
+  let active = screen.tabs.selected_label()
+  screen.inbox.active = active == "Inbox"
+  screen.my_issues.active = active == "My Issues"
+  screen
+}
+
 fn key_hints(labels: [Str]) view::View {
   mut children: [view::View] = []
 
