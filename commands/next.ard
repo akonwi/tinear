@@ -9,7 +9,7 @@ use tinear/tui/welcome_screen
 
 fn app_content(cfg: config::Config) ui::Widget {
   let initial_auth = cfg.has_auth()
-  ui::stateful(fn(state: ui::State) ui::Widget {
+  ui::stateful(fn(_ctx: ui::BuildContext, state: ui::State) ui::Widget {
     let authed = state.get<Bool>("authed").or(initial_auth)
     let state_api_key = state.get<Str>("api_key").or("")
     let api_key = match state_api_key {
@@ -49,10 +49,10 @@ fn root(cfg: config::Config) ui::Widget {
       ],
     ),
     bindings: [
-      quit_intent: fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+      ui::action(quit_intent, fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
         ui::quit(ctx)
         ui::EventResult::handled
-      },
+      }),
     ],
   )
 }

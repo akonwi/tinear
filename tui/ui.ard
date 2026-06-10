@@ -4,8 +4,9 @@
 // handles so Ard-generated Go can pass values to host wrappers without casts.
 
 extern type Widget = "ui.Widget"
-extern type EventContext = "ui.EventContext"
-extern type BuildContext = "ui.BuildContext"
+extern type EventContextHandle = "*projectffi.UiEventContext"
+extern type BuildContextHandle = "ui.BuildContext"
+extern type RuntimeHandle = "ui.Runtime"
 extern type StateContext = "*projectffi.UiStateContext"
 
 // Intents are semantic action names, e.g. "tinear.quit" or "issue.open".
@@ -24,10 +25,19 @@ enum EventResult {
 // as quit shortcuts should be composed into `root` with `actions`/`shortcuts`.
 extern fn run(root: Widget) Void!Str = "UiRun"
 
+extern type ActionBinding = "projectffi.UiActionBinding"
+
 // Wrap `child` with action handlers. When a descendant invokes an intent,
 // vaxis/ui searches outward through ancestor `actions` widgets for a matching
-// handler. Map keys are intent names.
-extern fn actions(child: Widget, bindings: [Str:fn(EventContext, Str) EventResult]) Widget = "UiActions"
+// handler.
+extern fn actions(child: Widget, bindings: [ActionBinding]) Widget = "UiActions"
+extern fn _action(name: Str, handler: fn(EventContextHandle, Str) EventResult) ActionBinding = "UiAction"
+
+fn action(name: Str, handler: fn(EventContext, Str) EventResult) ActionBinding {
+  _action(name, fn(ctx: EventContextHandle, intent: Str) EventResult {
+    handler(EventContext{handle: ctx}, intent)
+  })
+}
 
 // Wrap `child` with shortcut mappings. Key patterns use vaxis/ui's
 // Key.MatchString format, e.g. "q", "Enter", "Ctrl+c", "Shift+Tab". Map
@@ -42,21 +52,68 @@ extern fn focusable(child: Widget) Widget = "UiFocusable"
 extern fn key_debug(child: Widget) Widget = "UiKeyDebug"
 
 // Request a follow-up frame from inside an event/action handler.
-extern fn request_frame(ctx: EventContext) Void = "UiRequestFrame"
+extern fn _request_frame(ctx: EventContextHandle) Void = "UiRequestFrameWrapped"
+
+extern fn _build_context_runtime(ctx: BuildContextHandle) RuntimeHandle = "UiBuildContextRuntime"
+extern fn _event_context_runtime(ctx: EventContextHandle) RuntimeHandle = "UiEventContextRuntimeWrapped"
+extern fn _runtime_dispatch(runtime: RuntimeHandle, callback: fn()) Void = "UiRuntimeDispatch"
+
+struct Runtime {
+  handle: RuntimeHandle,
+}
+
+impl Runtime {
+  // Re-enter the vaxis/ui event loop from background work before mutating UI state.
+  fn dispatch(callback: fn()) {
+    _runtime_dispatch(self.handle, callback)
+  }
+}
+
+struct BuildContext {
+  handle: BuildContextHandle,
+}
+
+impl BuildContext {
+  fn runtime() Runtime {
+    Runtime{handle: _build_context_runtime(self.handle)}
+  }
+}
+
+struct EventContext {
+  handle: EventContextHandle,
+}
+
+impl EventContext {
+  fn runtime() Runtime {
+    Runtime{handle: _event_context_runtime(self.handle)}
+  }
+}
+
+fn request_frame(ctx: EventContext) {
+  _request_frame(ctx.handle)
+}
 
 // Run `callback` on the UI runtime after a short delay. Useful when a state
 // change should paint first and then kick off follow-up work.
-extern fn dispatch_after(ctx: EventContext, delay_ms: Int, callback: fn()) Void = "UiDispatchAfter"
+extern fn _dispatch_after(ctx: EventContextHandle, delay_ms: Int, callback: fn()) Void = "UiDispatchAfterWrapped"
+
+fn dispatch_after(ctx: EventContext, delay_ms: Int, callback: fn()) {
+  _dispatch_after(ctx: ctx.handle, delay_ms: delay_ms, callback: callback)
+}
 
 // Request that the current UI app exits. Usually called from an action handler.
-extern fn quit(ctx: EventContext) Void = "UiQuit"
+extern fn _quit(ctx: EventContextHandle) Void = "UiQuitWrapped"
+
+fn quit(ctx: EventContext) {
+  _quit(ctx.handle)
+}
 
 // Raw Go-owned state handle. Prefer the `State` wrapper and methods below in
 // application code.
-extern fn stateful_raw(build: fn(StateContext) Widget) Widget = "UiStateful"
-extern fn stateful_raw_with_init(init: fn(StateContext), build: fn(StateContext) Widget) Widget = "UiStatefulWithInit"
-extern fn stateful_raw_key(key: Str, build: fn(StateContext) Widget) Widget = "UiStatefulKey"
-extern fn stateful_raw_with_init_key(key: Str, init: fn(StateContext), build: fn(StateContext) Widget) Widget = "UiStatefulWithInitKey"
+extern fn stateful_raw(build: fn(BuildContextHandle, StateContext) Widget) Widget = "UiStatefulContext"
+extern fn stateful_raw_with_init(init: fn(BuildContextHandle, StateContext), build: fn(BuildContextHandle, StateContext) Widget) Widget = "UiStatefulContextWithInit"
+extern fn stateful_raw_key(key: Str, build: fn(BuildContextHandle, StateContext) Widget) Widget = "UiStatefulContextKey"
+extern fn stateful_raw_with_init_key(key: Str, init: fn(BuildContextHandle, StateContext), build: fn(BuildContextHandle, StateContext) Widget) Widget = "UiStatefulContextWithInitKey"
 extern fn state_get<$T>(ctx: StateContext, key: Str) $T? = "UiStateGet"
 extern fn state_set<$T>(ctx: StateContext, key: Str, value: $T) Void = "UiStateSet"
 extern fn state_drop(ctx: StateContext, key: Str) Void = "UiStateDrop"
@@ -95,39 +152,40 @@ impl State {
 }
 
 // Generic Ard-backed stateful widget. `build` is called by vaxis/ui with a
-// retained `State`; use State methods for small retained values. `init`, when
-// provided, runs before the first build; State setters there initialize values
-// directly instead of scheduling a rebuild.
-fn stateful(build: fn(State) Widget, init: fn(State)?, key: Str?) Widget {
+// retained `State` and current `BuildContext`; use State methods for small
+// retained values. `init`, when provided, runs before the first build and also
+// receives a `BuildContext`, so background work can capture `ctx.runtime()`.
+// State setters in init initialize values directly instead of scheduling a rebuild.
+fn stateful(build: fn(BuildContext, State) Widget, init: fn(BuildContext, State)?, key: Str?) Widget {
   match init {
     initializer => {
       match key {
         k => stateful_raw_with_init_key(
           key: k,
-          init: fn(ctx: StateContext) {
-            initializer(State{ctx: ctx})
+          init: fn(build_ctx: BuildContextHandle, state_ctx: StateContext) {
+            initializer(BuildContext{handle: build_ctx}, State{ctx: state_ctx})
           },
-          build: fn(ctx: StateContext) Widget {
-            build(State{ctx: ctx})
+          build: fn(build_ctx: BuildContextHandle, state_ctx: StateContext) Widget {
+            build(BuildContext{handle: build_ctx}, State{ctx: state_ctx})
           },
         ),
         _ => stateful_raw_with_init(
-          init: fn(ctx: StateContext) {
-            initializer(State{ctx: ctx})
+          init: fn(build_ctx: BuildContextHandle, state_ctx: StateContext) {
+            initializer(BuildContext{handle: build_ctx}, State{ctx: state_ctx})
           },
-          build: fn(ctx: StateContext) Widget {
-            build(State{ctx: ctx})
+          build: fn(build_ctx: BuildContextHandle, state_ctx: StateContext) Widget {
+            build(BuildContext{handle: build_ctx}, State{ctx: state_ctx})
           },
         ),
       }
     },
     _ => {
       match key {
-        k => stateful_raw_key(k, fn(ctx: StateContext) Widget {
-          build(State{ctx: ctx})
+        k => stateful_raw_key(k, fn(build_ctx: BuildContextHandle, state_ctx: StateContext) Widget {
+          build(BuildContext{handle: build_ctx}, State{ctx: state_ctx})
         }),
-        _ => stateful_raw(fn(ctx: StateContext) Widget {
-          build(State{ctx: ctx})
+        _ => stateful_raw(fn(build_ctx: BuildContextHandle, state_ctx: StateContext) Widget {
+          build(BuildContext{handle: build_ctx}, State{ctx: state_ctx})
         }),
       }
     },
@@ -178,6 +236,7 @@ extern fn text(value: Str, style: Style?) Widget = "UiText"
 extern fn row(children: [Widget], style: Style?) Widget = "UiRow"
 extern fn column(children: [Widget]) Widget = "UiColumn"
 extern fn column_stretch(children: [Widget]) Widget = "UiColumnStretch"
+extern fn indexed_stack(index: Int, children: [Widget]) Widget = "UiIndexedStack"
 
 // Vertical column that sizes to its contents instead of expanding to fill its
 // parent. Useful inside `center` when the content block should be centered.
@@ -198,5 +257,26 @@ fn divider(style: Style?, vertical: Bool?) Widget {
 
 extern fn overlay_modal(child: Widget, modal: Widget) Widget = "UiOverlayModal"
 extern fn box(child: Widget, border: BoxBorder?, style: Style?) Widget = "UiBox"
-extern fn text_field(value: Str, placeholder: Str, min_width: Int, obscure: Bool, on_changed: fn(EventContext, Str), on_submitted: fn(EventContext, Str)) Widget = "UiTextField"
-extern fn button(label: Str, on_pressed: fn(EventContext)) Widget = "UiButton"
+extern fn _text_field(value: Str, placeholder: Str, min_width: Int, obscure: Bool, on_changed: fn(EventContextHandle, Str), on_submitted: fn(EventContextHandle, Str)) Widget = "UiTextFieldWrapped"
+extern fn _button(label: Str, on_pressed: fn(EventContextHandle)) Widget = "UiButtonWrapped"
+
+fn text_field(value: Str, placeholder: Str, min_width: Int, obscure: Bool, on_changed: fn(EventContext, Str), on_submitted: fn(EventContext, Str)) Widget {
+  _text_field(
+    value: value,
+    placeholder: placeholder,
+    min_width: min_width,
+    obscure: obscure,
+    on_changed: fn(ctx: EventContextHandle, next: Str) {
+      on_changed(EventContext{handle: ctx}, next)
+    },
+    on_submitted: fn(ctx: EventContextHandle, submitted: Str) {
+      on_submitted(EventContext{handle: ctx}, submitted)
+    },
+  )
+}
+
+fn button(label: Str, on_pressed: fn(EventContext)) Widget {
+  _button(label, fn(ctx: EventContextHandle) {
+    on_pressed(EventContext{handle: ctx})
+  })
+}

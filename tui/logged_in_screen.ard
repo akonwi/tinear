@@ -38,11 +38,15 @@ fn tab_bar(tab: Str) ui::Widget {
   ])
 }
 
-fn body(tab: Str, inbox: ui::Widget, my_issues: ui::Widget) ui::Widget {
+fn tab_index(tab: Str) Int {
   match tab {
-    "My Issues" => my_issues,
-    _ => inbox,
+    "My Issues" => 1,
+    _ => 0,
   }
+}
+
+fn body(tab: Str, inbox: ui::Widget, my_issues: ui::Widget) ui::Widget {
+  ui::indexed_stack(tab_index(tab), [inbox, my_issues])
 }
 
 fn footer(tab: Str) ui::Widget {
@@ -70,7 +74,7 @@ fn content(state: ui::State, inbox: ui::Widget, my_issues: ui::Widget) ui::Widge
 fn new(api_key: Str) ui::Widget {
   let inbox = inbox_view::new(api_key)
   let my_issues = my_issues_view::new(api_key)
-  ui::stateful(fn(state: ui::State) ui::Widget {
+  ui::stateful(fn(_ctx: ui::BuildContext, state: ui::State) ui::Widget {
     ui::actions(
       child: ui::shortcuts(
         child: content(state, inbox, my_issues),
@@ -81,18 +85,18 @@ fn new(api_key: Str) ui::Widget {
         ],
       ),
       bindings: [
-        "tabs.next": fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+        ui::action("tabs.next", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
           toggle_tab(state)
           ui::EventResult::handled
-        },
-        "tabs.inbox": fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+        }),
+        ui::action("tabs.inbox", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
           set_tab(state, "Inbox")
           ui::EventResult::handled
-        },
-        "tabs.my_issues": fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+        }),
+        ui::action("tabs.my_issues", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
           set_tab(state, "My Issues")
           ui::EventResult::handled
-        },
+        }),
       ],
     )
   })

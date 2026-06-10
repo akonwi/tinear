@@ -30,10 +30,10 @@ fn dialog(title: Str, child: ui::Widget, footer: ui::Widget, width: Int, on_dism
       ],
     ),
     bindings: [
-      "modal.dismiss": fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+      ui::action("modal.dismiss", fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
         on_dismiss(ctx)
         ui::EventResult::handled
-      },
+      }),
     ],
   )
 }

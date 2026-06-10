@@ -43,13 +43,35 @@ func UiRun(root ui.Widget) error {
 	return ui.Run(root, ui.WithShortcuts(shortcuts))
 }
 
-func UiActions[T ~int](child ui.Widget, bindings map[string]func(ui.EventContext, string) T) ui.Widget {
+type UiEventContext struct{ handle ui.EventContext }
+
+type UiActionBinding struct {
+	Name    string
+	Handler func(ui.EventContext, string) ui.EventResult
+}
+
+func UiAction[T ~int](name string, handler func(*UiEventContext, string) T) UiActionBinding {
+	return UiActionBinding{
+		Name: name,
+		Handler: func(ctx ui.EventContext, intent string) ui.EventResult {
+			if handler == nil {
+				return ui.EventIgnored
+			}
+			return ui.EventResult(handler(&UiEventContext{handle: ctx}, intent))
+		},
+	}
+}
+
+func UiActions(child ui.Widget, bindings []UiActionBinding) ui.Widget {
 	mapped := map[ui.IntentType]ui.ActionFunc{}
-	for name, handler := range bindings {
-		intentName := name
-		action := handler
+	for _, binding := range bindings {
+		intentName := binding.Name
+		action := binding.Handler
 		mapped[ui.IntentType(intentName)] = func(ctx ui.EventContext, intent ui.Intent) ui.EventResult {
-			return ui.EventResult(action(ctx, string(intent.IntentType())))
+			if action == nil {
+				return ui.EventIgnored
+			}
+			return action(ctx, string(intent.IntentType()))
 		}
 	}
 	return ui.Actions{Bindings: mapped, Child: child}
@@ -234,6 +256,13 @@ func UiRequestFrame(ctx ui.EventContext) {
 	ctx.Runtime().Dispatch(func() {})
 }
 
+func UiRequestFrameWrapped(ctx *UiEventContext) {
+	if ctx == nil {
+		return
+	}
+	UiRequestFrame(ctx.handle)
+}
+
 func UiDispatchAfter(ctx ui.EventContext, delayMs int, callback func()) {
 	runtime := ctx.Runtime()
 	time.AfterFunc(time.Duration(delayMs)*time.Millisecond, func() {
@@ -241,16 +270,30 @@ func UiDispatchAfter(ctx ui.EventContext, delayMs int, callback func()) {
 	})
 }
 
+func UiDispatchAfterWrapped(ctx *UiEventContext, delayMs int, callback func()) {
+	if ctx == nil {
+		return
+	}
+	UiDispatchAfter(ctx.handle, delayMs, callback)
+}
+
 func UiQuit(ctx ui.EventContext) {
 	ctx.Quit()
+}
+
+func UiQuitWrapped(ctx *UiEventContext) {
+	if ctx == nil {
+		return
+	}
+	ctx.handle.Quit()
 }
 
 type UiStateContext struct{ state *ardState }
 
 type ardStateful struct {
 	key   string
-	init  func(*UiStateContext)
-	build func(*UiStateContext) ui.Widget
+	init  func(ui.BuildContext, *UiStateContext)
+	build func(ui.BuildContext, *UiStateContext) ui.Widget
 }
 
 type ardState struct {
@@ -258,23 +301,39 @@ type ardState struct {
 	values       map[string]any
 	initializing bool
 	disposed     bool
-	init         func(*UiStateContext)
-	build        func(*UiStateContext) ui.Widget
+	init         func(ui.BuildContext, *UiStateContext)
+	build        func(ui.BuildContext, *UiStateContext) ui.Widget
 }
 
 func UiStateful(build func(*UiStateContext) ui.Widget) ui.Widget {
-	return ardStateful{build: build}
+	return ardStateful{build: func(_ ui.BuildContext, ctx *UiStateContext) ui.Widget { return build(ctx) }}
 }
 
 func UiStatefulWithInit(init func(*UiStateContext), build func(*UiStateContext) ui.Widget) ui.Widget {
-	return ardStateful{init: init, build: build}
+	return ardStateful{init: func(_ ui.BuildContext, ctx *UiStateContext) { init(ctx) }, build: func(_ ui.BuildContext, ctx *UiStateContext) ui.Widget { return build(ctx) }}
 }
 
 func UiStatefulKey(key string, build func(*UiStateContext) ui.Widget) ui.Widget {
-	return ardStateful{key: key, build: build}
+	return ardStateful{key: key, build: func(_ ui.BuildContext, ctx *UiStateContext) ui.Widget { return build(ctx) }}
 }
 
 func UiStatefulWithInitKey(key string, init func(*UiStateContext), build func(*UiStateContext) ui.Widget) ui.Widget {
+	return ardStateful{key: key, init: func(_ ui.BuildContext, ctx *UiStateContext) { init(ctx) }, build: func(_ ui.BuildContext, ctx *UiStateContext) ui.Widget { return build(ctx) }}
+}
+
+func UiStatefulContext(build func(ui.BuildContext, *UiStateContext) ui.Widget) ui.Widget {
+	return ardStateful{build: build}
+}
+
+func UiStatefulContextWithInit(init func(ui.BuildContext, *UiStateContext), build func(ui.BuildContext, *UiStateContext) ui.Widget) ui.Widget {
+	return ardStateful{init: init, build: build}
+}
+
+func UiStatefulContextKey(key string, build func(ui.BuildContext, *UiStateContext) ui.Widget) ui.Widget {
+	return ardStateful{key: key, build: build}
+}
+
+func UiStatefulContextWithInitKey(key string, init func(ui.BuildContext, *UiStateContext), build func(ui.BuildContext, *UiStateContext) ui.Widget) ui.Widget {
 	return ardStateful{key: key, init: init, build: build}
 }
 
@@ -289,7 +348,7 @@ func (w ardStateful) CreateState() ui.State {
 func (s *ardState) InitState() {
 	if s.init != nil {
 		s.initializing = true
-		s.init(&UiStateContext{state: s})
+		s.init(s.Context(), &UiStateContext{state: s})
 		s.initializing = false
 	}
 }
@@ -323,7 +382,29 @@ func (s *ardState) setValue(fn func()) {
 }
 
 func (s *ardState) Build(ctx ui.BuildContext) ui.Widget {
-	return s.build(&UiStateContext{state: s})
+	return s.build(ctx, &UiStateContext{state: s})
+}
+
+func UiBuildContextRuntime(ctx ui.BuildContext) ui.Runtime {
+	return ctx.Runtime()
+}
+
+func UiEventContextRuntime(ctx ui.EventContext) ui.Runtime {
+	return ctx.Runtime()
+}
+
+func UiEventContextRuntimeWrapped(ctx *UiEventContext) ui.Runtime {
+	if ctx == nil {
+		return nil
+	}
+	return ctx.handle.Runtime()
+}
+
+func UiRuntimeDispatch(rt ui.Runtime, callback func()) {
+	if rt == nil || callback == nil {
+		return
+	}
+	rt.Dispatch(callback)
 }
 
 func UiStateGet[T any](ctx *UiStateContext, key string) ardruntime.Maybe[T] {
@@ -506,6 +587,10 @@ func UiColumnStretch(children []ui.Widget) ui.Widget {
 	}
 }
 
+func UiIndexedStack(index int, children []ui.Widget) ui.Widget {
+	return ui.IndexedStack{Index: index, Children: children}
+}
+
 func UiColumnMin(children []ui.Widget) ui.Widget {
 	return ui.Flex{
 		Axis:               ui.Vertical,
@@ -645,12 +730,39 @@ func UiTextField(value string, placeholder string, minWidth int, obscure bool, o
 	}
 }
 
+func UiTextFieldWrapped(value string, placeholder string, minWidth int, obscure bool, onChanged func(*UiEventContext, string), onSubmitted func(*UiEventContext, string)) ui.Widget {
+	return UiTextField(
+		value,
+		placeholder,
+		minWidth,
+		obscure,
+		func(ctx ui.EventContext, next string) {
+			if onChanged != nil {
+				onChanged(&UiEventContext{handle: ctx}, next)
+			}
+		},
+		func(ctx ui.EventContext, submitted string) {
+			if onSubmitted != nil {
+				onSubmitted(&UiEventContext{handle: ctx}, submitted)
+			}
+		},
+	)
+}
+
 func UiButton(label string, onPressed func(ui.EventContext)) ui.Widget {
 	return ui.Button{Label: label, OnPressed: func(ctx ui.EventContext) {
 		if onPressed != nil {
 			onPressed(ctx)
 		}
 	}}
+}
+
+func UiButtonWrapped(label string, onPressed func(*UiEventContext)) ui.Widget {
+	return UiButton(label, func(ctx ui.EventContext) {
+		if onPressed != nil {
+			onPressed(&UiEventContext{handle: ctx})
+		}
+	})
 }
 
 var testRenderMarks = map[int]bool{}
