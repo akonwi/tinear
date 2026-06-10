@@ -60,12 +60,6 @@ extern fn stateful_raw_with_init_key(key: Str, init: fn(StateContext), build: fn
 extern fn state_get<$T>(ctx: StateContext, key: Str) $T? = "UiStateGet"
 extern fn state_set<$T>(ctx: StateContext, key: Str, value: $T) Void = "UiStateSet"
 extern fn state_drop(ctx: StateContext, key: Str) Void = "UiStateDrop"
-extern fn state_str(ctx: StateContext, key: Str) Str = "UiStateString"
-extern fn set_state_str(ctx: StateContext, key: Str, value: Str) Void = "UiSetStateString"
-extern fn state_bool(ctx: StateContext, key: Str) Bool = "UiStateBool"
-extern fn set_state_bool(ctx: StateContext, key: Str, value: Bool) Void = "UiSetStateBool"
-extern fn state_int(ctx: StateContext, key: Str) Int = "UiStateInt"
-extern fn set_state_int(ctx: StateContext, key: Str, value: Int) Void = "UiSetStateInt"
 
 // Ergonomic Ard wrapper around the Go-owned state context. This keeps the raw
 // extern pointer out of app code while still allowing vaxis/ui to own lifecycle
@@ -97,30 +91,6 @@ impl State {
 
   fn drop(key: Str) {
     state_drop(self.ctx, key)
-  }
-
-  fn get_str(key: Str) Str {
-    self.get<Str>(key).or("")
-  }
-
-  fn set_str(key: Str, value: Str) {
-    self.set(key, value)
-  }
-
-  fn get_bool(key: Str) Bool {
-    self.get<Bool>(key).or(false)
-  }
-
-  fn set_bool(key: Str, value: Bool) {
-    self.set(key, value)
-  }
-
-  fn get_int(key: Str) Int {
-    self.get<Int>(key).or(0)
-  }
-
-  fn set_int(key: Str, value: Int) {
-    self.set(key, value)
   }
 }
 

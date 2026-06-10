@@ -198,22 +198,22 @@ fn new(api_key: Str) ui::Widget {
     key: "my-issues",
     init: fn(state: ui::State) {
       if store.columns.size() == 0 {
-        state.set_bool("my_issues_loading", true)
+        state.set("my_issues_loading", true)
         async::start(fn() {
           match store.load() {
-            ok(_) => { state.set_str("my_issues_error", "") },
-            err(e) => { state.set_str("my_issues_error", e) },
+            ok(_) => { state.set("my_issues_error", "") },
+            err(e) => { state.set("my_issues_error", e) },
           }
-          state.set_bool("my_issues_loaded", true)
-          state.set_bool("my_issues_loading", false)
+          state.set("my_issues_loaded", true)
+          state.set("my_issues_loading", false)
         })
       }
     },
     build: fn(state: ui::State) ui::Widget {
-      let col = clamp(state.get_int("my_issues_col"), store.columns.size())
-      let row = clamp(state.get_int("my_issues_row"), selected_row_count(store, col))
+      let col = clamp(state.get<Int>("my_issues_col").or(0), store.columns.size())
+      let row = clamp(state.get<Int>("my_issues_row").or(0), selected_row_count(store, col))
       let scroll = visible_scroll(
-        state.get_int("my_issues_scroll"),
+        state.get<Int>("my_issues_scroll").or(0),
         col,
         board_visible_count(store.columns.size()),
         store.columns.size(),
@@ -222,8 +222,8 @@ fn new(api_key: Str) ui::Widget {
         child: ui::shortcuts(
           child: content(
             store: store,
-            loading: state.get_bool("my_issues_loading"),
-            error: state.get_str("my_issues_error"),
+            loading: state.get<Bool>("my_issues_loading").or(false),
+            error: state.get<Str>("my_issues_error").or(""),
             col: col,
             row: row,
             scroll: scroll,
@@ -243,38 +243,38 @@ fn new(api_key: Str) ui::Widget {
         ),
         bindings: [
           "my_issues.previous_row": fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-            state.set_int("my_issues_row", clamp(row - 1, selected_row_count(store, col)))
+            state.set("my_issues_row", clamp(row - 1, selected_row_count(store, col)))
             ui::EventResult::handled
           },
           "my_issues.next_row": fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-            state.set_int("my_issues_row", clamp(row + 1, selected_row_count(store, col)))
+            state.set("my_issues_row", clamp(row + 1, selected_row_count(store, col)))
             ui::EventResult::handled
           },
           "my_issues.previous_col": fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
             let next_col = clamp(col - 1, store.columns.size())
-            state.set_int("my_issues_col", next_col)
-            state.set_int("my_issues_row", clamp(row, selected_row_count(store, next_col)))
-            state.set_int("my_issues_scroll", visible_scroll(scroll, next_col, board_visible_count(store.columns.size()), store.columns.size()))
+            state.set("my_issues_col", next_col)
+            state.set("my_issues_row", clamp(row, selected_row_count(store, next_col)))
+            state.set("my_issues_scroll", visible_scroll(scroll, next_col, board_visible_count(store.columns.size()), store.columns.size()))
             ui::EventResult::handled
           },
           "my_issues.next_col": fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
             let next_col = clamp(col + 1, store.columns.size())
-            state.set_int("my_issues_col", next_col)
-            state.set_int("my_issues_row", clamp(row, selected_row_count(store, next_col)))
-            state.set_int("my_issues_scroll", visible_scroll(scroll, next_col, board_visible_count(store.columns.size()), store.columns.size()))
+            state.set("my_issues_col", next_col)
+            state.set("my_issues_row", clamp(row, selected_row_count(store, next_col)))
+            state.set("my_issues_scroll", visible_scroll(scroll, next_col, board_visible_count(store.columns.size()), store.columns.size()))
             ui::EventResult::handled
           },
           "my_issues.refresh": fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
-            if not state.get_bool("my_issues_loading") {
-              state.set_bool("my_issues_loading", true)
+            if not state.get<Bool>("my_issues_loading").or(false) {
+              state.set("my_issues_loading", true)
               ui::dispatch_after(ctx, 16, fn() {
                 match store.load() {
-                  ok(_) => { state.set_str("my_issues_error", "") },
-                  err(e) => { state.set_str("my_issues_error", e) },
+                  ok(_) => { state.set("my_issues_error", "") },
+                  err(e) => { state.set("my_issues_error", e) },
                 }
-                state.set_int("my_issues_col", clamp(col, store.columns.size()))
-                state.set_int("my_issues_row", clamp(row, selected_row_count(store, col)))
-                state.set_bool("my_issues_loading", false)
+                state.set("my_issues_col", clamp(col, store.columns.size()))
+                state.set("my_issues_row", clamp(row, selected_row_count(store, col)))
+                state.set("my_issues_loading", false)
               })
             }
             ui::EventResult::handled

@@ -350,48 +350,6 @@ func UiStateDrop(ctx *UiStateContext, key string) {
 	ctx.state.setValue(func() { delete(ctx.state.values, key) })
 }
 
-func UiStateString(ctx *UiStateContext, key string) string {
-	if ctx == nil || ctx.state == nil {
-		return ""
-	}
-	if value, ok := ctx.state.values[key].(string); ok {
-		return value
-	}
-	return ""
-}
-
-func UiSetStateString(ctx *UiStateContext, key string, value string) {
-	UiStateSet(ctx, key, value)
-}
-
-func UiStateBool(ctx *UiStateContext, key string) bool {
-	if ctx == nil || ctx.state == nil {
-		return false
-	}
-	if value, ok := ctx.state.values[key].(bool); ok {
-		return value
-	}
-	return false
-}
-
-func UiSetStateBool(ctx *UiStateContext, key string, value bool) {
-	UiStateSet(ctx, key, value)
-}
-
-func UiStateInt(ctx *UiStateContext, key string) int {
-	if ctx == nil || ctx.state == nil {
-		return 0
-	}
-	if value, ok := ctx.state.values[key].(int); ok {
-		return value
-	}
-	return 0
-}
-
-func UiSetStateInt(ctx *UiStateContext, key string, value int) {
-	UiStateSet(ctx, key, value)
-}
-
 type UiStyle struct {
 	Bold       bool
 	Reverse    bool

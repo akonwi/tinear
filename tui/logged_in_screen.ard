@@ -4,7 +4,7 @@ use tinear/tui/my_issues_view
 use tinear/tui/ui
 
 fn selected_tab(state: ui::State) Str {
-  let tab = state.get_str("tab")
+  let tab = state.get<Str>("tab").or("")
   match tab {
     "" => "Inbox",
     _ => tab,
@@ -12,7 +12,7 @@ fn selected_tab(state: ui::State) Str {
 }
 
 fn set_tab(state: ui::State, tab: Str) {
-  state.set_str("tab", tab)
+  state.set("tab", tab)
 }
 
 fn toggle_tab(state: ui::State) {
