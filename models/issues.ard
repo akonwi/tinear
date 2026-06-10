@@ -39,20 +39,6 @@ struct BoardColumn {
   issues: [Issue],
 }
 
-// Store for the My Issues board data.
-//
-// The screen owns UI state (cursor/scroll/loading/error). The store owns the
-// loaded issue columns and knows how to fetch/decode them from Linear.
-struct IssuesStore {
-  api_key: Str,
-  columns: mut [BoardColumn],
-}
-
-fn new(api_key: Str) IssuesStore {
-  mut columns: [BoardColumn] = []
-  IssuesStore{api_key: api_key, columns: columns}
-}
-
 fn optional_str(data: Dynamic, name: Str, fallback: Str) Str {
   match decode_utils::optional_field(data, name) {
     v => decode::run(v, decode::string).expect("field not string"),
@@ -144,17 +130,14 @@ fn decode_column(raw: state::BoardColumn) BoardColumn {
   }
 }
 
-impl IssuesStore {
-  fn load() Void!Str {
-    let viewer = try api::fetch_viewer(self.api_key)
-    let viewer_id = decode::run(viewer, decode::field("id", decode::string))
-      .expect("Missing viewer id")
-    let raw_columns = try api::fetch_board(self.api_key, viewer_id)
-    mut columns: [BoardColumn] = []
-    for col in raw_columns {
-      columns.push(decode_column(col))
-    }
-    self.columns = columns
-    Result::ok(())
+fn load(api_key: Str) [BoardColumn]!Str {
+  let viewer = try api::fetch_viewer(api_key)
+  let viewer_id = decode::run(viewer, decode::field("id", decode::string))
+    .expect("Missing viewer id")
+  let raw_columns = try api::fetch_board(api_key, viewer_id)
+  mut columns: [BoardColumn] = []
+  for col in raw_columns {
+    columns.push(decode_column(col))
   }
+  Result::ok(columns)
 }

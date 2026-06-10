@@ -14,7 +14,7 @@ use tinear/vaxis
 // the body for the Inbox tab.
 struct InboxScreen {
   api_key: Str,
-  store: inbox::InboxStore,
+  items: mut [inbox::Item],
   cursor: Int,
   loading: Bool,
   error: Str?,
@@ -22,9 +22,10 @@ struct InboxScreen {
 }
 
 fn new(api_key: Str) InboxScreen {
+  mut items: [inbox::Item] = []
   InboxScreen{
     api_key: api_key,
-    store: inbox::new(api_key),
+    items: items,
     cursor: 0,
     loading: false,
     error: maybe::none(),
@@ -62,8 +63,8 @@ impl InboxScreen {
     self.error = maybe::none()
     ctx.redraw()
 
-    match self.store.load() {
-      ok => (),
+    match inbox::load(self.api_key) {
+      ok(items) => { self.items = items },
       err => {
         self.error = maybe::some(err)
       }
@@ -82,7 +83,7 @@ impl InboxScreen {
         }
       },
       "Down" => {
-        if self.cursor + 1 < self.store.items.size() {
+        if self.cursor + 1 < self.items.size() {
           self.cursor = self.cursor + 1
         }
       },
@@ -128,7 +129,7 @@ impl view::View for InboxScreen {
         match self.error {
           _err => frame.draw_styled(0, 0, "Unable to load inbox", 1, -1, false, false, false, false, false),
           _ => {
-            match self.store.items.size() == 0 {
+            match self.items.size() == 0 {
               true => {
                 let msg = "Inbox empty"
                 let raw_x = (frame.width() - frame.rendered_width(msg)) / 2
@@ -147,7 +148,7 @@ impl view::View for InboxScreen {
                 let height = frame.height()
                 let start = visible_start(self.cursor, height)
                 mut row = 0
-                for notif, idx in self.store.items {
+                for notif, idx in self.items {
                   if idx >= start and row < height {
                     let line = text::truncate_with_ellipsis(notif.draw(idx, self.cursor), frame.width())
                     let selected = idx == self.cursor

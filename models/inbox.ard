@@ -13,16 +13,6 @@ struct Item {
   title: Str,
 }
 
-struct InboxStore {
-  api_key: Str,
-  items: mut [Item]
-}
-
-fn new(api_key: Str) InboxStore {
-  mut items = List::new<Item>()
-  InboxStore{api_key: api_key, items: items}
-}
-
 fn format_type(n_type: Str) Str {
   match n_type {
     "issueAssignedToYou" => "assigned",
@@ -111,6 +101,23 @@ fn decode_item(notif: Dynamic) Item {
   }
 }
 
+fn load(api_key: Str) [Item]!Str {
+  let nodes = try api::fetch_inbox(api_key)
+  mut items: [Item] = []
+  for node in nodes {
+    items.push(decode_item(node))
+  }
+  Result::ok(items)
+}
+
+fn load_detail(api_key: Str, notification_id: Str) Dynamic!Str {
+  api::fetch_notification_detail(api_key, notification_id)
+}
+
+fn archive(api_key: Str, notification_id: Str) Void!Str {
+  api::archive_notification(api_key, notification_id)
+}
+
 impl Item {
   fn draw(idx: Int, cursor: Int) Str {
     let cursor_mark = match idx == cursor {
@@ -123,22 +130,3 @@ impl Item {
   }
 }
 
-impl InboxStore {
-  fn load() Void!Str {
-    let nodes = try api::fetch_inbox(self.api_key)
-    mut items: [Item] = []
-    for node in nodes {
-      items.push(decode_item(node))
-    }
-    self.items = items
-    Result::ok(())
-  }
-
-  fn load_detail(notification_id: Str) Dynamic!Str {
-    api::fetch_notification_detail(self.api_key, notification_id)
-  }
-
-  fn archive(notification_id: Str) Void!Str {
-    api::archive_notification(self.api_key, notification_id)
-  }
-}

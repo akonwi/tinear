@@ -48,9 +48,9 @@ fn render_item(item: inbox::Item, selected: Bool) ui::Widget {
   }
 }
 
-fn render_rows(store: inbox::InboxStore, cursor: Int) ui::Widget {
+fn render_rows(items: [inbox::Item], cursor: Int) ui::Widget {
   mut rows: [ui::Widget] = []
-  for item, idx in store.items {
+  for item, idx in items {
     rows.push(render_item(item, idx == cursor))
   }
   ui::focusable(ui::column_stretch(rows))
@@ -281,17 +281,17 @@ fn detail_modal(item: inbox::Item, loading_detail: Bool, detail_error: Str, deta
   )
 }
 
-fn content(store: inbox::InboxStore, loading: Bool, error: Str, cursor: Int, detail_open: Bool, loading_detail: Bool, detail_error: Str, detail: Dynamic?, on_detail_dismiss: fn(ui::EventContext)) ui::Widget {
+fn content(items: [inbox::Item], loading: Bool, error: Str, cursor: Int, detail_open: Bool, loading_detail: Bool, detail_error: Str, detail: Dynamic?, on_detail_dismiss: fn(ui::EventContext)) ui::Widget {
   if loading {
     ui::text("Loading inbox…")
   } else if not error.is_empty() {
     ui::text("Unable to load inbox", style: ui::style(bold: true))
-  } else if store.items.size() == 0 {
+  } else if items.size() == 0 {
     ui::center(ui::text("Inbox empty"))
   } else if detail_open {
-    let item = store.items.at(cursor)
+    let item = items.at(cursor)
     ui::overlay_modal(
-      render_rows(store, cursor),
+      render_rows(items, cursor),
       detail_modal(
         item: item,
         loading_detail: loading_detail,
@@ -301,14 +301,17 @@ fn content(store: inbox::InboxStore, loading: Bool, error: Str, cursor: Int, det
       ),
     )
   } else {
-    render_rows(store, cursor)
+    render_rows(items, cursor)
   }
 }
 
-private fn load_inbox(store: inbox::InboxStore, state: ui::State) {
+private fn load_inbox(api_key: Str, state: ui::State) {
   state.set("inbox_loading", true)
-  match store.load() {
-    ok(_) => { state.set("error", "") },
+  match inbox::load(api_key) {
+    ok(items) => {
+      state.set("items", items)
+      state.set("error", "")
+    },
     err(e) => { state.set("error", e) },
   }
   state.set("inbox_loaded", true)
@@ -316,25 +319,25 @@ private fn load_inbox(store: inbox::InboxStore, state: ui::State) {
 }
 
 fn new(api_key: Str) ui::Widget {
-  let store = inbox::new(api_key)
-
   ui::stateful(
     key: "inbox",
     init: fn(state: ui::State) {
-      if store.items.size() == 0 {
-        load_inbox(store: store, state: state)
+      let items = state.get<[inbox::Item]>("items").or([])
+      if items.size() == 0 {
+        load_inbox(api_key: api_key, state: state)
       }
     },
     build: fn(state: ui::State) ui::Widget {
-    let cursor = clamp_cursor(state.get<Int>("cursor").or(0), store.items.size())
-    let detail_open = state.get<Bool>("detail_open").or(false)
-    let loading = state.get<Bool>("inbox_loading").or(false)
-    let loading_detail = state.get<Bool>("is_loading").or(false)
-    let detail = state.get<Dynamic>("detail")
-    ui::actions(
+      let items = state.get<[inbox::Item]>("items").or([])
+      let cursor = clamp_cursor(state.get<Int>("cursor").or(0), items.size())
+      let detail_open = state.get<Bool>("detail_open").or(false)
+      let loading = state.get<Bool>("inbox_loading").or(false)
+      let loading_detail = state.get<Bool>("is_loading").or(false)
+      let detail = state.get<Dynamic>("detail")
+      ui::actions(
       child: ui::shortcuts(
         child: content(
-          store: store,
+          items: items,
           loading: loading,
           error: state.get<Str>("error").or(""),
           cursor: cursor,
@@ -368,13 +371,13 @@ fn new(api_key: Str) ui::Widget {
       bindings: [
         "inbox.previous": fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
           if not detail_open {
-            state.set("cursor", clamp_cursor(cursor - 1, store.items.size()))
+            state.set("cursor", clamp_cursor(cursor - 1, items.size()))
           }
           ui::EventResult::handled
         },
         "inbox.next": fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
           if not detail_open {
-            state.set("cursor", clamp_cursor(cursor + 1, store.items.size()))
+            state.set("cursor", clamp_cursor(cursor + 1, items.size()))
           }
           ui::EventResult::handled
         },
@@ -382,14 +385,14 @@ fn new(api_key: Str) ui::Widget {
           if (not detail_open) and (not state.get<Bool>("inbox_loading").or(false)) {
             state.set("inbox_loading", true)
             ui::dispatch_after(ctx, 16, fn() {
-              load_inbox(store: store, state: state)
+              load_inbox(api_key: api_key, state: state)
             })
           }
           ui::EventResult::handled
         },
         "inbox.open_detail": fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
-          if (not detail_open) and store.items.size() > 0 {
-            let selected = store.items.at(cursor)
+          if (not detail_open) and items.size() > 0 {
+            let selected = items.at(cursor)
             let target_id = selected.notification_id
             state.set("detail_id", target_id)
             state.set("detail_error", "")
@@ -398,7 +401,7 @@ fn new(api_key: Str) ui::Widget {
             state.set("detail_open", true)
             ui::dispatch_after(ctx, 16, fn() {
               if state.get<Str>("detail_id").or("") == target_id {
-                match store.load_detail(target_id) {
+                match inbox::load_detail(api_key, target_id) {
                   ok(d) => {
                     state.set("detail", d)
                     state.set("detail_error", "")
@@ -429,9 +432,9 @@ fn new(api_key: Str) ui::Widget {
           ui::EventResult::handled
         },
         "inbox.archive_detail": fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
-          if store.items.size() > 0 {
-            let selected = store.items.at(cursor)
-            match store.archive(selected.notification_id) {
+          if items.size() > 0 {
+            let selected = items.at(cursor)
+            match inbox::archive(api_key, selected.notification_id) {
               ok(_) => {
                 if detail_open {
                   state.set("detail_open", false)
@@ -439,8 +442,9 @@ fn new(api_key: Str) ui::Widget {
                   state.set("detail_error", "")
                   state.drop("detail")
                 }
-                load_inbox(store: store, state: state)
-                state.set("cursor", clamp_cursor(cursor, store.items.size()))
+                load_inbox(api_key: api_key, state: state)
+                let updated_items = state.get<[inbox::Item]>("items").or([])
+                state.set("cursor", clamp_cursor(cursor, updated_items.size()))
               },
               err(e) => {
                 if detail_open {
@@ -462,6 +466,6 @@ fn new(api_key: Str) ui::Widget {
         },
       ],
     )
-  },
+    },
   )
 }
