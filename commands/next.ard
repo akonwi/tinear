@@ -1,3 +1,4 @@
+use ard/env
 use ard/io
 
 use tinear/commands/login
@@ -27,11 +28,22 @@ fn app_content(cfg: config::Config) ui::Widget {
   })
 }
 
+fn debug_wrap(child: ui::Widget) ui::Widget {
+  let enabled = match env::get("DEBUG") {
+    value => value == "true",
+    _ => false,
+  }
+  match enabled {
+    true => ui::key_debug(child),
+    false => child,
+  }
+}
+
 fn root(cfg: config::Config) ui::Widget {
   let quit_intent = "tinear.quit"
   ui::actions(
     child: ui::shortcuts(
-      child: ui::key_debug(ui::padding_horizontal(1, app_content(cfg))),
+      child: debug_wrap(ui::padding_horizontal(1, app_content(cfg))),
       bindings: [
         "Ctrl+c": quit_intent,
       ],
