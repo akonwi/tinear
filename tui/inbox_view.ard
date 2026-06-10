@@ -305,6 +305,16 @@ fn content(store: inbox::InboxStore, loading: Bool, error: Str, cursor: Int, det
   }
 }
 
+private fn load_inbox(store: inbox::InboxStore, state: ui::State) {
+  state.set("inbox_loading", true)
+  match store.load() {
+    ok(_) => { state.set("error", "") },
+    err(e) => { state.set("error", e) },
+  }
+  state.set("inbox_loaded", true)
+  state.set("inbox_loading", false)
+}
+
 fn new(api_key: Str) ui::Widget {
   let store = inbox::new(api_key)
 
@@ -312,13 +322,7 @@ fn new(api_key: Str) ui::Widget {
     key: "inbox",
     init: fn(state: ui::State) {
       if store.items.size() == 0 {
-        state.set("inbox_loading", true)
-        match store.load() {
-          ok(_) => { state.set("error", "") },
-          err(e) => { state.set("error", e) },
-        }
-        state.set("inbox_loaded", true)
-        state.set("inbox_loading", false)
+        load_inbox(store: store, state: state)
       }
     },
     build: fn(state: ui::State) ui::Widget {
@@ -378,12 +382,7 @@ fn new(api_key: Str) ui::Widget {
           if (not detail_open) and (not state.get<Bool>("inbox_loading").or(false)) {
             state.set("inbox_loading", true)
             ui::dispatch_after(ctx, 16, fn() {
-              match store.load() {
-                ok(_) => { state.set("error", "") },
-                err(e) => { state.set("error", e) },
-              }
-              state.set("inbox_loaded", true)
-              state.set("inbox_loading", false)
+              load_inbox(store: store, state: state)
             })
           }
           ui::EventResult::handled
@@ -440,11 +439,7 @@ fn new(api_key: Str) ui::Widget {
                   state.set("detail_error", "")
                   state.drop("detail")
                 }
-                match store.load() {
-                  ok(_) => { state.set("error", "") },
-                  err(e) => { state.set("error", e) },
-                }
-                state.set("inbox_loaded", true)
+                load_inbox(store: store, state: state)
                 state.set("cursor", clamp_cursor(cursor, store.items.size()))
               },
               err(e) => {

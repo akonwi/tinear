@@ -192,6 +192,15 @@ fn content(store: issues::IssuesStore, loading: Bool, error: Str, col: Int, row:
   }
 }
 
+private fn load_my_issues(store: issues::IssuesStore, state: ui::State) {
+  match store.load() {
+    ok(_) => { state.set("my_issues_error", "") },
+    err(e) => { state.set("my_issues_error", e) },
+  }
+  state.set("my_issues_loaded", true)
+  state.set("my_issues_loading", false)
+}
+
 fn new(api_key: Str) ui::Widget {
   let store = issues::new(api_key)
   ui::stateful(
@@ -200,12 +209,7 @@ fn new(api_key: Str) ui::Widget {
       if store.columns.size() == 0 {
         state.set("my_issues_loading", true)
         async::start(fn() {
-          match store.load() {
-            ok(_) => { state.set("my_issues_error", "") },
-            err(e) => { state.set("my_issues_error", e) },
-          }
-          state.set("my_issues_loaded", true)
-          state.set("my_issues_loading", false)
+          load_my_issues(store: store, state: state)
         })
       }
     },
@@ -268,13 +272,9 @@ fn new(api_key: Str) ui::Widget {
             if not state.get<Bool>("my_issues_loading").or(false) {
               state.set("my_issues_loading", true)
               ui::dispatch_after(ctx, 16, fn() {
-                match store.load() {
-                  ok(_) => { state.set("my_issues_error", "") },
-                  err(e) => { state.set("my_issues_error", e) },
-                }
+                load_my_issues(store: store, state: state)
                 state.set("my_issues_col", clamp(col, store.columns.size()))
                 state.set("my_issues_row", clamp(row, selected_row_count(store, col)))
-                state.set("my_issues_loading", false)
               })
             }
             ui::EventResult::handled
