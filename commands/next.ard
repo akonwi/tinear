@@ -36,7 +36,6 @@ fn root(cfg: config::Config) ui::Widget {
     child: ui::shortcuts(
       child: ui::key_debug(ui::padding_horizontal(1, app_content(cfg))),
       bindings: [
-        "q": quit_intent,
         "Ctrl+c": quit_intent,
       ],
     ),

@@ -352,7 +352,6 @@ fn new(api_key: Str) ui::Widget {
           "\r": "inbox.open_detail",
           "\n": "inbox.open_detail",
           "Ctrl+m": "inbox.open_detail",
-          "Space": "inbox.open_detail",
           "Escape": "inbox.close_detail",
           "Esc": "inbox.close_detail",
           "o": "inbox.open_browser",
