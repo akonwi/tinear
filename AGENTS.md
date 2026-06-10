@@ -73,6 +73,9 @@ The Go module includes both.
 - Keep FFI-only details private/internal when possible. Public Ard functions
   should translate ergonomic nullable/default arguments into the required Go FFI
   shape.
+- Prefer optional arguments for widget customization/lifecycle hooks instead of
+  separate public functions for the same widget. For example, use
+  `ui::stateful(build, init: ...)` rather than a separate `stateful_with_init`.
 
 Key bits of the event API:
 

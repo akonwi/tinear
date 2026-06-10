@@ -248,25 +248,42 @@ func UiQuit(ctx ui.EventContext) {
 type UiStateContext struct{ state *ardState }
 
 type ardStateful struct {
+	init  func(*UiStateContext)
 	build func(*UiStateContext) ui.Widget
 }
 
 type ardState struct {
 	ui.StateBase
-	values map[string]any
-	build  func(*UiStateContext) ui.Widget
+	values       map[string]any
+	initializing bool
+	init         func(*UiStateContext)
+	build        func(*UiStateContext) ui.Widget
 }
 
 func UiStateful(build func(*UiStateContext) ui.Widget) ui.Widget {
 	return ardStateful{build: build}
 }
 
+func UiStatefulWithInit(init func(*UiStateContext), build func(*UiStateContext) ui.Widget) ui.Widget {
+	return ardStateful{init: init, build: build}
+}
+
 func (w ardStateful) CreateState() ui.State {
-	return &ardState{values: map[string]any{}, build: w.build}
+	return &ardState{values: map[string]any{}, init: w.init, build: w.build}
+}
+
+func (s *ardState) InitState() {
+	if s.init != nil {
+		s.initializing = true
+		s.init(&UiStateContext{state: s})
+		s.initializing = false
+	}
 }
 
 func (s *ardState) DidUpdateWidget(old ui.Widget) {
-	s.build = s.Widget().(ardStateful).build
+	w := s.Widget().(ardStateful)
+	s.init = w.init
+	s.build = w.build
 }
 
 func (s *ardState) Build(ctx ui.BuildContext) ui.Widget {
@@ -287,6 +304,10 @@ func UiSetStateString(ctx *UiStateContext, key string, value string) {
 	if ctx == nil || ctx.state == nil {
 		return
 	}
+	if ctx.state.initializing {
+		ctx.state.values[key] = value
+		return
+	}
 	ctx.state.SetState(func() { ctx.state.values[key] = value })
 }
 
@@ -304,6 +325,10 @@ func UiSetStateBool(ctx *UiStateContext, key string, value bool) {
 	if ctx == nil || ctx.state == nil {
 		return
 	}
+	if ctx.state.initializing {
+		ctx.state.values[key] = value
+		return
+	}
 	ctx.state.SetState(func() { ctx.state.values[key] = value })
 }
 
@@ -319,6 +344,10 @@ func UiStateInt(ctx *UiStateContext, key string) int {
 
 func UiSetStateInt(ctx *UiStateContext, key string, value int) {
 	if ctx == nil || ctx.state == nil {
+		return
+	}
+	if ctx.state.initializing {
+		ctx.state.values[key] = value
 		return
 	}
 	ctx.state.SetState(func() { ctx.state.values[key] = value })

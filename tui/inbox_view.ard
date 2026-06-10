@@ -310,8 +310,8 @@ fn new(api_key: Str) ui::Widget {
   let store = inbox::new(api_key)
   mut detail: Dynamic? = maybe::none()
 
-  ui::stateful(fn(state: ui::State) ui::Widget {
-    if not state.get_bool("inbox_loaded") {
+  ui::stateful(
+    init: fn(state: ui::State) {
       state.set_bool("inbox_loading", true)
       match store.load() {
         ok(_) => { state.set_str("error", "") },
@@ -319,8 +319,8 @@ fn new(api_key: Str) ui::Widget {
       }
       state.set_bool("inbox_loaded", true)
       state.set_bool("inbox_loading", false)
-    }
-
+    },
+    build: fn(state: ui::State) ui::Widget {
     let cursor = clamp_cursor(state.get_int("cursor"), store.items.size())
     let detail_open = state.get_bool("detail_open")
     let loading = state.get_bool("inbox_loading")
@@ -465,5 +465,6 @@ fn new(api_key: Str) ui::Widget {
         },
       ],
     )
-  })
+  },
+  )
 }
