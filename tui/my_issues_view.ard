@@ -1,0 +1,293 @@
+use ard/async
+use ard/maybe
+
+use tinear/models/issues
+use tinear/tui/state
+use tinear/tui/text
+use tinear/tui/ui
+
+fn clamp(value: Int, count: Int) Int {
+  match {
+    count <= 0 => 0,
+    value < 0 => 0,
+    value >= count => count - 1,
+    _ => value,
+  }
+}
+
+fn board_column_gap() Int { 3 }
+fn board_column_width() Int { 30 }
+fn board_visible_count(col_count: Int) Int {
+  match col_count < 3 {
+    true => col_count,
+    false => 3,
+  }
+}
+
+fn repeat(ch: Str, count: Int) Str {
+  mut out = ""
+  if count > 0 {
+    for i in 0..(count - 1) {
+      out =+ ch
+    }
+  }
+  out
+}
+
+fn visible_scroll(scroll: Int, selected: Int, visible_count: Int, col_count: Int) Int {
+  let safe_visible = match visible_count < 1 {
+    true => 1,
+    false => visible_count,
+  }
+  let max_scroll = match col_count > safe_visible {
+    true => col_count - safe_visible,
+    false => 0,
+  }
+  let clamped = match scroll > max_scroll {
+    true => max_scroll,
+    false => match scroll < 0 {
+      true => 0,
+      false => scroll,
+    },
+  }
+
+  let with_selected = match selected < clamped {
+    true => selected,
+    false => match selected >= clamped + safe_visible {
+      true => selected - safe_visible + 1,
+      false => clamped,
+    },
+  }
+
+  match with_selected > max_scroll {
+    true => max_scroll,
+    false => match with_selected < 0 {
+      true => 0,
+      false => with_selected,
+    },
+  }
+}
+
+fn row_text(value: Str, selected: Bool) ui::Widget {
+  match selected {
+    true => ui::text(value, style: ui::style(reverse: true)),
+    false => ui::text(value),
+  }
+}
+
+fn card_body(issue: issues::Issue, selected: Bool, col_w: Int) ui::Widget {
+  let cursor = match selected {
+    true => "▸",
+    false => " ",
+  }
+  let glyph = state::priority_glyph(issue.priority)
+  let title_indent = "   "
+  let title_w = col_w - 3
+  let wrapped = text::wrap_title(issue.title, title_w)
+  mut children = [
+    row_text("{cursor}{glyph} {issue.identifier}", selected),
+    row_text("{title_indent}{wrapped.line1}", selected),
+  ]
+  if not wrapped.line2.is_empty() {
+    children.push(row_text("{title_indent}{wrapped.line2}", selected))
+  }
+  ui::column_stretch(children)
+}
+
+fn issue_card(issue: issues::Issue, selected: Bool, last: Bool, col_w: Int) ui::Widget {
+  let first = match selected {
+    true => ui::box(card_body(issue, selected, col_w), style: ui::style(reverse: true)),
+    false => card_body(issue, selected, col_w),
+  }
+  mut children = [first]
+  if not last {
+    children.push(ui::text(repeat("━", col_w - 1)))
+    children.push(ui::sized_box(0, 1))
+  }
+  ui::column_stretch(children)
+}
+
+fn board_column(col: issues::BoardColumn, col_idx: Int, selected_col: Int, selected_row: Int) ui::Widget {
+  let col_w = board_column_width()
+  let suffix = match col.state_type == "completed" {
+    true => " · last 10",
+    false => "",
+  }
+  let header = text::truncate_with_ellipsis("{col.name} ({col.issues.size()}){suffix}", col_w)
+  mut children = [
+    ui::text(header),
+    ui::text(repeat("─", col_w - 1), style: ui::style(foreground: "border")),
+    ui::sized_box(0, 1),
+  ]
+  let last_idx = col.issues.size() - 1
+  for issue, row_idx in col.issues {
+    children.push(issue_card(
+      issue: issue,
+      selected: col_idx == selected_col and row_idx == selected_row,
+      last: row_idx == last_idx,
+      col_w: col_w,
+    ))
+  }
+  ui::constrained_width(col_w, ui::column_stretch(children))
+}
+
+fn board(store: issues::IssuesStore, selected_col: Int, selected_row: Int, scroll: Int) ui::Widget {
+  let col_count = store.columns.size()
+  let visible_count = board_visible_count(col_count)
+  let start_col = visible_scroll(scroll, selected_col, visible_count, col_count)
+  let end_excl = match start_col + visible_count > col_count {
+    true => col_count,
+    false => start_col + visible_count,
+  }
+
+  mut columns: [ui::Widget] = []
+  if start_col > 0 {
+    columns.push(ui::text("‹"))
+  }
+  for col, col_idx in store.columns {
+    if col_idx >= start_col and col_idx < end_excl {
+      if columns.size() > 0 {
+        columns.push(ui::sized_box(board_column_gap(), 0))
+      }
+      columns.push(board_column(col, col_idx, selected_col, selected_row))
+    }
+  }
+  if end_excl < col_count {
+    columns.push(ui::sized_box(board_column_gap(), 0))
+    columns.push(ui::text("›"))
+  }
+  ui::focusable(ui::row(columns))
+}
+
+fn selected_row_count(store: issues::IssuesStore, col: Int) Int {
+  match store.columns.size() == 0 {
+    true => 0,
+    false => store.columns.at(clamp(col, store.columns.size())).issues.size(),
+  }
+}
+
+fn selected_issue(store: issues::IssuesStore, col: Int, row: Int) issues::Issue? {
+  match store.columns.size() == 0 {
+    true => maybe::none(),
+    false => {
+      let safe_col = clamp(col, store.columns.size())
+      let issues = store.columns.at(safe_col).issues
+      match issues.size() == 0 {
+        true => maybe::none(),
+        false => maybe::some(issues.at(clamp(row, issues.size()))),
+      }
+    },
+  }
+}
+
+fn content(store: issues::IssuesStore, loading: Bool, error: Str, col: Int, row: Int, scroll: Int) ui::Widget {
+  if loading {
+    ui::text("Loading my issues…")
+  } else if not error.is_empty() {
+    ui::text("Unable to load my issues", style: ui::style(bold: true))
+  } else if store.columns.size() == 0 {
+    ui::center(ui::text("No issues assigned to you."))
+  } else {
+    board(store, col, row, scroll)
+  }
+}
+
+fn new(api_key: Str) ui::Widget {
+  let store = issues::new(api_key)
+  ui::stateful(
+    key: "my-issues",
+    init: fn(state: ui::State) {
+      if store.columns.size() == 0 {
+        state.set_bool("my_issues_loading", true)
+        async::start(fn() {
+          match store.load() {
+            ok(_) => { state.set_str("my_issues_error", "") },
+            err(e) => { state.set_str("my_issues_error", e) },
+          }
+          state.set_bool("my_issues_loaded", true)
+          state.set_bool("my_issues_loading", false)
+        })
+      }
+    },
+    build: fn(state: ui::State) ui::Widget {
+      let col = clamp(state.get_int("my_issues_col"), store.columns.size())
+      let row = clamp(state.get_int("my_issues_row"), selected_row_count(store, col))
+      let scroll = visible_scroll(
+        state.get_int("my_issues_scroll"),
+        col,
+        board_visible_count(store.columns.size()),
+        store.columns.size(),
+      )
+      ui::actions(
+        child: ui::shortcuts(
+          child: content(
+            store: store,
+            loading: state.get_bool("my_issues_loading"),
+            error: state.get_str("my_issues_error"),
+            col: col,
+            row: row,
+            scroll: scroll,
+          ),
+          bindings: [
+            "Up": "my_issues.previous_row",
+            "k": "my_issues.previous_row",
+            "Down": "my_issues.next_row",
+            "j": "my_issues.next_row",
+            "Left": "my_issues.previous_col",
+            "h": "my_issues.previous_col",
+            "Right": "my_issues.next_col",
+            "l": "my_issues.next_col",
+            "Enter": "my_issues.open",
+            "r": "my_issues.refresh",
+          ],
+        ),
+        bindings: [
+          "my_issues.previous_row": fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            state.set_int("my_issues_row", clamp(row - 1, selected_row_count(store, col)))
+            ui::EventResult::handled
+          },
+          "my_issues.next_row": fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            state.set_int("my_issues_row", clamp(row + 1, selected_row_count(store, col)))
+            ui::EventResult::handled
+          },
+          "my_issues.previous_col": fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            let next_col = clamp(col - 1, store.columns.size())
+            state.set_int("my_issues_col", next_col)
+            state.set_int("my_issues_row", clamp(row, selected_row_count(store, next_col)))
+            state.set_int("my_issues_scroll", visible_scroll(scroll, next_col, board_visible_count(store.columns.size()), store.columns.size()))
+            ui::EventResult::handled
+          },
+          "my_issues.next_col": fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            let next_col = clamp(col + 1, store.columns.size())
+            state.set_int("my_issues_col", next_col)
+            state.set_int("my_issues_row", clamp(row, selected_row_count(store, next_col)))
+            state.set_int("my_issues_scroll", visible_scroll(scroll, next_col, board_visible_count(store.columns.size()), store.columns.size()))
+            ui::EventResult::handled
+          },
+          "my_issues.refresh": fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            if not state.get_bool("my_issues_loading") {
+              state.set_bool("my_issues_loading", true)
+              ui::dispatch_after(ctx, 16, fn() {
+                match store.load() {
+                  ok(_) => { state.set_str("my_issues_error", "") },
+                  err(e) => { state.set_str("my_issues_error", e) },
+                }
+                state.set_int("my_issues_col", clamp(col, store.columns.size()))
+                state.set_int("my_issues_row", clamp(row, selected_row_count(store, col)))
+                state.set_bool("my_issues_loading", false)
+              })
+            }
+            ui::EventResult::handled
+          },
+          "my_issues.open": fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            match selected_issue(store, col, row) {
+              _issue => (),
+              _ => (),
+            }
+            ui::EventResult::handled
+          },
+        ],
+      )
+    },
+  )
+}

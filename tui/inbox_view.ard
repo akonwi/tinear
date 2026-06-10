@@ -311,14 +311,17 @@ fn new(api_key: Str) ui::Widget {
   mut detail: Dynamic? = maybe::none()
 
   ui::stateful(
+    key: "inbox",
     init: fn(state: ui::State) {
-      state.set_bool("inbox_loading", true)
-      match store.load() {
-        ok(_) => { state.set_str("error", "") },
-        err(e) => { state.set_str("error", e) },
+      if store.items.size() == 0 {
+        state.set_bool("inbox_loading", true)
+        match store.load() {
+          ok(_) => { state.set_str("error", "") },
+          err(e) => { state.set_str("error", e) },
+        }
+        state.set_bool("inbox_loaded", true)
+        state.set_bool("inbox_loading", false)
       }
-      state.set_bool("inbox_loaded", true)
-      state.set_bool("inbox_loading", false)
     },
     build: fn(state: ui::State) ui::Widget {
     let cursor = clamp_cursor(state.get_int("cursor"), store.items.size())

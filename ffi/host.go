@@ -248,6 +248,7 @@ func UiQuit(ctx ui.EventContext) {
 type UiStateContext struct{ state *ardState }
 
 type ardStateful struct {
+	key   string
 	init  func(*UiStateContext)
 	build func(*UiStateContext) ui.Widget
 }
@@ -256,6 +257,7 @@ type ardState struct {
 	ui.StateBase
 	values       map[string]any
 	initializing bool
+	disposed     bool
 	init         func(*UiStateContext)
 	build        func(*UiStateContext) ui.Widget
 }
@@ -266,6 +268,18 @@ func UiStateful(build func(*UiStateContext) ui.Widget) ui.Widget {
 
 func UiStatefulWithInit(init func(*UiStateContext), build func(*UiStateContext) ui.Widget) ui.Widget {
 	return ardStateful{init: init, build: build}
+}
+
+func UiStatefulKey(key string, build func(*UiStateContext) ui.Widget) ui.Widget {
+	return ardStateful{key: key, build: build}
+}
+
+func UiStatefulWithInitKey(key string, init func(*UiStateContext), build func(*UiStateContext) ui.Widget) ui.Widget {
+	return ardStateful{key: key, init: init, build: build}
+}
+
+func (w ardStateful) WidgetKey() ui.KeyValue {
+	return ui.KeyValue(w.key)
 }
 
 func (w ardStateful) CreateState() ui.State {
@@ -286,6 +300,28 @@ func (s *ardState) DidUpdateWidget(old ui.Widget) {
 	s.build = w.build
 }
 
+func (s *ardState) Dispose() {
+	s.disposed = true
+}
+
+func (s *ardState) setValue(fn func()) {
+	if s.initializing {
+		fn()
+		return
+	}
+	if s.disposed {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			if fmt.Sprint(r) != "ui: MarkNeedsBuild called after Dispose" {
+				panic(r)
+			}
+		}
+	}()
+	s.SetState(fn)
+}
+
 func (s *ardState) Build(ctx ui.BuildContext) ui.Widget {
 	return s.build(&UiStateContext{state: s})
 }
@@ -304,11 +340,7 @@ func UiSetStateString(ctx *UiStateContext, key string, value string) {
 	if ctx == nil || ctx.state == nil {
 		return
 	}
-	if ctx.state.initializing {
-		ctx.state.values[key] = value
-		return
-	}
-	ctx.state.SetState(func() { ctx.state.values[key] = value })
+	ctx.state.setValue(func() { ctx.state.values[key] = value })
 }
 
 func UiStateBool(ctx *UiStateContext, key string) bool {
@@ -325,11 +357,7 @@ func UiSetStateBool(ctx *UiStateContext, key string, value bool) {
 	if ctx == nil || ctx.state == nil {
 		return
 	}
-	if ctx.state.initializing {
-		ctx.state.values[key] = value
-		return
-	}
-	ctx.state.SetState(func() { ctx.state.values[key] = value })
+	ctx.state.setValue(func() { ctx.state.values[key] = value })
 }
 
 func UiStateInt(ctx *UiStateContext, key string) int {
@@ -346,11 +374,7 @@ func UiSetStateInt(ctx *UiStateContext, key string, value int) {
 	if ctx == nil || ctx.state == nil {
 		return
 	}
-	if ctx.state.initializing {
-		ctx.state.values[key] = value
-		return
-	}
-	ctx.state.SetState(func() { ctx.state.values[key] = value })
+	ctx.state.setValue(func() { ctx.state.values[key] = value })
 }
 
 type UiStyle struct {

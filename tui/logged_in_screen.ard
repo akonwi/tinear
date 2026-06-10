@@ -1,5 +1,6 @@
 use tinear/tui/inbox_view
 use tinear/tui/hints
+use tinear/tui/my_issues_view
 use tinear/tui/ui
 
 fn selected_tab(state: ui::State) Str {
@@ -37,9 +38,9 @@ fn tab_bar(tab: Str) ui::Widget {
   ])
 }
 
-fn body(tab: Str, inbox: ui::Widget) ui::Widget {
+fn body(tab: Str, inbox: ui::Widget, my_issues: ui::Widget) ui::Widget {
   match tab {
-    "My Issues" => ui::center(ui::text("My Issues will be ported next.")),
+    "My Issues" => my_issues,
     _ => inbox,
   }
 }
@@ -55,12 +56,12 @@ fn screen_separator() ui::Widget {
   ui::divider(style: ui::style(foreground: "border"))
 }
 
-fn content(state: ui::State, inbox: ui::Widget) ui::Widget {
+fn content(state: ui::State, inbox: ui::Widget, my_issues: ui::Widget) ui::Widget {
   let tab = selected_tab(state)
   ui::column_stretch([
     tab_bar(tab),
     screen_separator(),
-    ui::expanded(body(tab, inbox)),
+    ui::expanded(body(tab, inbox, my_issues)),
     screen_separator(),
     footer(tab),
   ])
@@ -68,10 +69,11 @@ fn content(state: ui::State, inbox: ui::Widget) ui::Widget {
 
 fn new(api_key: Str) ui::Widget {
   let inbox = inbox_view::new(api_key)
+  let my_issues = my_issues_view::new(api_key)
   ui::stateful(fn(state: ui::State) ui::Widget {
     ui::actions(
       child: ui::shortcuts(
-        child: content(state, inbox),
+        child: content(state, inbox, my_issues),
         bindings: [
           "Tab": "tabs.next",
           "1": "tabs.inbox",

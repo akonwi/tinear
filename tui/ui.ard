@@ -55,6 +55,8 @@ extern fn quit(ctx: EventContext) Void = "UiQuit"
 // application code.
 extern fn stateful_raw(build: fn(StateContext) Widget) Widget = "UiStateful"
 extern fn stateful_raw_with_init(init: fn(StateContext), build: fn(StateContext) Widget) Widget = "UiStatefulWithInit"
+extern fn stateful_raw_key(key: Str, build: fn(StateContext) Widget) Widget = "UiStatefulKey"
+extern fn stateful_raw_with_init_key(key: Str, init: fn(StateContext), build: fn(StateContext) Widget) Widget = "UiStatefulWithInitKey"
 extern fn state_str(ctx: StateContext, key: Str) Str = "UiStateString"
 extern fn set_state_str(ctx: StateContext, key: Str, value: Str) Void = "UiSetStateString"
 extern fn state_bool(ctx: StateContext, key: Str) Bool = "UiStateBool"
@@ -99,19 +101,39 @@ impl State {
 // retained `State`; use State methods for small retained values. `init`, when
 // provided, runs before the first build; State setters there initialize values
 // directly instead of scheduling a rebuild.
-fn stateful(build: fn(State) Widget, init: fn(State)?) Widget {
+fn stateful(build: fn(State) Widget, init: fn(State)?, key: Str?) Widget {
   match init {
-    initializer => stateful_raw_with_init(
-      init: fn(ctx: StateContext) {
-        initializer(State{ctx: ctx})
-      },
-      build: fn(ctx: StateContext) Widget {
-        build(State{ctx: ctx})
-      },
-    ),
-    _ => stateful_raw(fn(ctx: StateContext) Widget {
-      build(State{ctx: ctx})
-    }),
+    initializer => {
+      match key {
+        k => stateful_raw_with_init_key(
+          key: k,
+          init: fn(ctx: StateContext) {
+            initializer(State{ctx: ctx})
+          },
+          build: fn(ctx: StateContext) Widget {
+            build(State{ctx: ctx})
+          },
+        ),
+        _ => stateful_raw_with_init(
+          init: fn(ctx: StateContext) {
+            initializer(State{ctx: ctx})
+          },
+          build: fn(ctx: StateContext) Widget {
+            build(State{ctx: ctx})
+          },
+        ),
+      }
+    },
+    _ => {
+      match key {
+        k => stateful_raw_key(k, fn(ctx: StateContext) Widget {
+          build(State{ctx: ctx})
+        }),
+        _ => stateful_raw(fn(ctx: StateContext) Widget {
+          build(State{ctx: ctx})
+        }),
+      }
+    },
   }
 }
 
