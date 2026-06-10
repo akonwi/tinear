@@ -343,6 +343,13 @@ func UiStateSet[T any](ctx *UiStateContext, key string, value T) {
 	ctx.state.setValue(func() { ctx.state.values[key] = value })
 }
 
+func UiStateDrop(ctx *UiStateContext, key string) {
+	if ctx == nil || ctx.state == nil {
+		return
+	}
+	ctx.state.setValue(func() { delete(ctx.state.values, key) })
+}
+
 func UiStateString(ctx *UiStateContext, key string) string {
 	if ctx == nil || ctx.state == nil {
 		return ""

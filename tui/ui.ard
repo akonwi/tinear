@@ -59,6 +59,7 @@ extern fn stateful_raw_key(key: Str, build: fn(StateContext) Widget) Widget = "U
 extern fn stateful_raw_with_init_key(key: Str, init: fn(StateContext), build: fn(StateContext) Widget) Widget = "UiStatefulWithInitKey"
 extern fn state_get<$T>(ctx: StateContext, key: Str) $T? = "UiStateGet"
 extern fn state_set<$T>(ctx: StateContext, key: Str, value: $T) Void = "UiStateSet"
+extern fn state_drop(ctx: StateContext, key: Str) Void = "UiStateDrop"
 extern fn state_str(ctx: StateContext, key: Str) Str = "UiStateString"
 extern fn set_state_str(ctx: StateContext, key: Str, value: Str) Void = "UiSetStateString"
 extern fn state_bool(ctx: StateContext, key: Str) Bool = "UiStateBool"
@@ -81,6 +82,10 @@ fn set<$T>(state: State, key: Str, value: $T) {
   state_set(ctx: state.ctx, key: key, value: value)
 }
 
+fn drop(state: State, key: Str) {
+  state_drop(state.ctx, key)
+}
+
 impl State {
   fn get<$T>(key: Str) $T? {
     state_get<$T>(self.ctx, key)
@@ -88,6 +93,10 @@ impl State {
 
   fn set<$T>(key: Str, value: $T) {
     state_set(ctx: self.ctx, key: key, value: value)
+  }
+
+  fn drop(key: Str) {
+    state_drop(self.ctx, key)
   }
 
   fn get_str(key: Str) Str {
