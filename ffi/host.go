@@ -326,6 +326,23 @@ func (s *ardState) Build(ctx ui.BuildContext) ui.Widget {
 	return s.build(&UiStateContext{state: s})
 }
 
+func UiStateGet[T any](ctx *UiStateContext, key string) ardruntime.Maybe[T] {
+	if ctx == nil || ctx.state == nil {
+		return ardruntime.None[T]()
+	}
+	if value, ok := ctx.state.values[key].(T); ok {
+		return ardruntime.Some(value)
+	}
+	return ardruntime.None[T]()
+}
+
+func UiStateSet[T any](ctx *UiStateContext, key string, value T) {
+	if ctx == nil || ctx.state == nil {
+		return
+	}
+	ctx.state.setValue(func() { ctx.state.values[key] = value })
+}
+
 func UiStateString(ctx *UiStateContext, key string) string {
 	if ctx == nil || ctx.state == nil {
 		return ""
@@ -337,10 +354,7 @@ func UiStateString(ctx *UiStateContext, key string) string {
 }
 
 func UiSetStateString(ctx *UiStateContext, key string, value string) {
-	if ctx == nil || ctx.state == nil {
-		return
-	}
-	ctx.state.setValue(func() { ctx.state.values[key] = value })
+	UiStateSet(ctx, key, value)
 }
 
 func UiStateBool(ctx *UiStateContext, key string) bool {
@@ -354,10 +368,7 @@ func UiStateBool(ctx *UiStateContext, key string) bool {
 }
 
 func UiSetStateBool(ctx *UiStateContext, key string, value bool) {
-	if ctx == nil || ctx.state == nil {
-		return
-	}
-	ctx.state.setValue(func() { ctx.state.values[key] = value })
+	UiStateSet(ctx, key, value)
 }
 
 func UiStateInt(ctx *UiStateContext, key string) int {
@@ -371,10 +382,7 @@ func UiStateInt(ctx *UiStateContext, key string) int {
 }
 
 func UiSetStateInt(ctx *UiStateContext, key string, value int) {
-	if ctx == nil || ctx.state == nil {
-		return
-	}
-	ctx.state.setValue(func() { ctx.state.values[key] = value })
+	UiStateSet(ctx, key, value)
 }
 
 type UiStyle struct {

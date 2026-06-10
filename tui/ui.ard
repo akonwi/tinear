@@ -57,6 +57,8 @@ extern fn stateful_raw(build: fn(StateContext) Widget) Widget = "UiStateful"
 extern fn stateful_raw_with_init(init: fn(StateContext), build: fn(StateContext) Widget) Widget = "UiStatefulWithInit"
 extern fn stateful_raw_key(key: Str, build: fn(StateContext) Widget) Widget = "UiStatefulKey"
 extern fn stateful_raw_with_init_key(key: Str, init: fn(StateContext), build: fn(StateContext) Widget) Widget = "UiStatefulWithInitKey"
+extern fn state_get<$T>(ctx: StateContext, key: Str) $T? = "UiStateGet"
+extern fn state_set<$T>(ctx: StateContext, key: Str, value: $T) Void = "UiStateSet"
 extern fn state_str(ctx: StateContext, key: Str) Str = "UiStateString"
 extern fn set_state_str(ctx: StateContext, key: Str, value: Str) Void = "UiSetStateString"
 extern fn state_bool(ctx: StateContext, key: Str) Bool = "UiStateBool"
@@ -71,29 +73,45 @@ struct State {
   ctx: StateContext,
 }
 
+fn get<$T>(state: State, key: Str) $T? {
+  state_get<$T>(state.ctx, key)
+}
+
+fn set<$T>(state: State, key: Str, value: $T) {
+  state_set(ctx: state.ctx, key: key, value: value)
+}
+
 impl State {
+  fn get<$T>(key: Str) $T? {
+    state_get<$T>(self.ctx, key)
+  }
+
+  fn set<$T>(key: Str, value: $T) {
+    state_set(ctx: self.ctx, key: key, value: value)
+  }
+
   fn get_str(key: Str) Str {
-    state_str(self.ctx, key)
+    self.get<Str>(key).or("")
   }
 
   fn set_str(key: Str, value: Str) {
-    set_state_str(ctx: self.ctx, key: key, value: value)
+    self.set(key, value)
   }
 
   fn get_bool(key: Str) Bool {
-    state_bool(self.ctx, key)
+    self.get<Bool>(key).or(false)
   }
 
   fn set_bool(key: Str, value: Bool) {
-    set_state_bool(ctx: self.ctx, key: key, value: value)
+    self.set(key, value)
   }
 
   fn get_int(key: Str) Int {
-    state_int(self.ctx, key)
+    self.get<Int>(key).or(0)
   }
 
   fn set_int(key: Str, value: Int) {
-    set_state_int(ctx: self.ctx, key: key, value: value)
+    self.set(key, value)
   }
 }
 
