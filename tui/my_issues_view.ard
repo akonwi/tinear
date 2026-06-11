@@ -78,6 +78,24 @@ fn row_text(value: Str, selected: Bool) ui::Widget {
   }
 }
 
+fn metadata_text(issue: issues::Issue) Str {
+  let has_cycle = not issue.cycle_label.is_empty() and not (issue.cycle_label == "—")
+  let has_project = not issue.project_name.is_empty() and not (issue.project_name == "—")
+  match {
+    has_cycle and has_project => "{issue.cycle_label} · {issue.project_name}",
+    has_cycle => issue.cycle_label,
+    has_project => issue.project_name,
+    _ => "",
+  }
+}
+
+fn metadata_row(value: Str, selected: Bool) ui::Widget {
+  match selected {
+    true => ui::text(value, style: ui::style(reverse: true)),
+    false => ui::text(value, style: ui::style(foreground: "border")),
+  }
+}
+
 fn card_body(issue: issues::Issue, selected: Bool, col_w: Int) ui::Widget {
   let cursor = match selected {
     true => "▸",
@@ -93,6 +111,10 @@ fn card_body(issue: issues::Issue, selected: Bool, col_w: Int) ui::Widget {
   ]
   if not wrapped.line2.is_empty() {
     children.push(row_text("{title_indent}{wrapped.line2}", selected))
+  }
+  let meta = metadata_text(issue)
+  if not meta.is_empty() {
+    children.push(metadata_row("{title_indent}{text::truncate_with_ellipsis(meta, title_w)}", selected))
   }
   ui::column_stretch(children)
 }
