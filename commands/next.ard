@@ -26,27 +26,27 @@ fn app_content(cfg: config::Config) ui::Widget {
           api_key: model.api_key,
           has_error: model.error,
           on_changed: fn(value: Str) {
-            mut next = model
-            next.api_key = value
-            next.error = false
-            state.set_value(next)
+            state.set<AppUiState>(fn(mut next: AppUiState) {
+              next.api_key = value
+              next.error = false
+            })
           },
           on_submit: fn(api_key: Str) {
-            mut next = model
-            if api_key.is_empty() {
-              next.error = true
-            } else {
-              let ok = match login::login(api_key) {
-                ok(_) => true,
-                err(_) => false,
+            state.set<AppUiState>(fn(mut next: AppUiState) {
+              if api_key.is_empty() {
+                next.error = true
+              } else {
+                let ok = match login::login(api_key) {
+                  ok(_) => true,
+                  err(_) => false,
+                }
+                next.error = not ok
+                if ok {
+                  next.api_key = api_key
+                  next.authed = true
+                }
               }
-              next.error = not ok
-              if ok {
-                next.api_key = api_key
-                next.authed = true
-              }
-            }
-            state.set_value(next)
+            })
           },
         ),
       }

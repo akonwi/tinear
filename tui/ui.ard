@@ -47,6 +47,8 @@ extern fn shortcuts(child: Widget, bindings: [Str:Str]) Widget = "UiShortcuts"
 // Make `child` an event focus target. Ancestor shortcuts/actions can then
 // receive keyboard events through the focused path.
 extern fn focusable(child: Widget) Widget = "UiFocusable"
+extern fn focusable_key(key: Str, child: Widget) Widget = "UiFocusableKey"
+extern fn request_focus(key: Str) Void = "UiRequestFocus"
 
 // Debug helper: overlays the last key event as a short-lived toast.
 extern fn key_debug(child: Widget) Widget = "UiKeyDebug"
@@ -114,7 +116,7 @@ extern fn stateful_raw_init<$T>(init: fn(BuildContextHandle, StateContext) $T, b
 extern fn stateful_raw_init_key<$T>(key: Str, init: fn(BuildContextHandle, StateContext) $T, build: fn(BuildContextHandle, StateContext) Widget) Widget = "UiStatefulValueInitKey"
 
 // Ard wrapper around the Go-owned state handle. A stateful widget owns exactly
-// one typed value; replace it with `set_value` to schedule a rebuild.
+// one typed value; mutate it with `set` to schedule a rebuild.
 struct State {
   ctx: StateContext,
 }
@@ -124,8 +126,10 @@ impl State {
     _state_value<$T>(self.ctx)
   }
 
-  fn set_value<$T>(value: $T) {
-    _state_set_value(ctx: self.ctx, value: value)
+  fn set<$T>(mutate: fn(mut $T)) {
+    mut next = _state_value<$T>(self.ctx)
+    mutate(next)
+    _state_set_value(ctx: self.ctx, value: next)
   }
 }
 

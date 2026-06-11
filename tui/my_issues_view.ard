@@ -1,7 +1,10 @@
 use ard/async
+use ard/decode
 use ard/maybe
 
 use tinear/models/issues
+use tinear/tui/api
+use tinear/tui/modal
 use tinear/tui/state
 use tinear/tui/text
 use tinear/tui/ui
@@ -180,6 +183,86 @@ fn selected_issue(columns: [issues::BoardColumn], col: Int, row: Int) issues::Is
   }
 }
 
+fn state_picker_rows(picker: state::StatePicker) ui::Widget {
+  mut rows: [ui::Widget] = []
+  for s, i in picker.states {
+    let sid = decode::run(s, decode::field("id", decode::string)).expect("Missing state.id")
+    let sname = decode::run(s, decode::field("name", decode::string)).expect("Missing state.name")
+    let cursor_mark = match i == picker.cursor {
+      true => "▸",
+      false => " ",
+    }
+    let current_suffix = match sid == picker.current_state_id {
+      true => "  (current)",
+      false => "",
+    }
+    rows.push(ui::text(" {cursor_mark} {sname}{current_suffix}"))
+  }
+  ui::column_stretch(rows)
+}
+
+fn cycle_picker_rows(picker: state::CyclePicker) ui::Widget {
+  let row_count = picker.cycles.size() + 1
+  mut rows: [ui::Widget] = []
+  for r in 0..(row_count - 1) {
+    let cursor_mark = match r == picker.cursor {
+      true => "▸",
+      false => " ",
+    }
+    mut label = ""
+    if r == 0 {
+      let suffix = match picker.current_cycle_id.is_empty() {
+        true => "  (current)",
+        false => "",
+      }
+      label = "(no cycle){suffix}"
+    } else {
+      let c = picker.cycles.at(r - 1)
+      let number = decode::run(c, decode::field("number", decode::int)).expect("Missing cycle.number")
+      let cid = decode::run(c, decode::field("id", decode::string)).expect("Missing cycle.id")
+      let name_opt = decode::run(c, decode::field("name", decode::nullable(decode::string))).expect("Missing cycle.name")
+      let base = match name_opt {
+        n => n,
+        _ => "Cycle {number}",
+      }
+      let suffix = match cid == picker.current_cycle_id {
+        true => "  (current)",
+        false => "",
+      }
+      label = "{base}{suffix}"
+    }
+    rows.push(ui::text(" {cursor_mark} {label}"))
+  }
+  ui::column_stretch(rows)
+}
+
+fn picker_footer() ui::Widget {
+  ui::text("↑↓ select  ↵ confirm  Esc cancel")
+}
+
+fn state_picker_modal(picker: state::StatePicker, on_dismiss: fn(ui::EventContext)) ui::Widget {
+  modal::dialog(
+    title: "Status — {picker.issue_identifier} ({picker.team_name})",
+    child: state_picker_rows(picker),
+    footer: picker_footer(),
+    width: 50,
+    on_dismiss: on_dismiss,
+  )
+}
+
+fn cycle_picker_modal(picker: state::CyclePicker, on_dismiss: fn(ui::EventContext)) ui::Widget {
+  modal::dialog(
+    title: "Cycle — {picker.issue_identifier} ({picker.team_name})",
+    child: cycle_picker_rows(picker),
+    footer: picker_footer(),
+    width: 60,
+    on_dismiss: on_dismiss,
+  )
+}
+
+type StatePickerOption = state::StatePicker?
+type CyclePickerOption = state::CyclePicker?
+
 struct MyIssuesUiState {
   columns: [issues::BoardColumn],
   loading: Bool,
@@ -188,6 +271,8 @@ struct MyIssuesUiState {
   col: Int,
   row: Int,
   scroll: Int,
+  state_picker: StatePickerOption,
+  cycle_picker: CyclePickerOption,
 }
 
 fn initial_state() MyIssuesUiState {
@@ -199,10 +284,12 @@ fn initial_state() MyIssuesUiState {
     col: 0,
     row: 0,
     scroll: 0,
+    state_picker: maybe::none(),
+    cycle_picker: maybe::none(),
   }
 }
 
-fn content(columns: [issues::BoardColumn], loading: Bool, error: Str, col: Int, row: Int, scroll: Int) ui::Widget {
+fn base_content(columns: [issues::BoardColumn], loading: Bool, error: Str, col: Int, row: Int, scroll: Int) ui::Widget {
   if loading {
     ui::text("Loading my issues…")
   } else if not error.is_empty() {
@@ -211,6 +298,17 @@ fn content(columns: [issues::BoardColumn], loading: Bool, error: Str, col: Int, 
     ui::center(ui::text("No issues assigned to you."))
   } else {
     board(columns, col, row, scroll)
+  }
+}
+
+fn content(columns: [issues::BoardColumn], loading: Bool, error: Str, col: Int, row: Int, scroll: Int, state_picker: StatePickerOption, cycle_picker: CyclePickerOption, on_picker_dismiss: fn(ui::EventContext)) ui::Widget {
+  let base = base_content(columns: columns, loading: loading, error: error, col: col, row: row, scroll: scroll)
+  match state_picker {
+    p => ui::overlay_modal(base, state_picker_modal(p, on_picker_dismiss)),
+    _ => match cycle_picker {
+      p => ui::overlay_modal(base, cycle_picker_modal(p, on_picker_dismiss)),
+      _ => base,
+    },
   }
 }
 
@@ -225,17 +323,17 @@ fn new(api_key: Str) ui::Widget {
       async::start(fn() {
         let result = issues::load(api_key)
         rt.dispatch(fn() {
-          mut loaded = state.value<MyIssuesUiState>()
-          match result {
-            ok(columns) => {
-              loaded.columns = columns
-              loaded.error = ""
-            },
-            err(e) => { loaded.error = e },
-          }
-          loaded.loaded = true
-          loaded.loading = false
-          state.set_value(loaded)
+          state.set<MyIssuesUiState>(fn(mut loaded: MyIssuesUiState) {
+            match result {
+              ok(columns) => {
+                loaded.columns = columns
+                loaded.error = ""
+              },
+              err(e) => { loaded.error = e },
+            }
+            loaded.loaded = true
+            loaded.loading = false
+          })
         })
       })
       next
@@ -252,14 +350,22 @@ fn new(api_key: Str) ui::Widget {
       )
       ui::actions(
         child: ui::shortcuts(
-          child: content(
+          child: ui::focusable_key("tab.my_issues", content(
             columns: model.columns,
             loading: model.loading,
             error: model.error,
             col: col,
             row: row,
             scroll: scroll,
-          ),
+            state_picker: model.state_picker,
+            cycle_picker: model.cycle_picker,
+            on_picker_dismiss: fn(_ctx: ui::EventContext) {
+              state.set<MyIssuesUiState>(fn(mut next: MyIssuesUiState) {
+                next.state_picker = maybe::none()
+                next.cycle_picker = maybe::none()
+              })
+            },
+          )),
           bindings: [
             "Up": "my_issues.previous_row",
             "k": "my_issues.previous_row",
@@ -271,64 +377,215 @@ fn new(api_key: Str) ui::Widget {
             "l": "my_issues.next_col",
             "Enter": "my_issues.open",
             "r": "my_issues.refresh",
+            "s": "my_issues.open_state_picker",
+            "y": "my_issues.open_cycle_picker",
+            "Escape": "picker.dismiss",
+            "Esc": "picker.dismiss",
+            "Space": "picker.confirm",
           ],
         ),
         bindings: [
           ui::action("my_issues.previous_row", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-            mut next = model
-            next.row = clamp(row - 1, selected_row_count(model.columns, col))
-            state.set_value(next)
+            state.set<MyIssuesUiState>(fn(mut next: MyIssuesUiState) {
+              match next.state_picker {
+                p => {
+                  if p.cursor > 0 {
+                    p.cursor = p.cursor - 1
+                    next.state_picker = maybe::some(p)
+                  }
+                },
+                _ => match next.cycle_picker {
+                  p => {
+                    if p.cursor > 0 {
+                      p.cursor = p.cursor - 1
+                      next.cycle_picker = maybe::some(p)
+                    }
+                  },
+                  _ => { next.row = clamp(row - 1, selected_row_count(model.columns, col)) },
+                },
+              }
+            })
             ui::EventResult::handled
           }),
           ui::action("my_issues.next_row", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-            mut next = model
-            next.row = clamp(row + 1, selected_row_count(model.columns, col))
-            state.set_value(next)
+            state.set<MyIssuesUiState>(fn(mut next: MyIssuesUiState) {
+              match next.state_picker {
+                p => {
+                  if p.cursor < p.states.size() - 1 {
+                    p.cursor = p.cursor + 1
+                    next.state_picker = maybe::some(p)
+                  }
+                },
+                _ => match next.cycle_picker {
+                  p => {
+                    if p.cursor < p.cycles.size() {
+                      p.cursor = p.cursor + 1
+                      next.cycle_picker = maybe::some(p)
+                    }
+                  },
+                  _ => { next.row = clamp(row + 1, selected_row_count(model.columns, col)) },
+                },
+              }
+            })
             ui::EventResult::handled
           }),
           ui::action("my_issues.previous_col", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
             let next_col = clamp(col - 1, model.columns.size())
-            mut next = model
-            next.col = next_col
-            next.row = clamp(row, selected_row_count(model.columns, next_col))
-            next.scroll = visible_scroll(scroll, next_col, board_visible_count(model.columns.size()), model.columns.size())
-            state.set_value(next)
+            state.set<MyIssuesUiState>(fn(mut next: MyIssuesUiState) {
+              next.col = next_col
+              next.row = clamp(row, selected_row_count(model.columns, next_col))
+              next.scroll = visible_scroll(scroll, next_col, board_visible_count(model.columns.size()), model.columns.size())
+            })
             ui::EventResult::handled
           }),
           ui::action("my_issues.next_col", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
             let next_col = clamp(col + 1, model.columns.size())
-            mut next = model
-            next.col = next_col
-            next.row = clamp(row, selected_row_count(model.columns, next_col))
-            next.scroll = visible_scroll(scroll, next_col, board_visible_count(model.columns.size()), model.columns.size())
-            state.set_value(next)
+            state.set<MyIssuesUiState>(fn(mut next: MyIssuesUiState) {
+              next.col = next_col
+              next.row = clamp(row, selected_row_count(model.columns, next_col))
+              next.scroll = visible_scroll(scroll, next_col, board_visible_count(model.columns.size()), model.columns.size())
+            })
             ui::EventResult::handled
           }),
           ui::action("my_issues.refresh", fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
             if not model.loading {
-              mut next = model
-              next.loading = true
-              state.set_value(next)
+              state.set<MyIssuesUiState>(fn(mut next: MyIssuesUiState) {
+                next.loading = true
+              })
               let rt = ctx.runtime()
               async::start(fn() {
                 let result = issues::load(api_key)
                 rt.dispatch(fn() {
-                  mut refreshed = state.value<MyIssuesUiState>()
-                  match result {
-                    ok(columns) => {
-                      refreshed.columns = columns
-                      refreshed.error = ""
-                      refreshed.col = clamp(col, columns.size())
-                      refreshed.row = clamp(row, selected_row_count(columns, col))
-                    },
-                    err(e) => { refreshed.error = e },
-                  }
-                  refreshed.loaded = true
-                  refreshed.loading = false
-                  state.set_value(refreshed)
+                  state.set<MyIssuesUiState>(fn(mut refreshed: MyIssuesUiState) {
+                    match result {
+                      ok(columns) => {
+                        refreshed.columns = columns
+                        refreshed.error = ""
+                        refreshed.col = clamp(col, columns.size())
+                        refreshed.row = clamp(row, selected_row_count(columns, col))
+                      },
+                      err(e) => { refreshed.error = e },
+                    }
+                    refreshed.loaded = true
+                    refreshed.loading = false
+                  })
                 })
               })
               ()
+            }
+            ui::EventResult::handled
+          }),
+          ui::action("my_issues.open_state_picker", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            if model.state_picker.is_none() and model.cycle_picker.is_none() {
+              match selected_issue(model.columns, col, row) {
+                issue => {
+                  match api::open_state_picker(api_key, issue.raw, true, 0) {
+                    ok(p) => {
+                      state.set<MyIssuesUiState>(fn(mut next: MyIssuesUiState) {
+                        next.state_picker = maybe::some(p)
+                      })
+                    },
+                    err(_) => (),
+                  }
+                },
+                _ => (),
+              }
+            }
+            ui::EventResult::handled
+          }),
+          ui::action("my_issues.open_cycle_picker", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            if model.state_picker.is_none() and model.cycle_picker.is_none() {
+              match selected_issue(model.columns, col, row) {
+                issue => {
+                  match api::open_cycle_picker(api_key, issue.raw, true, 0) {
+                    ok(p) => {
+                      state.set<MyIssuesUiState>(fn(mut next: MyIssuesUiState) {
+                        next.cycle_picker = maybe::some(p)
+                      })
+                    },
+                    err(_) => (),
+                  }
+                },
+                _ => (),
+              }
+            }
+            ui::EventResult::handled
+          }),
+          ui::action("picker.dismiss", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            state.set<MyIssuesUiState>(fn(mut next: MyIssuesUiState) {
+              next.state_picker = maybe::none()
+              next.cycle_picker = maybe::none()
+            })
+            ui::EventResult::handled
+          }),
+          ui::action("picker.confirm", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            match model.state_picker {
+              p => {
+                let target = p.states.at(p.cursor)
+                let new_state_id = decode::run(target, decode::field("id", decode::string)).expect("Missing state.id")
+                if new_state_id == p.current_state_id {
+                  state.set<MyIssuesUiState>(fn(mut next: MyIssuesUiState) {
+                    next.state_picker = maybe::none()
+                  })
+                } else {
+                  match api::update_issue_state(api_key, p.issue_id, new_state_id) {
+                    ok(_) => {
+                      state.set<MyIssuesUiState>(fn(mut next: MyIssuesUiState) {
+                        next.state_picker = maybe::none()
+                        match issues::load(api_key) {
+                          ok(columns) => {
+                            next.columns = columns
+                            next.error = ""
+                            next.col = clamp(col, columns.size())
+                            next.row = clamp(row, selected_row_count(columns, col))
+                          },
+                          err(e) => { next.error = e },
+                        }
+                        next.loaded = true
+                        next.loading = false
+                      })
+                    },
+                    err(_) => (),
+                  }
+                }
+              },
+              _ => match model.cycle_picker {
+                p => {
+                  let target_cycle_id = match p.cursor == 0 {
+                    true => "",
+                    false => {
+                      let c = p.cycles.at(p.cursor - 1)
+                      decode::run(c, decode::field("id", decode::string)).expect("Missing cycle.id")
+                    },
+                  }
+                  if target_cycle_id == p.current_cycle_id {
+                    state.set<MyIssuesUiState>(fn(mut next: MyIssuesUiState) {
+                      next.cycle_picker = maybe::none()
+                    })
+                  } else {
+                    match api::update_issue_cycle(api_key, p.issue_id, target_cycle_id) {
+                      ok(_) => {
+                        state.set<MyIssuesUiState>(fn(mut next: MyIssuesUiState) {
+                          next.cycle_picker = maybe::none()
+                          match issues::load(api_key) {
+                            ok(columns) => {
+                              next.columns = columns
+                              next.error = ""
+                              next.col = clamp(col, columns.size())
+                              next.row = clamp(row, selected_row_count(columns, col))
+                            },
+                            err(e) => { next.error = e },
+                          }
+                          next.loaded = true
+                          next.loading = false
+                        })
+                      },
+                      err(_) => (),
+                    }
+                  }
+                },
+                _ => (),
+              },
             }
             ui::EventResult::handled
           }),

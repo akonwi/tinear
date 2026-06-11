@@ -155,8 +155,27 @@ func shortcutKeyMatches(key ui.Key, binding string) bool {
 	return strings.EqualFold(binding, "Enter") && key.Keycode == vaxis.KeyKeyPadEnter
 }
 
+var uiFocusNodes = map[string]*ui.FocusNode{}
+
+func uiFocusNode(key string) *ui.FocusNode {
+	if node, ok := uiFocusNodes[key]; ok {
+		return node
+	}
+	node := &ui.FocusNode{}
+	uiFocusNodes[key] = node
+	return node
+}
+
 func UiFocusable(child ui.Widget) ui.Widget {
 	return ui.Focus(nil, child)
+}
+
+func UiFocusableKey(key string, child ui.Widget) ui.Widget {
+	return ui.Focus(uiFocusNode(key), child)
+}
+
+func UiRequestFocus(key string) {
+	uiFocusNode(key).RequestFocus()
 }
 
 type uiKeyDebug struct{ Child ui.Widget }
@@ -252,33 +271,21 @@ func (r *renderKeyDebug) HandleEvent(ctx ui.EventContext, ev ui.Event) ui.EventR
 	return ui.EventIgnored
 }
 
-func UiRequestFrame(ctx ui.EventContext) {
-	ctx.Runtime().Dispatch(func() {})
-}
-
 func UiRequestFrameWrapped(ctx *UiEventContext) {
 	if ctx == nil {
 		return
 	}
-	UiRequestFrame(ctx.handle)
-}
-
-func UiDispatchAfter(ctx ui.EventContext, delayMs int, callback func()) {
-	runtime := ctx.Runtime()
-	time.AfterFunc(time.Duration(delayMs)*time.Millisecond, func() {
-		runtime.Dispatch(callback)
-	})
+	ctx.handle.Runtime().Dispatch(func() {})
 }
 
 func UiDispatchAfterWrapped(ctx *UiEventContext, delayMs int, callback func()) {
 	if ctx == nil {
 		return
 	}
-	UiDispatchAfter(ctx.handle, delayMs, callback)
-}
-
-func UiQuit(ctx ui.EventContext) {
-	ctx.Quit()
+	runtime := ctx.handle.Runtime()
+	time.AfterFunc(time.Duration(delayMs)*time.Millisecond, func() {
+		runtime.Dispatch(callback)
+	})
 }
 
 func UiQuitWrapped(ctx *UiEventContext) {
@@ -291,10 +298,9 @@ func UiQuitWrapped(ctx *UiEventContext) {
 type UiStateContext struct{ state *ardState }
 
 type ardStateful struct {
-	key      string
-	initial  any
-	init     func(ui.BuildContext, *UiStateContext)
-	build    func(ui.BuildContext, *UiStateContext) ui.Widget
+	key   string
+	init  func(ui.BuildContext, *UiStateContext)
+	build func(ui.BuildContext, *UiStateContext) ui.Widget
 }
 
 type ardState struct {
@@ -330,7 +336,7 @@ func (w ardStateful) WidgetKey() ui.KeyValue {
 }
 
 func (w ardStateful) CreateState() ui.State {
-	return &ardState{value: w.initial, init: w.init, build: w.build}
+	return &ardState{init: w.init, build: w.build}
 }
 
 func (s *ardState) InitState() {
@@ -374,10 +380,6 @@ func (s *ardState) Build(ctx ui.BuildContext) ui.Widget {
 }
 
 func UiBuildContextRuntime(ctx ui.BuildContext) ui.Runtime {
-	return ctx.Runtime()
-}
-
-func UiEventContextRuntime(ctx ui.EventContext) ui.Runtime {
 	return ctx.Runtime()
 }
 

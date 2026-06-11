@@ -50,6 +50,13 @@ fn tab_index(tab: Str) Int {
   }
 }
 
+fn focus_tab(tab: Str) {
+  match tab {
+    "My Issues" => ui::request_focus("tab.my_issues"),
+    _ => ui::request_focus("tab.inbox"),
+  }
+}
+
 fn body(tab: Str, inbox: ui::Widget, my_issues: ui::Widget) ui::Widget {
   ui::indexed_stack(tab_index(tab), [inbox, my_issues])
 }
@@ -96,15 +103,25 @@ fn new(api_key: Str) ui::Widget {
       ),
       bindings: [
         ui::action("tabs.next", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-          state.set_value(toggled_tab(model))
+          let next_tab = selected_tab(toggled_tab(model))
+          state.set<LoggedInUiState>(fn(mut next: LoggedInUiState) {
+            next.tab = next_tab
+          })
+          focus_tab(next_tab)
           ui::EventResult::handled
         }),
         ui::action("tabs.inbox", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-          state.set_value(with_tab(model, "Inbox"))
+          state.set<LoggedInUiState>(fn(mut next: LoggedInUiState) {
+            next.tab = "Inbox"
+          })
+          focus_tab("Inbox")
           ui::EventResult::handled
         }),
         ui::action("tabs.my_issues", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-          state.set_value(with_tab(model, "My Issues"))
+          state.set<LoggedInUiState>(fn(mut next: LoggedInUiState) {
+            next.tab = "My Issues"
+          })
+          focus_tab("My Issues")
           ui::EventResult::handled
         }),
       ],
