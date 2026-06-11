@@ -7,7 +7,7 @@ extern type Widget = "ui.Widget"
 extern type EventContextHandle = "*projectffi.UiEventContext"
 extern type BuildContextHandle = "ui.BuildContext"
 extern type RuntimeHandle = "ui.Runtime"
-extern type StateContext = "*projectffi.UiStateContext"
+extern type StateHandle = "*projectffi.UiStateContext"
 
 // Intents are semantic action names, e.g. "tinear.quit" or "issue.open".
 // Shortcuts map key presses to intent names; Actions map intent names to
@@ -110,26 +110,26 @@ fn quit(ctx: EventContext) {
   _quit(ctx.handle)
 }
 
-extern fn _state_value<$T>(ctx: StateContext) $T = "UiStateValue"
-extern fn _state_set_value<$T>(ctx: StateContext, value: $T) Void = "UiStateSetValue"
-extern fn stateful_raw_init<$T>(init: fn(BuildContextHandle, StateContext) $T, build: fn(BuildContextHandle, StateContext) Widget) Widget = "UiStatefulValueInit"
-extern fn stateful_raw_init_key<$T>(key: Str, init: fn(BuildContextHandle, StateContext) $T, build: fn(BuildContextHandle, StateContext) Widget) Widget = "UiStatefulValueInitKey"
+extern fn _state_value<$T>(handle: StateHandle) $T = "UiStateValue"
+extern fn _state_set_value<$T>(handle: StateHandle, value: $T) Void = "UiStateSetValue"
+extern fn stateful_raw_init<$T>(init: fn(BuildContextHandle, StateHandle) $T, build: fn(BuildContextHandle, StateHandle) Widget) Widget = "UiStatefulValueInit"
+extern fn stateful_raw_init_key<$T>(key: Str, init: fn(BuildContextHandle, StateHandle) $T, build: fn(BuildContextHandle, StateHandle) Widget) Widget = "UiStatefulValueInitKey"
 
 // Ard wrapper around the Go-owned state handle. A stateful widget owns exactly
 // one typed value; mutate it with `set` to schedule a rebuild.
 struct State {
-  ctx: StateContext,
+  handle: StateHandle,
 }
 
 impl State {
   fn value<$T>() $T {
-    _state_value<$T>(self.ctx)
+    _state_value<$T>(self.handle)
   }
 
   fn set<$T>(mutate: fn(mut $T)) {
-    mut next = _state_value<$T>(self.ctx)
+    mut next = _state_value<$T>(self.handle)
     mutate(next)
-    _state_set_value(ctx: self.ctx, value: next)
+    _state_set_value(handle: self.handle, value: next)
   }
 }
 
@@ -137,19 +137,19 @@ fn stateful<$T>(init: fn(BuildContext, State) $T, build: fn(BuildContext, State)
   match key {
     k => stateful_raw_init_key(
       key: k,
-      init: fn(build_ctx: BuildContextHandle, state_ctx: StateContext) $T {
-        init(BuildContext{handle: build_ctx}, State{ctx: state_ctx})
+      init: fn(build_ctx: BuildContextHandle, state_handle: StateHandle) $T {
+        init(BuildContext{handle: build_ctx}, State{handle: state_handle})
       },
-      build: fn(build_ctx: BuildContextHandle, state_ctx: StateContext) Widget {
-        build(BuildContext{handle: build_ctx}, State{ctx: state_ctx})
+      build: fn(build_ctx: BuildContextHandle, state_handle: StateHandle) Widget {
+        build(BuildContext{handle: build_ctx}, State{handle: state_handle})
       },
     ),
     _ => stateful_raw_init(
-      init: fn(build_ctx: BuildContextHandle, state_ctx: StateContext) $T {
-        init(BuildContext{handle: build_ctx}, State{ctx: state_ctx})
+      init: fn(build_ctx: BuildContextHandle, state_handle: StateHandle) $T {
+        init(BuildContext{handle: build_ctx}, State{handle: state_handle})
       },
-      build: fn(build_ctx: BuildContextHandle, state_ctx: StateContext) Widget {
-        build(BuildContext{handle: build_ctx}, State{ctx: state_ctx})
+      build: fn(build_ctx: BuildContextHandle, state_handle: StateHandle) Widget {
+        build(BuildContext{handle: build_ctx}, State{handle: state_handle})
       },
     ),
   }
