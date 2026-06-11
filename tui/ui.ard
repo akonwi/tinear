@@ -108,87 +108,46 @@ fn quit(ctx: EventContext) {
   _quit(ctx.handle)
 }
 
-// Raw Go-owned state handle. Prefer the `State` wrapper and methods below in
-// application code.
-extern fn stateful_raw(build: fn(BuildContextHandle, StateContext) Widget) Widget = "UiStatefulContext"
-extern fn stateful_raw_with_init(init: fn(BuildContextHandle, StateContext), build: fn(BuildContextHandle, StateContext) Widget) Widget = "UiStatefulContextWithInit"
-extern fn stateful_raw_key(key: Str, build: fn(BuildContextHandle, StateContext) Widget) Widget = "UiStatefulContextKey"
-extern fn stateful_raw_with_init_key(key: Str, init: fn(BuildContextHandle, StateContext), build: fn(BuildContextHandle, StateContext) Widget) Widget = "UiStatefulContextWithInitKey"
-extern fn state_get<$T>(ctx: StateContext, key: Str) $T? = "UiStateGet"
-extern fn state_set<$T>(ctx: StateContext, key: Str, value: $T) Void = "UiStateSet"
-extern fn state_drop(ctx: StateContext, key: Str) Void = "UiStateDrop"
+extern fn _state_value<$T>(ctx: StateContext) $T = "UiStateValue"
+extern fn _state_set_value<$T>(ctx: StateContext, value: $T) Void = "UiStateSetValue"
+extern fn stateful_raw_init<$T>(init: fn(BuildContextHandle, StateContext) $T, build: fn(BuildContextHandle, StateContext) Widget) Widget = "UiStatefulValueInit"
+extern fn stateful_raw_init_key<$T>(key: Str, init: fn(BuildContextHandle, StateContext) $T, build: fn(BuildContextHandle, StateContext) Widget) Widget = "UiStatefulValueInitKey"
 
-// Ergonomic Ard wrapper around the Go-owned state context. This keeps the raw
-// extern pointer out of app code while still allowing vaxis/ui to own lifecycle
-// and SetState scheduling.
+// Ard wrapper around the Go-owned state handle. A stateful widget owns exactly
+// one typed value; replace it with `set_value` to schedule a rebuild.
 struct State {
   ctx: StateContext,
 }
 
-fn get<$T>(state: State, key: Str) $T? {
-  state_get<$T>(state.ctx, key)
-}
-
-fn set<$T>(state: State, key: Str, value: $T) {
-  state_set(ctx: state.ctx, key: key, value: value)
-}
-
-fn drop(state: State, key: Str) {
-  state_drop(state.ctx, key)
-}
-
 impl State {
-  fn get<$T>(key: Str) $T? {
-    state_get<$T>(self.ctx, key)
+  fn value<$T>() $T {
+    _state_value<$T>(self.ctx)
   }
 
-  fn set<$T>(key: Str, value: $T) {
-    state_set(ctx: self.ctx, key: key, value: value)
-  }
-
-  fn drop(key: Str) {
-    state_drop(self.ctx, key)
+  fn set_value<$T>(value: $T) {
+    _state_set_value(ctx: self.ctx, value: value)
   }
 }
 
-// Generic Ard-backed stateful widget. `build` is called by vaxis/ui with a
-// retained `State` and current `BuildContext`; use State methods for small
-// retained values. `init`, when provided, runs before the first build and also
-// receives a `BuildContext`, so background work can capture `ctx.runtime()`.
-// State setters in init initialize values directly instead of scheduling a rebuild.
-fn stateful(build: fn(BuildContext, State) Widget, init: fn(BuildContext, State)?, key: Str?) Widget {
-  match init {
-    initializer => {
-      match key {
-        k => stateful_raw_with_init_key(
-          key: k,
-          init: fn(build_ctx: BuildContextHandle, state_ctx: StateContext) {
-            initializer(BuildContext{handle: build_ctx}, State{ctx: state_ctx})
-          },
-          build: fn(build_ctx: BuildContextHandle, state_ctx: StateContext) Widget {
-            build(BuildContext{handle: build_ctx}, State{ctx: state_ctx})
-          },
-        ),
-        _ => stateful_raw_with_init(
-          init: fn(build_ctx: BuildContextHandle, state_ctx: StateContext) {
-            initializer(BuildContext{handle: build_ctx}, State{ctx: state_ctx})
-          },
-          build: fn(build_ctx: BuildContextHandle, state_ctx: StateContext) Widget {
-            build(BuildContext{handle: build_ctx}, State{ctx: state_ctx})
-          },
-        ),
-      }
-    },
-    _ => {
-      match key {
-        k => stateful_raw_key(k, fn(build_ctx: BuildContextHandle, state_ctx: StateContext) Widget {
-          build(BuildContext{handle: build_ctx}, State{ctx: state_ctx})
-        }),
-        _ => stateful_raw(fn(build_ctx: BuildContextHandle, state_ctx: StateContext) Widget {
-          build(BuildContext{handle: build_ctx}, State{ctx: state_ctx})
-        }),
-      }
-    },
+fn stateful<$T>(init: fn(BuildContext, State) $T, build: fn(BuildContext, State) Widget, key: Str?) Widget {
+  match key {
+    k => stateful_raw_init_key(
+      key: k,
+      init: fn(build_ctx: BuildContextHandle, state_ctx: StateContext) $T {
+        init(BuildContext{handle: build_ctx}, State{ctx: state_ctx})
+      },
+      build: fn(build_ctx: BuildContextHandle, state_ctx: StateContext) Widget {
+        build(BuildContext{handle: build_ctx}, State{ctx: state_ctx})
+      },
+    ),
+    _ => stateful_raw_init(
+      init: fn(build_ctx: BuildContextHandle, state_ctx: StateContext) $T {
+        init(BuildContext{handle: build_ctx}, State{ctx: state_ctx})
+      },
+      build: fn(build_ctx: BuildContextHandle, state_ctx: StateContext) Widget {
+        build(BuildContext{handle: build_ctx}, State{ctx: state_ctx})
+      },
+    ),
   }
 }
 

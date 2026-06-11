@@ -3,22 +3,27 @@ use tinear/tui/hints
 use tinear/tui/my_issues_view
 use tinear/tui/ui
 
-fn selected_tab(state: ui::State) Str {
-  let tab = state.get<Str>("tab").or("")
-  match tab {
+struct LoggedInUiState {
+  tab: Str,
+}
+
+fn selected_tab(model: LoggedInUiState) Str {
+  match model.tab {
     "" => "Inbox",
-    _ => tab,
+    _ => model.tab,
   }
 }
 
-fn set_tab(state: ui::State, tab: Str) {
-  state.set("tab", tab)
+fn with_tab(model: LoggedInUiState, tab: Str) LoggedInUiState {
+  mut next = model
+  next.tab = tab
+  next
 }
 
-fn toggle_tab(state: ui::State) {
-  match selected_tab(state) {
-    "Inbox" => set_tab(state, "My Issues"),
-    _ => set_tab(state, "Inbox"),
+fn toggled_tab(model: LoggedInUiState) LoggedInUiState {
+  match selected_tab(model) {
+    "Inbox" => with_tab(model, "My Issues"),
+    _ => with_tab(model, "Inbox"),
   }
 }
 
@@ -60,8 +65,8 @@ fn screen_separator() ui::Widget {
   ui::divider(style: ui::style(foreground: "border"))
 }
 
-fn content(state: ui::State, inbox: ui::Widget, my_issues: ui::Widget) ui::Widget {
-  let tab = selected_tab(state)
+fn content(model: LoggedInUiState, inbox: ui::Widget, my_issues: ui::Widget) ui::Widget {
+  let tab = selected_tab(model)
   ui::column_stretch([
     tab_bar(tab),
     screen_separator(),
@@ -74,10 +79,15 @@ fn content(state: ui::State, inbox: ui::Widget, my_issues: ui::Widget) ui::Widge
 fn new(api_key: Str) ui::Widget {
   let inbox = inbox_view::new(api_key)
   let my_issues = my_issues_view::new(api_key)
-  ui::stateful(fn(_ctx: ui::BuildContext, state: ui::State) ui::Widget {
-    ui::actions(
+  ui::stateful(
+    init: fn(_ctx: ui::BuildContext, _state: ui::State) LoggedInUiState {
+      LoggedInUiState{tab: "Inbox"}
+    },
+    build: fn(_ctx: ui::BuildContext, state: ui::State) ui::Widget {
+      let model = state.value<LoggedInUiState>()
+      ui::actions(
       child: ui::shortcuts(
-        child: content(state, inbox, my_issues),
+        child: content(model, inbox, my_issues),
         bindings: [
           "Tab": "tabs.next",
           "1": "tabs.inbox",
@@ -86,18 +96,19 @@ fn new(api_key: Str) ui::Widget {
       ),
       bindings: [
         ui::action("tabs.next", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-          toggle_tab(state)
+          state.set_value(toggled_tab(model))
           ui::EventResult::handled
         }),
         ui::action("tabs.inbox", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-          set_tab(state, "Inbox")
+          state.set_value(with_tab(model, "Inbox"))
           ui::EventResult::handled
         }),
         ui::action("tabs.my_issues", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-          set_tab(state, "My Issues")
+          state.set_value(with_tab(model, "My Issues"))
           ui::EventResult::handled
         }),
       ],
     )
-  })
+    },
+  )
 }

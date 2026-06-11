@@ -7,25 +7,51 @@ use tinear/tui/logged_in_screen
 use tinear/tui/ui
 use tinear/tui/welcome_screen
 
+struct AppUiState {
+  authed: Bool,
+  api_key: Str,
+  error: Bool,
+}
+
 fn app_content(cfg: config::Config) ui::Widget {
-  let initial_auth = cfg.has_auth()
-  ui::stateful(fn(_ctx: ui::BuildContext, state: ui::State) ui::Widget {
-    let authed = state.get<Bool>("authed").or(initial_auth)
-    let state_api_key = state.get<Str>("api_key").or("")
-    let api_key = match state_api_key {
-      "" => cfg.api_key,
-      _ => state_api_key,
-    }
-    match authed {
-      true => logged_in_screen::new(api_key),
-      false => welcome_screen::new(state, fn(api_key: Str) Bool {
-        match login::login(api_key) {
-          ok(_) => true,
-          err(_) => false,
-        }
-      }),
-    }
-  })
+  ui::stateful(
+    init: fn(_ctx: ui::BuildContext, _state: ui::State) AppUiState {
+      AppUiState{authed: cfg.has_auth(), api_key: cfg.api_key, error: false}
+    },
+    build: fn(_ctx: ui::BuildContext, state: ui::State) ui::Widget {
+      let model = state.value<AppUiState>()
+      match model.authed {
+        true => logged_in_screen::new(model.api_key),
+        false => welcome_screen::new(
+          api_key: model.api_key,
+          has_error: model.error,
+          on_changed: fn(value: Str) {
+            mut next = model
+            next.api_key = value
+            next.error = false
+            state.set_value(next)
+          },
+          on_submit: fn(api_key: Str) {
+            mut next = model
+            if api_key.is_empty() {
+              next.error = true
+            } else {
+              let ok = match login::login(api_key) {
+                ok(_) => true,
+                err(_) => false,
+              }
+              next.error = not ok
+              if ok {
+                next.api_key = api_key
+                next.authed = true
+              }
+            }
+            state.set_value(next)
+          },
+        ),
+      }
+    },
+  )
 }
 
 fn debug_wrap(child: ui::Widget) ui::Widget {

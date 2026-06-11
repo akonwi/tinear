@@ -180,6 +180,28 @@ fn selected_issue(columns: [issues::BoardColumn], col: Int, row: Int) issues::Is
   }
 }
 
+struct MyIssuesUiState {
+  columns: [issues::BoardColumn],
+  loading: Bool,
+  loaded: Bool,
+  error: Str,
+  col: Int,
+  row: Int,
+  scroll: Int,
+}
+
+fn initial_state() MyIssuesUiState {
+  MyIssuesUiState{
+    columns: [],
+    loading: false,
+    loaded: false,
+    error: "",
+    col: 0,
+    row: 0,
+    scroll: 0,
+  }
+}
+
 fn content(columns: [issues::BoardColumn], loading: Bool, error: Str, col: Int, row: Int, scroll: Int) ui::Widget {
   if loading {
     ui::text("Loading my issues…")
@@ -195,44 +217,45 @@ fn content(columns: [issues::BoardColumn], loading: Bool, error: Str, col: Int, 
 fn new(api_key: Str) ui::Widget {
   ui::stateful(
     key: "my-issues",
-    init: fn(ctx: ui::BuildContext, state: ui::State) {
-      let columns = state.get<[issues::BoardColumn]>("my_issues_columns").or([])
-      if columns.size() == 0 {
-        state.set("my_issues_loading", true)
-        let rt = ctx.runtime()
-        async::start(fn() {
-          let result = issues::load(api_key)
-          rt.dispatch(fn() {
-            match result {
-              ok(loaded_columns) => {
-                state.set("my_issues_columns", loaded_columns)
-                state.set("my_issues_error", "")
-              },
-              err(e) => { state.set("my_issues_error", e) },
-            }
-            state.set("my_issues_loaded", true)
-            state.set("my_issues_loading", false)
-          })
+    init: fn(ctx: ui::BuildContext, state: ui::State) MyIssuesUiState {
+      let initial = initial_state()
+      mut next = initial
+      next.loading = true
+      let rt = ctx.runtime()
+      async::start(fn() {
+        let result = issues::load(api_key)
+        rt.dispatch(fn() {
+          mut loaded = state.value<MyIssuesUiState>()
+          match result {
+            ok(columns) => {
+              loaded.columns = columns
+              loaded.error = ""
+            },
+            err(e) => { loaded.error = e },
+          }
+          loaded.loaded = true
+          loaded.loading = false
+          state.set_value(loaded)
         })
-      }
+      })
+      next
     },
     build: fn(ctx: ui::BuildContext, state: ui::State) ui::Widget {
-      let columns = state.get<[issues::BoardColumn]>("my_issues_columns").or([])
-      let loading = state.get<Bool>("my_issues_loading").or(false)
-      let col = clamp(state.get<Int>("my_issues_col").or(0), columns.size())
-      let row = clamp(state.get<Int>("my_issues_row").or(0), selected_row_count(columns, col))
+      let model = state.value<MyIssuesUiState>()
+      let col = clamp(model.col, model.columns.size())
+      let row = clamp(model.row, selected_row_count(model.columns, col))
       let scroll = visible_scroll(
-        state.get<Int>("my_issues_scroll").or(0),
+        model.scroll,
         col,
-        board_visible_count(columns.size()),
-        columns.size(),
+        board_visible_count(model.columns.size()),
+        model.columns.size(),
       )
       ui::actions(
         child: ui::shortcuts(
           child: content(
-            columns: columns,
-            loading: loading,
-            error: state.get<Str>("my_issues_error").or(""),
+            columns: model.columns,
+            loading: model.loading,
+            error: model.error,
             col: col,
             row: row,
             scroll: scroll,
@@ -252,45 +275,57 @@ fn new(api_key: Str) ui::Widget {
         ),
         bindings: [
           ui::action("my_issues.previous_row", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-            state.set("my_issues_row", clamp(row - 1, selected_row_count(columns, col)))
+            mut next = model
+            next.row = clamp(row - 1, selected_row_count(model.columns, col))
+            state.set_value(next)
             ui::EventResult::handled
           }),
           ui::action("my_issues.next_row", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-            state.set("my_issues_row", clamp(row + 1, selected_row_count(columns, col)))
+            mut next = model
+            next.row = clamp(row + 1, selected_row_count(model.columns, col))
+            state.set_value(next)
             ui::EventResult::handled
           }),
           ui::action("my_issues.previous_col", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-            let next_col = clamp(col - 1, columns.size())
-            state.set("my_issues_col", next_col)
-            state.set("my_issues_row", clamp(row, selected_row_count(columns, next_col)))
-            state.set("my_issues_scroll", visible_scroll(scroll, next_col, board_visible_count(columns.size()), columns.size()))
+            let next_col = clamp(col - 1, model.columns.size())
+            mut next = model
+            next.col = next_col
+            next.row = clamp(row, selected_row_count(model.columns, next_col))
+            next.scroll = visible_scroll(scroll, next_col, board_visible_count(model.columns.size()), model.columns.size())
+            state.set_value(next)
             ui::EventResult::handled
           }),
           ui::action("my_issues.next_col", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-            let next_col = clamp(col + 1, columns.size())
-            state.set("my_issues_col", next_col)
-            state.set("my_issues_row", clamp(row, selected_row_count(columns, next_col)))
-            state.set("my_issues_scroll", visible_scroll(scroll, next_col, board_visible_count(columns.size()), columns.size()))
+            let next_col = clamp(col + 1, model.columns.size())
+            mut next = model
+            next.col = next_col
+            next.row = clamp(row, selected_row_count(model.columns, next_col))
+            next.scroll = visible_scroll(scroll, next_col, board_visible_count(model.columns.size()), model.columns.size())
+            state.set_value(next)
             ui::EventResult::handled
           }),
           ui::action("my_issues.refresh", fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
-            if not state.get<Bool>("my_issues_loading").or(false) {
-              state.set("my_issues_loading", true)
+            if not model.loading {
+              mut next = model
+              next.loading = true
+              state.set_value(next)
               let rt = ctx.runtime()
               async::start(fn() {
                 let result = issues::load(api_key)
                 rt.dispatch(fn() {
+                  mut refreshed = state.value<MyIssuesUiState>()
                   match result {
-                    ok(updated_columns) => {
-                      state.set("my_issues_columns", updated_columns)
-                      state.set("my_issues_error", "")
-                      state.set("my_issues_col", clamp(col, updated_columns.size()))
-                      state.set("my_issues_row", clamp(row, selected_row_count(updated_columns, col)))
+                    ok(columns) => {
+                      refreshed.columns = columns
+                      refreshed.error = ""
+                      refreshed.col = clamp(col, columns.size())
+                      refreshed.row = clamp(row, selected_row_count(columns, col))
                     },
-                    err(e) => { state.set("my_issues_error", e) },
+                    err(e) => { refreshed.error = e },
                   }
-                  state.set("my_issues_loaded", true)
-                  state.set("my_issues_loading", false)
+                  refreshed.loaded = true
+                  refreshed.loading = false
+                  state.set_value(refreshed)
                 })
               })
               ()
@@ -298,7 +333,7 @@ fn new(api_key: Str) ui::Widget {
             ui::EventResult::handled
           }),
           ui::action("my_issues.open", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-            match selected_issue(columns, col, row) {
+            match selected_issue(model.columns, col, row) {
               _issue => (),
               _ => (),
             }

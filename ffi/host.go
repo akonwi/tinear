@@ -291,50 +291,38 @@ func UiQuitWrapped(ctx *UiEventContext) {
 type UiStateContext struct{ state *ardState }
 
 type ardStateful struct {
-	key   string
-	init  func(ui.BuildContext, *UiStateContext)
-	build func(ui.BuildContext, *UiStateContext) ui.Widget
+	key      string
+	initial  any
+	init     func(ui.BuildContext, *UiStateContext)
+	build    func(ui.BuildContext, *UiStateContext) ui.Widget
 }
 
 type ardState struct {
 	ui.StateBase
-	values       map[string]any
+	value        any
 	initializing bool
 	disposed     bool
 	init         func(ui.BuildContext, *UiStateContext)
 	build        func(ui.BuildContext, *UiStateContext) ui.Widget
 }
 
-func UiStateful(build func(*UiStateContext) ui.Widget) ui.Widget {
-	return ardStateful{build: func(_ ui.BuildContext, ctx *UiStateContext) ui.Widget { return build(ctx) }}
+func UiStatefulValueInit[T any](init func(ui.BuildContext, *UiStateContext) T, build func(ui.BuildContext, *UiStateContext) ui.Widget) ui.Widget {
+	return ardStateful{
+		init: func(ctx ui.BuildContext, state *UiStateContext) {
+			state.state.value = init(ctx, state)
+		},
+		build: build,
+	}
 }
 
-func UiStatefulWithInit(init func(*UiStateContext), build func(*UiStateContext) ui.Widget) ui.Widget {
-	return ardStateful{init: func(_ ui.BuildContext, ctx *UiStateContext) { init(ctx) }, build: func(_ ui.BuildContext, ctx *UiStateContext) ui.Widget { return build(ctx) }}
-}
-
-func UiStatefulKey(key string, build func(*UiStateContext) ui.Widget) ui.Widget {
-	return ardStateful{key: key, build: func(_ ui.BuildContext, ctx *UiStateContext) ui.Widget { return build(ctx) }}
-}
-
-func UiStatefulWithInitKey(key string, init func(*UiStateContext), build func(*UiStateContext) ui.Widget) ui.Widget {
-	return ardStateful{key: key, init: func(_ ui.BuildContext, ctx *UiStateContext) { init(ctx) }, build: func(_ ui.BuildContext, ctx *UiStateContext) ui.Widget { return build(ctx) }}
-}
-
-func UiStatefulContext(build func(ui.BuildContext, *UiStateContext) ui.Widget) ui.Widget {
-	return ardStateful{build: build}
-}
-
-func UiStatefulContextWithInit(init func(ui.BuildContext, *UiStateContext), build func(ui.BuildContext, *UiStateContext) ui.Widget) ui.Widget {
-	return ardStateful{init: init, build: build}
-}
-
-func UiStatefulContextKey(key string, build func(ui.BuildContext, *UiStateContext) ui.Widget) ui.Widget {
-	return ardStateful{key: key, build: build}
-}
-
-func UiStatefulContextWithInitKey(key string, init func(ui.BuildContext, *UiStateContext), build func(ui.BuildContext, *UiStateContext) ui.Widget) ui.Widget {
-	return ardStateful{key: key, init: init, build: build}
+func UiStatefulValueInitKey[T any](key string, init func(ui.BuildContext, *UiStateContext) T, build func(ui.BuildContext, *UiStateContext) ui.Widget) ui.Widget {
+	return ardStateful{
+		key: key,
+		init: func(ctx ui.BuildContext, state *UiStateContext) {
+			state.state.value = init(ctx, state)
+		},
+		build: build,
+	}
 }
 
 func (w ardStateful) WidgetKey() ui.KeyValue {
@@ -342,7 +330,7 @@ func (w ardStateful) WidgetKey() ui.KeyValue {
 }
 
 func (w ardStateful) CreateState() ui.State {
-	return &ardState{values: map[string]any{}, init: w.init, build: w.build}
+	return &ardState{value: w.initial, init: w.init, build: w.build}
 }
 
 func (s *ardState) InitState() {
@@ -407,28 +395,22 @@ func UiRuntimeDispatch(rt ui.Runtime, callback func()) {
 	rt.Dispatch(callback)
 }
 
-func UiStateGet[T any](ctx *UiStateContext, key string) ardruntime.Maybe[T] {
+func UiStateValue[T any](ctx *UiStateContext) T {
+	var zero T
 	if ctx == nil || ctx.state == nil {
-		return ardruntime.None[T]()
+		return zero
 	}
-	if value, ok := ctx.state.values[key].(T); ok {
-		return ardruntime.Some(value)
+	if value, ok := ctx.state.value.(T); ok {
+		return value
 	}
-	return ardruntime.None[T]()
+	return zero
 }
 
-func UiStateSet[T any](ctx *UiStateContext, key string, value T) {
+func UiStateSetValue[T any](ctx *UiStateContext, value T) {
 	if ctx == nil || ctx.state == nil {
 		return
 	}
-	ctx.state.setValue(func() { ctx.state.values[key] = value })
-}
-
-func UiStateDrop(ctx *UiStateContext, key string) {
-	if ctx == nil || ctx.state == nil {
-		return
-	}
-	ctx.state.setValue(func() { delete(ctx.state.values, key) })
+	ctx.state.setValue(func() { ctx.state.value = value })
 }
 
 type UiStyle struct {
