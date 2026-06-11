@@ -87,7 +87,7 @@ fn new(api_key: Str) ui::Widget {
   let inbox = inbox_view::new(api_key)
   let my_issues = my_issues_view::new(api_key)
   ui::stateful(
-    init: fn(_ctx: ui::BuildContext, _state: ui::State) LoggedInUiState {
+    init: fn(_ctx: ui::BuildContext) LoggedInUiState {
       LoggedInUiState{tab: "Inbox"}
     },
     build: fn(_ctx: ui::BuildContext, state: ui::State) ui::Widget {

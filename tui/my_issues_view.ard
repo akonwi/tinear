@@ -315,14 +315,14 @@ fn content(columns: [issues::BoardColumn], loading: Bool, error: Str, col: Int, 
 fn new(api_key: Str) ui::Widget {
   ui::stateful(
     key: "my-issues",
-    init: fn(ctx: ui::BuildContext, state: ui::State) MyIssuesUiState {
+    init: fn(ctx: ui::BuildContext) MyIssuesUiState {
       let initial = initial_state()
       mut next = initial
       next.loading = true
       let rt = ctx.runtime()
       async::start(fn() {
         let result = issues::load(api_key)
-        rt.dispatch(fn() {
+        rt.dispatch(fn(state: ui::State) {
           state.set<MyIssuesUiState>(fn(mut loaded: MyIssuesUiState) {
             match result {
               ok(columns) => {
@@ -340,6 +340,7 @@ fn new(api_key: Str) ui::Widget {
     },
     build: fn(ctx: ui::BuildContext, state: ui::State) ui::Widget {
       let model = state.value<MyIssuesUiState>()
+      let rt = ctx.runtime()
       let col = clamp(model.col, model.columns.size())
       let row = clamp(model.row, selected_row_count(model.columns, col))
       let scroll = visible_scroll(
@@ -447,15 +448,14 @@ fn new(api_key: Str) ui::Widget {
             })
             ui::EventResult::handled
           }),
-          ui::action("my_issues.refresh", fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          ui::action("my_issues.refresh", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
             if not model.loading {
               state.set<MyIssuesUiState>(fn(mut next: MyIssuesUiState) {
                 next.loading = true
               })
-              let rt = ctx.runtime()
               async::start(fn() {
                 let result = issues::load(api_key)
-                rt.dispatch(fn() {
+                rt.dispatch(fn(state: ui::State) {
                   state.set<MyIssuesUiState>(fn(mut refreshed: MyIssuesUiState) {
                     match result {
                       ok(columns) => {

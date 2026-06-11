@@ -383,18 +383,20 @@ func UiBuildContextRuntime(ctx ui.BuildContext) ui.Runtime {
 	return ctx.Runtime()
 }
 
-func UiEventContextRuntimeWrapped(ctx *UiEventContext) ui.Runtime {
-	if ctx == nil {
-		return nil
-	}
-	return ctx.handle.Runtime()
-}
-
-func UiRuntimeDispatch(rt ui.Runtime, callback func()) {
+func UiRuntimeDispatch(rt ui.Runtime, state ardruntime.Maybe[*UiStateContext], callback func(*UiStateContext)) {
 	if rt == nil || callback == nil {
 		return
 	}
-	rt.Dispatch(callback)
+	if state.IsNone() || state.Value() == nil {
+		panic("ui runtime dispatch requires state")
+	}
+	stateCtx := state.Value()
+	rt.Dispatch(func() {
+		if stateCtx.state == nil || stateCtx.state.disposed {
+			return
+		}
+		callback(stateCtx)
+	})
 }
 
 func UiStateValue[T any](ctx *UiStateContext) T {

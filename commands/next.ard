@@ -15,7 +15,7 @@ struct AppUiState {
 
 fn app_content(cfg: config::Config) ui::Widget {
   ui::stateful(
-    init: fn(_ctx: ui::BuildContext, _state: ui::State) AppUiState {
+    init: fn(_ctx: ui::BuildContext) AppUiState {
       AppUiState{authed: cfg.has_auth(), api_key: cfg.api_key, error: false}
     },
     build: fn(_ctx: ui::BuildContext, state: ui::State) ui::Widget {

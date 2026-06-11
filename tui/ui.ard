@@ -3,6 +3,8 @@
 // These bindings intentionally expose real Go ui types instead of opaque any
 // handles so Ard-generated Go can pass values to host wrappers without casts.
 
+use ard/maybe
+
 extern type Widget = "ui.Widget"
 extern type EventContextHandle = "*projectffi.UiEventContext"
 extern type BuildContextHandle = "ui.BuildContext"
@@ -57,38 +59,35 @@ extern fn key_debug(child: Widget) Widget = "UiKeyDebug"
 extern fn _request_frame(ctx: EventContextHandle) Void = "UiRequestFrameWrapped"
 
 extern fn _build_context_runtime(ctx: BuildContextHandle) RuntimeHandle = "UiBuildContextRuntime"
-extern fn _event_context_runtime(ctx: EventContextHandle) RuntimeHandle = "UiEventContextRuntimeWrapped"
-extern fn _runtime_dispatch(runtime: RuntimeHandle, callback: fn()) Void = "UiRuntimeDispatch"
+extern fn _runtime_dispatch(runtime: RuntimeHandle, state: StateHandle?, callback: fn(StateHandle)) Void = "UiRuntimeDispatch"
 
 struct Runtime {
   handle: RuntimeHandle,
+  state: StateHandle?,
 }
 
 impl Runtime {
   // Re-enter the vaxis/ui event loop from background work before mutating UI state.
-  fn dispatch(callback: fn()) {
-    _runtime_dispatch(self.handle, callback)
+  fn dispatch(callback: fn(State)) {
+    _runtime_dispatch(self.handle, self.state, fn(state_handle: StateHandle) {
+      callback(State{handle: state_handle})
+    })
   }
 }
 
 struct BuildContext {
   handle: BuildContextHandle,
+  state: StateHandle?,
 }
 
 impl BuildContext {
   fn runtime() Runtime {
-    Runtime{handle: _build_context_runtime(self.handle)}
+    Runtime{handle: _build_context_runtime(self.handle), state: self.state}
   }
 }
 
 struct EventContext {
   handle: EventContextHandle,
-}
-
-impl EventContext {
-  fn runtime() Runtime {
-    Runtime{handle: _event_context_runtime(self.handle)}
-  }
 }
 
 fn request_frame(ctx: EventContext) {
@@ -133,23 +132,23 @@ impl State {
   }
 }
 
-fn stateful<$T>(init: fn(BuildContext, State) $T, build: fn(BuildContext, State) Widget, key: Str?) Widget {
+fn stateful<$T>(init: fn(BuildContext) $T, build: fn(BuildContext, State) Widget, key: Str?) Widget {
   match key {
     k => stateful_raw_init_key(
       key: k,
       init: fn(build_ctx: BuildContextHandle, state_handle: StateHandle) $T {
-        init(BuildContext{handle: build_ctx}, State{handle: state_handle})
+        init(BuildContext{handle: build_ctx, state: maybe::some(state_handle)})
       },
       build: fn(build_ctx: BuildContextHandle, state_handle: StateHandle) Widget {
-        build(BuildContext{handle: build_ctx}, State{handle: state_handle})
+        build(BuildContext{handle: build_ctx, state: maybe::some(state_handle)}, State{handle: state_handle})
       },
     ),
     _ => stateful_raw_init(
       init: fn(build_ctx: BuildContextHandle, state_handle: StateHandle) $T {
-        init(BuildContext{handle: build_ctx}, State{handle: state_handle})
+        init(BuildContext{handle: build_ctx, state: maybe::some(state_handle)})
       },
       build: fn(build_ctx: BuildContextHandle, state_handle: StateHandle) Widget {
-        build(BuildContext{handle: build_ctx}, State{handle: state_handle})
+        build(BuildContext{handle: build_ctx, state: maybe::some(state_handle)}, State{handle: state_handle})
       },
     ),
   }

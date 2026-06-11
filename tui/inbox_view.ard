@@ -322,7 +322,7 @@ struct InboxUiState {
 fn new(api_key: Str) ui::Widget {
   ui::stateful(
     key: "inbox",
-    init: fn(_ctx: ui::BuildContext, _state: ui::State) InboxUiState {
+    init: fn(_ctx: ui::BuildContext) InboxUiState {
       let no_detail: Dynamic? = maybe::none()
       let empty = InboxUiState{
         items: [],
