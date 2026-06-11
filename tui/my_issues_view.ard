@@ -104,7 +104,7 @@ fn issue_card(issue: issues::Issue, selected: Bool, last: Bool, col_w: Int) ui::
   }
   mut children = [first]
   if not last {
-    children.push(ui::text(repeat("━", col_w - 1)))
+    children.push(ui::text(repeat("─", col_w - 1), style: ui::style(foreground: "border")))
     children.push(ui::sized_box(0, 1))
   }
   ui::column_stretch(children)
