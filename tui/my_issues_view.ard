@@ -118,7 +118,7 @@ fn board_column(col: issues::BoardColumn, col_idx: Int, selected_col: Int, selec
   }
   let header = text::truncate_with_ellipsis("{col.name} ({col.issues.size()}){suffix}", col_w)
   mut children = [
-    ui::text(header),
+    ui::text(header, style: ui::style(bold: true)),
     ui::text(repeat("─", col_w - 1), style: ui::style(foreground: "border")),
     ui::sized_box(0, 1),
   ]
