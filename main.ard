@@ -2,7 +2,6 @@ use ard/argv
 use ard/io
 use ard/list as List
 
-use tinear/commands/next
 use tinear/commands/login
 use tinear/commands/tui
 
@@ -15,7 +14,6 @@ fn print_usage() {
   io::print("")
   io::print("Commands:")
   io::print("  login   Save an API key to ~/.tinear/config")
-  io::print("  next    Launch the experimental next TUI")
   io::print("  help    Show this help")
   io::print("")
   io::print("API key from LINEAR_API_KEY env var or ~/.tinear/config (JSON)")
@@ -26,13 +24,12 @@ fn main() {
   let rest = List::drop(from: args.arguments, till: 1)
 
   match args.arguments.size() {
-    0 => tui::run(rest),
+    0 => tui::run(),
     _ => {
       let cmd = args.arguments.at(0)
       match cmd {
         "help" => print_usage(),
         "login" => login::run(rest),
-        "next" => next::run(),
         _ => {
           io::print("Unknown command: {cmd}")
           io::print("")

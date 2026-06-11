@@ -1,11 +1,8 @@
-use tinear/tui/components
-use tinear/vaxis
+// Shared Linear UI model helpers used by the vaxis/ui implementation.
 
-// ---- workflow helpers --------------------------------------------------
-
-// Workflow rank for a Linear state type. Lower is earlier in the
-// flow. Used to sort columns/states across teams so cross-team
-// merged states land in a predictable order.
+// Workflow rank for a Linear state type. Lower is earlier in the flow. Used to
+// sort columns/states across teams so cross-team merged states land in a
+// predictable order.
 fn state_type_rank(state_type: Str) Int {
   match state_type {
     "triage" => 0,
@@ -17,13 +14,11 @@ fn state_type_rank(state_type: Str) Int {
   }
 }
 
-// State names to exclude from the board view. These are typically
-// dead-end states whose issues shouldn't clutter the active workflow.
+// State names to exclude from the board view. These are typically dead-end
+// states whose issues shouldn't clutter the active workflow.
 fn is_hidden_state(name: Str) Bool {
   name == "Duplicate"
 }
-
-// ---- priority helpers --------------------------------------------------
 
 // Linear priority code (1=Urgent..4=Low, 0/None=no priority) to label.
 fn priority_label(p: Int?) Str {
@@ -41,9 +36,8 @@ fn priority_label(p: Int?) Str {
   }
 }
 
-// Single-character priority glyph for compact card rendering.
-// Returns a space when priority is None or 0 so all glyphs occupy
-// the same visual column.
+// Single-character priority glyph for compact card rendering. Returns a space
+// when priority is None or 0 so all glyphs occupy the same visual column.
 fn priority_glyph(p: Int?) Str {
   match p {
     n => {
@@ -59,10 +53,8 @@ fn priority_glyph(p: Int?) Str {
   }
 }
 
-// ---- data types --------------------------------------------------------
-
-// A column on the My Issues board: a workflow state name + the
-// issues currently in it.
+// A raw board column from the Linear API, before models/issues.ard decodes each
+// issue into the typed Issue model used by the vaxis/ui board.
 struct BoardColumn {
   name: Str,
   state_type: Str,
@@ -70,34 +62,7 @@ struct BoardColumn {
   issues: [Dynamic],
 }
 
-// An open issue detail tab. Comments are fetched on-demand when the
-// tab is opened (see api::fetch_issue_comments).
-//
-// Navigation model: two sections (description=0, comments=1). When
-// `active` is false, the section cursor highlights one of them and
-// arrows switch between sections. When `active` is true, arrows
-// scroll/move within the active section. Escape exits the active
-// section or closes the tab.
-struct IssueTab {
-  issue: Dynamic,
-  section: Int,
-  active: Bool,
-  // Description section's scrollview. Layout and wrapped lines are
-  // recomputed each frame; only its scroll offset persists here.
-  desc_view: components::Scrollview,
-  // Comments section's list component. Owns the comments and its
-  // own cursor/top.
-  comments_view: components::CommentList,
-}
-
-// Modal picker for changing an issue's workflow state. While
-// AppState.state_picker is set, arrow keys drive the picker and the
-// underlying tab keys are blocked.
-//
-// `from_board = true` means the picker was opened from the board
-// (cursor at columns[board_col].issues[board_row]). On confirm we
-// refresh the board. Otherwise it was opened from an issue tab and
-// `tab_idx` says which entry in issue_tabs to refresh.
+// Modal picker for changing an issue's workflow state.
 struct StatePicker {
   issue_id: Str,
   issue_identifier: Str,
@@ -109,86 +74,24 @@ struct StatePicker {
   tab_idx: Int,
 }
 
-// Result of fetching a team's cycles. `active_cycle_number` is the
-// number of the team's currently active cycle, used to filter the
-// list of cycles to a useful slice (past + active + next) instead of
-// every future cycle the team has scheduled.
+// Result of fetching a team's cycles. `active_cycle_number` is the number of
+// the team's currently active cycle, used to filter the list of cycles to a
+// useful slice (past + active + next) instead of every future cycle the team has
+// scheduled.
 struct TeamCyclesResult {
   active_cycle_number: Int?,
   cycles: [Dynamic],
 }
 
-// Modal picker for changing an issue's cycle. Same conventions as
-// StatePicker. The implicit "(no cycle)" option occupies cursor
-// index 0, so cycles[i] corresponds to cursor index i + 1.
+// Modal picker for changing an issue's cycle. The implicit "(no cycle)" option
+// occupies cursor index 0, so cycles[i] corresponds to cursor index i + 1.
 struct CyclePicker {
   issue_id: Str,
   issue_identifier: Str,
-  // The issue's current cycle id, or "" if it has no cycle.
   current_cycle_id: Str,
   team_name: Str,
   cycles: [Dynamic],
   cursor: Int,
   from_board: Bool,
   tab_idx: Int,
-}
-
-// Modal text editor for composing a new comment on an issue. While
-// AppState.comment_composer is set, key events go to the editor
-// rather than the underlying tab.
-//
-// `body` is an append-only buffer of UTF-8 text; the in-modal cursor
-// is always at the end. tab_idx is the issue_tabs index to refresh
-// after a successful commentCreate.
-struct CommentComposer {
-  issue_id: Str,
-  issue_identifier: Str,
-  body: Str,
-  tab_idx: Int,
-}
-
-// Notification status-change transition (e.g. Backlog → Done),
-// derived from an issue's history.
-struct StatusTransition {
-  from: Str,
-  to: Str,
-}
-
-// Display identifier + title pair for a notification. PR
-// notifications use #<number> and PR title; issue notifications use
-// the issue identifier and issue title.
-struct IdTitle {
-  id: Str,
-  title: Str,
-}
-
-// The central TUI state. Rebuilt each frame from the run_loop's
-// local mutable variables and passed (immutably) into draw_screen.
-struct AppState {
-  api_key: Str,
-  vx: vaxis::Vaxis,
-  notifications: [Dynamic],
-  columns: [BoardColumn],
-  cursor: Int,
-  comment_cursor: Int,
-  board_col: Int,
-  board_row: Int,
-  board_scroll: Int,
-  // Tabs beyond the two fixed ones (Inbox, My Issues). Each entry
-  // is an open issue tab; the tab label is the issue's identifier.
-  issue_tabs: [IssueTab],
-  viewer_name: Str,
-  viewer_email: Str,
-
-  running: Bool,
-  tabs: [Str],
-  active_tab: Int,
-  detail_mode: Bool,
-  // Status picker overlay. Set means open.
-  state_picker: StatePicker?,
-  // Cycle picker overlay. Set means open.
-  cycle_picker: CyclePicker?,
-  // Comment composer overlay. Mutually exclusive in practice with
-  // state_picker / cycle_picker.
-  comment_composer: CommentComposer?,
 }

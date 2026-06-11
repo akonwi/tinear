@@ -19,72 +19,66 @@ ard run main.ard                            # run directly
 | Path | Purpose |
 |------|---------|
 | `main.ard` | Entrypoint, dispatches `help` / `login` / default-to-TUI |
-| `config.ard` | load config and API key from env var or `~/.tinear/config` |
+| `config.ard` | Load config and API key from env var or `~/.tinear/config` |
 | `linear/client.ard` | Shared GraphQL client (one `graphql()` function) |
 | `commands/login.ard` | Interactive `login` command (saves key to config) |
-| `commands/tui.ard` | Thin TUI entrypoint — delegates to `tui/app::run_loop` |
-| `tui/*.ard` | TUI implementation, split by concern (see below) |
-| `vaxis.ard` + `ffi/` | Terminal UI bindings (Ard extern declarations + Go FFI) |
+| `commands/tui.ard` | vaxis/ui TUI entrypoint used by the default command |
+| `models/*.ard` | Stateless fetch/decode model modules for inbox and issues |
+| `tui/*.ard` | vaxis/ui implementation, split by concern (see below) |
+| `vaxis.ard` + `ffi/` | Terminal/vaxis/ui bindings (Ard extern declarations + Go FFI) |
 
 ## TUI Layout
 
-`commands/tui.ard` is just an entrypoint. The actual implementation lives in `tui/`:
+The active TUI is built on `git.sr.ht/~rockorager/vaxis/ui` via `tui/ui.ard`.
 
 | File | Purpose |
 |------|---------|
-| `tui/app.ard` | `run_loop` (event loop + input dispatch) and `draw_screen` |
-| `tui/state.ard` | All data structs (AppState, IssueTab, etc.) + workflow / priority helpers |
-| `tui/components.ard` | `Scrollview`, `CommentList`, `draw_comment` — view components with impls |
-| `tui/api.ard` | Every GraphQL fetch/mutation + `open_state_picker` |
-| `tui/text.ard` | Byte- and display-width string helpers (truncate, pad, wrap) |
-| `tui/screen.ard` | `Layout` struct + terminal geometry helpers |
+| `tui/ui.ard` | Ard-facing vaxis/ui widget/state/runtime bindings |
+| `tui/logged_in_screen.ard` | Logged-in tab shell; keeps tab bodies mounted with `ui::indexed_stack` |
+| `tui/welcome_screen.ard` | Login/auth screen for unauthenticated users |
+| `tui/inbox_view.ard` | Inbox list + notification detail modal |
+| `tui/my_issues_view.ard` | My Issues board + picker modals |
+| `tui/modal.ard` | Shared vaxis/ui modal/dialog wrapper |
+| `tui/hints.ard` | Footer hint bar |
+| `tui/api.ard` | GraphQL fetch/mutation helpers and picker construction |
+| `tui/state.ard` | Shared Linear UI model structs + workflow/priority helpers |
 | `tui/decode.ard` | `optional_field` — missing-or-null aware field decoder |
-| `tui/draw.ard` | Shared draw primitives (tab bar, label rows) |
-| `tui/notifications.ard` | Notification helpers + inbox view (list, detail panels) |
-| `tui/board.ard` | Board geometry + card/column rendering |
-| `tui/issue_tab.ard` | Open-issue tab rendering |
-| `tui/modals.ard` | Status picker + comment composer modal rendering |
+| `tui/text.ard` | Byte- and display-width string helpers (truncate, pad, wrap) |
 
 ### Architectural conventions
 
-- **Persistent state vs ephemeral layout**: view components store only the bits
-  that survive across frames (`scroll`, `cursor`, `top`). The per-frame layout
-  rectangle (`screen::Layout`) is computed in the parent and passed into the
-  component's `draw` method. Use this pattern for any new component.
-- **`AppState` is rebuilt each frame** in `app::run_loop` from local mutable
-  variables and passed (immutably) into `draw_screen`. State mutations live in
-  the input handler, not in draw paths.
-- **Dependency direction**: text/screen/decode → components → state → api →
-  draw/board/notifications/modals/issue_tab → app. Don't introduce upward
-  dependencies.
+- Prefer vaxis/ui primitives and thin Ard wrappers over custom retained UI code.
+- Widget-local UI data lives in typed `ui::State` values. Stateless model modules
+  perform API calls and decoding, then widgets store returned data in state.
+- Use `ui::stateful(init: ..., build: ..., key: ...)`. `init` creates initial
+  state only; background work should capture `ctx.runtime()` and dispatch state
+  mutations back onto the UI runtime.
+- Keep inactive tab bodies mounted with `ui::indexed_stack` when their state
+  should survive tab switches.
+- Keep FFI-only details private/internal when possible. Public Ard functions
+  should translate ergonomic nullable/default arguments into the required Go FFI
+  shape.
 
-## Vaxis FFI
-
-`vaxis.ard` lives at the project root with `ffi/host.go` holding the Go bindings.
-The Go module includes both.
-
-### `vaxis/ui` binding conventions
+## vaxis/ui binding conventions
 
 - Primitive widget factory functions should accept a nullable `style: Style?`
   argument when the underlying widget/rendering can be styled.
 - Prefer a consistent, discoverable API like `ui::text(value, style: ...)` and
   `ui::row(children, style: ...)` over use-case-specific helpers such as
   `text_reverse`, `background`, or other single-purpose styling wrappers.
-- Keep FFI-only details private/internal when possible. Public Ard functions
-  should translate ergonomic nullable/default arguments into the required Go FFI
-  shape.
 - Prefer optional arguments for widget customization/lifecycle hooks instead of
-  separate public functions for the same widget. For example, use
-  `ui::stateful(build, init: ...)` rather than a separate `stateful_with_init`.
+  separate public functions for the same widget.
+- Re-enter the UI runtime explicitly from background work:
 
-Key bits of the event API:
-
-- `vaxis::next_event(vx) Event` — blocking; returns the typed `Event` union
-  (`KeyEvent | MouseEvent | ResizeEvent | FocusEvent | PasteEvent | RedrawEvent | CustomEvent | ColorThemeEvent | QuitEvent`).
-- `KeyEvent.name` is the plain key name (no modifier prefixes): `"Escape"`,
-  `"Enter"`, `"Up"`, `"Tab"`, `"a"`, etc.
-- `KeyEvent.text` is the rendered text (handles shift/layout/IME). Empty for
-  non-textual keys. Prefer `.text` for text inputs.
+```ard
+let rt = ctx.runtime()
+async::start(fn() {
+  let result = load()
+  rt.dispatch(fn(state: ui::State) {
+    state.set<MyState>(fn(mut s: MyState) { ... })
+  })
+})
+```
 
 ## Key Patterns
 
@@ -108,8 +102,7 @@ Key bits of the event API:
 - `login` — prompts for API key, validates via `viewer` query, saves to
   `~/.tinear/config`
 - `help` — prints usage
-- _(no command)_ — launches the interactive TUI (Inbox + My Issues tabs,
-  per-issue detail tabs, status picker, comment composer)
+- _(no command)_ — launches the interactive TUI
 
 ## Ard Language Notes
 

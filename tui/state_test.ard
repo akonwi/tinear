@@ -1,0 +1,17 @@
+use ard/maybe
+use ard/testing
+
+use tinear/tui/state
+
+test fn test_priority_helpers() Void!Str {
+  let missing: Int? = maybe::none()
+  try testing::assert(state::priority_label(1) == "Urgent", "priority 1 should be Urgent")
+  try testing::assert(state::priority_label(missing) == "—", "missing priority should be em dash")
+  try testing::assert(state::priority_glyph(2) == "↑", "priority 2 should use up glyph")
+  testing::assert(state::priority_glyph(missing) == " ", "missing priority should use blank glyph")
+}
+
+test fn test_state_type_rank_orders_workflow() Void!Str {
+  try testing::assert(state::state_type_rank("triage") < state::state_type_rank("started"), "triage should rank before started")
+  testing::assert(state::is_hidden_state("Duplicate"), "Duplicate should be hidden")
+}

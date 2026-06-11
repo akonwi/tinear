@@ -4,7 +4,7 @@ use tinear/tui/api
 use tinear/tui/decode as decode_utils
 use tinear/tui/state
 
-// Typed issue model used by the next TUI.
+// Typed issue model used by the TUI.
 //
 // `raw` is kept as an escape hatch for older API helpers that still expect the
 // Linear GraphQL Dynamic shape (state/cycle pickers, mutations, etc.). Rendering
