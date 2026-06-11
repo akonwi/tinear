@@ -1,0 +1,34 @@
+use ard/testing
+
+use tinear/tui/ui
+use tinear/tui/ui/test as uitest
+
+test fn test_ui_test_app_renders_text_and_cells() Void!Str {
+  let app = uitest::app(ui::text("Hello", style: ui::style(reverse: true)))
+  app.pump(10, 1)
+
+  try testing::assert(app.contains("Hello"), "test app should expose painted text")
+  try testing::assert(app.cell_grapheme(0, 0) == "H", "first cell should contain H")
+  testing::assert(app.cell_reverse(0, 0), "styled text should mark reverse cells")
+}
+
+test fn test_ui_test_app_dispatches_shortcut_actions() Void!Str {
+  mut pressed = false
+  let app = uitest::app(ui::actions(
+    child: ui::shortcuts(
+      child: ui::focusable(ui::text("Press x")),
+      bindings: ["x": "test.press"],
+    ),
+    bindings: [
+      ui::action("test.press", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+        pressed = true
+        ui::EventResult::handled
+      }),
+    ],
+  ))
+
+  app.pump(20, 1)
+  app.key("x")
+
+  testing::assert(pressed, "shortcut should dispatch action")
+}

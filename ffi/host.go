@@ -11,6 +11,7 @@ import (
 
 	"git.sr.ht/~rockorager/vaxis"
 	"git.sr.ht/~rockorager/vaxis/ui"
+	"git.sr.ht/~rockorager/vaxis/ui/uitest"
 	ardruntime "github.com/akonwi/ard/runtime"
 )
 
@@ -41,6 +42,124 @@ func UiRun(root ui.Widget) error {
 	delete(shortcuts, "Tab")
 	delete(shortcuts, "Shift+Tab")
 	return ui.Run(root, ui.WithShortcuts(shortcuts))
+}
+
+type UiTestApp struct{ app *uitest.App }
+
+func UiTestNew(root ui.Widget) *UiTestApp {
+	return &UiTestApp{app: uitest.New(root)}
+}
+
+func UiTestPump(app *UiTestApp, width, height int) {
+	if app == nil || app.app == nil {
+		return
+	}
+	app.app.Pump(width, height)
+}
+
+func UiTestKey(app *UiTestApp, text string) {
+	if app == nil || app.app == nil {
+		return
+	}
+	app.app.Key(text)
+}
+
+func UiTestEnter(app *UiTestApp) {
+	if app == nil || app.app == nil {
+		return
+	}
+	app.app.Enter()
+}
+
+func UiTestEscape(app *UiTestApp) {
+	if app == nil || app.app == nil {
+		return
+	}
+	app.app.Send(vaxis.Key{Keycode: vaxis.KeyEsc})
+}
+
+func UiTestUp(app *UiTestApp) {
+	if app == nil || app.app == nil {
+		return
+	}
+	app.app.Send(vaxis.Key{Keycode: vaxis.KeyUp})
+}
+
+func UiTestDown(app *UiTestApp) {
+	if app == nil || app.app == nil {
+		return
+	}
+	app.app.Send(vaxis.Key{Keycode: vaxis.KeyDown})
+}
+
+func UiTestLeft(app *UiTestApp) {
+	if app == nil || app.app == nil {
+		return
+	}
+	app.app.Send(vaxis.Key{Keycode: vaxis.KeyLeft})
+}
+
+func UiTestRight(app *UiTestApp) {
+	if app == nil || app.app == nil {
+		return
+	}
+	app.app.Send(vaxis.Key{Keycode: vaxis.KeyRight})
+}
+
+func UiTestTab(app *UiTestApp) {
+	if app == nil || app.app == nil {
+		return
+	}
+	app.app.Tab()
+}
+
+func UiTestShiftTab(app *UiTestApp) {
+	if app == nil || app.app == nil {
+		return
+	}
+	app.app.ShiftTab()
+}
+
+func UiTestClick(app *UiTestApp, x, y int) {
+	if app == nil || app.app == nil {
+		return
+	}
+	app.app.Click(x, y)
+}
+
+func UiTestContains(app *UiTestApp, text string) bool {
+	if app == nil || app.app == nil {
+		return false
+	}
+	return app.app.Contains(text)
+}
+
+func UiTestText(app *UiTestApp) string {
+	if app == nil || app.app == nil {
+		return ""
+	}
+	return app.app.Text()
+}
+
+func UiTestCellGrapheme(app *UiTestApp, x, y int) string {
+	if app == nil || app.app == nil {
+		return ""
+	}
+	return app.app.Cell(x, y).Grapheme
+}
+
+func UiTestCellReverse(app *UiTestApp, x, y int) bool {
+	if app == nil || app.app == nil {
+		return false
+	}
+	return app.app.Cell(x, y).Attribute&vaxis.AttrReverse != 0
+}
+
+func UiTestShouldQuit(app *UiTestApp) bool {
+	if app == nil || app.app == nil {
+		return false
+	}
+	return app.app.ShouldQuit()
 }
 
 type UiEventContext struct{ handle ui.EventContext }

@@ -1,0 +1,25 @@
+use ard/testing
+
+use tinear/tui/modal
+use tinear/tui/ui
+use tinear/tui/ui/test as uitest
+
+test fn test_modal_dialog_renders_title_and_dismisses_on_escape() Void!Str {
+  mut dismissed = false
+  let app = uitest::app(modal::dialog(
+    title: "Confirm",
+    child: ui::text("Are you sure?"),
+    footer: ui::text("Esc close"),
+    width: 24,
+    on_dismiss: fn(_ctx: ui::EventContext) {
+      dismissed = true
+    },
+  ))
+
+  app.pump(40, 8)
+  try testing::assert(app.contains("Confirm"), "modal should render title")
+  try testing::assert(app.contains("Are you sure?"), "modal should render body")
+
+  app.escape()
+  testing::assert(dismissed, "Escape should dispatch modal dismiss action")
+}
