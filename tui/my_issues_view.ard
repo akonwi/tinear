@@ -111,10 +111,7 @@ fn metadata_row(value: Str, selected: Bool) ui::Widget {
 }
 
 fn card_body(issue: issues::Issue, selected: Bool, col_w: Int) ui::Widget {
-  let cursor = match selected {
-    true => "▸",
-    false => " ",
-  }
+  let cursor = " "
   let glyph = state::priority_glyph(issue.priority)
   let title_indent = "   "
   let title_w = col_w - 3
