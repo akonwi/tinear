@@ -211,6 +211,7 @@ extern fn sized_box(width: Int, height: Int) Widget = "UiSizedBox"
 extern fn sized_box_child(width: Int, height: Int, child: Widget) Widget = "UiSizedBoxChild"
 extern fn constrained_width(width: Int, child: Widget) Widget = "UiConstrainedWidth"
 extern fn expanded(child: Widget) Widget = "UiExpanded"
+extern fn on_width(child: Widget, on_width: fn(Int)) Widget = "UiOnWidth"
 extern fn divider_raw(style: Style?, vertical: Bool) Widget = "UiDivider"
 
 fn divider(style: Style?, vertical: Bool?) Widget {

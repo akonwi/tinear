@@ -733,6 +733,83 @@ func UiExpanded(child ui.Widget) ui.Widget {
 	return ui.Expanded(child)
 }
 
+type uiWidthObserver struct {
+	Child   ui.Widget
+	OnWidth func(int)
+}
+
+func (w uiWidthObserver) WidgetChild() ui.Widget {
+	return w.Child
+}
+
+func (w uiWidthObserver) CreateRenderObject(ctx ui.BuildContext) ui.RenderObject {
+	return &renderWidthObserver{OnWidth: w.OnWidth, lastWidth: -1}
+}
+
+func (w uiWidthObserver) UpdateRenderObject(ctx ui.BuildContext, ro ui.RenderObject) {
+	r := ro.(*renderWidthObserver)
+	r.OnWidth = w.OnWidth
+	r.MarkNeedsLayout()
+}
+
+type renderWidthObserver struct {
+	ui.SingleChildRenderObject
+	OnWidth   func(int)
+	lastWidth int
+}
+
+func (r *renderWidthObserver) notify(width int) {
+	if width == r.lastWidth {
+		return
+	}
+	r.lastWidth = width
+	if r.OnWidth != nil {
+		r.OnWidth(width)
+	}
+}
+
+func (r *renderWidthObserver) Layout(ctx ui.LayoutContext, c ui.Constraints) {
+	if child := r.Child(); child != nil {
+		child.Layout(ctx, c)
+		size := child.Base().Size()
+		if c.HasBoundedWidth() {
+			size.Width = c.MaxWidth
+		}
+		r.SetSize(c.Constrain(size))
+	} else {
+		r.SetSize(c.Constrain(ui.Size{}))
+	}
+	r.notify(r.Size().Width)
+}
+
+func (r *renderWidthObserver) DryLayout(ctx ui.LayoutContext, c ui.Constraints) ui.Size {
+	if child := r.Child(); child != nil {
+		size := ui.DryLayout(ctx, child, c)
+		if c.HasBoundedWidth() {
+			size.Width = c.MaxWidth
+		}
+		return c.Constrain(size)
+	}
+	return c.Constrain(ui.Size{})
+}
+
+func (r *renderWidthObserver) Paint(p *ui.Painter, off ui.Offset) {
+	if child := r.Child(); child != nil {
+		child.Paint(p, off)
+	}
+}
+
+func (r *renderWidthObserver) HitTest(result *ui.HitTestResult, point ui.Point) bool {
+	if child := r.Child(); child != nil {
+		return child.HitTest(result, point)
+	}
+	return false
+}
+
+func UiOnWidth(child ui.Widget, onWidth func(int)) ui.Widget {
+	return uiWidthObserver{Child: child, OnWidth: onWidth}
+}
+
 type uiThemedDivider struct {
 	Style    ardruntime.Maybe[UiStyle]
 	Vertical bool

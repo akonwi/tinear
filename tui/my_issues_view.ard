@@ -19,11 +19,41 @@ fn clamp(value: Int, count: Int) Int {
 }
 
 fn board_column_gap() Int { 3 }
-fn board_column_width() Int { 30 }
-fn board_visible_count(col_count: Int) Int {
-  match col_count < 3 {
-    true => col_count,
-    false => 3,
+
+fn board_column_width(screen_w: Int, col_count: Int) Int {
+  match col_count == 0 {
+    true => 30,
+    false => {
+      let gap = board_column_gap()
+      let available = screen_w
+      let computed = (available - ((col_count - 1) * gap)) / col_count
+      match computed < 22 {
+        true => 22,
+        false => match computed > 50 {
+          true => 50,
+          false => computed,
+        },
+      }
+    },
+  }
+}
+
+fn board_visible_count(screen_w: Int, col_count: Int) Int {
+  match col_count == 0 {
+    true => 0,
+    false => {
+      let col_w = board_column_width(screen_w, col_count)
+      let gap = board_column_gap()
+      let per_col = col_w + gap
+      let computed = (screen_w + gap) / per_col
+      match computed > col_count {
+        true => col_count,
+        false => match computed < 1 {
+          true => 1,
+          false => computed,
+        },
+      }
+    },
   }
 }
 
@@ -132,8 +162,8 @@ fn issue_card(issue: issues::Issue, selected: Bool, last: Bool, col_w: Int) ui::
   ui::column_stretch(children)
 }
 
-fn board_column(col: issues::BoardColumn, col_idx: Int, selected_col: Int, selected_row: Int) ui::Widget {
-  let col_w = board_column_width()
+fn board_column(col: issues::BoardColumn, col_idx: Int, selected_col: Int, selected_row: Int, screen_w: Int, col_count: Int) ui::Widget {
+  let col_w = board_column_width(screen_w, col_count)
   let suffix = match col.state_type == "completed" {
     true => " · last 10",
     false => "",
@@ -156,9 +186,9 @@ fn board_column(col: issues::BoardColumn, col_idx: Int, selected_col: Int, selec
   ui::constrained_width(col_w, ui::column_stretch(children))
 }
 
-fn board(columns: [issues::BoardColumn], selected_col: Int, selected_row: Int, scroll: Int) ui::Widget {
+fn board(columns: [issues::BoardColumn], selected_col: Int, selected_row: Int, scroll: Int, screen_w: Int) ui::Widget {
   let col_count = columns.size()
-  let visible_count = board_visible_count(col_count)
+  let visible_count = board_visible_count(screen_w, col_count)
   let start_col = visible_scroll(scroll, selected_col, visible_count, col_count)
   let end_excl = match start_col + visible_count > col_count {
     true => col_count,
@@ -174,7 +204,7 @@ fn board(columns: [issues::BoardColumn], selected_col: Int, selected_row: Int, s
       if widgets.size() > 0 {
         widgets.push(ui::sized_box(board_column_gap(), 0))
       }
-      widgets.push(board_column(col, col_idx, selected_col, selected_row))
+      widgets.push(board_column(col, col_idx, selected_col, selected_row, screen_w, col_count))
     }
   }
   if end_excl < col_count {
@@ -293,6 +323,7 @@ struct MyIssuesUiState {
   col: Int,
   row: Int,
   scroll: Int,
+  viewport_width: Int,
   state_picker: StatePickerOption,
   cycle_picker: CyclePickerOption,
 }
@@ -306,12 +337,13 @@ fn initial_state() MyIssuesUiState {
     col: 0,
     row: 0,
     scroll: 0,
+    viewport_width: 90,
     state_picker: maybe::none(),
     cycle_picker: maybe::none(),
   }
 }
 
-fn base_content(columns: [issues::BoardColumn], loading: Bool, error: Str, col: Int, row: Int, scroll: Int) ui::Widget {
+fn base_content(columns: [issues::BoardColumn], loading: Bool, error: Str, col: Int, row: Int, scroll: Int, screen_w: Int) ui::Widget {
   if loading {
     ui::text("Loading my issues…")
   } else if not error.is_empty() {
@@ -319,12 +351,12 @@ fn base_content(columns: [issues::BoardColumn], loading: Bool, error: Str, col: 
   } else if columns.size() == 0 {
     ui::center(ui::text("No issues assigned to you."))
   } else {
-    board(columns, col, row, scroll)
+    board(columns, col, row, scroll, screen_w)
   }
 }
 
-fn content(columns: [issues::BoardColumn], loading: Bool, error: Str, col: Int, row: Int, scroll: Int, state_picker: StatePickerOption, cycle_picker: CyclePickerOption, on_picker_dismiss: fn(ui::EventContext)) ui::Widget {
-  let base = base_content(columns: columns, loading: loading, error: error, col: col, row: row, scroll: scroll)
+fn content(columns: [issues::BoardColumn], loading: Bool, error: Str, col: Int, row: Int, scroll: Int, screen_w: Int, state_picker: StatePickerOption, cycle_picker: CyclePickerOption, on_picker_dismiss: fn(ui::EventContext)) ui::Widget {
+  let base = base_content(columns: columns, loading: loading, error: error, col: col, row: row, scroll: scroll, screen_w: screen_w)
   match state_picker {
     p => ui::overlay_modal(base, state_picker_modal(p, on_picker_dismiss)),
     _ => match cycle_picker {
@@ -365,30 +397,43 @@ fn new(api_key: Str) ui::Widget {
       let rt = ctx.runtime()
       let col = clamp(model.col, model.columns.size())
       let row = clamp(model.row, selected_row_count(model.columns, col))
+      let screen_w = model.viewport_width
+      let visible_count = board_visible_count(screen_w, model.columns.size())
       let scroll = visible_scroll(
         model.scroll,
         col,
-        board_visible_count(model.columns.size()),
+        visible_count,
         model.columns.size(),
       )
       ui::actions(
         child: ui::shortcuts(
-          child: ui::focusable_key("tab.my_issues", content(
-            columns: model.columns,
-            loading: model.loading,
-            error: model.error,
-            col: col,
-            row: row,
-            scroll: scroll,
-            state_picker: model.state_picker,
-            cycle_picker: model.cycle_picker,
-            on_picker_dismiss: fn(_ctx: ui::EventContext) {
-              state.set<MyIssuesUiState>(fn(mut next: MyIssuesUiState) {
-                next.state_picker = maybe::none()
-                next.cycle_picker = maybe::none()
-              })
+          child: ui::on_width(
+            ui::focusable_key("tab.my_issues", content(
+              columns: model.columns,
+              loading: model.loading,
+              error: model.error,
+              col: col,
+              row: row,
+              scroll: scroll,
+              screen_w: screen_w,
+              state_picker: model.state_picker,
+              cycle_picker: model.cycle_picker,
+              on_picker_dismiss: fn(_ctx: ui::EventContext) {
+                state.set<MyIssuesUiState>(fn(mut next: MyIssuesUiState) {
+                  next.state_picker = maybe::none()
+                  next.cycle_picker = maybe::none()
+                })
+              },
+            )),
+            fn(width: Int) {
+              if width > 0 and not (width == model.viewport_width) {
+                state.set<MyIssuesUiState>(fn(mut next: MyIssuesUiState) {
+                  next.viewport_width = width
+                  next.scroll = visible_scroll(next.scroll, col, board_visible_count(width, model.columns.size()), model.columns.size())
+                })
+              }
             },
-          )),
+          ),
           bindings: [
             "Up": "my_issues.previous_row",
             "k": "my_issues.previous_row",
@@ -457,7 +502,7 @@ fn new(api_key: Str) ui::Widget {
             state.set<MyIssuesUiState>(fn(mut next: MyIssuesUiState) {
               next.col = next_col
               next.row = clamp(row, selected_row_count(model.columns, next_col))
-              next.scroll = visible_scroll(scroll, next_col, board_visible_count(model.columns.size()), model.columns.size())
+              next.scroll = visible_scroll(scroll, next_col, visible_count, model.columns.size())
             })
             ui::EventResult::handled
           }),
@@ -466,7 +511,7 @@ fn new(api_key: Str) ui::Widget {
             state.set<MyIssuesUiState>(fn(mut next: MyIssuesUiState) {
               next.col = next_col
               next.row = clamp(row, selected_row_count(model.columns, next_col))
-              next.scroll = visible_scroll(scroll, next_col, board_visible_count(model.columns.size()), model.columns.size())
+              next.scroll = visible_scroll(scroll, next_col, visible_count, model.columns.size())
             })
             ui::EventResult::handled
           }),
