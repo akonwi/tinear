@@ -20,23 +20,7 @@ fn clamp(value: Int, count: Int) Int {
 
 fn board_column_gap() Int { 3 }
 
-fn board_column_width(screen_w: Int, col_count: Int) Int {
-  match col_count == 0 {
-    true => 30,
-    false => {
-      let gap = board_column_gap()
-      let available = screen_w
-      let computed = (available - ((col_count - 1) * gap)) / col_count
-      match computed < 22 {
-        true => 22,
-        false => match computed > 50 {
-          true => 50,
-          false => computed,
-        },
-      }
-    },
-  }
-}
+fn board_column_width(screen_w: Int, col_count: Int) Int { 50 }
 
 fn board_visible_count(screen_w: Int, col_count: Int) Int {
   match col_count == 0 {
