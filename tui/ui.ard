@@ -32,15 +32,15 @@ enum ToastVariant {
 
 // Start a vaxis/ui app with `root` as the root widget. App-level behavior such
 // as quit shortcuts should be composed into `root` with `actions`/`shortcuts`.
-extern fn run(root: Widget) Void!Str = "UiRun"
+extern fn run(root: Widget) Void!Str = "tinear.UiRun"
 
 extern type ActionBinding = "tinear.UiActionBinding"
 
 // Wrap `child` with action handlers. When a descendant invokes an intent,
 // vaxis/ui searches outward through ancestor `actions` widgets for a matching
 // handler.
-extern fn actions(child: Widget, bindings: [ActionBinding]) Widget = "UiActions"
-extern fn _action(name: Str, handler: fn(EventContextHandle, Str) EventResult) ActionBinding = "UiAction"
+extern fn actions(child: Widget, bindings: [ActionBinding]) Widget = "tinear.UiActions"
+extern fn _action(name: Str, handler: fn(EventContextHandle, Str) EventResult) ActionBinding = "tinear.UiAction"
 
 fn action(name: Str, handler: fn(EventContext, Str) EventResult) ActionBinding {
   _action(name, fn(ctx: EventContextHandle, intent: Str) EventResult {
@@ -51,22 +51,22 @@ fn action(name: Str, handler: fn(EventContext, Str) EventResult) ActionBinding {
 // Wrap `child` with shortcut mappings. Key patterns use vaxis/ui's
 // Key.MatchString format, e.g. "q", "Enter", "Ctrl+c", "Shift+Tab". Map
 // values are intent names.
-extern fn shortcuts(child: Widget, bindings: [Str:Str]) Widget = "UiShortcuts"
+extern fn shortcuts(child: Widget, bindings: [Str:Str]) Widget = "tinear.UiShortcuts"
 
 // Make `child` an event focus target. Ancestor shortcuts/actions can then
 // receive keyboard events through the focused path.
-extern fn focusable(child: Widget) Widget = "UiFocusable"
-extern fn focusable_key(key: Str, child: Widget) Widget = "UiFocusableKey"
-extern fn focus_scope(child: Widget, trap: Bool, auto_focus: Bool) Widget = "UiFocusScope"
-extern fn request_focus(key: Str) Void = "UiRequestFocus"
+extern fn focusable(child: Widget) Widget = "tinear.UiFocusable"
+extern fn focusable_key(key: Str, child: Widget) Widget = "tinear.UiFocusableKey"
+extern fn focus_scope(child: Widget, trap: Bool, auto_focus: Bool) Widget = "tinear.UiFocusScope"
+extern fn request_focus(key: Str) Void = "tinear.UiRequestFocus"
 
 // Debug helper: overlays captured key events as styled debug toasts.
-extern fn key_debug(child: Widget) Widget = "UiKeyDebug"
+extern fn key_debug(child: Widget) Widget = "tinear.UiKeyDebug"
 
 // Show a transient toast. `title` is required; `description` is optional. When
 // `ttl_ms` is omitted or <= 0, the toast stays visible for 5 seconds.
-extern fn _show_toast(ctx: EventContextHandle, title: Str, description: Str?, variant: ToastVariant, ttl_ms: Int?) Void = "UiShowToast"
-extern fn _show_toast_runtime(runtime: RuntimeHandle, title: Str, description: Str?, variant: ToastVariant, ttl_ms: Int?) Void = "UiShowToastRuntime"
+extern fn _show_toast(ctx: EventContextHandle, title: Str, description: Str?, variant: ToastVariant, ttl_ms: Int?) Void = "tinear.UiShowToast"
+extern fn _show_toast_runtime(runtime: RuntimeHandle, title: Str, description: Str?, variant: ToastVariant, ttl_ms: Int?) Void = "tinear.UiShowToastRuntime"
 
 fn show_toast(ctx: EventContext, title: Str, description: Str?, variant: ToastVariant, ttl_ms: Int?) {
   _show_toast(ctx.handle, title, description, variant, ttl_ms)
@@ -77,10 +77,10 @@ fn show_toast_runtime<$T>(runtime: Runtime<$T>, title: Str, description: Str?, v
 }
 
 // Request a follow-up frame from inside an event/action handler.
-extern fn _request_frame(ctx: EventContextHandle) Void = "UiRequestFrameWrapped"
+extern fn _request_frame(ctx: EventContextHandle) Void = "tinear.UiRequestFrameWrapped"
 
-extern fn _build_context_runtime(ctx: BuildContextHandle) RuntimeHandle = "UiBuildContextRuntime"
-extern fn _runtime_dispatch(runtime: RuntimeHandle, state: StateHandle?, callback: fn(StateHandle)) Void = "UiRuntimeDispatch"
+extern fn _build_context_runtime(ctx: BuildContextHandle) RuntimeHandle = "tinear.UiBuildContextRuntime"
+extern fn _runtime_dispatch(runtime: RuntimeHandle, state: StateHandle?, callback: fn(StateHandle)) Void = "tinear.UiRuntimeDispatch"
 
 struct Runtime<$T> {
   handle: RuntimeHandle,
@@ -117,23 +117,23 @@ fn request_frame(ctx: EventContext) {
 
 // Run `callback` on the UI runtime after a short delay. Useful when a state
 // change should paint first and then kick off follow-up work.
-extern fn _dispatch_after(ctx: EventContextHandle, delay_ms: Int, callback: fn()) Void = "UiDispatchAfterWrapped"
+extern fn _dispatch_after(ctx: EventContextHandle, delay_ms: Int, callback: fn()) Void = "tinear.UiDispatchAfterWrapped"
 
 fn dispatch_after(ctx: EventContext, delay_ms: Int, callback: fn()) {
   _dispatch_after(ctx: ctx.handle, delay_ms: delay_ms, callback: callback)
 }
 
 // Request that the current UI app exits. Usually called from an action handler.
-extern fn _quit(ctx: EventContextHandle) Void = "UiQuitWrapped"
+extern fn _quit(ctx: EventContextHandle) Void = "tinear.UiQuitWrapped"
 
 fn quit(ctx: EventContext) {
   _quit(ctx.handle)
 }
 
-extern fn _state_value<$T>(handle: StateHandle) $T = "UiStateValue"
-extern fn _state_set_value<$T>(handle: StateHandle, value: $T) Void = "UiStateSetValue"
-extern fn stateful_raw_init<$T>(init: fn(BuildContextHandle, StateHandle) $T, build: fn(BuildContextHandle, StateHandle) Widget) Widget = "UiStatefulValueInit"
-extern fn stateful_raw_init_key<$T>(key: Str, init: fn(BuildContextHandle, StateHandle) $T, build: fn(BuildContextHandle, StateHandle) Widget) Widget = "UiStatefulValueInitKey"
+extern fn _state_value<$T>(handle: StateHandle) $T = "tinear.UiStateValue"
+extern fn _state_set_value<$T>(handle: StateHandle, value: $T) Void = "tinear.UiStateSetValue"
+extern fn stateful_raw_init<$T>(init: fn(BuildContextHandle, StateHandle) $T, build: fn(BuildContextHandle, StateHandle) Widget) Widget = "tinear.UiStatefulValueInit"
+extern fn stateful_raw_init_key<$T>(key: Str, init: fn(BuildContextHandle, StateHandle) $T, build: fn(BuildContextHandle, StateHandle) Widget) Widget = "tinear.UiStatefulValueInitKey"
 
 // Ard wrapper around the Go-owned state handle. A stateful widget owns exactly
 // one typed value; mutate it with `set` to schedule a rebuild.
@@ -169,7 +169,7 @@ extern type Style = "tinear.UiStyle"
 extern type BoxBorder = "tinear.UiBoxBorder"
 
 // Internal FFI boundary. Use `style` in Ard code so omitted attrs default here.
-extern fn style_raw(bold: Bool, reverse: Bool, foreground: Str) Style = "UiStyleNew"
+extern fn style_raw(bold: Bool, reverse: Bool, foreground: Str) Style = "tinear.UiStyleNew"
 
 fn bool_or(value: Bool?, fallback: Bool) Bool {
   match value {
@@ -193,7 +193,7 @@ fn style(bold: Bool?, reverse: Bool?, foreground: Str?) Style {
   )
 }
 
-extern fn border_raw(top: Bool, right: Bool, bottom: Bool, left: Bool, style: Style?) BoxBorder = "UiBorderNew"
+extern fn border_raw(top: Bool, right: Bool, bottom: Bool, left: Bool, style: Style?) BoxBorder = "tinear.UiBorderNew"
 
 fn border(top: Bool?, right: Bool?, bottom: Bool?, left: Bool?, style: Style?) BoxBorder {
   border_raw(
@@ -205,39 +205,39 @@ fn border(top: Bool?, right: Bool?, bottom: Bool?, left: Bool?, style: Style?) B
   )
 }
 
-extern fn text(value: Str, style: Style?) Widget = "UiText"
-extern fn row(children: [Widget], style: Style?) Widget = "UiRow"
-extern fn column(children: [Widget]) Widget = "UiColumn"
-extern fn column_stretch(children: [Widget]) Widget = "UiColumnStretch"
-extern fn indexed_stack(index: Int, children: [Widget]) Widget = "UiIndexedStack"
-extern fn scroll_view(child: Widget) Widget = "UiScrollView"
-extern fn scroll_pane_controller() ScrollPaneController = "UiScrollPaneController"
-extern fn scroll_pane(controller: ScrollPaneController, child: Widget) Widget = "UiScrollPane"
-extern fn scroll_pane_scroll_by(controller: ScrollPaneController, cols: Int, rows: Int) Bool = "UiScrollPaneScrollBy"
+extern fn text(value: Str, style: Style?) Widget = "tinear.UiText"
+extern fn row(children: [Widget], style: Style?) Widget = "tinear.UiRow"
+extern fn column(children: [Widget]) Widget = "tinear.UiColumn"
+extern fn column_stretch(children: [Widget]) Widget = "tinear.UiColumnStretch"
+extern fn indexed_stack(index: Int, children: [Widget]) Widget = "tinear.UiIndexedStack"
+extern fn scroll_view(child: Widget) Widget = "tinear.UiScrollView"
+extern fn scroll_pane_controller() ScrollPaneController = "tinear.UiScrollPaneController"
+extern fn scroll_pane(controller: ScrollPaneController, child: Widget) Widget = "tinear.UiScrollPane"
+extern fn scroll_pane_scroll_by(controller: ScrollPaneController, cols: Int, rows: Int) Bool = "tinear.UiScrollPaneScrollBy"
 
 // Vertical column that sizes to its contents instead of expanding to fill its
 // parent. Useful inside `center` when the content block should be centered.
-extern fn column_min(children: [Widget]) Widget = "UiColumnMin"
+extern fn column_min(children: [Widget]) Widget = "tinear.UiColumnMin"
 
-extern fn center(child: Widget) Widget = "UiCenter"
-extern fn padding_all(all: Int, child: Widget) Widget = "UiPaddingAll"
-extern fn padding_horizontal(horizontal: Int, child: Widget) Widget = "UiPaddingHorizontal"
-extern fn sized_box(width: Int, height: Int) Widget = "UiSizedBox"
-extern fn sized_box_child(width: Int, height: Int, child: Widget) Widget = "UiSizedBoxChild"
-extern fn constrained_width(width: Int, child: Widget) Widget = "UiConstrainedWidth"
-extern fn expanded(child: Widget) Widget = "UiExpanded"
-extern fn on_width(child: Widget, on_width: fn(Int)) Widget = "UiOnWidth"
-extern fn divider_raw(style: Style?, vertical: Bool) Widget = "UiDivider"
+extern fn center(child: Widget) Widget = "tinear.UiCenter"
+extern fn padding_all(all: Int, child: Widget) Widget = "tinear.UiPaddingAll"
+extern fn padding_horizontal(horizontal: Int, child: Widget) Widget = "tinear.UiPaddingHorizontal"
+extern fn sized_box(width: Int, height: Int) Widget = "tinear.UiSizedBox"
+extern fn sized_box_child(width: Int, height: Int, child: Widget) Widget = "tinear.UiSizedBoxChild"
+extern fn constrained_width(width: Int, child: Widget) Widget = "tinear.UiConstrainedWidth"
+extern fn expanded(child: Widget) Widget = "tinear.UiExpanded"
+extern fn on_width(child: Widget, on_width: fn(Int)) Widget = "tinear.UiOnWidth"
+extern fn divider_raw(style: Style?, vertical: Bool) Widget = "tinear.UiDivider"
 
 fn divider(style: Style?, vertical: Bool?) Widget {
   divider_raw(style: style, vertical: bool_or(vertical, false))
 }
 
-extern fn overlay_modal(child: Widget, modal: Widget) Widget = "UiOverlayModal"
-extern fn box(child: Widget, border: BoxBorder?, style: Style?) Widget = "UiBox"
-extern fn _text_field(value: Str, placeholder: Str, min_width: Int, obscure: Bool, on_changed: fn(EventContextHandle, Str), on_submitted: fn(EventContextHandle, Str)) Widget = "UiTextFieldWrapped"
-extern fn _text_area(value: Str, placeholder: Str, min_width: Int, min_height: Int, soft_wrap: Bool, on_changed: fn(EventContextHandle, Str), on_submitted: fn(EventContextHandle, Str)) Widget = "UiTextAreaWrapped"
-extern fn _button(label: Str, on_pressed: fn(EventContextHandle)) Widget = "UiButtonWrapped"
+extern fn overlay_modal(child: Widget, modal: Widget) Widget = "tinear.UiOverlayModal"
+extern fn box(child: Widget, border: BoxBorder?, style: Style?) Widget = "tinear.UiBox"
+extern fn _text_field(value: Str, placeholder: Str, min_width: Int, obscure: Bool, on_changed: fn(EventContextHandle, Str), on_submitted: fn(EventContextHandle, Str)) Widget = "tinear.UiTextFieldWrapped"
+extern fn _text_area(value: Str, placeholder: Str, min_width: Int, min_height: Int, soft_wrap: Bool, on_changed: fn(EventContextHandle, Str), on_submitted: fn(EventContextHandle, Str)) Widget = "tinear.UiTextAreaWrapped"
+extern fn _button(label: Str, on_pressed: fn(EventContextHandle)) Widget = "tinear.UiButtonWrapped"
 
 fn text_field(value: Str, placeholder: Str, min_width: Int, obscure: Bool, on_changed: fn(EventContext, Str), on_submitted: fn(EventContext, Str)) Widget {
   _text_field(

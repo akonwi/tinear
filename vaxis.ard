@@ -308,4 +308,4 @@ extern fn window_show_cursor(win: Window, x: Int, y: Int) Void = "WindowShowCurs
 // without OSC 8 support just render the underlined text.
 extern fn window_draw_link(win: Window, x: Int, y: Int, text: Str, url: Str) Void = "WindowDrawLink"
 
-extern fn text_backspace(text: Str) Str = "TextBackspace"
+extern fn text_backspace(text: Str) Str = "tinear.TextBackspace"

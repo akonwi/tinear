@@ -5,7 +5,7 @@ use tinear/tui/api
 use tinear/tui/decode as decode_utils
 use tinear/tui/state
 
-extern fn normalize_text(value: Str) Str = "NormalizeLinearText"
+extern fn normalize_text(value: Str) Str = "tinear.NormalizeLinearText"
 
 // Typed issue model used by the TUI.
 //
