@@ -5,7 +5,7 @@ use tinear/tui/ui
 use tinear/tui/ui/test as uitest
 
 test fn test_picker_renders_options_and_current_marker() Void!Str {
-  let app = uitest::app(picker::view(picker::Picker{
+  let app = uitest::app(picker::view(picker::Props{
     title: "Status",
     options: [
       picker::Option{id: "todo", label: "Todo", current: false},
@@ -24,7 +24,7 @@ test fn test_picker_renders_options_and_current_marker() Void!Str {
 test fn test_picker_confirms_current_cursor_on_enter() Void!Str {
   mut selected_id = ""
   let app = uitest::app(picker::new(
-    picker::Picker{
+    picker::Props{
       title: "Status",
       options: [
         picker::Option{id: "todo", label: "Todo", current: false},

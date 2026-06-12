@@ -11,7 +11,7 @@ struct Option {
   current: Bool,
 }
 
-struct Picker {
+struct Props {
   title: Str,
   options: [Option],
   cursor: Int,
@@ -25,7 +25,7 @@ struct CursorState {
 struct Active {
   kind: Str,
   issue_id: Str,
-  picker: Picker,
+  props: Props,
 }
 
 fn state_kind() Str { "state" }
@@ -40,10 +40,10 @@ fn clamp_cursor(cursor: Int, count: Int) Int {
   }
 }
 
-fn view(picker: Picker) ui::Widget {
+fn view(props: Props) ui::Widget {
   mut rows: [ui::Widget] = []
-  for option, idx in picker.options {
-    let cursor_mark = match idx == picker.cursor {
+  for option, idx in props.options {
+    let cursor_mark = match idx == props.cursor {
       true => "▸",
       false => " ",
     }
@@ -60,30 +60,30 @@ fn footer() ui::Widget {
   ui::text("↑↓ select  ↵ confirm  Esc cancel")
 }
 
-fn selected_at(picker: Picker, cursor: Int) Option? {
-  match picker.options.size() == 0 {
+fn selected_at(props: Props, cursor: Int) Option? {
+  match props.options.size() == 0 {
     true => maybe::none(),
-    false => maybe::some(picker.options.at(clamp_cursor(cursor, picker.options.size()))),
+    false => maybe::some(props.options.at(clamp_cursor(cursor, props.options.size()))),
   }
 }
 
-fn new(picker: Picker, on_confirm: fn(ui::EventContext, Option), on_dismiss: fn(ui::EventContext)) ui::Widget {
+fn new(props: Props, on_confirm: fn(ui::EventContext, Option), on_dismiss: fn(ui::EventContext)) ui::Widget {
   ui::stateful(
-    key: picker.title,
+    key: props.title,
     init: fn(_ctx: ui::BuildContext) CursorState {
-      CursorState{cursor: clamp_cursor(picker.cursor, picker.options.size())}
+      CursorState{cursor: clamp_cursor(props.cursor, props.options.size())}
     },
     build: fn(_ctx: ui::BuildContext, state: ui::State<CursorState>) ui::Widget {
       let model = state.value()
-      mut display = picker
-      display.cursor = clamp_cursor(model.cursor, picker.options.size())
+      mut display = props
+      display.cursor = clamp_cursor(model.cursor, props.options.size())
       ui::actions(
         child: ui::shortcuts(
           child: modal::dialog(
-            title: picker.title,
+            title: props.title,
             child: view(display),
             footer: footer(),
-            width: picker.width,
+            width: props.width,
             on_dismiss: on_dismiss,
           ),
           bindings: [
@@ -98,18 +98,18 @@ fn new(picker: Picker, on_confirm: fn(ui::EventContext, Option), on_dismiss: fn(
         bindings: [
           ui::action("picker.previous", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
             state.set(fn(mut next: CursorState) {
-              next.cursor = clamp_cursor(model.cursor - 1, picker.options.size())
+              next.cursor = clamp_cursor(model.cursor - 1, props.options.size())
             })
             ui::EventResult::handled
           }),
           ui::action("picker.next", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
             state.set(fn(mut next: CursorState) {
-              next.cursor = clamp_cursor(model.cursor + 1, picker.options.size())
+              next.cursor = clamp_cursor(model.cursor + 1, props.options.size())
             })
             ui::EventResult::handled
           }),
           ui::action("picker.confirm", fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
-            match selected_at(picker, model.cursor) {
+            match selected_at(props, model.cursor) {
               option => on_confirm(ctx, option),
               _ => (),
             }
@@ -174,7 +174,7 @@ fn cycle_label(cycle: issues::Cycle) Str {
   }
 }
 
-fn state_for_issue(api_key: Str, issue: issues::Issue) Picker!Str {
+fn state_for_issue(api_key: Str, issue: issues::Issue) Props!Str {
   let states = sort_states(try issues::load_team_states(api_key, issue.team_id))
   mut options: [Option] = []
   mut cursor = 0
@@ -185,7 +185,7 @@ fn state_for_issue(api_key: Str, issue: issues::Issue) Picker!Str {
     }
     options.push(Option{id: s.id, label: s.name, current: current})
   }
-  Result::ok(Picker{
+  Result::ok(Props{
     title: "Status — {issue.identifier} ({issue.team_name})",
     options: options,
     cursor: cursor,
@@ -193,7 +193,7 @@ fn state_for_issue(api_key: Str, issue: issues::Issue) Picker!Str {
   })
 }
 
-fn cycle_for_issue(api_key: Str, issue: issues::Issue) Picker!Str {
+fn cycle_for_issue(api_key: Str, issue: issues::Issue) Props!Str {
   let result = try issues::load_team_cycles(api_key, issue.team_id)
 
   mut filtered: [issues::Cycle] = []
@@ -219,7 +219,7 @@ fn cycle_for_issue(api_key: Str, issue: issues::Issue) Picker!Str {
     options.push(Option{id: c.id, label: cycle_label(c), current: current})
   }
 
-  Result::ok(Picker{
+  Result::ok(Props{
     title: "Cycle — {issue.identifier} ({issue.team_name})",
     options: options,
     cursor: cursor,
@@ -228,11 +228,11 @@ fn cycle_for_issue(api_key: Str, issue: issues::Issue) Picker!Str {
 }
 
 fn active_state(api_key: Str, issue: issues::Issue) Active!Str {
-  let p = try state_for_issue(api_key, issue)
-  Result::ok(Active{kind: state_kind(), issue_id: issue.id, picker: p})
+  let props = try state_for_issue(api_key, issue)
+  Result::ok(Active{kind: state_kind(), issue_id: issue.id, props: props})
 }
 
 fn active_cycle(api_key: Str, issue: issues::Issue) Active!Str {
-  let p = try cycle_for_issue(api_key, issue)
-  Result::ok(Active{kind: cycle_kind(), issue_id: issue.id, picker: p})
+  let props = try cycle_for_issue(api_key, issue)
+  Result::ok(Active{kind: cycle_kind(), issue_id: issue.id, props: props})
 }
