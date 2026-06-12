@@ -58,18 +58,14 @@ fn cycle_label(cycle: issues::Cycle) Str {
 fn state_props(api_key: Str, issue: issues::Issue) picker::Props!Str {
   let states = sort_states(try issues::load_team_states(api_key, issue.team_id))
   mut options: [picker::Option] = []
-  mut cursor = 0
-  for s, idx in states {
+  for s in states {
     let current = s.id == issue.state_id
-    if current {
-      cursor = idx
-    }
     options.push(picker::Option{id: s.id, label: s.name, current: current})
   }
   Result::ok(picker::Props{
     title: "Status — {issue.identifier} ({issue.team_name})",
     options: options,
-    cursor: cursor,
+    inititial_id: issue.state_id,
     width: 50,
   })
 }
@@ -91,19 +87,15 @@ fn cycle_props(api_key: Str, issue: issues::Issue) picker::Props!Str {
 
   let cycles = sort_cycles(filtered)
   mut options = [picker::Option{id: "", label: "(no cycle)", current: issue.cycle_id.is_empty()}]
-  mut cursor = 0
   for c in cycles {
     let current = c.id == issue.cycle_id
-    if current {
-      cursor = options.size()
-    }
     options.push(picker::Option{id: c.id, label: cycle_label(c), current: current})
   }
 
   Result::ok(picker::Props{
     title: "Cycle — {issue.identifier} ({issue.team_name})",
     options: options,
-    cursor: cursor,
+    inititial_id: issue.cycle_id,
     width: 60,
   })
 }

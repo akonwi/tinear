@@ -11,7 +11,7 @@ test fn test_picker_renders_options_and_current_marker() Void!Str {
       picker::Option{id: "todo", label: "Todo", current: false},
       picker::Option{id: "started", label: "In Progress", current: true},
     ],
-    cursor: 1,
+    inititial_id: "started",
     width: 50,
   }))
   app.pump(60, 6)
@@ -30,7 +30,7 @@ test fn test_picker_confirms_current_cursor_on_enter() Void!Str {
         picker::Option{id: "todo", label: "Todo", current: false},
         picker::Option{id: "started", label: "In Progress", current: true},
       ],
-      cursor: 0,
+      inititial_id: "todo",
       width: 50,
     },
     fn(_ctx: ui::EventContext, option: picker::Option) { selected_id = option.id },

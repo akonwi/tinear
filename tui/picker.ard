@@ -12,7 +12,7 @@ struct Option {
 struct Props {
   title: Str,
   options: [Option],
-  cursor: Int,
+  inititial_id: Str,
   width: Int,
 }
 
@@ -29,10 +29,21 @@ fn clamp_cursor(cursor: Int, count: Int) Int {
   }
 }
 
-fn view(props: Props) ui::Widget {
+fn initial_cursor(props: Props) Int {
+  mut cursor = 0
+  for option, idx in props.options {
+    if option.id == props.inititial_id {
+      cursor = idx
+    }
+  }
+  clamp_cursor(cursor, props.options.size())
+}
+
+fn view_at(props: Props, cursor: Int) ui::Widget {
+  let selected_cursor = clamp_cursor(cursor, props.options.size())
   mut rows: [ui::Widget] = []
   for option, idx in props.options {
-    let cursor_mark = match idx == props.cursor {
+    let cursor_mark = match idx == selected_cursor {
       true => "▸",
       false => " ",
     }
@@ -43,6 +54,10 @@ fn view(props: Props) ui::Widget {
     rows.push(ui::text(" {cursor_mark} {option.label}{suffix}"))
   }
   ui::column_stretch(rows)
+}
+
+fn view(props: Props) ui::Widget {
+  view_at(props, initial_cursor(props))
 }
 
 fn footer() ui::Widget {
@@ -60,17 +75,16 @@ fn new(props: Props, on_confirm: fn(ui::EventContext, Option), on_dismiss: fn(ui
   ui::stateful(
     key: props.title,
     init: fn(_ctx: ui::BuildContext) CursorState {
-      CursorState{cursor: clamp_cursor(props.cursor, props.options.size())}
+      CursorState{cursor: initial_cursor(props)}
     },
     build: fn(_ctx: ui::BuildContext, state: ui::State<CursorState>) ui::Widget {
       let model = state.value()
-      mut display = props
-      display.cursor = clamp_cursor(model.cursor, props.options.size())
+      let cursor = clamp_cursor(model.cursor, props.options.size())
       ui::actions(
         child: ui::shortcuts(
           child: modal::dialog(
             title: props.title,
-            child: view(display),
+            child: view_at(props, cursor),
             footer: footer(),
             width: props.width,
             on_dismiss: on_dismiss,
