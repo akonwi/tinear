@@ -54,6 +54,7 @@ test fn test_picker_confirms_on_enter() Void!Str {
     fn(_ctx: ui::EventContext) {},
     fn(_ctx: ui::EventContext) {},
     fn(_ctx: ui::EventContext) { confirmed = true },
+    fn(_ctx: ui::EventContext) {},
   ))
   app.pump(60, 6)
 

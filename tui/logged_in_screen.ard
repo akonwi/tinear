@@ -4,7 +4,6 @@ use tinear/models/issues
 use tinear/tui/inbox_view
 use tinear/tui/hints
 use tinear/tui/issue_detail_view
-use tinear/tui/modal
 use tinear/tui/my_issues_view
 use tinear/tui/picker
 use tinear/tui/ui
@@ -162,13 +161,7 @@ fn screen_content(api_key: Str, model: LoggedInUiState, inbox: ui::Widget, my_is
 fn content(api_key: Str, model: LoggedInUiState, inbox: ui::Widget, my_issues: ui::Widget, on_state: fn(issues::Issue), on_cycle: fn(issues::Issue), on_picker_previous: fn(ui::EventContext), on_picker_next: fn(ui::EventContext), on_picker_confirm: fn(ui::EventContext), on_picker_dismiss: fn(ui::EventContext)) ui::Widget {
   let base = screen_content(api_key, model, inbox, my_issues, on_state, on_cycle)
   match model.active_picker {
-    active => ui::overlay_modal(base, modal::dialog(
-      title: active.picker.title,
-      child: picker::new(active.picker, on_picker_previous, on_picker_next, on_picker_confirm),
-      footer: picker::footer(),
-      width: active.picker.width,
-      on_dismiss: on_picker_dismiss,
-    )),
+    active => ui::overlay_modal(base, picker::new(active.picker, on_picker_previous, on_picker_next, on_picker_confirm, on_picker_dismiss)),
     _ => base,
   }
 }

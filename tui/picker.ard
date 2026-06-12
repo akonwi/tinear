@@ -1,6 +1,7 @@
 use ard/maybe
 
 use tinear/models/issues
+use tinear/tui/modal
 use tinear/tui/state
 use tinear/tui/ui
 
@@ -51,10 +52,20 @@ fn view(picker: Picker) ui::Widget {
   ui::column_stretch(rows)
 }
 
-fn new(picker: Picker, on_previous: fn(ui::EventContext), on_next: fn(ui::EventContext), on_confirm: fn(ui::EventContext)) ui::Widget {
+fn footer() ui::Widget {
+  ui::text("↑↓ select  ↵ confirm  Esc cancel")
+}
+
+fn new(picker: Picker, on_previous: fn(ui::EventContext), on_next: fn(ui::EventContext), on_confirm: fn(ui::EventContext), on_dismiss: fn(ui::EventContext)) ui::Widget {
   ui::actions(
     child: ui::shortcuts(
-      child: ui::focusable(view(picker)),
+      child: modal::dialog(
+        title: picker.title,
+        child: view(picker),
+        footer: footer(),
+        width: picker.width,
+        on_dismiss: on_dismiss,
+      ),
       bindings: [
         "Up": "picker.previous",
         "k": "picker.previous",
@@ -79,10 +90,6 @@ fn new(picker: Picker, on_previous: fn(ui::EventContext), on_next: fn(ui::EventC
       }),
     ],
   )
-}
-
-fn footer() ui::Widget {
-  ui::text("↑↓ select  ↵ confirm  Esc cancel")
 }
 
 fn previous(picker: Picker) Picker {
