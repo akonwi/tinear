@@ -39,7 +39,7 @@ fn initial_cursor(props: Props) Int {
   clamp_cursor(cursor, props.options.size())
 }
 
-fn view_at(props: Props, cursor: Int) ui::Widget {
+private fn view(props: Props, cursor: Int) ui::Widget {
   let selected_cursor = clamp_cursor(cursor, props.options.size())
   mut rows: [ui::Widget] = []
   for option, idx in props.options {
@@ -54,10 +54,6 @@ fn view_at(props: Props, cursor: Int) ui::Widget {
     rows.push(ui::text(" {cursor_mark} {option.label}{suffix}"))
   }
   ui::column_stretch(rows)
-}
-
-fn view(props: Props) ui::Widget {
-  view_at(props, initial_cursor(props))
 }
 
 fn footer() ui::Widget {
@@ -84,7 +80,7 @@ fn new(props: Props, on_confirm: fn(ui::EventContext, Option), on_dismiss: fn(ui
         child: ui::shortcuts(
           child: modal::dialog(
             title: props.title,
-            child: view_at(props, cursor),
+            child: view(props, cursor),
             footer: footer(),
             width: props.width.or(50),
             on_dismiss: on_dismiss,

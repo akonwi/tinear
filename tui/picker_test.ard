@@ -6,15 +6,18 @@ use tinear/tui/ui
 use tinear/tui/ui/test as uitest
 
 test fn test_picker_renders_options_and_current_marker() Void!Str {
-  let app = uitest::app(picker::view(picker::Props{
-    title: "Status",
-    options: [
-      picker::Option{id: "todo", label: "Todo", current: false},
-      picker::Option{id: "started", label: "In Progress", current: true},
-    ],
-    inititial_id: "started",
-    width: maybe::none(),
-  }))
+  let app = uitest::app(picker::new(
+    picker::Props{
+      title: "Status",
+      options: [
+        picker::Option{id: "todo", label: "Todo", current: false},
+        picker::Option{id: "started", label: "In Progress", current: true},
+      ],
+      inititial_id: "started",
+    },
+    fn(_ctx: ui::EventContext, _option: picker::Option) {},
+    fn(_ctx: ui::EventContext) {},
+  ))
   app.pump(60, 6)
 
   try testing::assert(app.contains("Todo"), "picker should render first option")
