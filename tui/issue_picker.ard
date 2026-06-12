@@ -1,3 +1,5 @@
+use ard/maybe
+
 use tinear/models/issues
 use tinear/tui/picker
 use tinear/tui/state
@@ -66,7 +68,7 @@ fn state_props(api_key: Str, issue: issues::Issue) picker::Props!Str {
     title: "Status — {issue.identifier} ({issue.team_name})",
     options: options,
     inititial_id: issue.state_id,
-    width: 50,
+    width: maybe::none(),
   })
 }
 
@@ -96,6 +98,6 @@ fn cycle_props(api_key: Str, issue: issues::Issue) picker::Props!Str {
     title: "Cycle — {issue.identifier} ({issue.team_name})",
     options: options,
     inititial_id: issue.cycle_id,
-    width: 60,
+    width: maybe::some(60),
   })
 }

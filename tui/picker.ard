@@ -13,7 +13,7 @@ struct Props {
   title: Str,
   options: [Option],
   inititial_id: Str,
-  width: Int,
+  width: Int?,
 }
 
 struct CursorState {
@@ -86,7 +86,7 @@ fn new(props: Props, on_confirm: fn(ui::EventContext, Option), on_dismiss: fn(ui
             title: props.title,
             child: view_at(props, cursor),
             footer: footer(),
-            width: props.width,
+            width: props.width.or(50),
             on_dismiss: on_dismiss,
           ),
           bindings: [
