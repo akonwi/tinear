@@ -18,6 +18,10 @@ struct Picker {
   width: Int,
 }
 
+struct CursorState {
+  cursor: Int,
+}
+
 struct Active {
   kind: Str,
   issue_id: Str,
@@ -56,59 +60,65 @@ fn footer() ui::Widget {
   ui::text("↑↓ select  ↵ confirm  Esc cancel")
 }
 
-fn new(picker: Picker, on_previous: fn(ui::EventContext), on_next: fn(ui::EventContext), on_confirm: fn(ui::EventContext), on_dismiss: fn(ui::EventContext)) ui::Widget {
-  ui::actions(
-    child: ui::shortcuts(
-      child: modal::dialog(
-        title: picker.title,
-        child: view(picker),
-        footer: footer(),
-        width: picker.width,
-        on_dismiss: on_dismiss,
-      ),
-      bindings: [
-        "Up": "picker.previous",
-        "k": "picker.previous",
-        "Down": "picker.next",
-        "j": "picker.next",
-        "Enter": "picker.confirm",
-        "Space": "picker.confirm",
-      ],
-    ),
-    bindings: [
-      ui::action("picker.previous", fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
-        on_previous(ctx)
-        ui::EventResult::handled
-      }),
-      ui::action("picker.next", fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
-        on_next(ctx)
-        ui::EventResult::handled
-      }),
-      ui::action("picker.confirm", fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
-        on_confirm(ctx)
-        ui::EventResult::handled
-      }),
-    ],
-  )
-}
-
-fn previous(picker: Picker) Picker {
-  mut next = picker
-  next.cursor = clamp_cursor(picker.cursor - 1, picker.options.size())
-  next
-}
-
-fn next(picker: Picker) Picker {
-  mut next_picker = picker
-  next_picker.cursor = clamp_cursor(picker.cursor + 1, picker.options.size())
-  next_picker
-}
-
-fn selected(picker: Picker) Option? {
+fn selected_at(picker: Picker, cursor: Int) Option? {
   match picker.options.size() == 0 {
     true => maybe::none(),
-    false => maybe::some(picker.options.at(clamp_cursor(picker.cursor, picker.options.size()))),
+    false => maybe::some(picker.options.at(clamp_cursor(cursor, picker.options.size()))),
   }
+}
+
+fn new(picker: Picker, on_confirm: fn(ui::EventContext, Option), on_dismiss: fn(ui::EventContext)) ui::Widget {
+  ui::stateful(
+    key: picker.title,
+    init: fn(_ctx: ui::BuildContext) CursorState {
+      CursorState{cursor: clamp_cursor(picker.cursor, picker.options.size())}
+    },
+    build: fn(_ctx: ui::BuildContext, state: ui::State<CursorState>) ui::Widget {
+      let model = state.value()
+      mut display = picker
+      display.cursor = clamp_cursor(model.cursor, picker.options.size())
+      ui::actions(
+        child: ui::shortcuts(
+          child: modal::dialog(
+            title: picker.title,
+            child: view(display),
+            footer: footer(),
+            width: picker.width,
+            on_dismiss: on_dismiss,
+          ),
+          bindings: [
+            "Up": "picker.previous",
+            "k": "picker.previous",
+            "Down": "picker.next",
+            "j": "picker.next",
+            "Enter": "picker.confirm",
+            "Space": "picker.confirm",
+          ],
+        ),
+        bindings: [
+          ui::action("picker.previous", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            state.set(fn(mut next: CursorState) {
+              next.cursor = clamp_cursor(model.cursor - 1, picker.options.size())
+            })
+            ui::EventResult::handled
+          }),
+          ui::action("picker.next", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            state.set(fn(mut next: CursorState) {
+              next.cursor = clamp_cursor(model.cursor + 1, picker.options.size())
+            })
+            ui::EventResult::handled
+          }),
+          ui::action("picker.confirm", fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            match selected_at(picker, model.cursor) {
+              option => on_confirm(ctx, option),
+              _ => (),
+            }
+            ui::EventResult::handled
+          }),
+        ],
+      )
+    },
+  )
 }
 
 fn sort_states(states: [issues::WorkflowState]) [issues::WorkflowState] {

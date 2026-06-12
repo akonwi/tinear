@@ -21,44 +21,26 @@ test fn test_picker_renders_options_and_current_marker() Void!Str {
   testing::assert(not app.contains("▸ Todo"), "only selected option should have cursor")
 }
 
-test fn test_picker_navigation_and_selection() Void!Str {
-  let p = picker::Picker{
-    title: "Cycle",
-    options: [
-      picker::Option{id: "", label: "(no cycle)", current: false},
-      picker::Option{id: "cycle-1", label: "Cycle 1", current: true},
-    ],
-    cursor: 0,
-    width: 60,
-  }
-  let moved = picker::next(p)
-
-  match picker::selected(moved) {
-    option => {
-      try testing::assert(option.id == "cycle-1", "selected option should move down")
-      testing::assert(option.current, "selected option should preserve current flag")
-    },
-    _ => testing::assert(false, "expected selected option"),
-  }
-}
-
-test fn test_picker_confirms_on_enter() Void!Str {
-  mut confirmed = false
+test fn test_picker_confirms_current_cursor_on_enter() Void!Str {
+  mut selected_id = ""
   let app = uitest::app(picker::new(
     picker::Picker{
       title: "Status",
-      options: [picker::Option{id: "todo", label: "Todo", current: false}],
+      options: [
+        picker::Option{id: "todo", label: "Todo", current: false},
+        picker::Option{id: "started", label: "In Progress", current: true},
+      ],
       cursor: 0,
       width: 50,
     },
-    fn(_ctx: ui::EventContext) {},
-    fn(_ctx: ui::EventContext) {},
-    fn(_ctx: ui::EventContext) { confirmed = true },
+    fn(_ctx: ui::EventContext, option: picker::Option) { selected_id = option.id },
     fn(_ctx: ui::EventContext) {},
   ))
   app.pump(60, 6)
 
+  app.down()
+  app.pump(60, 6)
   app.enter()
 
-  testing::assert(confirmed, "Enter should confirm picker")
+  testing::assert(selected_id == "started", "Enter should confirm picker-owned cursor selection")
 }
