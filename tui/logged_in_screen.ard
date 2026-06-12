@@ -4,11 +4,21 @@ use tinear/models/issues
 use tinear/tui/inbox_view
 use tinear/tui/hints
 use tinear/tui/issue_detail_view
+use tinear/tui/issue_picker
 use tinear/tui/my_issues_view
 use tinear/tui/picker
 use tinear/tui/ui
 
-type ActivePickerOption = picker::Active?
+struct ActivePicker {
+  target: Str,
+  issue_id: Str,
+  props: picker::Props,
+}
+
+type ActivePickerOption = ActivePicker?
+
+fn state_picker_target() Str { "state" }
+fn cycle_picker_target() Str { "cycle" }
 
 struct LoggedInUiState {
   tab: Str,
@@ -236,8 +246,8 @@ fn focus_selected_after_rebuild(ctx: ui::EventContext, model: LoggedInUiState) {
 
 fn open_state_picker(api_key: Str, issue: issues::Issue, model: LoggedInUiState) LoggedInUiState {
   mut next = model
-  match picker::active_state(api_key, issue) {
-    ok(active) => { next.active_picker = maybe::some(active) },
+  match issue_picker::state_props(api_key, issue) {
+    ok(props) => { next.active_picker = maybe::some(ActivePicker{target: state_picker_target(), issue_id: issue.id, props: props}) },
     err(_) => (),
   }
   next
@@ -245,19 +255,19 @@ fn open_state_picker(api_key: Str, issue: issues::Issue, model: LoggedInUiState)
 
 fn open_cycle_picker(api_key: Str, issue: issues::Issue, model: LoggedInUiState) LoggedInUiState {
   mut next = model
-  match picker::active_cycle(api_key, issue) {
-    ok(active) => { next.active_picker = maybe::some(active) },
+  match issue_picker::cycle_props(api_key, issue) {
+    ok(props) => { next.active_picker = maybe::some(ActivePicker{target: cycle_picker_target(), issue_id: issue.id, props: props}) },
     err(_) => (),
   }
   next
 }
 
-fn confirm_active_picker(api_key: Str, active: picker::Active, option: picker::Option, model: LoggedInUiState, state: ui::State<LoggedInUiState>, ctx: ui::EventContext) {
+fn confirm_active_picker(api_key: Str, active: ActivePicker, option: picker::Option, model: LoggedInUiState, state: ui::State<LoggedInUiState>, ctx: ui::EventContext) {
   if option.current {
     state.set(fn(mut next: LoggedInUiState) { next.active_picker = maybe::none() })
     focus_selected_after_rebuild(ctx, model)
   } else {
-    let result = match active.kind == picker::state_kind() {
+    let result = match active.target == state_picker_target() {
       true => issues::update_state(api_key, active.issue_id, option.id),
       false => issues::update_cycle(api_key, active.issue_id, option.id),
     }

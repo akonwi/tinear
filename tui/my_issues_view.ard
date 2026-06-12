@@ -3,6 +3,7 @@ use ard/duration
 use ard/maybe
 
 use tinear/models/issues
+use tinear/tui/issue_picker
 use tinear/tui/picker
 use tinear/tui/state
 use tinear/tui/text
@@ -288,7 +289,16 @@ fn start_background_refresh(api_key: Str, rt: ui::Runtime<MyIssuesUiState>) {
 }
 
 
-type ActivePickerOption = picker::Active?
+struct ActivePicker {
+  target: Str,
+  issue_id: Str,
+  props: picker::Props,
+}
+
+type ActivePickerOption = ActivePicker?
+
+fn state_picker_target() Str { "state" }
+fn cycle_picker_target() Str { "cycle" }
 
 struct MyIssuesUiState {
   columns: [issues::BoardColumn],
@@ -328,13 +338,13 @@ fn base_content(columns: [issues::BoardColumn], loading: Bool, error: Str, col: 
   }
 }
 
-fn confirm_active_picker(api_key: Str, active: picker::Active, option: picker::Option, state: ui::State<MyIssuesUiState>, col: Int, row: Int) {
+fn confirm_active_picker(api_key: Str, active: ActivePicker, option: picker::Option, state: ui::State<MyIssuesUiState>, col: Int, row: Int) {
   if option.current {
     state.set(fn(mut next: MyIssuesUiState) {
       next.active_picker = maybe::none()
     })
   } else {
-    let result = match active.kind == picker::state_kind() {
+    let result = match active.target == state_picker_target() {
       true => issues::update_state(api_key, active.issue_id, option.id),
       false => issues::update_cycle(api_key, active.issue_id, option.id),
     }
@@ -508,10 +518,10 @@ fn new(api_key: Str, on_open_issue: fn(ui::EventContext, issues::Issue)) ui::Wid
             if model.active_picker.is_none() {
               match selected_issue(model.columns, col, row) {
                 issue => {
-                  match picker::active_state(api_key, issue) {
-                    ok(active) => {
+                  match issue_picker::state_props(api_key, issue) {
+                    ok(props) => {
                       state.set(fn(mut next: MyIssuesUiState) {
-                        next.active_picker = maybe::some(active)
+                        next.active_picker = maybe::some(ActivePicker{target: state_picker_target(), issue_id: issue.id, props: props})
                       })
                     },
                     err(_) => (),
@@ -526,10 +536,10 @@ fn new(api_key: Str, on_open_issue: fn(ui::EventContext, issues::Issue)) ui::Wid
             if model.active_picker.is_none() {
               match selected_issue(model.columns, col, row) {
                 issue => {
-                  match picker::active_cycle(api_key, issue) {
-                    ok(active) => {
+                  match issue_picker::cycle_props(api_key, issue) {
+                    ok(props) => {
                       state.set(fn(mut next: MyIssuesUiState) {
-                        next.active_picker = maybe::some(active)
+                        next.active_picker = maybe::some(ActivePicker{target: cycle_picker_target(), issue_id: issue.id, props: props})
                       })
                     },
                     err(_) => (),

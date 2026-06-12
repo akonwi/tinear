@@ -1,8 +1,6 @@
 use ard/maybe
 
-use tinear/models/issues
 use tinear/tui/modal
-use tinear/tui/state
 use tinear/tui/ui
 
 struct Option {
@@ -21,15 +19,6 @@ struct Props {
 struct CursorState {
   cursor: Int,
 }
-
-struct Active {
-  kind: Str,
-  issue_id: Str,
-  props: Props,
-}
-
-fn state_kind() Str { "state" }
-fn cycle_kind() Str { "cycle" }
 
 fn clamp_cursor(cursor: Int, count: Int) Int {
   match {
@@ -119,120 +108,4 @@ fn new(props: Props, on_confirm: fn(ui::EventContext, Option), on_dismiss: fn(ui
       )
     },
   )
-}
-
-fn sort_states(states: [issues::WorkflowState]) [issues::WorkflowState] {
-  let n = states.size()
-  if n < 2 {
-    states
-  } else {
-    mut result = states
-    for i in 0..(n - 2) {
-      for j in 0..(n - 2 - i) {
-        let a = result.at(j)
-        let b = result.at(j + 1)
-        let ra = state::state_type_rank(a.state_type)
-        let rb = state::state_type_rank(b.state_type)
-        let swap = match ra == rb {
-          true => a.position > b.position,
-          false => ra > rb,
-        }
-        if swap {
-          result.set(j, b)
-          result.set(j + 1, a)
-        }
-      }
-    }
-    result
-  }
-}
-
-fn sort_cycles(cycles: [issues::Cycle]) [issues::Cycle] {
-  let n = cycles.size()
-  if n < 2 {
-    cycles
-  } else {
-    mut result = cycles
-    for i in 0..(n - 2) {
-      for j in 0..(n - 2 - i) {
-        let a = result.at(j)
-        let b = result.at(j + 1)
-        if a.number < b.number {
-          result.set(j, b)
-          result.set(j + 1, a)
-        }
-      }
-    }
-    result
-  }
-}
-
-fn cycle_label(cycle: issues::Cycle) Str {
-  match cycle.name.is_empty() {
-    true => "Cycle {cycle.number}",
-    false => cycle.name,
-  }
-}
-
-fn state_for_issue(api_key: Str, issue: issues::Issue) Props!Str {
-  let states = sort_states(try issues::load_team_states(api_key, issue.team_id))
-  mut options: [Option] = []
-  mut cursor = 0
-  for s, idx in states {
-    let current = s.id == issue.state_id
-    if current {
-      cursor = idx
-    }
-    options.push(Option{id: s.id, label: s.name, current: current})
-  }
-  Result::ok(Props{
-    title: "Status — {issue.identifier} ({issue.team_name})",
-    options: options,
-    cursor: cursor,
-    width: 50,
-  })
-}
-
-fn cycle_for_issue(api_key: Str, issue: issues::Issue) Props!Str {
-  let result = try issues::load_team_cycles(api_key, issue.team_id)
-
-  mut filtered: [issues::Cycle] = []
-  match result.active_cycle_number {
-    active_n => {
-      for c in result.cycles {
-        if c.number <= active_n + 1 or c.id == issue.cycle_id {
-          filtered.push(c)
-        }
-      }
-    },
-    _ => { filtered = result.cycles },
-  }
-
-  let cycles = sort_cycles(filtered)
-  mut options = [Option{id: "", label: "(no cycle)", current: issue.cycle_id.is_empty()}]
-  mut cursor = 0
-  for c in cycles {
-    let current = c.id == issue.cycle_id
-    if current {
-      cursor = options.size()
-    }
-    options.push(Option{id: c.id, label: cycle_label(c), current: current})
-  }
-
-  Result::ok(Props{
-    title: "Cycle — {issue.identifier} ({issue.team_name})",
-    options: options,
-    cursor: cursor,
-    width: 60,
-  })
-}
-
-fn active_state(api_key: Str, issue: issues::Issue) Active!Str {
-  let props = try state_for_issue(api_key, issue)
-  Result::ok(Active{kind: state_kind(), issue_id: issue.id, props: props})
-}
-
-fn active_cycle(api_key: Str, issue: issues::Issue) Active!Str {
-  let props = try cycle_for_issue(api_key, issue)
-  Result::ok(Active{kind: cycle_kind(), issue_id: issue.id, props: props})
 }
