@@ -67,7 +67,9 @@ private fn dynamic_id_and_title(notif: Dynamic, n_type: Str) IdTitle {
     false => {
       let issue_obj = decode_utils::optional_field(notif, "issue")
       let id = match issue_obj {
-        iss => decode::run(iss, decode::field("identifier", decode::string)).expect("Missing issue identifier"),
+        iss => {
+          decode::run(iss, decode::field("identifier", decode::string)).expect("Missing issue identifier")
+        },
         _ => "—",
       }
       let title = match issue_obj {
@@ -101,20 +103,20 @@ fn decode_item(notif: Dynamic) Item {
   }
 }
 
-
 fn fetch_inbox(api_key: Str) [Dynamic]!Str {
   let query = "query \{ notifications(first: 50) \{ nodes \{ id type createdAt title subtitle url ... on IssueNotification \{ comment \{ id body createdAt user \{ name displayName \} \} issue \{ id identifier title description priority state \{ name \} team \{ name key \} project \{ name \} assignee \{ name displayName \} comments(first: 30) \{ nodes \{ id body createdAt user \{ name displayName \} \} \} history(first: 10) \{ nodes \{ id createdAt fromState \{ name \} toState \{ name \} \} \} \} \} ... on PullRequestNotification \{ pullRequestCommentId pullRequest \{ id number title url status sourceBranch targetBranch openedAt creator \{ name displayName \} \} \} actor \{ id name displayName \} \} \} \}"
   let data = try client::graphql(api_key, query)
-  let nodes = decode::run(data, decode::path(["notifications", "nodes"], decode::list(decode::dynamic)))
-    .expect("Missing notifications nodes")
+  let nodes = decode::run(
+    data,
+    decode::path(["notifications", "nodes"], decode::list(decode::dynamic)),
+  ).expect("Missing notifications nodes")
   Result::ok(nodes)
 }
 
 fn fetch_notification_detail(api_key: Str, notification_id: Str) Dynamic!Str {
   let query = "query \{ notification(id: \"{notification_id}\") \{ id type createdAt title subtitle url ... on IssueNotification \{ comment \{ id body createdAt user \{ name displayName \} \} issue \{ id identifier title url description priority state \{ name \} team \{ name key \} project \{ name \} assignee \{ name displayName \} comments(first: 30) \{ nodes \{ id body createdAt user \{ name displayName \} \} \} history(first: 10) \{ nodes \{ id createdAt fromState \{ name \} toState \{ name \} \} \} \} \} ... on PullRequestNotification \{ pullRequestCommentId pullRequest \{ id number title url status sourceBranch targetBranch openedAt creator \{ name displayName \} \} \} actor \{ id name displayName \} \} \}"
   let data = try client::graphql(api_key, query)
-  let notification = decode::run(data, decode::field("notification", decode::dynamic))
-    .expect("Missing notification")
+  let notification = decode::run(data, decode::field("notification", decode::dynamic)).expect("Missing notification")
   Result::ok(notification)
 }
 
@@ -152,4 +154,3 @@ impl Item {
     "{cursor_mark} {id_part} {self.actor_name} {self.type_label}  {self.title}"
   }
 }
-

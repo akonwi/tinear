@@ -6,40 +6,65 @@ use tinear/tui/ui
 use tinear/tui/ui/test as uitest
 
 test fn test_picker_renders_options_and_current_marker() Void!Str {
-  let app = uitest::app(picker::new(
-    picker::Props{
-      title: "Status",
-      options: [
-        picker::Option{id: "todo", label: "Todo", current: false},
-        picker::Option{id: "started", label: "In Progress", current: true},
-      ],
-      inititial_id: "started",
-    },
-    fn(_ctx: ui::EventContext, _option: picker::Option) {},
-    fn(_ctx: ui::EventContext) {},
-  ))
+  let app = uitest::app(
+    picker::new(
+      picker::Props{
+        title: "Status",
+        options: [
+          picker::Option{
+            id: "todo",
+            label: "Todo",
+            current: false,
+          },
+          picker::Option{
+            id: "started",
+            label: "In Progress",
+            current: true,
+          },
+        ],
+        inititial_id: "started",
+      },
+      fn(_ctx: ui::EventContext, _option: picker::Option) {},
+      fn(_ctx: ui::EventContext) {},
+    ),
+  )
   app.pump(60, 6)
 
   try testing::assert(app.contains("Todo"), "picker should render first option")
-  try testing::assert(app.contains("▸ In Progress  (current)"), "picker should render cursor and current marker")
+  try testing::assert(
+    app.contains("▸ In Progress  (current)"),
+    "picker should render cursor and current marker",
+  )
   testing::assert(not app.contains("▸ Todo"), "only selected option should have cursor")
 }
 
 test fn test_picker_confirms_current_cursor_on_enter() Void!Str {
   mut selected_id = ""
-  let app = uitest::app(picker::new(
-    picker::Props{
-      title: "Status",
-      options: [
-        picker::Option{id: "todo", label: "Todo", current: false},
-        picker::Option{id: "started", label: "In Progress", current: true},
-      ],
-      inititial_id: "todo",
-      width: maybe::none(),
-    },
-    fn(_ctx: ui::EventContext, option: picker::Option) { selected_id = option.id },
-    fn(_ctx: ui::EventContext) {},
-  ))
+  let app = uitest::app(
+    picker::new(
+      picker::Props{
+        title: "Status",
+        options: [
+          picker::Option{
+            id: "todo",
+            label: "Todo",
+            current: false,
+          },
+          picker::Option{
+            id: "started",
+            label: "In Progress",
+            current: true,
+          },
+        ],
+        inititial_id: "todo",
+        width: maybe::none(),
+      },
+      fn(_ctx: ui::EventContext, option: picker::Option) {
+        selected_id = option.id
+      },
+      fn(_ctx: ui::EventContext) {},
+    ),
+  )
   app.pump(60, 6)
 
   app.down()

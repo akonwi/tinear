@@ -15,19 +15,26 @@ fn test_issue() issues::Issue {
 }
 
 fn test_issue_with_description() issues::Issue {
-  let raw = decode::from_json(test_issue_json("\"Refresh tokens should rotate before expiry so sessions remain active.\""))
-    .expect("parse test issue with description")
+  let raw = decode::from_json(
+    test_issue_json("\"Refresh tokens should rotate before expiry so sessions remain active.\""),
+  ).expect("parse test issue with description")
   issues::decode_issue(raw)
 }
 
 fn test_issue_with_long_description() issues::Issue {
-  let raw = decode::from_json(test_issue_json("\"line 1\\nline 2\\nline 3\\nline 4\\nhidden tail\""))
-    .expect("parse test issue with long description")
+  let raw = decode::from_json(
+    test_issue_json("\"line 1\\nline 2\\nline 3\\nline 4\\nhidden tail\""),
+  ).expect("parse test issue with long description")
   issues::decode_issue(raw)
 }
 
 fn test_comment(id: Str, author: Str, body: Str) issues::Comment {
-  issues::Comment{id: id, author: author, created_at: "2026-01-02T03:04:05.000Z", body: body}
+  issues::Comment{
+    id: id,
+    author: author,
+    created_at: "2026-01-02T03:04:05.000Z",
+    body: body,
+  }
 }
 
 test fn test_issue_detail_header_renders_top_metadata() Void!Str {
@@ -51,21 +58,32 @@ test fn test_issue_detail_renders_description() Void!Str {
   app.pump(80, 14)
 
   try testing::assert(app.contains("Description"), "detail should render description section")
-  testing::assert(app.contains("Refresh tokens should rotate before expiry"), "detail should render description text")
+  testing::assert(
+    app.contains("Refresh tokens should rotate before expiry"),
+    "detail should render description text",
+  )
 }
 
 test fn test_issue_detail_renders_empty_description_placeholder() Void!Str {
   let app = uitest::app(issue_detail_view::with_comments(test_issue(), []))
   app.pump(80, 14)
 
-  testing::assert(app.contains("(no description)"), "detail should render empty description placeholder")
+  testing::assert(
+    app.contains("(no description)"),
+    "detail should render empty description placeholder",
+  )
 }
 
 test fn test_issue_detail_renders_comments() Void!Str {
-  let app = uitest::app(issue_detail_view::with_comments(test_issue_with_description(), [
-    test_comment("comment-1", "Alice", "I hit this yesterday on the mobile app."),
-    test_comment("comment-2", "Bob", "We should also log refresh attempts."),
-  ]))
+  let app = uitest::app(
+    issue_detail_view::with_comments(
+      test_issue_with_description(),
+      [
+        test_comment("comment-1", "Alice", "I hit this yesterday on the mobile app."),
+        test_comment("comment-2", "Bob", "We should also log refresh attempts."),
+      ],
+    ),
+  )
   app.pump(80, 20)
 
   try testing::assert(app.contains("Comments (2)"), "detail should render comment count")
@@ -87,7 +105,10 @@ test fn test_issue_detail_clips_long_description() Void!Str {
   app.pump(80, 11)
 
   try testing::assert(app.contains("line 1"), "detail should render visible description start")
-  testing::assert(not app.contains("hidden tail"), "detail should clip overflowing description before footer area")
+  testing::assert(
+    not app.contains("hidden tail"),
+    "detail should clip overflowing description before footer area",
+  )
 }
 
 test fn test_issue_detail_opens_and_cancels_comment_composer() Void!Str {
@@ -113,7 +134,10 @@ test fn test_issue_detail_comment_composer_autofocuses_textarea() Void!Str {
   app.key("i")
   app.pump(80, 20)
 
-  testing::assert(app.contains("hi"), "typing after opening composer should enter text without clicking")
+  testing::assert(
+    app.contains("hi"),
+    "typing after opening composer should enter text without clicking",
+  )
 }
 
 test fn test_issue_detail_scrolls_description_with_j() Void!Str {

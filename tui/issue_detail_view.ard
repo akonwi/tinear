@@ -27,18 +27,22 @@ fn value_or_dash(value: Str) Str {
 }
 
 fn field_pair(label: Str, value: Str, width: Int) ui::Widget {
-  ui::row([
-    ui::sized_box_child(10, 1, ui::text(label, style: ui::style(foreground: "border"))),
-    ui::sized_box_child(width, 1, ui::text(text::truncate_with_ellipsis(value_or_dash(value), width))),
-  ])
+  ui::row(
+    [
+      ui::sized_box_child(10, 1, ui::text(label, style: ui::style(foreground: "border"))),
+      ui::sized_box_child(width, 1, ui::text(text::truncate_with_ellipsis(value_or_dash(value), width))),
+    ],
+  )
 }
 
 fn field_row(left_label: Str, left_value: Str, right_label: Str, right_value: Str) ui::Widget {
-  ui::row([
-    field_pair(left_label, left_value, 24),
-    ui::sized_box(3, 0),
-    field_pair(right_label, right_value, 24),
-  ])
+  ui::row(
+    [
+      field_pair(left_label, left_value, 24),
+      ui::sized_box(3, 0),
+      field_pair(right_label, right_value, 24),
+    ],
+  )
 }
 
 fn priority_value(issue: issues::Issue) Str {
@@ -51,17 +55,21 @@ fn priority_value(issue: issues::Issue) Str {
 }
 
 fn metadata_header(issue: issues::Issue) ui::Widget {
-  ui::column_stretch([
-    ui::row([
-      ui::text(issue.identifier, style: ui::style(bold: true)),
-      ui::text("  "),
-      ui::expanded(ui::text(issue.title, style: ui::style(bold: true))),
-    ]),
-    ui::sized_box(0, 1),
-    field_row("Status", issue.state_name, "Priority", priority_value(issue)),
-    field_row("Assignee", issue.assignee_name, "Cycle", issue.cycle_label),
-    field_row("Project", issue.project_name, "Team", issue.team_name),
-  ])
+  ui::column_stretch(
+    [
+      ui::row(
+        [
+          ui::text(issue.identifier, style: ui::style(bold: true)),
+          ui::text("  "),
+          ui::expanded(ui::text(issue.title, style: ui::style(bold: true))),
+        ],
+      ),
+      ui::sized_box(0, 1),
+      field_row("Status", issue.state_name, "Priority", priority_value(issue)),
+      field_row("Assignee", issue.assignee_name, "Cycle", issue.cycle_label),
+      field_row("Project", issue.project_name, "Team", issue.team_name),
+    ],
+  )
 }
 
 fn description_width(viewport_width: Int) Int {
@@ -81,10 +89,9 @@ fn wrapped_text(value: Str, viewport_width: Int, style: ui::Style?) ui::Widget {
 }
 
 fn section_header(label: Str) ui::Widget {
-  ui::column_stretch([
-    ui::text(label, style: ui::style(bold: true)),
-    ui::divider(style: ui::style(foreground: "border")),
-  ])
+  ui::column_stretch(
+    [ui::text(label, style: ui::style(bold: true)), ui::divider(style: ui::style(foreground: "border"))],
+  )
 }
 
 fn description_section(issue: issues::Issue, viewport_width: Int) ui::Widget {
@@ -92,16 +99,13 @@ fn description_section(issue: issues::Issue, viewport_width: Int) ui::Widget {
     desc => wrapped_text(desc, viewport_width, style: maybe::none()),
     _ => ui::text("(no description)", style: ui::style(foreground: "border")),
   }
-  ui::column_stretch([
-    section_header("Description"),
-    ui::padding_horizontal(1, body),
-  ])
+  ui::column_stretch([section_header("Description"), ui::padding_horizontal(1, body)])
 }
 
 fn repeat(ch: Str, count: Int) Str {
   mut out = ""
   if count > 0 {
-    for i in 0..(count - 1) {
+    for i in 0..count - 1 {
       out =+ ch
     }
   }
@@ -111,11 +115,13 @@ fn repeat(ch: Str, count: Int) Str {
 fn comment_card(comment: issues::Comment, viewport_width: Int, last: Bool) ui::Widget {
   let width = description_width(viewport_width)
   mut children = [
-    ui::row([
-      ui::text(comment.author, style: ui::style(bold: true)),
-      ui::text(" · ", style: ui::style(foreground: "border")),
-      ui::text(text::format_date(comment.created_at), style: ui::style(foreground: "border")),
-    ]),
+    ui::row(
+      [
+        ui::text(comment.author, style: ui::style(bold: true)),
+        ui::text(" · ", style: ui::style(foreground: "border")),
+        ui::text(text::format_date(comment.created_at), style: ui::style(foreground: "border")),
+      ],
+    ),
     wrapped_text(comment.body, viewport_width, style: maybe::none()),
   ]
   if not last {
@@ -146,72 +152,112 @@ fn comments_section(comments: [issues::Comment], loading: Bool, error: Str, view
     true => "Comments",
     false => "Comments ({comments.size()})",
   }
-  ui::column_stretch([
-    section_header(count_label),
-    ui::padding_horizontal(1, comments_body(comments, loading, error, viewport_width)),
-  ])
+  ui::column_stretch(
+    [
+      section_header(count_label),
+      ui::padding_horizontal(1, comments_body(comments, loading, error, viewport_width)),
+    ],
+  )
 }
 
-fn scroll_body(issue: issues::Issue, comments: [issues::Comment], loading: Bool, error: Str, viewport_width: Int) ui::Widget {
-  ui::padding_horizontal(1, ui::column_stretch([
-    description_section(issue, viewport_width),
-    ui::sized_box(0, 1),
-    comments_section(comments, loading, error, viewport_width),
-  ]))
+fn scroll_body(
+  issue: issues::Issue,
+  comments: [issues::Comment],
+  loading: Bool,
+  error: Str,
+  viewport_width: Int,
+) ui::Widget {
+  ui::padding_horizontal(
+    1,
+    ui::column_stretch(
+      [
+        description_section(issue, viewport_width),
+        ui::sized_box(0, 1),
+        comments_section(comments, loading, error, viewport_width),
+      ],
+    ),
+  )
 }
 
 fn focus_detail_after_rebuild(ctx: ui::EventContext, issue: issues::Issue) {
-  ui::dispatch_after(ctx, 0, fn() {
-    ui::request_focus("tab.issue.{issue.id}")
-  })
+  ui::dispatch_after(
+    ctx,
+    0,
+    fn() {
+      ui::request_focus("tab.issue.{issue.id}")
+    },
+  )
 }
 
-fn submit_comment(api_key: Str, issue: issues::Issue, body: Str, state: ui::State<IssueDetailUiState>, rt: ui::Runtime<IssueDetailUiState>, scroller: ui::ScrollPaneController, ctx: ui::EventContext) {
+fn submit_comment(
+  api_key: Str,
+  issue: issues::Issue,
+  body: Str,
+  state: ui::State<IssueDetailUiState>,
+  rt: ui::Runtime<IssueDetailUiState>,
+  scroller: ui::ScrollPaneController,
+  ctx: ui::EventContext,
+) {
   if not body.trim().is_empty() {
-    state.set(fn(mut next: IssueDetailUiState) {
-      next.compose_sending = true
-      next.compose_error = ""
-    })
-    async::start(fn() {
-      let result = issues::create_comment(api_key, issue.id, body)
-      match result {
-        ok(_) => {
-          let refreshed = issues::load_comments(api_key, issue.id)
-          rt.dispatch(fn(state: ui::State<IssueDetailUiState>) {
-            state.set(fn(mut next: IssueDetailUiState) {
-              match refreshed {
-                ok(comments) => {
-                  next.comments = comments
-                  next.comments_error = ""
-                  next.compose_open = false
-                  next.compose_text = ""
-                  next.compose_error = ""
-                },
-                err(e) => {
-                  next.compose_error = e
-                },
-              }
-              next.compose_sending = false
-            })
-            ui::scroll_pane_scroll_by(scroller, 0, 9999)
-            focus_detail_after_rebuild(ctx, issue)
-          })
-        },
-        err(e) => {
-          rt.dispatch(fn(state: ui::State<IssueDetailUiState>) {
-            state.set(fn(mut next: IssueDetailUiState) {
-              next.compose_sending = false
-              next.compose_error = e
-            })
-            ui::request_frame(ctx)
-          })
-        },
-      }
-    })
+    state.set(
+      fn(mut next: IssueDetailUiState) {
+        next.compose_sending = true
+        next.compose_error = ""
+      },
+    )
+    async::start(
+      fn() {
+        let result = issues::create_comment(api_key, issue.id, body)
+        match result {
+          ok(_) => {
+            let refreshed = issues::load_comments(api_key, issue.id)
+            rt.dispatch(
+              fn(state: ui::State<IssueDetailUiState>) {
+                state.set(
+                  fn(mut next: IssueDetailUiState) {
+                    match refreshed {
+                      ok(comments) => {
+                        next.comments = comments
+                        next.comments_error = ""
+                        next.compose_open = false
+                        next.compose_text = ""
+                        next.compose_error = ""
+                      },
+                      err(e) => { next.compose_error = e },
+                    }
+                    next.compose_sending = false
+                  },
+                )
+                ui::scroll_pane_scroll_by(scroller, 0, 9999)
+                focus_detail_after_rebuild(ctx, issue)
+              },
+            )
+          },
+          err(e) => {
+            rt.dispatch(
+              fn(state: ui::State<IssueDetailUiState>) {
+                state.set(
+                  fn(mut next: IssueDetailUiState) {
+                    next.compose_sending = false
+                    next.compose_error = e
+                  },
+                )
+                ui::request_frame(ctx)
+              },
+            )
+          },
+        }
+      },
+    )
   }
 }
 
-fn compose_area(issue: issues::Issue, model: IssueDetailUiState, state: ui::State<IssueDetailUiState>, on_submit: fn(ui::EventContext, Str)) ui::Widget {
+fn compose_area(
+  issue: issues::Issue,
+  model: IssueDetailUiState,
+  state: ui::State<IssueDetailUiState>,
+  on_submit: fn(ui::EventContext, Str),
+) ui::Widget {
   if model.compose_open {
     let body = match model.compose_sending {
       true => ui::padding_horizontal(1, ui::text("Sending…", style: ui::style(foreground: "border"))),
@@ -220,57 +266,89 @@ fn compose_area(issue: issues::Issue, model: IssueDetailUiState, state: ui::Stat
         if not model.compose_error.is_empty() {
           rows.push(ui::text("Failed to send — Ctrl+Enter retry", style: ui::style(foreground: "border")))
         }
-        rows.push(ui::focus_scope(
-          child: ui::text_area(
-            value: model.compose_text,
-            placeholder: "Write a comment…",
-            min_width: 40,
-            min_height: 4,
-            soft_wrap: true,
-            on_changed: fn(_ctx: ui::EventContext, next_text: Str) {
-              state.set(fn(mut next: IssueDetailUiState) {
-                next.compose_text = next_text
-                next.compose_error = ""
-              })
-            },
-            on_submitted: on_submit,
+        rows.push(
+          ui::focus_scope(
+            child: ui::text_area(
+              value: model.compose_text,
+              placeholder: "Write a comment…",
+              min_width: 40,
+              min_height: 4,
+              soft_wrap: true,
+              on_changed: fn(_ctx: ui::EventContext, next_text: Str) {
+                state.set(
+                  fn(mut next: IssueDetailUiState) {
+                    next.compose_text = next_text
+                    next.compose_error = ""
+                  },
+                )
+              },
+              on_submitted: on_submit,
+            ),
+            trap: false,
+            auto_focus: true,
           ),
-          trap: false,
-          auto_focus: true,
-        ))
+        )
         rows.push(ui::text("Ctrl+Enter send  Esc cancel", style: ui::style(foreground: "border")))
         ui::padding_horizontal(1, ui::column_stretch(rows))
       },
     }
-    ui::column_stretch([
-      ui::divider(style: ui::style(foreground: "border")),
-      body,
-    ])
+    ui::column_stretch([ui::divider(style: ui::style(foreground: "border")), body])
   } else {
     ui::sized_box(0, 0)
   }
 }
 
-fn detail_layout(issue: issues::Issue, model: IssueDetailUiState, state: ui::State<IssueDetailUiState>, on_submit: fn(ui::EventContext, Str)) ui::Widget {
+fn detail_layout(
+  issue: issues::Issue,
+  model: IssueDetailUiState,
+  state: ui::State<IssueDetailUiState>,
+  on_submit: fn(ui::EventContext, Str),
+) ui::Widget {
   ui::focusable_key(
     "tab.issue.{issue.id}",
-    ui::column_stretch([
-      ui::padding_horizontal(1, metadata_header(issue)),
-      ui::divider(style: ui::style(foreground: "border")),
-      ui::expanded(ui::scroll_pane(model.scroller, scroll_body(issue, model.comments, model.comments_loading, model.comments_error, model.viewport_width))),
-      compose_area(issue, model, state, on_submit),
-    ]),
+    ui::column_stretch(
+      [
+        ui::padding_horizontal(1, metadata_header(issue)),
+        ui::divider(style: ui::style(foreground: "border")),
+        ui::expanded(
+          ui::scroll_pane(
+            model.scroller,
+            scroll_body(
+              issue,
+              model.comments,
+              model.comments_loading,
+              model.comments_error,
+              model.viewport_width,
+            ),
+          ),
+        ),
+        compose_area(issue, model, state, on_submit),
+      ],
+    ),
   )
 }
 
-fn content(api_key: Str, issue: issues::Issue, model: IssueDetailUiState, state: ui::State<IssueDetailUiState>, rt: ui::Runtime<IssueDetailUiState>, on_state: fn(issues::Issue), on_cycle: fn(issues::Issue)) ui::Widget {
+fn content(
+  api_key: Str,
+  issue: issues::Issue,
+  model: IssueDetailUiState,
+  state: ui::State<IssueDetailUiState>,
+  rt: ui::Runtime<IssueDetailUiState>,
+  on_state: fn(issues::Issue),
+  on_cycle: fn(issues::Issue),
+) ui::Widget {
   ui::actions(
     child: ui::shortcuts(
-      child: detail_layout(issue, model, state, fn(ctx: ui::EventContext, submitted: Str) {
-        if model.compose_open and not model.compose_sending {
-          submit_comment(api_key, issue, submitted, state, rt, model.scroller, ctx)
-        }
-      }),
+      child: detail_layout(
+        issue,
+        model,
+        state,
+        fn(ctx: ui::EventContext, submitted: Str) {
+          if model.compose_open and not model.compose_sending {
+            submit_comment(api_key, issue, submitted, state, rt, model.scroller, ctx)
+          }
+        },
+      ),
       bindings: [
         "Up": "issue_detail.scroll_up",
         "k": "issue_detail.scroll_up",
@@ -287,65 +365,90 @@ fn content(api_key: Str, issue: issues::Issue, model: IssueDetailUiState, state:
       ],
     ),
     bindings: [
-      ui::action("issue_detail.scroll_up", fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
-        ui::scroll_pane_scroll_by(model.scroller, 0, -1)
-        ui::request_frame(ctx)
-        ui::EventResult::handled
-      }),
-      ui::action("issue_detail.scroll_down", fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
-        ui::scroll_pane_scroll_by(model.scroller, 0, 1)
-        ui::request_frame(ctx)
-        ui::EventResult::handled
-      }),
-      ui::action("issue_detail.status", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-        if model.compose_open {
-          ui::EventResult::ignored
-        } else {
-          on_state(issue)
-          ui::EventResult::handled
-        }
-      }),
-      ui::action("issue_detail.cycle", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-        if model.compose_open {
-          ui::EventResult::ignored
-        } else {
-          on_cycle(issue)
-          ui::EventResult::handled
-        }
-      }),
-      ui::action("issue_detail.compose", fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
-        if not model.compose_open {
-          state.set(fn(mut next: IssueDetailUiState) {
-            next.compose_open = true
-            next.compose_error = ""
-          })
-          ui::scroll_pane_scroll_by(model.scroller, 0, 9999)
+      ui::action(
+        "issue_detail.scroll_up",
+        fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          ui::scroll_pane_scroll_by(model.scroller, 0, -1)
           ui::request_frame(ctx)
-        }
-        ui::EventResult::handled
-      }),
-      ui::action("issue_detail.submit_comment", fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
-        if model.compose_open and not model.compose_sending {
-          submit_comment(api_key, issue, model.compose_text, state, rt, model.scroller, ctx)
           ui::EventResult::handled
-        } else {
-          ui::EventResult::ignored
-        }
-      }),
-      ui::action("issue_detail.cancel_compose", fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
-        if model.compose_open {
-          state.set(fn(mut next: IssueDetailUiState) {
-            next.compose_open = false
-            next.compose_text = ""
-            next.compose_sending = false
-            next.compose_error = ""
-          })
-          focus_detail_after_rebuild(ctx, issue)
+        },
+      ),
+      ui::action(
+        "issue_detail.scroll_down",
+        fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          ui::scroll_pane_scroll_by(model.scroller, 0, 1)
+          ui::request_frame(ctx)
           ui::EventResult::handled
-        } else {
-          ui::EventResult::ignored
-        }
-      }),
+        },
+      ),
+      ui::action(
+        "issue_detail.status",
+        fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          if model.compose_open {
+            ui::EventResult::ignored
+          } else {
+            on_state(issue)
+            ui::EventResult::handled
+          }
+        },
+      ),
+      ui::action(
+        "issue_detail.cycle",
+        fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          if model.compose_open {
+            ui::EventResult::ignored
+          } else {
+            on_cycle(issue)
+            ui::EventResult::handled
+          }
+        },
+      ),
+      ui::action(
+        "issue_detail.compose",
+        fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          if not model.compose_open {
+            state.set(
+              fn(mut next: IssueDetailUiState) {
+                next.compose_open = true
+                next.compose_error = ""
+              },
+            )
+            ui::scroll_pane_scroll_by(model.scroller, 0, 9999)
+            ui::request_frame(ctx)
+          }
+          ui::EventResult::handled
+        },
+      ),
+      ui::action(
+        "issue_detail.submit_comment",
+        fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          if model.compose_open and not model.compose_sending {
+            submit_comment(api_key, issue, model.compose_text, state, rt, model.scroller, ctx)
+            ui::EventResult::handled
+          } else {
+            ui::EventResult::ignored
+          }
+        },
+      ),
+      ui::action(
+        "issue_detail.cancel_compose",
+        fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          if model.compose_open {
+            state.set(
+              fn(mut next: IssueDetailUiState) {
+                next.compose_open = false
+                next.compose_text = ""
+                next.compose_sending = false
+                next.compose_error = ""
+              },
+            )
+            focus_detail_after_rebuild(ctx, issue)
+            ui::EventResult::handled
+          } else {
+            ui::EventResult::ignored
+          }
+        },
+      ),
     ],
   )
 }
@@ -354,11 +457,29 @@ fn with_comments(issue: issues::Issue, comments: [issues::Comment]) ui::Widget {
   ui::stateful(
     key: "issue-detail-test.{issue.id}",
     init: fn(ctx: ui::BuildContext) IssueDetailUiState {
-      IssueDetailUiState{viewport_width: 80, scroller: ui::scroll_pane_controller(), comments: comments, comments_loading: false, comments_error: "", compose_open: false, compose_text: "", compose_sending: false, compose_error: ""}
+      IssueDetailUiState{
+        viewport_width: 80,
+        scroller: ui::scroll_pane_controller(),
+        comments: comments,
+        comments_loading: false,
+        comments_error: "",
+        compose_open: false,
+        compose_text: "",
+        compose_sending: false,
+        compose_error: "",
+      }
     },
     build: fn(ctx: ui::BuildContext, state: ui::State<IssueDetailUiState>) ui::Widget {
       let model = state.value()
-      content("", issue, model, state, ctx.runtime<IssueDetailUiState>(), fn(_issue: issues::Issue) {}, fn(_issue: issues::Issue) {})
+      content(
+        "",
+        issue,
+        model,
+        state,
+        ctx.runtime<IssueDetailUiState>(),
+        fn(_issue: issues::Issue) {},
+        fn(_issue: issues::Issue) {},
+      )
     },
   )
 }
@@ -367,23 +488,39 @@ fn new(api_key: Str, issue: issues::Issue, on_state: fn(issues::Issue), on_cycle
   ui::stateful(
     key: "issue-detail.{issue.id}",
     init: fn(ctx: ui::BuildContext) IssueDetailUiState {
-      let initial = IssueDetailUiState{viewport_width: 80, scroller: ui::scroll_pane_controller(), comments: [], comments_loading: true, comments_error: "", compose_open: false, compose_text: "", compose_sending: false, compose_error: ""}
+      let initial = IssueDetailUiState{
+        viewport_width: 80,
+        scroller: ui::scroll_pane_controller(),
+        comments: [],
+        comments_loading: true,
+        comments_error: "",
+        compose_open: false,
+        compose_text: "",
+        compose_sending: false,
+        compose_error: "",
+      }
       let rt = ctx.runtime<IssueDetailUiState>()
-      async::start(fn() {
-        let result = issues::load_comments(api_key, issue.id)
-        rt.dispatch(fn(state: ui::State<IssueDetailUiState>) {
-          state.set(fn(mut next: IssueDetailUiState) {
-            match result {
-              ok(comments) => {
-                next.comments = comments
-                next.comments_error = ""
-              },
-              err(e) => { next.comments_error = e },
-            }
-            next.comments_loading = false
-          })
-        })
-      })
+      async::start(
+        fn() {
+          let result = issues::load_comments(api_key, issue.id)
+          rt.dispatch(
+            fn(state: ui::State<IssueDetailUiState>) {
+              state.set(
+                fn(mut next: IssueDetailUiState) {
+                  match result {
+                    ok(comments) => {
+                      next.comments = comments
+                      next.comments_error = ""
+                    },
+                    err(e) => { next.comments_error = e },
+                  }
+                  next.comments_loading = false
+                },
+              )
+            },
+          )
+        },
+      )
       initial
     },
     build: fn(ctx: ui::BuildContext, state: ui::State<IssueDetailUiState>) ui::Widget {
@@ -391,10 +528,12 @@ fn new(api_key: Str, issue: issues::Issue, on_state: fn(issues::Issue), on_cycle
       ui::on_width(
         content(api_key, issue, model, state, ctx.runtime<IssueDetailUiState>(), on_state, on_cycle),
         fn(width: Int) {
-          if width > 0 and not (width == model.viewport_width) {
-            state.set(fn(mut next: IssueDetailUiState) {
-              next.viewport_width = width
-            })
+          if width > 0 and not width == model.viewport_width {
+            state.set(
+              fn(mut next: IssueDetailUiState) {
+                next.viewport_width = width
+              },
+            )
           }
         },
       )

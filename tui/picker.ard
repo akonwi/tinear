@@ -95,25 +95,38 @@ fn new(props: Props, on_confirm: fn(ui::EventContext, Option), on_dismiss: fn(ui
           ],
         ),
         bindings: [
-          ui::action("picker.previous", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-            state.set(fn(mut next: CursorState) {
-              next.cursor = clamp_cursor(model.cursor - 1, props.options.size())
-            })
-            ui::EventResult::handled
-          }),
-          ui::action("picker.next", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-            state.set(fn(mut next: CursorState) {
-              next.cursor = clamp_cursor(model.cursor + 1, props.options.size())
-            })
-            ui::EventResult::handled
-          }),
-          ui::action("picker.confirm", fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
-            match selected_at(props, model.cursor) {
-              option => on_confirm(ctx, option),
-              _ => (),
-            }
-            ui::EventResult::handled
-          }),
+          ui::action(
+            "picker.previous",
+            fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              state.set(
+                fn(mut next: CursorState) {
+                  next.cursor = clamp_cursor(model.cursor - 1, props.options.size())
+                },
+              )
+              ui::EventResult::handled
+            },
+          ),
+          ui::action(
+            "picker.next",
+            fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              state.set(
+                fn(mut next: CursorState) {
+                  next.cursor = clamp_cursor(model.cursor + 1, props.options.size())
+                },
+              )
+              ui::EventResult::handled
+            },
+          ),
+          ui::action(
+            "picker.confirm",
+            fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              match selected_at(props, model.cursor) {
+                option => on_confirm(ctx, option),
+                _ => (),
+              }
+              ui::EventResult::handled
+            },
+          ),
         ],
       )
     },

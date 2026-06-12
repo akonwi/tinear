@@ -10,8 +10,8 @@ fn sort_states(states: [issues::WorkflowState]) [issues::WorkflowState] {
     states
   } else {
     mut result = states
-    for i in 0..(n - 2) {
-      for j in 0..(n - 2 - i) {
+    for i in 0..n - 2 {
+      for j in 0..n - 2 - i {
         let a = result.at(j)
         let b = result.at(j + 1)
         let ra = state::state_type_rank(a.state_type)
@@ -36,8 +36,8 @@ fn sort_cycles(cycles: [issues::Cycle]) [issues::Cycle] {
     cycles
   } else {
     mut result = cycles
-    for i in 0..(n - 2) {
-      for j in 0..(n - 2 - i) {
+    for i in 0..n - 2 {
+      for j in 0..n - 2 - i {
         let a = result.at(j)
         let b = result.at(j + 1)
         if a.number < b.number {
@@ -62,14 +62,22 @@ fn state_props(api_key: Str, issue: issues::Issue) picker::Props!Str {
   mut options: [picker::Option] = []
   for s in states {
     let current = s.id == issue.state_id
-    options.push(picker::Option{id: s.id, label: s.name, current: current})
+    options.push(
+      picker::Option{
+        id: s.id,
+        label: s.name,
+        current: current,
+      },
+    )
   }
-  Result::ok(picker::Props{
-    title: "Status — {issue.identifier} ({issue.team_name})",
-    options: options,
-    inititial_id: issue.state_id,
-    width: maybe::none(),
-  })
+  Result::ok(
+    picker::Props{
+      title: "Status — {issue.identifier} ({issue.team_name})",
+      options: options,
+      inititial_id: issue.state_id,
+      width: maybe::none(),
+    },
+  )
 }
 
 fn cycle_props(api_key: Str, issue: issues::Issue) picker::Props!Str {
@@ -88,16 +96,30 @@ fn cycle_props(api_key: Str, issue: issues::Issue) picker::Props!Str {
   }
 
   let cycles = sort_cycles(filtered)
-  mut options = [picker::Option{id: "", label: "(no cycle)", current: issue.cycle_id.is_empty()}]
+  mut options = [
+    picker::Option{
+      id: "",
+      label: "(no cycle)",
+      current: issue.cycle_id.is_empty(),
+    },
+  ]
   for c in cycles {
     let current = c.id == issue.cycle_id
-    options.push(picker::Option{id: c.id, label: cycle_label(c), current: current})
+    options.push(
+      picker::Option{
+        id: c.id,
+        label: cycle_label(c),
+        current: current,
+      },
+    )
   }
 
-  Result::ok(picker::Props{
-    title: "Cycle — {issue.identifier} ({issue.team_name})",
-    options: options,
-    inititial_id: issue.cycle_id,
-    width: maybe::some(60),
-  })
+  Result::ok(
+    picker::Props{
+      title: "Cycle — {issue.identifier} ({issue.team_name})",
+      options: options,
+      inititial_id: issue.cycle_id,
+      width: maybe::some(60),
+    },
+  )
 }

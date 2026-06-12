@@ -8,57 +8,90 @@ fn issue_json_with_title(title: Str, description: Str) Str {
 }
 
 fn issue_json(description: Str) Str {
-  issue_json_with_title("Title â quoted âtextâ", description)
+  issue_json_with_title("Title â\u0080\u0094 quoted â\u0080\u009ctextâ\u0080\u009d", description)
 }
 
 test fn test_decode_issue_normalizes_mojibake_text() Void!Str {
-  let raw = decode::from_json(issue_json("\"clean completions â no workflow code runs âinsideââ¦\""))
-    .expect("parse issue")
+  let raw = decode::from_json(
+    issue_json(
+      "\"clean completions â\u0080\u0094 no workflow code runs â\u0080\u009cinsideâ\u0080\u009dâ\u0080¦\"",
+    ),
+  ).expect("parse issue")
   let issue = issues::decode_issue(raw)
 
-  try testing::assert(issue.title == "Title - quoted \"text\"", "title should normalize mojibake punctuation")
+  try testing::assert(
+    issue.title == "Title - quoted \"text\"",
+    "title should normalize mojibake punctuation",
+  )
   match issue.description {
-    desc => testing::assert(desc == "clean completions - no workflow code runs \"inside\"...", "description should normalize mojibake punctuation"),
+    desc => {
+      testing::assert(
+        desc == "clean completions - no workflow code runs \"inside\"...",
+        "description should normalize mojibake punctuation",
+      )
+    },
     _ => testing::assert(false, "description should be present"),
   }
 }
 
 test fn test_decode_issue_normalizes_windows_1252_mojibake_text() Void!Str {
-  let raw = decode::from_json(issue_json_with_title("Title â€” quoted â€œtextâ€�", "\"body â€“ with â€™ apostrophe â€¦\""))
-    .expect("parse issue")
+  let raw = decode::from_json(
+    issue_json_with_title(
+      "Title â€” quoted â€œtextâ€�",
+      "\"body â€“ with â€™ apostrophe â€¦\"",
+    ),
+  ).expect("parse issue")
   let issue = issues::decode_issue(raw)
 
-  try testing::assert(issue.title == "Title - quoted \"text\"", "title should normalize Windows-1252 mojibake")
+  try testing::assert(
+    issue.title == "Title - quoted \"text\"",
+    "title should normalize Windows-1252 mojibake",
+  )
   match issue.description {
-    desc => testing::assert(desc == "body - with ' apostrophe ...", "description should normalize Windows-1252 mojibake"),
+    desc => {
+      testing::assert(
+        desc == "body - with ' apostrophe ...",
+        "description should normalize Windows-1252 mojibake",
+      )
+    },
     _ => testing::assert(false, "description should be present"),
   }
 }
 
 test fn test_decode_issue_normalizes_degraded_cent_mojibake_in_description() Void!Str {
-  let raw = decode::from_json(issue_json_with_title("Title", "\"being undeliverable ÂÂ¢ÂÂ Iterable rejected it\""))
-    .expect("parse issue")
+  let raw = decode::from_json(
+    issue_json_with_title("Title", "\"being undeliverable ÂÂ¢ÂÂ Iterable rejected it\""),
+  ).expect("parse issue")
   let issue = issues::decode_issue(raw)
 
   match issue.description {
-    desc => testing::assert(desc == "being undeliverable - Iterable rejected it", "degraded cent mojibake should normalize to dash regardless of padding count"),
+    desc => {
+      testing::assert(
+        desc == "being undeliverable - Iterable rejected it",
+        "degraded cent mojibake should normalize to dash regardless of padding count",
+      )
+    },
     _ => testing::assert(false, "description should be present"),
   }
 }
 
 test fn test_decode_issue_normalizes_bare_mojibake_dash_in_title() Void!Str {
-  let raw = decode::from_json(issue_json_with_title("ProcessWorkflowReconciler â scheduled workflow", "null"))
-    .expect("parse issue")
+  let raw = decode::from_json(
+    issue_json_with_title("ProcessWorkflowReconciler â scheduled workflow", "null"),
+  ).expect("parse issue")
   // The board query can return a degraded mojibake variant where the bytes
   // after `â` have already been stripped before rendering.
   let issue = issues::decode_issue(raw)
 
-  testing::assert(issue.title == "ProcessWorkflowReconciler - scheduled workflow", "bare mojibake dash should normalize in title")
+  testing::assert(
+    issue.title == "ProcessWorkflowReconciler - scheduled workflow",
+    "bare mojibake dash should normalize in title",
+  )
 }
 
 test fn test_decode_issue_normalizes_card_metadata_fields() Void!Str {
   let raw = decode::from_json(
-    "\{\"id\":\"issue-1\",\"identifier\":\"AKO-123\",\"title\":\"Title\",\"description\":null,\"priority\":2,\"state\":\{\"id\":\"state-1\",\"name\":\"In Progress â Review\",\"type\":\"started\",\"position\":1.0\},\"team\":\{\"id\":\"team-1\",\"name\":\"Core âPlatformâ\",\"key\":\"AKO\"\},\"project\":\{\"name\":\"Auth â Infra\"\},\"assignee\":\{\"name\":\"Jane\",\"displayName\":\"Jane â Doe\"\},\"cycle\":\{\"id\":\"cycle-1\",\"number\":12,\"name\":\"Cycle â 12\"\}\}",
+    "\{\"id\":\"issue-1\",\"identifier\":\"AKO-123\",\"title\":\"Title\",\"description\":null,\"priority\":2,\"state\":\{\"id\":\"state-1\",\"name\":\"In Progress â\u0080\u0094 Review\",\"type\":\"started\",\"position\":1.0\},\"team\":\{\"id\":\"team-1\",\"name\":\"Core â\u0080\u009cPlatformâ\u0080\u009d\",\"key\":\"AKO\"\},\"project\":\{\"name\":\"Auth â\u0080\u0093 Infra\"\},\"assignee\":\{\"name\":\"Jane\",\"displayName\":\"Jane â\u0080\u0099 Doe\"\},\"cycle\":\{\"id\":\"cycle-1\",\"number\":12,\"name\":\"Cycle â\u0080\u0094 12\"\}\}",
   ).expect("parse issue")
   let issue = issues::decode_issue(raw)
 
@@ -71,9 +104,12 @@ test fn test_decode_issue_normalizes_card_metadata_fields() Void!Str {
 
 test fn test_decode_comment_normalizes_mojibake_body() Void!Str {
   let raw = decode::from_json(
-    "\{\"id\":\"comment-1\",\"body\":\"one â two â three\",\"createdAt\":\"2026-01-02T03:04:05.000Z\",\"user\":\{\"name\":\"Jane\",\"displayName\":\"Jane\"\}\}",
+    "\{\"id\":\"comment-1\",\"body\":\"one â\u0080\u0093 two â\u0080\u0099 three\",\"createdAt\":\"2026-01-02T03:04:05.000Z\",\"user\":\{\"name\":\"Jane\",\"displayName\":\"Jane\"\}\}",
   ).expect("parse comment")
   let comment = issues::decode_comment(raw)
 
-  testing::assert(comment.body == "one - two ' three", "comment body should normalize mojibake punctuation")
+  testing::assert(
+    comment.body == "one - two ' three",
+    "comment body should normalize mojibake punctuation",
+  )
 }

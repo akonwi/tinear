@@ -12,6 +12,9 @@ test fn test_priority_helpers() Void!Str {
 }
 
 test fn test_state_type_rank_orders_workflow() Void!Str {
-  try testing::assert(state::state_type_rank("triage") < state::state_type_rank("started"), "triage should rank before started")
+  try testing::assert(
+    state::state_type_rank("triage") < state::state_type_rank("started"),
+    "triage should rank before started",
+  )
   testing::assert(state::is_hidden_state("Duplicate"), "Duplicate should be hidden")
 }

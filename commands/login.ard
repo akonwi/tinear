@@ -1,8 +1,5 @@
 use ard/decode
-use ard/env
-use ard/fs
 use ard/io
-use ard/json
 
 use tinear/config
 use tinear/linear/client
@@ -41,15 +38,19 @@ fn run_inner(args: [Str]) Void!Str {
 
   io::print("Validating...")
 
-  login(api_key).and_then(fn(data) {
-    let viewer = decode::run(data, decode::field("viewer", decode::dynamic)).expect("Missing viewer")
-    let name = decode_utils::user_display_name(viewer)
-    let email = decode::run(viewer, decode::field("email", decode::string)).expect("Missing email")
+  login(
+    api_key,
+  ).and_then(
+    fn(data) {
+      let viewer = decode::run(data, decode::field("viewer", decode::dynamic)).expect("Missing viewer")
+      let name = decode_utils::user_display_name(viewer)
+      let email = decode::run(viewer, decode::field("email", decode::string)).expect("Missing email")
 
-    io::print("")
-    io::print("Logged in as {name} <{email}>")
-    Result::ok(())
-  })
+      io::print("")
+      io::print("Logged in as {name} <{email}>")
+      Result::ok(())
+    },
+  )
 }
 
 fn run(args: [Str]) {

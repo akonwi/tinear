@@ -1,7 +1,6 @@
 use ard/env
 use ard/fs
 use ard/json
-use ard/maybe
 
 struct Config {
   api_key: Str,
@@ -43,7 +42,6 @@ fn write(api_key: Str) Str!Str {
 
   Result::ok(config_path)
 }
-
 
 fn load() Config!Str {
   // Try env var first

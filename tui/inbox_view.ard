@@ -17,7 +17,7 @@ fn clamp_cursor(cursor: Int, count: Int) Int {
     count <= 0 => 0,
     cursor < 0 => 0,
     cursor >= count => count - 1,
-    _ => cursor
+    _ => cursor,
   }
 }
 
@@ -68,9 +68,11 @@ fn field_string(data: Dynamic, name: Str, fallback: Str) Str {
 
 fn nullable_string(data: Dynamic, name: Str, fallback: Str) Str {
   match decode::run(data, decode::field(name, decode::nullable(decode::string))) {
-    ok(v) => match v {
-      s => s,
-      _ => fallback,
+    ok(v) => {
+      match v {
+        s => s,
+        _ => fallback,
+      }
     },
     err(_) => fallback,
   }
@@ -113,9 +115,11 @@ fn relevant_url(notif: Dynamic) Str {
       let cid = nullable_string(notif, "pullRequestCommentId", "")
       match pr_url.is_empty() {
         true => "",
-        false => match cid.is_empty() {
-          true => pr_url,
-          false => "{pr_url}#issuecomment-{cid}",
+        false => {
+          match cid.is_empty() {
+            true => pr_url,
+            false => "{pr_url}#issuecomment-{cid}",
+          }
         },
       }
     } else {
@@ -133,9 +137,11 @@ fn status_transition(notif: Dynamic) Str {
   let issue_obj = decode_utils::optional_field(notif, "issue")
   let empty: [Dynamic] = []
   let entries = match issue_obj {
-    iss => match decode::run(iss, decode::path(["history", "nodes"], decode::list(decode::dynamic))) {
-      ok(nodes) => nodes,
-      err(_) => empty,
+    iss => {
+      match decode::run(iss, decode::path(["history", "nodes"], decode::list(decode::dynamic))) {
+        ok(nodes) => nodes,
+        err(_) => empty,
+      }
     },
     _ => empty,
   }
@@ -222,7 +228,9 @@ fn pr_detail_text(item: inbox::Item, notif: Dynamic) Str {
       let author = optional_user_name(pr, "creator")
       let opened = text::format_date(field_string(pr, "openedAt", ""))
       let update = match is_pr_comment_type(n_type) {
-        true => "Comment\n{actor} · {created}\n\n{nullable_string(notif, "subtitle", "(comment body unavailable)")}",
+        true => {
+          "Comment\n{actor} · {created}\n\n{nullable_string(notif, "subtitle", "(comment body unavailable)")}"
+        },
         false => "Update\n{actor} {item.type_label} · {created}",
       }
       "Status: {status}\nBranch: {source} → {target}\nAuthor: {author}\nOpened: {opened}\n\n{update}"
@@ -266,25 +274,38 @@ fn detail_footer() ui::Widget {
   hints::bar(["o open", "⌫ delete", "Esc close"])
 }
 
-fn detail_modal(item: inbox::Item, loading_detail: Bool, detail_error: Str, detail: Dynamic?, on_dismiss: fn(ui::EventContext)) ui::Widget {
+fn detail_modal(
+  item: inbox::Item,
+  loading_detail: Bool,
+  detail_error: Str,
+  detail: Dynamic?,
+  on_dismiss: fn(ui::EventContext),
+) ui::Widget {
   modal::dialog(
     title: detail_title(item),
-    child: ui::column_stretch([
-      detail_body(
-        item: item,
-        loading_detail: loading_detail,
-        detail_error: detail_error,
-        detail: detail,
-      ),
-      ui::sized_box(1, 1),
-    ]),
+    child: ui::column_stretch(
+      [
+        detail_body(item: item, loading_detail: loading_detail, detail_error: detail_error, detail: detail),
+        ui::sized_box(1, 1),
+      ],
+    ),
     footer: detail_footer(),
     width: 72,
     on_dismiss: on_dismiss,
   )
 }
 
-fn content(items: [inbox::Item], loading: Bool, error: Str, cursor: Int, detail_open: Bool, loading_detail: Bool, detail_error: Str, detail: Dynamic?, on_detail_dismiss: fn(ui::EventContext)) ui::Widget {
+fn content(
+  items: [inbox::Item],
+  loading: Bool,
+  error: Str,
+  cursor: Int,
+  detail_open: Bool,
+  loading_detail: Bool,
+  detail_error: Str,
+  detail: Dynamic?,
+  on_detail_dismiss: fn(ui::EventContext),
+) ui::Widget {
   if loading {
     ui::text("Loading inbox…")
   } else if not error.is_empty() {
@@ -342,7 +363,13 @@ fn has_item_id(items: [inbox::Item], id: Str) Bool {
   found
 }
 
-fn apply_refreshed_items(mut state: InboxUiState, result: [inbox::Item]!Str, preserve_id: Str, fallback_cursor: Int, silent: Bool) InboxUiState {
+fn apply_refreshed_items(
+  mut state: InboxUiState,
+  result: [inbox::Item]!Str,
+  preserve_id: Str,
+  fallback_cursor: Int,
+  silent: Bool,
+) InboxUiState {
   match result {
     ok(items) => {
       state.items = items
@@ -367,23 +394,37 @@ fn apply_refreshed_items(mut state: InboxUiState, result: [inbox::Item]!Str, pre
 }
 
 fn start_background_refresh(api_key: Str, rt: ui::Runtime<InboxUiState>) {
-  async::start(fn() {
-    while {
-      async::sleep(duration::from_minutes(5))
-      let result = inbox::load(api_key)
-      match result {
-        ok(_) => (),
-        err(e) => ui::show_toast_runtime(rt, "Unable to refresh inbox", maybe::some(e), ui::ToastVariant::error, maybe::none()),
+  async::start(
+    fn() {
+      while {
+        async::sleep(duration::from_minutes(5))
+        let result = inbox::load(api_key)
+        match result {
+          ok(_) => (),
+          err(e) => {
+            ui::show_toast_runtime(
+              rt,
+              "Unable to refresh inbox",
+              maybe::some(e),
+              ui::ToastVariant::error,
+              maybe::none(),
+            )
+          },
+        }
+        rt.dispatch(
+          fn(state: ui::State<InboxUiState>) {
+            let current = state.value()
+            let preserve_id = item_id_at(current.items, current.cursor)
+            state.set(
+              fn(mut next: InboxUiState) {
+                next = apply_refreshed_items(next, result, preserve_id, current.cursor, true)
+              },
+            )
+          },
+        )
       }
-      rt.dispatch(fn(state: ui::State<InboxUiState>) {
-        let current = state.value()
-        let preserve_id = item_id_at(current.items, current.cursor)
-        state.set(fn(mut next: InboxUiState) {
-          next = apply_refreshed_items(next, result, preserve_id, current.cursor, true)
-        })
-      })
-    }
-  })
+    },
+  )
 }
 
 struct InboxUiState {
@@ -426,167 +467,219 @@ fn new(api_key: Str) ui::Widget {
       let model = state.value()
       let cursor = clamp_cursor(model.cursor, model.items.size())
       ui::actions(
-      child: ui::shortcuts(
-        child: ui::focusable_key("tab.inbox", content(
-          items: model.items,
-          loading: model.loading,
-          error: model.error,
-          cursor: cursor,
-          detail_open: model.detail_open,
-          loading_detail: model.detail_loading,
-          detail_error: model.detail_error,
-          detail: model.detail,
-          on_detail_dismiss: fn(ctx: ui::EventContext) {
-            state.set(fn(mut next: InboxUiState) {
-              next.detail_open = false
-              next.detail_loading = false
-              next.detail_error = ""
-              next.detail = maybe::none()
-            })
-          },
-        )),
+        child: ui::shortcuts(
+          child: ui::focusable_key(
+            "tab.inbox",
+            content(
+              items: model.items,
+              loading: model.loading,
+              error: model.error,
+              cursor: cursor,
+              detail_open: model.detail_open,
+              loading_detail: model.detail_loading,
+              detail_error: model.detail_error,
+              detail: model.detail,
+              on_detail_dismiss: fn(ctx: ui::EventContext) {
+                state.set(
+                  fn(mut next: InboxUiState) {
+                    next.detail_open = false
+                    next.detail_loading = false
+                    next.detail_error = ""
+                    next.detail = maybe::none()
+                  },
+                )
+              },
+            ),
+          ),
+          bindings: [
+            "Up": "inbox.previous",
+            "k": "inbox.previous",
+            "Down": "inbox.next",
+            "j": "inbox.next",
+            "Enter": "inbox.open_detail",
+            "\r": "inbox.open_detail",
+            "\n": "inbox.open_detail",
+            "Ctrl+m": "inbox.open_detail",
+            "Escape": "inbox.close_detail",
+            "Esc": "inbox.close_detail",
+            "o": "inbox.open_browser",
+            "BackSpace": "inbox.archive_detail",
+            "r": "inbox.refresh",
+          ],
+        ),
         bindings: [
-          "Up": "inbox.previous",
-          "k": "inbox.previous",
-          "Down": "inbox.next",
-          "j": "inbox.next",
-          "Enter": "inbox.open_detail",
-          "\r": "inbox.open_detail",
-          "\n": "inbox.open_detail",
-          "Ctrl+m": "inbox.open_detail",
-          "Escape": "inbox.close_detail",
-          "Esc": "inbox.close_detail",
-          "o": "inbox.open_browser",
-          "BackSpace": "inbox.archive_detail",
-          "r": "inbox.refresh",
-        ],
-      ),
-      bindings: [
-        ui::action("inbox.previous", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-          if not model.detail_open {
-            state.set(fn(mut next: InboxUiState) {
-              next.cursor = clamp_cursor(cursor - 1, model.items.size())
-            })
-          }
-          ui::EventResult::handled
-        }),
-        ui::action("inbox.next", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-          if not model.detail_open {
-            state.set(fn(mut next: InboxUiState) {
-              next.cursor = clamp_cursor(cursor + 1, model.items.size())
-            })
-          }
-          ui::EventResult::handled
-        }),
-        ui::action("inbox.refresh", fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
-          if (not model.detail_open) and (not model.loading) {
-            state.set(fn(mut next: InboxUiState) {
-              next.loading = true
-            })
-            ui::dispatch_after(ctx, 16, fn() {
-              let current = state.value()
-              let preserve_id = item_id_at(current.items, current.cursor)
-              state.set(fn(mut loaded: InboxUiState) {
-                loaded = apply_refreshed_items(loaded, inbox::load(api_key), preserve_id, current.cursor, false)
-              })
-            })
-          }
-          ui::EventResult::handled
-        }),
-        ui::action("inbox.open_detail", fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
-          if (not model.detail_open) and model.items.size() > 0 {
-            let selected = model.items.at(cursor)
-            let target_id = selected.notification_id
-            state.set(fn(mut next: InboxUiState) {
-              next.detail_id = target_id
-              next.detail_error = ""
-              next.detail = maybe::none()
-              next.detail_loading = true
-              next.detail_open = true
-            })
-            ui::dispatch_after(ctx, 16, fn() {
-              let current = state.value()
-              if current.detail_id == target_id {
-                state.set(fn(mut loaded: InboxUiState) {
-                  match inbox::load_detail(api_key, target_id) {
-                    ok(d) => {
-                      loaded.detail = maybe::some(d)
-                      loaded.detail_error = ""
-                    },
-                    err(e) => {
-                      loaded.detail = maybe::none()
-                      loaded.detail_error = e
-                    },
-                  }
-                  loaded.detail_loading = false
-                })
+          ui::action(
+            "inbox.previous",
+            fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              if not model.detail_open {
+                state.set(
+                  fn(mut next: InboxUiState) {
+                    next.cursor = clamp_cursor(cursor - 1, model.items.size())
+                  },
+                )
               }
-            })
-          }
-          ui::EventResult::handled
-        }),
-        ui::action("inbox.open_browser", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-          if model.detail_open {
-            match model.detail {
-              d => {
-                let target = relevant_url(d)
-                if not target.is_empty() {
-                  let _ = os::open_url(target)
+              ui::EventResult::handled
+            },
+          ),
+          ui::action(
+            "inbox.next",
+            fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              if not model.detail_open {
+                state.set(
+                  fn(mut next: InboxUiState) {
+                    next.cursor = clamp_cursor(cursor + 1, model.items.size())
+                  },
+                )
+              }
+              ui::EventResult::handled
+            },
+          ),
+          ui::action(
+            "inbox.refresh",
+            fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              if (not model.detail_open) and not model.loading {
+                state.set(
+                  fn(mut next: InboxUiState) {
+                    next.loading = true
+                  },
+                )
+                ui::dispatch_after(
+                  ctx,
+                  16,
+                  fn() {
+                    let current = state.value()
+                    let preserve_id = item_id_at(current.items, current.cursor)
+                    state.set(
+                      fn(mut loaded: InboxUiState) {
+                        loaded = apply_refreshed_items(loaded, inbox::load(api_key), preserve_id, current.cursor, false)
+                      },
+                    )
+                  },
+                )
+              }
+              ui::EventResult::handled
+            },
+          ),
+          ui::action(
+            "inbox.open_detail",
+            fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              if (not model.detail_open) and model.items.size() > 0 {
+                let selected = model.items.at(cursor)
+                let target_id = selected.notification_id
+                state.set(
+                  fn(mut next: InboxUiState) {
+                    next.detail_id = target_id
+                    next.detail_error = ""
+                    next.detail = maybe::none()
+                    next.detail_loading = true
+                    next.detail_open = true
+                  },
+                )
+                ui::dispatch_after(
+                  ctx,
+                  16,
+                  fn() {
+                    let current = state.value()
+                    if current.detail_id == target_id {
+                      state.set(
+                        fn(mut loaded: InboxUiState) {
+                          match inbox::load_detail(api_key, target_id) {
+                            ok(d) => {
+                              loaded.detail = maybe::some(d)
+                              loaded.detail_error = ""
+                            },
+                            err(e) => {
+                              loaded.detail = maybe::none()
+                              loaded.detail_error = e
+                            },
+                          }
+                          loaded.detail_loading = false
+                        },
+                      )
+                    }
+                  },
+                )
+              }
+              ui::EventResult::handled
+            },
+          ),
+          ui::action(
+            "inbox.open_browser",
+            fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              if model.detail_open {
+                match model.detail {
+                  d => {
+                    let target = relevant_url(d)
+                    if not target.is_empty() {
+                      let _ = os::open_url(target)
+                    }
+                  },
+                  _ => (),
                 }
-              },
-              _ => (),
-            }
-          }
-          ui::EventResult::handled
-        }),
-        ui::action("inbox.archive_detail", fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
-          if model.items.size() > 0 {
-            let selected = model.items.at(cursor)
-            match inbox::archive(api_key, selected.notification_id) {
-              ok(_) => {
-                state.set(fn(mut adjusted: InboxUiState) {
-                  if model.detail_open {
-                    adjusted.detail_open = false
-                    adjusted.detail_loading = false
-                    adjusted.detail_error = ""
-                    adjusted.detail = maybe::none()
-                  }
-                  match inbox::load(api_key) {
-                    ok(updated_items) => {
-                      adjusted.items = updated_items
-                      adjusted.error = ""
-                    },
-                    err(e) => { adjusted.error = e },
-                  }
-                  adjusted.loaded = true
-                  adjusted.loading = false
-                  adjusted.cursor = clamp_cursor(cursor, adjusted.items.size())
-                })
-              },
-              err(e) => {
-                state.set(fn(mut next: InboxUiState) {
-                  if model.detail_open {
-                    next.detail_error = e
-                  } else {
-                    next.error = e
-                  }
-                })
-              },
-            }
-          }
-          ui::EventResult::handled
-        }),
-        ui::action("inbox.close_detail", fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
-          state.set(fn(mut next: InboxUiState) {
-            next.detail_open = false
-            next.detail_loading = false
-            next.detail_error = ""
-            next.detail = maybe::none()
-          })
-          ui::EventResult::handled
-        }),
-      ],
-    )
+              }
+              ui::EventResult::handled
+            },
+          ),
+          ui::action(
+            "inbox.archive_detail",
+            fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              if model.items.size() > 0 {
+                let selected = model.items.at(cursor)
+                match inbox::archive(api_key, selected.notification_id) {
+                  ok(_) => {
+                    state.set(
+                      fn(mut adjusted: InboxUiState) {
+                        if model.detail_open {
+                          adjusted.detail_open = false
+                          adjusted.detail_loading = false
+                          adjusted.detail_error = ""
+                          adjusted.detail = maybe::none()
+                        }
+                        match inbox::load(api_key) {
+                          ok(updated_items) => {
+                            adjusted.items = updated_items
+                            adjusted.error = ""
+                          },
+                          err(e) => { adjusted.error = e },
+                        }
+                        adjusted.loaded = true
+                        adjusted.loading = false
+                        adjusted.cursor = clamp_cursor(cursor, adjusted.items.size())
+                      },
+                    )
+                  },
+                  err(e) => {
+                    state.set(
+                      fn(mut next: InboxUiState) {
+                        if model.detail_open {
+                          next.detail_error = e
+                        } else {
+                          next.error = e
+                        }
+                      },
+                    )
+                  },
+                }
+              }
+              ui::EventResult::handled
+            },
+          ),
+          ui::action(
+            "inbox.close_detail",
+            fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              state.set(
+                fn(mut next: InboxUiState) {
+                  next.detail_open = false
+                  next.detail_loading = false
+                  next.detail_error = ""
+                  next.detail = maybe::none()
+                },
+              )
+              ui::EventResult::handled
+            },
+          ),
+        ],
+      )
     },
   )
 }

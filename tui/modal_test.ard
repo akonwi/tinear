@@ -6,15 +6,17 @@ use tinear/tui/ui/test as uitest
 
 test fn test_modal_dialog_renders_title_and_dismisses_on_escape() Void!Str {
   mut dismissed = false
-  let app = uitest::app(modal::dialog(
-    title: "Confirm",
-    child: ui::text("Are you sure?"),
-    footer: ui::text("Esc close"),
-    width: 24,
-    on_dismiss: fn(_ctx: ui::EventContext) {
-      dismissed = true
-    },
-  ))
+  let app = uitest::app(
+    modal::dialog(
+      title: "Confirm",
+      child: ui::text("Are you sure?"),
+      footer: ui::text("Esc close"),
+      width: 24,
+      on_dismiss: fn(_ctx: ui::EventContext) {
+        dismissed = true
+      },
+    ),
+  )
 
   app.pump(40, 8)
   try testing::assert(app.contains("Confirm"), "modal should render title")
@@ -27,27 +29,34 @@ test fn test_modal_dialog_renders_title_and_dismisses_on_escape() Void!Str {
 test fn test_overlay_modal_escape_takes_priority_over_ancestor_shortcut() Void!Str {
   mut dismissed = false
   mut ancestor = false
-  let app = uitest::app(ui::actions(
-    child: ui::shortcuts(
-      child: ui::overlay_modal(
-        ui::focusable(ui::text("Base")),
-        modal::dialog(
-          title: "Status",
-          child: ui::text("In Progress"),
-          footer: ui::text("Esc cancel"),
-          width: 30,
-          on_dismiss: fn(_ctx: ui::EventContext) { dismissed = true },
+  let app = uitest::app(
+    ui::actions(
+      child: ui::shortcuts(
+        child: ui::overlay_modal(
+          ui::focusable(ui::text("Base")),
+          modal::dialog(
+            title: "Status",
+            child: ui::text("In Progress"),
+            footer: ui::text("Esc cancel"),
+            width: 30,
+            on_dismiss: fn(_ctx: ui::EventContext) {
+              dismissed = true
+            },
+          ),
         ),
+        bindings: ["Escape": "ancestor.escape", "Esc": "ancestor.escape"],
       ),
-      bindings: ["Escape": "ancestor.escape", "Esc": "ancestor.escape"],
+      bindings: [
+        ui::action(
+          "ancestor.escape",
+          fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            ancestor = true
+            ui::EventResult::handled
+          },
+        ),
+      ],
     ),
-    bindings: [
-      ui::action("ancestor.escape", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-        ancestor = true
-        ui::EventResult::handled
-      }),
-    ],
-  ))
+  )
 
   app.pump(60, 10)
   app.escape()

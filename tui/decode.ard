@@ -29,8 +29,7 @@ fn user_display_name(user: Dynamic) Str {
     _ => "",
   }
   match dn.is_empty() {
-    true => decode::run(user, decode::field("name", decode::string))
-      .expect("Missing user.name"),
+    true => decode::run(user, decode::field("name", decode::string)).expect("Missing user.name"),
     false => dn,
   }
 }

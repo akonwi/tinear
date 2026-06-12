@@ -1,9 +1,9 @@
+use ard/maybe
+
 // Thin Ard bindings for git.sr.ht/~rockorager/vaxis/ui.
 //
 // These bindings intentionally expose real Go ui types instead of opaque any
 // handles so Ard-generated Go can pass values to host wrappers without casts.
-
-use ard/maybe
 
 extern type Widget = "ui.Widget"
 extern type EventContextHandle = "*tinear.UiEventContext"
@@ -28,8 +28,6 @@ enum ToastVariant {
   debug,
 }
 
-
-
 // Start a vaxis/ui app with `root` as the root widget. App-level behavior such
 // as quit shortcuts should be composed into `root` with `actions`/`shortcuts`.
 extern fn run(root: Widget) Void!Str = "tinear.UiRun"
@@ -43,15 +41,18 @@ extern fn actions(child: Widget, bindings: [ActionBinding]) Widget = "tinear.UiA
 extern fn _action(name: Str, handler: fn(EventContextHandle, Str) EventResult) ActionBinding = "tinear.UiAction"
 
 fn action(name: Str, handler: fn(EventContext, Str) EventResult) ActionBinding {
-  _action(name, fn(ctx: EventContextHandle, intent: Str) EventResult {
-    handler(EventContext{handle: ctx}, intent)
-  })
+  _action(
+    name,
+    fn(ctx: EventContextHandle, intent: Str) EventResult {
+      handler(EventContext{handle: ctx}, intent)
+    },
+  )
 }
 
 // Wrap `child` with shortcut mappings. Key patterns use vaxis/ui's
 // Key.MatchString format, e.g. "q", "Enter", "Ctrl+c", "Shift+Tab". Map
 // values are intent names.
-extern fn shortcuts(child: Widget, bindings: [Str:Str]) Widget = "tinear.UiShortcuts"
+extern fn shortcuts(child: Widget, bindings: [Str: Str]) Widget = "tinear.UiShortcuts"
 
 // Make `child` an event focus target. Ancestor shortcuts/actions can then
 // receive keyboard events through the focused path.
@@ -65,14 +66,32 @@ extern fn key_debug(child: Widget) Widget = "tinear.UiKeyDebug"
 
 // Show a transient toast. `title` is required; `description` is optional. When
 // `ttl_ms` is omitted or <= 0, the toast stays visible for 5 seconds.
-extern fn _show_toast(ctx: EventContextHandle, title: Str, description: Str?, variant: ToastVariant, ttl_ms: Int?) Void = "tinear.UiShowToast"
-extern fn _show_toast_runtime(runtime: RuntimeHandle, title: Str, description: Str?, variant: ToastVariant, ttl_ms: Int?) Void = "tinear.UiShowToastRuntime"
+extern fn _show_toast(
+  ctx: EventContextHandle,
+  title: Str,
+  description: Str?,
+  variant: ToastVariant,
+  ttl_ms: Int?,
+) Void = "tinear.UiShowToast"
+extern fn _show_toast_runtime(
+  runtime: RuntimeHandle,
+  title: Str,
+  description: Str?,
+  variant: ToastVariant,
+  ttl_ms: Int?,
+) Void = "tinear.UiShowToastRuntime"
 
 fn show_toast(ctx: EventContext, title: Str, description: Str?, variant: ToastVariant, ttl_ms: Int?) {
   _show_toast(ctx.handle, title, description, variant, ttl_ms)
 }
 
-fn show_toast_runtime<$T>(runtime: Runtime<$T>, title: Str, description: Str?, variant: ToastVariant, ttl_ms: Int?) {
+fn show_toast_runtime<$T>(
+  runtime: Runtime<$T>,
+  title: Str,
+  description: Str?,
+  variant: ToastVariant,
+  ttl_ms: Int?,
+) {
   _show_toast_runtime(runtime.handle, title, description, variant, ttl_ms)
 }
 
@@ -90,9 +109,13 @@ struct Runtime<$T> {
 impl Runtime {
   // Re-enter the vaxis/ui event loop from background work before mutating UI state.
   fn dispatch(callback: fn(State<$T>)) {
-    _runtime_dispatch(self.handle, self.state, fn(state_handle: StateHandle) {
-      callback(State{handle: state_handle})
-    })
+    _runtime_dispatch(
+      self.handle,
+      self.state,
+      fn(state_handle: StateHandle) {
+        callback(State{handle: state_handle})
+      },
+    )
   }
 }
 
@@ -132,8 +155,15 @@ fn quit(ctx: EventContext) {
 
 extern fn _state_value<$T>(handle: StateHandle) $T = "tinear.UiStateValue"
 extern fn _state_set_value<$T>(handle: StateHandle, value: $T) Void = "tinear.UiStateSetValue"
-extern fn stateful_raw_init<$T>(init: fn(BuildContextHandle, StateHandle) $T, build: fn(BuildContextHandle, StateHandle) Widget) Widget = "tinear.UiStatefulValueInit"
-extern fn stateful_raw_init_key<$T>(key: Str, init: fn(BuildContextHandle, StateHandle) $T, build: fn(BuildContextHandle, StateHandle) Widget) Widget = "tinear.UiStatefulValueInitKey"
+extern fn stateful_raw_init<$T>(
+  init: fn(BuildContextHandle, StateHandle) $T,
+  build: fn(BuildContextHandle, StateHandle) Widget,
+) Widget = "tinear.UiStatefulValueInit"
+extern fn stateful_raw_init_key<$T>(
+  key: Str,
+  init: fn(BuildContextHandle, StateHandle) $T,
+  build: fn(BuildContextHandle, StateHandle) Widget,
+) Widget = "tinear.UiStatefulValueInitKey"
 
 // Ard wrapper around the Go-owned state handle. A stateful widget owns exactly
 // one typed value; mutate it with `set` to schedule a rebuild.
@@ -160,7 +190,10 @@ fn stateful<$T>(key: Str, init: fn(BuildContext) $T, build: fn(BuildContext, Sta
       init(BuildContext{handle: build_ctx, state: maybe::some(state_handle)})
     },
     build: fn(build_ctx: BuildContextHandle, state_handle: StateHandle) Widget {
-      build(BuildContext{handle: build_ctx, state: maybe::some(state_handle)}, State{handle: state_handle})
+      build(
+        BuildContext{handle: build_ctx, state: maybe::some(state_handle)},
+        State{handle: state_handle},
+      )
     },
   )
 }
@@ -235,11 +268,33 @@ fn divider(style: Style?, vertical: Bool?) Widget {
 
 extern fn overlay_modal(child: Widget, modal: Widget) Widget = "tinear.UiOverlayModal"
 extern fn box(child: Widget, border: BoxBorder?, style: Style?) Widget = "tinear.UiBox"
-extern fn _text_field(value: Str, placeholder: Str, min_width: Int, obscure: Bool, on_changed: fn(EventContextHandle, Str), on_submitted: fn(EventContextHandle, Str)) Widget = "tinear.UiTextFieldWrapped"
-extern fn _text_area(value: Str, placeholder: Str, min_width: Int, min_height: Int, soft_wrap: Bool, on_changed: fn(EventContextHandle, Str), on_submitted: fn(EventContextHandle, Str)) Widget = "tinear.UiTextAreaWrapped"
+extern fn _text_field(
+  value: Str,
+  placeholder: Str,
+  min_width: Int,
+  obscure: Bool,
+  on_changed: fn(EventContextHandle, Str),
+  on_submitted: fn(EventContextHandle, Str),
+) Widget = "tinear.UiTextFieldWrapped"
+extern fn _text_area(
+  value: Str,
+  placeholder: Str,
+  min_width: Int,
+  min_height: Int,
+  soft_wrap: Bool,
+  on_changed: fn(EventContextHandle, Str),
+  on_submitted: fn(EventContextHandle, Str),
+) Widget = "tinear.UiTextAreaWrapped"
 extern fn _button(label: Str, on_pressed: fn(EventContextHandle)) Widget = "tinear.UiButtonWrapped"
 
-fn text_field(value: Str, placeholder: Str, min_width: Int, obscure: Bool, on_changed: fn(EventContext, Str), on_submitted: fn(EventContext, Str)) Widget {
+fn text_field(
+  value: Str,
+  placeholder: Str,
+  min_width: Int,
+  obscure: Bool,
+  on_changed: fn(EventContext, Str),
+  on_submitted: fn(EventContext, Str),
+) Widget {
   _text_field(
     value: value,
     placeholder: placeholder,
@@ -254,7 +309,15 @@ fn text_field(value: Str, placeholder: Str, min_width: Int, obscure: Bool, on_ch
   )
 }
 
-fn text_area(value: Str, placeholder: Str, min_width: Int, min_height: Int, soft_wrap: Bool, on_changed: fn(EventContext, Str), on_submitted: fn(EventContext, Str)) Widget {
+fn text_area(
+  value: Str,
+  placeholder: Str,
+  min_width: Int,
+  min_height: Int,
+  soft_wrap: Bool,
+  on_changed: fn(EventContext, Str),
+  on_submitted: fn(EventContext, Str),
+) Widget {
   _text_area(
     value: value,
     placeholder: placeholder,
@@ -271,7 +334,10 @@ fn text_area(value: Str, placeholder: Str, min_width: Int, min_height: Int, soft
 }
 
 fn button(label: Str, on_pressed: fn(EventContext)) Widget {
-  _button(label, fn(ctx: EventContextHandle) {
-    on_pressed(EventContext{handle: ctx})
-  })
+  _button(
+    label,
+    fn(ctx: EventContextHandle) {
+      on_pressed(EventContext{handle: ctx})
+    },
+  )
 }

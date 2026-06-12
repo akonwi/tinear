@@ -13,7 +13,11 @@ fn test_issue(id: Str, identifier: Str) issues::Issue {
 }
 
 fn test_state(tab: Str) logged_in_screen::LoggedInUiState {
-  logged_in_screen::LoggedInUiState{tab: tab, issue_tabs: [], active_picker: maybe::none()}
+  logged_in_screen::LoggedInUiState{
+    tab: tab,
+    issue_tabs: [],
+    active_picker: maybe::none(),
+  }
 }
 
 test fn test_open_issue_adds_and_selects_issue_tab_without_duplicates() Void!Str {
@@ -23,7 +27,10 @@ test fn test_open_issue_adds_and_selects_issue_tab_without_duplicates() Void!Str
   let opened = logged_in_screen::open_issue(initial, issue)
   try testing::assert(opened.issue_tabs.size() == 1, "opening should add an issue tab")
   try testing::assert(opened.tab == "AKO-123", "opening should select the issue tab")
-  try testing::assert(logged_in_screen::tab_index(opened, "AKO-123") == 2, "issue tab should be after fixed tabs")
+  try testing::assert(
+    logged_in_screen::tab_index(opened, "AKO-123") == 2,
+    "issue tab should be after fixed tabs",
+  )
 
   let opened_again = logged_in_screen::open_issue(opened, issue)
   testing::assert(opened_again.issue_tabs.size() == 1, "opening same issue should not duplicate tab")
@@ -35,7 +42,10 @@ test fn test_replace_issue_updates_existing_tab_and_selection() Void!Str {
   let replaced = logged_in_screen::replace_issue(opened, test_issue("issue-1", "AKO-999"))
 
   try testing::assert(replaced.issue_tabs.size() == 1, "replace should keep tab count")
-  try testing::assert(replaced.issue_tabs.at(0).identifier == "AKO-999", "replace should update tab issue")
+  try testing::assert(
+    replaced.issue_tabs.at(0).identifier == "AKO-999",
+    "replace should update tab issue",
+  )
   testing::assert(replaced.tab == "AKO-999", "replace should keep updated issue selected")
 }
 
@@ -55,8 +65,14 @@ test fn test_selected_tab_is_issue_only_for_issue_tabs() Void!Str {
   mut my_issues = opened
   my_issues.tab = "My Issues"
 
-  try testing::assert(logged_in_screen::selected_tab_is_issue(opened), "opened issue tab should be recognized as an issue tab")
-  testing::assert(not logged_in_screen::selected_tab_is_issue(my_issues), "My Issues tab should not be treated as a closable issue tab")
+  try testing::assert(
+    logged_in_screen::selected_tab_is_issue(opened),
+    "opened issue tab should be recognized as an issue tab",
+  )
+  testing::assert(
+    not logged_in_screen::selected_tab_is_issue(my_issues),
+    "My Issues tab should not be treated as a closable issue tab",
+  )
 }
 
 test fn test_previous_tab_moves_backward_and_wraps() Void!Str {
@@ -64,8 +80,14 @@ test fn test_previous_tab_moves_backward_and_wraps() Void!Str {
   let first = logged_in_screen::open_issue(initial, test_issue("issue-1", "AKO-123"))
   let opened = logged_in_screen::open_issue(first, test_issue("issue-2", "AKO-456"))
 
-  try testing::assert(logged_in_screen::previous_tab(opened) == "AKO-123", "previous from second issue should select first issue")
+  try testing::assert(
+    logged_in_screen::previous_tab(opened) == "AKO-123",
+    "previous from second issue should select first issue",
+  )
   mut inbox = opened
   inbox.tab = "Inbox"
-  testing::assert(logged_in_screen::previous_tab(inbox) == "AKO-456", "previous from Inbox should wrap to last tab")
+  testing::assert(
+    logged_in_screen::previous_tab(inbox) == "AKO-456",
+    "previous from Inbox should wrap to last tab",
+  )
 }

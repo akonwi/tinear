@@ -155,7 +155,7 @@ fn wrap_text(s: Str, width: Int) [Str] {
 // is truncated with an ellipsis if the remainder doesn't fit.
 fn wrap_title(title: Str, width: Int) TitleLines {
   match title.size() <= width {
-    true => TitleLines{ line1: title, line2: "" },
+    true => TitleLines{line1: title, line2: ""},
     false => {
       // First pass: find the last space within [0, width) so we can
       // break at a word boundary.
@@ -190,10 +190,7 @@ fn wrap_title(title: Str, width: Int) TitleLines {
         idx = idx + 1
       }
 
-      TitleLines{
-        line1: line1,
-        line2: truncate_with_ellipsis(line2, width),
-      }
+      TitleLines{line1: line1, line2: truncate_with_ellipsis(line2, width)}
     },
   }
 }

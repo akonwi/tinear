@@ -10,5 +10,8 @@ test fn test_hints_bar_renders_labels_with_spacing() Void!Str {
   try testing::assert(app.contains("↑↓ select"), "should render first hint")
   try testing::assert(app.contains("r refresh"), "should render second hint")
   try testing::assert(app.contains("q quit"), "should render third hint")
-  testing::assert(app.contains("↑↓ select  r refresh  q quit"), "should separate hints with spacing")
+  testing::assert(
+    app.contains("↑↓ select  r refresh  q quit"),
+    "should separate hints with spacing",
+  )
 }
