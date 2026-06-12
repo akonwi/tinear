@@ -1,41 +1,5 @@
-use ard/argv
-use ard/io
-use ard/list as List
-
-use tinear/commands/login
 use tinear/commands/tui
 
-fn print_usage() {
-  io::print("tinear -- CLI for Linear")
-  io::print("")
-  io::print("Usage: tinear [command]")
-  io::print("")
-  io::print("With no command, the interactive TUI is launched.")
-  io::print("")
-  io::print("Commands:")
-  io::print("  login   Save an API key to ~/.tinear/config")
-  io::print("  help    Show this help")
-  io::print("")
-  io::print("API key from LINEAR_API_KEY env var or ~/.tinear/config (JSON)")
-}
-
 fn main() {
-  let args = argv::load()
-  let rest = List::drop(from: args.arguments, till: 1)
-
-  match args.arguments.size() {
-    0 => tui::run(),
-    _ => {
-      let cmd = args.arguments.at(0)
-      match cmd {
-        "help" => print_usage(),
-        "login" => login::run(rest),
-        _ => {
-          io::print("Unknown command: {cmd}")
-          io::print("")
-          print_usage()
-        },
-      }
-    },
-  }
+  tui::run()
 }
