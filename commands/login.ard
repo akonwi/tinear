@@ -1,27 +1,31 @@
-use ard/io
-use ard/fs
-use ard/json
-use ard/env
 use ard/decode
+use ard/env
+use ard/fs
+use ard/io
+use ard/json
+
+use tinear/config
 use tinear/linear/client
 use tinear/tui/decode as decode_utils
-use tinear/util
-
-struct LoginConfig {
-  api_key: Str,
-}
-
-fn get_home_dir() Str!Str {
-  match env::get("HOME") {
-    h => Result::ok(h),
-    _ => Result::err("HOME is not set"),
-  }
-}
 
 fn require_non_empty(s: Str, msg: Str) Str!Str {
   match s.is_empty() {
     false => Result::ok(s),
     true => Result::err(msg),
+  }
+}
+
+fn fetch_user(api_key: Str) Dynamic!Str {
+  client::graphql(api_key, "query \{ viewer \{ id name displayName email \} \}")
+}
+
+fn login(api_key: Str) Dynamic!Str {
+  match fetch_user(api_key) {
+    ok(data) => {
+      let config_path = try config::write(api_key)
+      Result::ok(data)
+    },
+    err(e) => Result::err("Invalid API key: {e}"),
   }
 }
 
@@ -36,31 +40,16 @@ fn run_inner(args: [Str]) Void!Str {
   let api_key = try require_non_empty(raw_key, "API key cannot be empty")
 
   io::print("Validating...")
-  match client::graphql(api_key, "query \{ viewer \{ id name displayName email \} \}") {
-    ok(data) => {
-      let viewer = decode::run(data, decode::field("viewer", decode::dynamic)).expect("Missing viewer")
-      let name = decode_utils::user_display_name(viewer)
-      let email = decode::run(viewer, decode::field("email", decode::string)).expect("Missing email")
 
-      let home = try get_home_dir()
-      let config_dir = "{home}/.tinear"
+  login(api_key).and_then(fn(data) {
+    let viewer = decode::run(data, decode::field("viewer", decode::dynamic)).expect("Missing viewer")
+    let name = decode_utils::user_display_name(viewer)
+    let email = decode::run(viewer, decode::field("email", decode::string)).expect("Missing email")
 
-      match fs::exists(config_dir) {
-        false => try fs::create_dir(config_dir),
-        true => (),
-      }
-
-      let config_content = json::encode(LoginConfig{api_key: api_key}).expect("encode config")
-      let config_path = "{config_dir}/config"
-      try fs::write(config_path, config_content)
-
-      io::print("")
-      io::print("Logged in as {name} <{email}>")
-      io::print("API key saved to {config_path}")
-      Result::ok(())
-    },
-    err(e) => Result::err("Invalid API key: {e}"),
-  }
+    io::print("")
+    io::print("Logged in as {name} <{email}>")
+    Result::ok(())
+  })
 }
 
 fn run(args: [Str]) {

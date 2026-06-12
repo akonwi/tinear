@@ -53,6 +53,14 @@ extern fn clipboard_push(vx: Vaxis, text: Str) Void = "ClipboardPush"
 
 // ---- Events ---------------------------------------------------------
 
+// Opaque handle to a single vaxis event. Constructed by `read_event`,
+// passed back into the accessor functions to extract its fields.
+// Backed by the underlying vaxis.Event interface; accessors
+// type-assert to the concrete variant.
+private extern type RawEvent
+
+extern fn event_key_pretty(e: RawEvent) Str = "EventKeyPretty"
+
 // Key press event. `name` is the plain key name without modifier
 // prefixes, taken from vaxis.Key.String() with modifiers cleared.
 // Examples: "Escape", "Enter", "Up", "Tab", "Space", "BackSpace",
@@ -63,13 +71,21 @@ extern fn clipboard_push(vx: Vaxis, text: Str) Void = "ClipboardPush"
 // non-textual keys (Enter, arrows, function keys, control combos).
 // Prefer `text` when implementing text inputs so you don't have to
 // uppercase/layout-translate characters yourself.
+
 struct KeyEvent {
+  raw: RawEvent,
   name: Str,
   text: Str,
   ctrl: Bool,
   shift: Bool,
   alt: Bool,
   meta: Bool,
+}
+
+impl KeyEvent {
+  fn pretty() Str {
+    event_key_pretty(self.raw)
+  }
 }
 
 // Mouse event. `button` is one of: "left", "middle", "right", "none",
@@ -99,20 +115,19 @@ struct FocusEvent {
   focused: Bool,
 }
 
-// Bracketed-paste boundary. started = true marks the beginning of a
-// paste; false marks the end. Keys within a paste arrive as KeyEvent.
+// Pasted text captured from a bracketed-paste sequence.
 struct PasteEvent {
-  started: Bool,
+  content: Str,
 }
 
-// Vaxis asked the app to redraw (e.g. after a SyncFunc).
+// Vaxis asked the app to redraw (e.g. after a SyncFunc or posted wakeup).
 struct RedrawEvent {}
 
-// "Data is stale, refetch now" signal posted from outside the main
-// event loop (typically by a background fiber). Distinct from
-// RedrawEvent (terminal-level repaint) so handlers can refetch
-// without conflating the two concerns.
-struct RefreshEvent {}
+// Application-defined event posted into the vaxis loop.
+struct CustomEvent {
+  name: Str,
+  payload: Dynamic?,
+}
 
 // Terminal color theme changed. dark = true for dark mode, false for light.
 struct ColorThemeEvent {
@@ -122,22 +137,37 @@ struct ColorThemeEvent {
 // Application is shutting down.
 struct QuitEvent {}
 
-type Event = KeyEvent | MouseEvent | ResizeEvent | FocusEvent | PasteEvent | RedrawEvent | RefreshEvent | ColorThemeEvent | QuitEvent
+type Event =
+  | KeyEvent
+  | MouseEvent
+  | ResizeEvent
+  | FocusEvent
+  | PasteEvent
+  | RedrawEvent
+  | CustomEvent
+  | ColorThemeEvent
+  | QuitEvent
 
-// Opaque handle to a single vaxis event. Constructed by `read_event`,
-// passed back into the accessor functions to extract its fields.
-// Backed by the underlying `vaxis.Event` interface; accessors
-// type-assert to the concrete variant.
-private extern type RawEvent = "vaxis.Event"
+extern fn read_event(vx: Vaxis) RawEvent = "ReadEvent"
 
-extern fn read_event(vx: Vaxis) RawEvent!Str = "ReadEvent"
-extern fn event_kind(e: RawEvent) Str = "EventKind"
+private extern fn post_key_event(vx: Vaxis, raw: RawEvent) Void = "PostKeyEvent"
+private extern fn post_mouse_event(vx: Vaxis, col: Int, row: Int, button: Str, kind: Str, ctrl: Bool, shift: Bool, alt: Bool) Void = "PostMouseEvent"
+private extern fn post_resize_event(vx: Vaxis, cols: Int, rows: Int, x_pixel: Int, y_pixel: Int) Void = "PostResizeEvent"
+private extern fn post_focus_event(vx: Vaxis, focused: Bool) Void = "PostFocusEvent"
+private extern fn post_paste_event(vx: Vaxis, content: Str) Void = "PostPasteEvent"
+private extern fn post_redraw_event(vx: Vaxis) Void = "PostRedrawEvent"
+private extern fn post_custom_event(vx: Vaxis, name: Str, payload: Dynamic?) Void = "PostCustomEvent"
+private extern fn post_color_theme_event(vx: Vaxis, dark: Bool) Void = "PostColorThemeEvent"
+private extern fn post_quit_event(vx: Vaxis) Void = "PostQuitEvent"
 
-// Enqueue a RefreshEvent into the vaxis event loop. Intended to be
-// called from an Ard fiber that owns the refresh schedule; the
-// queue is the only thread-safe way to wake the main loop's
-// blocking next_event call.
-extern fn post_refresh_event(vx: Vaxis) Void = "PostRefreshEvent"
+private extern fn is_key_event(e: RawEvent) Bool = "IsKeyEvent"
+private extern fn is_mouse_event(e: RawEvent) Bool = "IsMouseEvent"
+private extern fn is_resize_event(e: RawEvent) Bool = "IsResizeEvent"
+private extern fn is_focus_event(e: RawEvent) Bool = "IsFocusEvent"
+private extern fn is_paste_event(e: RawEvent) Bool = "IsPasteEvent"
+private extern fn is_redraw_event(e: RawEvent) Bool = "IsRedrawEvent"
+private extern fn is_color_theme_event(e: RawEvent) Bool = "IsColorThemeEvent"
+private extern fn is_quit_event(e: RawEvent) Bool = "IsQuitEvent"
 
 extern fn event_key_name(e: RawEvent) Str = "EventKeyName"
 extern fn event_key_text(e: RawEvent) Str = "EventKeyText"
@@ -162,16 +192,36 @@ extern fn event_resize_y_pixel(e: RawEvent) Int = "EventResizeYPixel"
 extern fn event_color_theme_dark(e: RawEvent) Bool = "EventColorThemeDark"
 
 extern fn event_focus_focused(e: RawEvent) Bool = "EventFocusFocused"
-extern fn event_paste_started(e: RawEvent) Bool = "EventPasteStarted"
+
+extern fn event_paste_content(e: RawEvent) Str = "EventPasteContent"
+extern fn event_custom_name(e: RawEvent) Str = "EventCustomName"
+extern fn event_custom_payload(e: RawEvent) Dynamic? = "EventCustomPayload"
+
+// Enqueue an event into vaxis's event loop. This is the Ard-side
+// escape hatch for waking the main loop from callbacks/fibers.
+fn post(vx: Vaxis, event: Event) {
+  match event {
+    KeyEvent(e) => post_key_event(vx, e.raw),
+    MouseEvent(e) => post_mouse_event(vx, e.col, e.row, e.button, e.kind, e.ctrl, e.shift, e.alt),
+    ResizeEvent(e) => post_resize_event(vx, e.cols, e.rows, e.x_pixel, e.y_pixel),
+    FocusEvent(e) => post_focus_event(vx, e.focused),
+    PasteEvent(e) => post_paste_event(vx, e.content),
+    RedrawEvent(_) => post_redraw_event(vx),
+    CustomEvent(e) => post_custom_event(vx, e.name, e.payload),
+    ColorThemeEvent(e) => post_color_theme_event(vx, e.dark),
+    QuitEvent(_) => post_quit_event(vx),
+  }
+}
 
 // Blocking call: read the next event from the terminal and return it
-// as one of the Event variants.
-fn next_event(vx: Vaxis) Event!Str {
-  let raw = try read_event(vx)
-  let kind = event_kind(raw)
-  match kind {
-    "key" => {
-      let ev: Event = KeyEvent{
+// as one of the Event variants. Unknown raw events are represented
+// as CustomEvent, so decoding is total.
+fn next_event(vx: Vaxis) Event {
+  let raw = read_event(vx)
+  match {
+    is_key_event(raw) => {
+      KeyEvent{
+        raw: raw,
         name: event_key_name(raw),
         text: event_key_text(raw),
         ctrl: event_key_ctrl(raw),
@@ -179,10 +229,9 @@ fn next_event(vx: Vaxis) Event!Str {
         alt: event_key_alt(raw),
         meta: event_key_meta(raw),
       }
-      Result::ok(ev)
     },
-    "mouse" => {
-      let ev: Event = MouseEvent{
+    is_mouse_event(raw) => {
+      MouseEvent{
         col: event_mouse_col(raw),
         row: event_mouse_row(raw),
         button: event_mouse_button(raw),
@@ -191,42 +240,21 @@ fn next_event(vx: Vaxis) Event!Str {
         shift: event_mouse_shift(raw),
         alt: event_mouse_alt(raw),
       }
-      Result::ok(ev)
     },
-    "resize" => {
-      let ev: Event = ResizeEvent{
+    is_resize_event(raw) => {
+      ResizeEvent{
         cols: event_resize_cols(raw),
         rows: event_resize_rows(raw),
         x_pixel: event_resize_x_pixel(raw),
         y_pixel: event_resize_y_pixel(raw),
       }
-      Result::ok(ev)
     },
-    "focus" => {
-      let ev: Event = FocusEvent{focused: event_focus_focused(raw)}
-      Result::ok(ev)
-    },
-    "paste" => {
-      let ev: Event = PasteEvent{started: event_paste_started(raw)}
-      Result::ok(ev)
-    },
-    "redraw" => {
-      let ev: Event = RedrawEvent{}
-      Result::ok(ev)
-    },
-    "refresh" => {
-      let ev: Event = RefreshEvent{}
-      Result::ok(ev)
-    },
-    "color_theme" => {
-      let ev: Event = ColorThemeEvent{dark: event_color_theme_dark(raw)}
-      Result::ok(ev)
-    },
-    "quit" => {
-      let ev: Event = QuitEvent{}
-      Result::ok(ev)
-    },
-    _ => Result::err("unknown event kind: {kind}"),
+    is_focus_event(raw) => FocusEvent{focused: event_focus_focused(raw)},
+    is_paste_event(raw) => PasteEvent{content: event_paste_content(raw)},
+    is_redraw_event(raw) => RedrawEvent{},
+    is_color_theme_event(raw) => ColorThemeEvent{dark: event_color_theme_dark(raw)},
+    is_quit_event(raw) => QuitEvent{},
+    _ => CustomEvent{name: event_custom_name(raw), payload: event_custom_payload(raw)},
   }
 }
 

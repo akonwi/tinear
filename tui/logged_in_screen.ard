@@ -1,0 +1,510 @@
+use ard/decode
+use ard/maybe
+
+use tinear/models/issues
+use tinear/tui/api
+use tinear/tui/inbox_view
+use tinear/tui/hints
+use tinear/tui/issue_detail_view
+use tinear/tui/my_issues_view
+use tinear/tui/state
+use tinear/tui/ui
+
+type StatePickerOption = state::StatePicker?
+type CyclePickerOption = state::CyclePicker?
+
+struct LoggedInUiState {
+  tab: Str,
+  issue_tabs: [issues::Issue],
+  state_picker: StatePickerOption,
+  cycle_picker: CyclePickerOption,
+}
+
+fn selected_tab(model: LoggedInUiState) Str {
+  match model.tab {
+    "" => "Inbox",
+    _ => model.tab,
+  }
+}
+
+fn with_tab(model: LoggedInUiState, tab: Str) LoggedInUiState {
+  mut next = model
+  next.tab = tab
+  next
+}
+
+fn tab_count(model: LoggedInUiState) Int {
+  2 + model.issue_tabs.size()
+}
+
+fn tab_label_at(model: LoggedInUiState, index: Int) Str {
+  match index {
+    0 => "Inbox",
+    1 => "My Issues",
+    _ => {
+      let issue_idx = index - 2
+      match issue_idx >= 0 and issue_idx < model.issue_tabs.size() {
+        true => model.issue_tabs.at(issue_idx).identifier,
+        false => "Inbox",
+      }
+    },
+  }
+}
+
+fn tab_index(model: LoggedInUiState, tab: Str) Int {
+  mut found = 0
+  if tab == "My Issues" {
+    found = 1
+  } else {
+    for issue, idx in model.issue_tabs {
+      if issue.identifier == tab {
+        found = idx + 2
+      }
+    }
+  }
+  found
+}
+
+fn next_tab(model: LoggedInUiState) Str {
+  let count = tab_count(model)
+  let current = tab_index(model, selected_tab(model))
+  let next = match current + 1 >= count {
+    true => 0,
+    false => current + 1,
+  }
+  tab_label_at(model, next)
+}
+
+fn previous_tab(model: LoggedInUiState) Str {
+  let count = tab_count(model)
+  let current = tab_index(model, selected_tab(model))
+  let previous = match current == 0 {
+    true => count - 1,
+    false => current - 1,
+  }
+  tab_label_at(model, previous)
+}
+
+fn tab_label(label: Str, selected: Bool) ui::Widget {
+  let padded = " {label} "
+  match selected {
+    true => ui::text(padded, style: ui::style(reverse: true)),
+    false => ui::text(padded),
+  }
+}
+
+fn tab_bar(model: LoggedInUiState) ui::Widget {
+  let tab = selected_tab(model)
+  mut children = [
+    tab_label("Inbox", tab == "Inbox"),
+    ui::divider(style: ui::style(foreground: "border"), vertical: true),
+    tab_label("My Issues", tab == "My Issues"),
+  ]
+  for issue in model.issue_tabs {
+    children.push(ui::divider(style: ui::style(foreground: "border"), vertical: true))
+    children.push(tab_label(issue.identifier, tab == issue.identifier))
+  }
+  ui::row(children)
+}
+
+fn focus_tab(model: LoggedInUiState, tab: Str) {
+  match tab {
+    "My Issues" => ui::request_focus("tab.my_issues"),
+    "Inbox" => ui::request_focus("tab.inbox"),
+    _ => {
+      for issue in model.issue_tabs {
+        if issue.identifier == tab {
+          ui::request_focus("tab.issue.{issue.id}")
+        }
+      }
+    },
+  }
+}
+
+fn selected_issue_tab_index(model: LoggedInUiState) Int? {
+  let selected = selected_tab(model)
+  mut found: Int? = maybe::none()
+  for issue, idx in model.issue_tabs {
+    if issue.identifier == selected {
+      found = maybe::some(idx)
+    }
+  }
+  found
+}
+
+fn body(api_key: Str, model: LoggedInUiState, inbox: ui::Widget, my_issues: ui::Widget, on_state: fn(issues::Issue), on_cycle: fn(issues::Issue)) ui::Widget {
+  mut children = [inbox, my_issues]
+  for issue in model.issue_tabs {
+    children.push(issue_detail_view::new(api_key, issue, on_state, on_cycle))
+  }
+  ui::indexed_stack(tab_index(model, selected_tab(model)), children)
+}
+
+fn footer(model: LoggedInUiState) ui::Widget {
+  match selected_tab(model) {
+    "My Issues" => hints::bar(["↑↓", "← →", "↵ open", "s status", "y cycle", "r refresh"]),
+    "Inbox" => hints::bar(["Tab switch", "↑↓ select", "⌫ delete", "r refresh", "↵ open"]),
+    _ => issue_detail_view::footer(),
+  }
+}
+
+fn screen_separator() ui::Widget {
+  ui::divider(style: ui::style(foreground: "border"))
+}
+
+fn screen_content(api_key: Str, model: LoggedInUiState, inbox: ui::Widget, my_issues: ui::Widget, on_state: fn(issues::Issue), on_cycle: fn(issues::Issue)) ui::Widget {
+  ui::column_stretch([
+    tab_bar(model),
+    screen_separator(),
+    ui::expanded(body(api_key, model, inbox, my_issues, on_state, on_cycle)),
+    screen_separator(),
+    footer(model),
+  ])
+}
+
+fn content(api_key: Str, model: LoggedInUiState, inbox: ui::Widget, my_issues: ui::Widget, on_state: fn(issues::Issue), on_cycle: fn(issues::Issue), on_picker_dismiss: fn(ui::EventContext)) ui::Widget {
+  let base = screen_content(api_key, model, inbox, my_issues, on_state, on_cycle)
+  match model.state_picker {
+    p => ui::overlay_modal(base, my_issues_view::state_picker_modal(p, on_picker_dismiss)),
+    _ => match model.cycle_picker {
+      p => ui::overlay_modal(base, my_issues_view::cycle_picker_modal(p, on_picker_dismiss)),
+      _ => base,
+    },
+  }
+}
+
+fn open_issue(model: LoggedInUiState, issue: issues::Issue) LoggedInUiState {
+  mut next = model
+  mut found = false
+  for existing in next.issue_tabs {
+    if existing.id == issue.id {
+      found = true
+    }
+  }
+  if not found {
+    mut tabs = next.issue_tabs
+    tabs.push(issue)
+    next.issue_tabs = tabs
+  }
+  next.tab = issue.identifier
+  next
+}
+
+fn selected_tab_is_issue(model: LoggedInUiState) Bool {
+  let selected = selected_tab(model)
+  mut found = false
+  for issue in model.issue_tabs {
+    if issue.identifier == selected {
+      found = true
+    }
+  }
+  found
+}
+
+fn close_selected_issue(model: LoggedInUiState) LoggedInUiState {
+  mut next = model
+  let selected = selected_tab(model)
+  mut remaining: [issues::Issue] = []
+  mut closed = false
+  for issue in model.issue_tabs {
+    if issue.identifier == selected {
+      closed = true
+    } else {
+      remaining.push(issue)
+    }
+  }
+  if closed {
+    next.issue_tabs = remaining
+    next.tab = "My Issues"
+  }
+  next
+}
+
+fn replace_issue(model: LoggedInUiState, updated: issues::Issue) LoggedInUiState {
+  mut next = model
+  mut tabs: [issues::Issue] = []
+  for issue in model.issue_tabs {
+    if issue.id == updated.id {
+      tabs.push(updated)
+    } else {
+      tabs.push(issue)
+    }
+  }
+  next.issue_tabs = tabs
+  next.tab = updated.identifier
+  next
+}
+
+fn focus_selected_after_rebuild(ctx: ui::EventContext, model: LoggedInUiState) {
+  ui::dispatch_after(ctx, 0, fn() {
+    focus_tab(model, selected_tab(model))
+  })
+}
+
+fn open_state_picker(api_key: Str, issue: issues::Issue, model: LoggedInUiState) LoggedInUiState {
+  mut next = model
+  match selected_issue_tab_index(model) {
+    idx => {
+      match api::open_state_picker(api_key, issue.raw, false, idx) {
+        ok(p) => { next.state_picker = maybe::some(p) },
+        err(_) => (),
+      }
+    },
+    _ => (),
+  }
+  next
+}
+
+fn open_cycle_picker(api_key: Str, issue: issues::Issue, model: LoggedInUiState) LoggedInUiState {
+  mut next = model
+  match selected_issue_tab_index(model) {
+    idx => {
+      match api::open_cycle_picker(api_key, issue.raw, false, idx) {
+        ok(p) => { next.cycle_picker = maybe::some(p) },
+        err(_) => (),
+      }
+    },
+    _ => (),
+  }
+  next
+}
+
+fn new(api_key: Str) ui::Widget {
+  let inbox = inbox_view::new(api_key)
+  ui::stateful(
+    key: "logged-in",
+    init: fn(_ctx: ui::BuildContext) LoggedInUiState {
+      LoggedInUiState{tab: "Inbox", issue_tabs: [], state_picker: maybe::none(), cycle_picker: maybe::none()}
+    },
+    build: fn(_ctx: ui::BuildContext, state: ui::State<LoggedInUiState>) ui::Widget {
+      let model = state.value()
+      let my_issues = my_issues_view::new(api_key, fn(ctx: ui::EventContext, issue: issues::Issue) {
+        let next_model = open_issue(model, issue)
+        state.set(fn(mut next: LoggedInUiState) {
+          next = next_model
+        })
+        ui::dispatch_after(ctx, 0, fn() {
+          focus_tab(next_model, next_model.tab)
+        })
+      })
+      ui::actions(
+      child: ui::shortcuts(
+        child: content(
+          api_key: api_key,
+          model: model,
+          inbox: inbox,
+          my_issues: my_issues,
+          on_state: fn(issue: issues::Issue) {
+            let next_model = open_state_picker(api_key, issue, model)
+            state.set(fn(mut next: LoggedInUiState) { next = next_model })
+          },
+          on_cycle: fn(issue: issues::Issue) {
+            let next_model = open_cycle_picker(api_key, issue, model)
+            state.set(fn(mut next: LoggedInUiState) { next = next_model })
+          },
+          on_picker_dismiss: fn(ctx: ui::EventContext) {
+            state.set(fn(mut next: LoggedInUiState) {
+              next.state_picker = maybe::none()
+              next.cycle_picker = maybe::none()
+            })
+            focus_selected_after_rebuild(ctx, model)
+          },
+        ),
+        bindings: [
+          "Tab": "tabs.next",
+          "Shift+Tab": "tabs.previous",
+          "1": "tabs.inbox",
+          "2": "tabs.my_issues",
+          "Escape": "tabs.escape",
+          "Esc": "tabs.escape",
+          "Up": "detail_picker.previous",
+          "k": "detail_picker.previous",
+          "Down": "detail_picker.next",
+          "j": "detail_picker.next",
+          "Enter": "detail_picker.confirm",
+          "Space": "detail_picker.confirm",
+        ],
+      ),
+      bindings: [
+        ui::action("tabs.next", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          let next = next_tab(model)
+          state.set(fn(mut updated: LoggedInUiState) {
+            updated.tab = next
+          })
+          ui::dispatch_after(_ctx, 0, fn() {
+            focus_tab(model, next)
+          })
+          ui::EventResult::handled
+        }),
+        ui::action("tabs.previous", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          let previous = previous_tab(model)
+          state.set(fn(mut updated: LoggedInUiState) {
+            updated.tab = previous
+          })
+          ui::dispatch_after(_ctx, 0, fn() {
+            focus_tab(model, previous)
+          })
+          ui::EventResult::handled
+        }),
+        ui::action("tabs.inbox", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          state.set(fn(mut next: LoggedInUiState) {
+            next.tab = "Inbox"
+          })
+          ui::dispatch_after(_ctx, 0, fn() {
+            focus_tab(model, "Inbox")
+          })
+          ui::EventResult::handled
+        }),
+        ui::action("tabs.my_issues", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          state.set(fn(mut next: LoggedInUiState) {
+            next.tab = "My Issues"
+          })
+          ui::dispatch_after(_ctx, 0, fn() {
+            focus_tab(model, "My Issues")
+          })
+          ui::EventResult::handled
+        }),
+        ui::action("tabs.escape", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          if model.state_picker.is_some() or model.cycle_picker.is_some() {
+            state.set(fn(mut next: LoggedInUiState) {
+              next.state_picker = maybe::none()
+              next.cycle_picker = maybe::none()
+            })
+            focus_selected_after_rebuild(_ctx, model)
+            ui::EventResult::handled
+          } else if selected_tab_is_issue(model) {
+            let next_model = close_selected_issue(model)
+            state.set(fn(mut next: LoggedInUiState) {
+              next = next_model
+            })
+            ui::dispatch_after(_ctx, 0, fn() {
+              focus_tab(next_model, selected_tab(next_model))
+            })
+            ui::EventResult::handled
+          } else {
+            ui::EventResult::ignored
+          }
+        }),
+        ui::action("detail_picker.previous", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          if model.state_picker.is_some() or model.cycle_picker.is_some() {
+            state.set(fn(mut next: LoggedInUiState) {
+              match next.state_picker {
+                p => {
+                  if p.cursor > 0 {
+                    p.cursor = p.cursor - 1
+                    next.state_picker = maybe::some(p)
+                  }
+                },
+                _ => match next.cycle_picker {
+                  p => {
+                    if p.cursor > 0 {
+                      p.cursor = p.cursor - 1
+                      next.cycle_picker = maybe::some(p)
+                    }
+                  },
+                  _ => (),
+                },
+              }
+            })
+            ui::EventResult::handled
+          } else {
+            ui::EventResult::ignored
+          }
+        }),
+        ui::action("detail_picker.next", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          if model.state_picker.is_some() or model.cycle_picker.is_some() {
+            state.set(fn(mut next: LoggedInUiState) {
+              match next.state_picker {
+                p => {
+                  if p.cursor < p.states.size() - 1 {
+                    p.cursor = p.cursor + 1
+                    next.state_picker = maybe::some(p)
+                  }
+                },
+                _ => match next.cycle_picker {
+                  p => {
+                    if p.cursor < p.cycles.size() {
+                      p.cursor = p.cursor + 1
+                      next.cycle_picker = maybe::some(p)
+                    }
+                  },
+                  _ => (),
+                },
+              }
+            })
+            ui::EventResult::handled
+          } else {
+            ui::EventResult::ignored
+          }
+        }),
+        ui::action("detail_picker.confirm", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          match model.state_picker {
+            p => {
+              let target = p.states.at(p.cursor)
+              let new_state_id = decode::run(target, decode::field("id", decode::string)).expect("Missing state.id")
+              if new_state_id == p.current_state_id {
+                state.set(fn(mut next: LoggedInUiState) { next.state_picker = maybe::none() })
+                focus_selected_after_rebuild(_ctx, model)
+              } else {
+                match api::update_issue_state(api_key, p.issue_id, new_state_id) {
+                  ok(_) => {
+                    mut next_model = model
+                    state.set(fn(mut next: LoggedInUiState) {
+                      next.state_picker = maybe::none()
+                      match issues::load_issue(api_key, p.issue_id) {
+                        ok(updated) => {
+                          next = replace_issue(next, updated)
+                          next_model = next
+                        },
+                        err(_) => { next_model = next },
+                      }
+                    })
+                    focus_selected_after_rebuild(_ctx, next_model)
+                  },
+                  err(_) => (),
+                }
+              }
+              ui::EventResult::handled
+            },
+            _ => match model.cycle_picker {
+              p => {
+                let target_cycle_id = match p.cursor == 0 {
+                  true => "",
+                  false => {
+                    let c = p.cycles.at(p.cursor - 1)
+                    decode::run(c, decode::field("id", decode::string)).expect("Missing cycle.id")
+                  },
+                }
+                if target_cycle_id == p.current_cycle_id {
+                  state.set(fn(mut next: LoggedInUiState) { next.cycle_picker = maybe::none() })
+                  focus_selected_after_rebuild(_ctx, model)
+                } else {
+                  match api::update_issue_cycle(api_key, p.issue_id, target_cycle_id) {
+                    ok(_) => {
+                      mut next_model = model
+                      state.set(fn(mut next: LoggedInUiState) {
+                        next.cycle_picker = maybe::none()
+                        match issues::load_issue(api_key, p.issue_id) {
+                          ok(updated) => {
+                            next = replace_issue(next, updated)
+                            next_model = next
+                          },
+                          err(_) => { next_model = next },
+                        }
+                      })
+                      focus_selected_after_rebuild(_ctx, next_model)
+                    },
+                    err(_) => (),
+                  }
+                }
+                ui::EventResult::handled
+              },
+              _ => ui::EventResult::ignored,
+            },
+          }
+        }),
+      ],
+    )
+    },
+  )
+}

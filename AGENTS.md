@@ -6,12 +6,13 @@
 
 CLI for [Linear](https://linear.app/) built with [Ard](https://ard.run).
 
-## Build & Run
+## Build, Run, Test
 
 ```bash
 ard check main.ard                          # type-check
 ard build main.ard --out ard-out/tinear     # build into the gitignored ard-out/
 ard run main.ard                            # run directly
+ard test                                    # run unit/widget tests
 ```
 
 ## Project Layout
@@ -19,82 +20,180 @@ ard run main.ard                            # run directly
 | Path | Purpose |
 |------|---------|
 | `main.ard` | Entrypoint, dispatches `help` / `login` / default-to-TUI |
-| `config.ard` | API key from `LINEAR_API_KEY` env var or `~/.tinear/config` |
-| `util.ard` | `get_api_key()` + `print_usage()` |
+| `config.ard` | Load config and API key from env var or `~/.tinear/config` |
 | `linear/client.ard` | Shared GraphQL client (one `graphql()` function) |
 | `commands/login.ard` | Interactive `login` command (saves key to config) |
-| `commands/tui.ard` | Thin TUI entrypoint — delegates to `tui/app::run_loop` |
-| `tui/*.ard` | TUI implementation, split by concern (see below) |
-| `vaxis.ard` + `ffi/` | Terminal UI bindings (Ard extern declarations + Go FFI) |
+| `commands/tui.ard` | vaxis/ui TUI entrypoint used by the default command |
+| `models/*.ard` | Stateless fetch/decode model modules for inbox and issues |
+| `tui/*.ard` | vaxis/ui implementation, split by concern |
+| `tui/ui.ard` | Ard-facing vaxis/ui widget/state/runtime bindings |
+| `tui/ui/test.ard` | Ard-facing `vaxis/ui/uitest` bindings for widget tests |
+| `vaxis.ard` + `ffi/` | Terminal/vaxis/ui bindings (Ard extern declarations + Go FFI) |
 
-## TUI Layout
+## Active TUI Architecture
 
-`commands/tui.ard` is just an entrypoint. The actual implementation lives in `tui/`:
+The active TUI is built on `git.sr.ht/~rockorager/vaxis/ui`. Do not add new
+custom retained UI framework code; prefer vaxis/ui primitives plus thin Ard
+wrappers.
 
 | File | Purpose |
 |------|---------|
-| `tui/app.ard` | `run_loop` (event loop + input dispatch) and `draw_screen` |
-| `tui/state.ard` | All data structs (AppState, IssueTab, etc.) + workflow / priority helpers |
-| `tui/components.ard` | `Scrollview`, `CommentList`, `draw_comment` — view components with impls |
-| `tui/api.ard` | Every GraphQL fetch/mutation + `open_state_picker` |
-| `tui/text.ard` | Byte- and display-width string helpers (truncate, pad, wrap) |
-| `tui/screen.ard` | `Layout` struct + terminal geometry helpers |
+| `tui/logged_in_screen.ard` | Logged-in tab shell; keeps tab bodies mounted with `ui::indexed_stack` |
+| `tui/welcome_screen.ard` | Login/auth screen for unauthenticated users |
+| `tui/inbox_view.ard` | Inbox list + notification detail modal |
+| `tui/my_issues_view.ard` | My Issues board + picker modals |
+| `tui/modal.ard` | Shared vaxis/ui modal/dialog wrapper |
+| `tui/hints.ard` | Footer hint bar |
+| `tui/api.ard` | GraphQL fetch/mutation helpers and picker construction |
+| `tui/state.ard` | Shared Linear UI model structs + workflow/priority helpers |
 | `tui/decode.ard` | `optional_field` — missing-or-null aware field decoder |
-| `tui/draw.ard` | Shared draw primitives (tab bar, label rows) |
-| `tui/notifications.ard` | Notification helpers + inbox view (list, detail panels) |
-| `tui/board.ard` | Board geometry + card/column rendering |
-| `tui/issue_tab.ard` | Open-issue tab rendering |
-| `tui/modals.ard` | Status picker + comment composer modal rendering |
+| `tui/text.ard` | Byte- and display-width string helpers (truncate, pad, wrap) |
 
-### Architectural conventions
+## vaxis/ui Best Practices
 
-- **Persistent state vs ephemeral layout**: view components store only the bits
-  that survive across frames (`scroll`, `cursor`, `top`). The per-frame layout
-  rectangle (`screen::Layout`) is computed in the parent and passed into the
-  component's `draw` method. Use this pattern for any new component.
-- **`AppState` is rebuilt each frame** in `app::run_loop` from local mutable
-  variables and passed (immutably) into `draw_screen`. State mutations live in
-  the input handler, not in draw paths.
-- **Dependency direction**: text/screen/decode → components → state → api →
-  draw/board/notifications/modals/issue_tab → app. Don't introduce upward
-  dependencies.
+- Prefer native vaxis/ui composition (`ui::row`, `ui::column`, `ui::text`,
+  `ui::box`, `ui::actions`, `ui::shortcuts`, etc.) over app-specific rendering
+  abstractions.
+- Keep Ard bindings thin and ergonomic. Public functions should translate Ard
+  nullable/default arguments into the exact Go FFI shape needed by vaxis/ui.
+- Keep raw FFI handles private/internal where possible. Expose Ard wrapper
+  structs like `BuildContext`, `Runtime`, `State`, and `EventContext`.
+- Primitive widget factory functions should accept a nullable `style: Style?`
+  argument when the underlying widget/rendering can be styled.
+- Prefer a consistent, discoverable API like `ui::text(value, style: ...)` and
+  `ui::row(children, style: ...)` over single-purpose helpers such as
+  `text_reverse` or `background`.
+- Prefer optional arguments for widget customization/lifecycle hooks instead of
+  separate public functions for the same widget.
+- Separate keybindings from behavior:
+  - `ui::shortcuts` maps keys (`"j"`, `"Enter"`, `"Ctrl+c"`) to intent names.
+  - `ui::actions` maps intent names to behavior with `ui::action(...)`.
+- Keyboard events follow the focused widget path. If a state change mounts a new
+  focus target (for example opening/selecting a dynamic tab), defer the focus
+  request until after the rebuild with `ui::dispatch_after(ctx, 0, fn() { ... })`;
+  requesting focus before the target is mounted silently leaves focus elsewhere.
+- Modals should get key priority by being placed in `ui::overlay_modal`, whose
+  FFI wrapper traps/autofocuses the modal subtree without drawing a shaded
+  barrier. Avoid adding root-level Escape handlers that always return handled;
+  return `ignored` when they do not apply so modal dismiss handlers can run.
+- For scrollable detail/body regions, prefer native `ui::scroll_view` or
+  controller-backed `ui::scroll_pane`. If focus remains on an outer wrapper,
+  route `j/k` and arrow shortcuts to the scroll pane controller explicitly;
+  mouse wheel scrolling can work even when keyboard focus is elsewhere.
+- Keep inactive tab bodies mounted with `ui::indexed_stack` when their state
+  should survive tab switches.
 
-## Vaxis FFI
+## State and Async Patterns
 
-`vaxis.ard` lives at the project root with `ffi/host.go` holding the Go bindings.
-The Go module includes both.
+Widget-local UI data should live in typed `ui::State` values. Stateless model
+modules perform API calls/decoding, then widgets store returned data in state.
 
-Key bits of the event API:
+Use `ui::stateful(init: ..., build: ..., key: ...)`:
 
-- `vaxis::next_event(vx) Event!Str` — blocking; returns the typed `Event` union
-  (`KeyEvent | MouseEvent | ResizeEvent | FocusEvent | PasteEvent | RedrawEvent | QuitEvent`).
-- `KeyEvent.name` is the plain key name (no modifier prefixes): `"Escape"`,
-  `"Enter"`, `"Up"`, `"Tab"`, `"a"`, etc.
-- `KeyEvent.text` is the rendered text (handles shift/layout/IME). Empty for
-  non-textual keys. Prefer `.text` for text inputs.
+```ard
+ui::stateful(
+  key: "my-widget",
+  init: fn(ctx: ui::BuildContext) MyState {
+    MyState{loading: false, items: []}
+  },
+  build: fn(ctx: ui::BuildContext, state: ui::State<MyState>) ui::Widget {
+    let model = state.value()
+    ...
+  },
+)
+```
 
-## Key Patterns
+Rules:
 
-- **Error handling**: `.expect("msg")` panics with a message. The `run()`
-  entrypoints return `Void`, so they panic on failure. Keep error messages
-  user-facing.
-- **Nullable nested JSON**: use `tui/decode::optional_field(data, name)` to
-  treat both missing-field and null-value cases as `None`. GraphQL inline
-  fragments omit fields entirely when their parent type doesn't match.
-- **Display-width-aware** text helpers (`text::pad_str_display`,
-  `text::truncate_with_ellipsis_display`) require a `vx` argument and use
-  `vaxis::rendered_width`. Use these whenever fitting into a fixed-cell slot;
-  the byte-based versions are only safe for ASCII.
-- **Auth header**: `Authorization: <raw key>` — no `Bearer` prefix. Linear
-  rejects it.
+- `init` creates initial state only. Do not perform blocking background work in
+  `init` unless it is intentionally synchronous and cheap.
+- Direct UI callbacks/build/event handlers may mutate state directly with
+  `state.set(fn(mut next: MyState) { ... })`.
+- Background work must re-enter the UI runtime before mutating UI state:
+
+```ard
+let rt = ctx.runtime<MyState>()
+async::start(fn() {
+  let result = load()
+  rt.dispatch(fn(state: ui::State<MyState>) {
+    state.set(fn(mut next: MyState) {
+      match result {
+        ok(items) => {
+          next.items = items
+          next.error = ""
+        },
+        err(e) => { next.error = e },
+      }
+      next.loading = false
+    })
+  })
+})
+```
+
+- Prefer typed state handles (`ui::State<MyState>`, `ui::Runtime<MyState>`)
+  with `state.value()` and `state.set(...)`.
+- Prefer immutable snapshots for rendering (`let model = state.value()`) and
+  focused mutation blocks for updates.
+- Use stable `key:` values for stateful widgets whose identity must survive tree
+  reordering or tab switching.
+
+## Testing vaxis/ui Widgets
+
+Use the Ard wrapper around upstream `vaxis/ui/uitest`:
+
+```ard
+use ard/testing
+use tinear/tui/ui/test as uitest
+
+let app = uitest::app(widget)
+app.pump(80, 24)
+try testing::assert(app.contains("Inbox"), "renders Inbox")
+```
+
+Available helpers include:
+
+- `pump(width, height)` — rebuild/layout/paint at a fixed size
+- `key(str)`, `enter()`, `escape()`, `tab()`, `shift_tab()`
+- `up()`, `down()`, `left()`, `right()`
+- `click(x, y)`
+- `contains(str)`, `text()`
+- `cell_grapheme(x, y)`, `cell_reverse(x, y)`
+- `should_quit()`
+
+Testing guidance:
+
+- Prefer widget tests for rendering, focus/key behavior, actions, shortcuts,
+  modal open/close, and state transitions.
+- Pump after constructing the app and after input that should affect rendering.
+- Assert on user-visible text or cell attributes; avoid coupling tests to
+  incidental whitespace unless layout is the behavior under test.
+- Keep pure helper tests in regular Ard unit tests when no widget tree is
+  needed.
+
+## Code Style
+
+- Keep functions small and named for UI intent (`issue_card`, `detail_modal`,
+  `load_inbox`) rather than implementation mechanics.
+- Favor named arguments when calling a function with more than two arguments.
+- Prefer model modules (`models/*.ard`) for fetch/decode logic and TUI modules
+  for presentation/state wiring.
+- Keep GraphQL decode edge cases close to API/model code, not inside render
+  branches.
+- Keep errors user-facing. `run()` entrypoints return `Void`, so they may panic
+  or print a clear message on failure.
+- Do not add a `Bearer` prefix to Linear auth. The header is
+  `Authorization: <raw key>`.
+- Use `tui/decode::optional_field(data, name)` for nullable nested JSON fields;
+  GraphQL inline fragments can omit fields entirely.
+- Use display-width-aware text helpers when fitting strings into fixed terminal
+  cells. Byte-based helpers are only safe for ASCII.
 
 ## Commands
 
 - `login` — prompts for API key, validates via `viewer` query, saves to
   `~/.tinear/config`
 - `help` — prints usage
-- _(no command)_ — launches the interactive TUI (Inbox + My Issues tabs,
-  per-issue detail tabs, status picker, comment composer)
+- _(no command)_ — launches the interactive TUI
 
 ## Ard Language Notes
 

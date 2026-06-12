@@ -7,12 +7,43 @@ struct Config {
   api_key: Str,
 }
 
-fn get_home() Str!Str {
+impl Config {
+  fn has_auth() Bool {
+    not self.api_key.is_empty()
+  }
+}
+
+fn get_home_dir() Str!Str {
   match env::get("HOME") {
     h => Result::ok(h),
     _ => Result::err("HOME is not set"),
   }
 }
+
+fn get_config_dir() Str!Str {
+  let home = try get_home_dir()
+  Result::ok("{home}/.tinear")
+}
+
+fn get_config_path() Str!Str {
+  let dir = try get_config_dir()
+  Result::ok("{dir}/config.json")
+}
+
+fn write(api_key: Str) Str!Str {
+  let config_dir = try get_config_dir()
+
+  if not fs::exists(config_dir) {
+    try fs::create_dir(config_dir)
+  }
+
+  let config_content = json::encode(Config{api_key: api_key}).expect("encode config")
+  let config_path = try get_config_path()
+  try fs::write(config_path, config_content)
+
+  Result::ok(config_path)
+}
+
 
 fn load() Config!Str {
   // Try env var first
@@ -20,9 +51,8 @@ fn load() Config!Str {
     key => Result::ok(Config{api_key: key}),
     _ => {
       // Fall back to config file
-      let home = try get_home()
-      let config_path = "{home}/.tinear/config"
-      let content = try fs::read(config_path)
+      let config_path = try get_config_path()
+      let content = try fs::read(config_path) -> _ { Result::ok(Config{api_key: ""}) }
       json::parse<Config>(content)
     },
   }

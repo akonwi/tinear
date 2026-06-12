@@ -2,12 +2,12 @@
 
 ## Status
 
-Accepted — Phase 1 implemented
+Superseded — the active TUI now uses the vaxis/ui implementation
 
 ## Context
 
-The existing `tui` command shows a static read-only view of the user's
-open issues (My Issues). We want to expand it into a full explorer that
+The original `tui` command showed a static read-only view of the user's
+open issues (My Issues). We wanted to expand it into a full explorer that
 lets users navigate Linear data interactively — inbox, projects, issue
 details — without leaving the terminal.
 
@@ -62,8 +62,8 @@ The TUI will be built incrementally in these phases:
   major refactors between phases.
 - Inbox is a new GraphQL query (`notifications`) — adds one more API
   surface to maintain.
-- The current `draw_board` / `fetch_board` / `run_loop` structure will
-  be replaced by a more general screen-rendering pattern.
+- The original `draw_board` / `fetch_board` / `run_loop` structure was
+  later superseded by the vaxis/ui widget implementation.
 - The command palette overlay requires rendering multiple layers
   (background dim, palette dialog) on top of the active screen.
 

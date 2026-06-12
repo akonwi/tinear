@@ -1,0 +1,99 @@
+use tinear/tui/ui
+
+extern type AppHandle = "*tinear.UiTestApp"
+extern fn _test_app(root: ui::Widget) AppHandle = "UiTestNew"
+extern fn _test_pump(app: AppHandle, width: Int, height: Int) Void = "UiTestPump"
+extern fn _test_key(app: AppHandle, text: Str) Void = "UiTestKey"
+extern fn _test_enter(app: AppHandle) Void = "UiTestEnter"
+extern fn _test_ctrl_j(app: AppHandle) Void = "UiTestCtrlJ"
+extern fn _test_escape(app: AppHandle) Void = "UiTestEscape"
+extern fn _test_up(app: AppHandle) Void = "UiTestUp"
+extern fn _test_down(app: AppHandle) Void = "UiTestDown"
+extern fn _test_left(app: AppHandle) Void = "UiTestLeft"
+extern fn _test_right(app: AppHandle) Void = "UiTestRight"
+extern fn _test_tab(app: AppHandle) Void = "UiTestTab"
+extern fn _test_shift_tab(app: AppHandle) Void = "UiTestShiftTab"
+extern fn _test_click(app: AppHandle, x: Int, y: Int) Void = "UiTestClick"
+extern fn _test_contains(app: AppHandle, text: Str) Bool = "UiTestContains"
+extern fn _test_text(app: AppHandle) Str = "UiTestText"
+extern fn _test_cell_grapheme(app: AppHandle, x: Int, y: Int) Str = "UiTestCellGrapheme"
+extern fn _test_cell_reverse(app: AppHandle, x: Int, y: Int) Bool = "UiTestCellReverse"
+extern fn _test_should_quit(app: AppHandle) Bool = "UiTestShouldQuit"
+
+struct App {
+  handle: AppHandle,
+}
+
+fn app(root: ui::Widget) App {
+  App{handle: _test_app(root)}
+}
+
+impl App {
+  fn pump(width: Int, height: Int) {
+    _test_pump(app: self.handle, width: width, height: height)
+  }
+
+  fn key(text: Str) {
+    _test_key(self.handle, text)
+  }
+
+  fn enter() {
+    _test_enter(self.handle)
+  }
+
+  fn ctrl_j() {
+    _test_ctrl_j(self.handle)
+  }
+
+  fn escape() {
+    _test_escape(self.handle)
+  }
+
+  fn up() {
+    _test_up(self.handle)
+  }
+
+  fn down() {
+    _test_down(self.handle)
+  }
+
+  fn left() {
+    _test_left(self.handle)
+  }
+
+  fn right() {
+    _test_right(self.handle)
+  }
+
+  fn tab() {
+    _test_tab(self.handle)
+  }
+
+  fn shift_tab() {
+    _test_shift_tab(self.handle)
+  }
+
+  fn click(x: Int, y: Int) {
+    _test_click(app: self.handle, x: x, y: y)
+  }
+
+  fn contains(text: Str) Bool {
+    _test_contains(self.handle, text)
+  }
+
+  fn text() Str {
+    _test_text(self.handle)
+  }
+
+  fn cell_grapheme(x: Int, y: Int) Str {
+    _test_cell_grapheme(app: self.handle, x: x, y: y)
+  }
+
+  fn cell_reverse(x: Int, y: Int) Bool {
+    _test_cell_reverse(app: self.handle, x: x, y: y)
+  }
+
+  fn should_quit() Bool {
+    _test_should_quit(self.handle)
+  }
+}

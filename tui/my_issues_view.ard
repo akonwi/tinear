@@ -1,0 +1,710 @@
+use ard/async
+use ard/decode
+use ard/duration
+use ard/maybe
+
+use tinear/models/issues
+use tinear/tui/api
+use tinear/tui/modal
+use tinear/tui/state
+use tinear/tui/text
+use tinear/tui/ui
+
+fn clamp(value: Int, count: Int) Int {
+  match {
+    count <= 0 => 0,
+    value < 0 => 0,
+    value >= count => count - 1,
+    _ => value,
+  }
+}
+
+fn board_column_gap() Int { 3 }
+
+fn board_column_width(screen_w: Int, col_count: Int) Int { 50 }
+
+fn board_visible_count(screen_w: Int, col_count: Int) Int {
+  match col_count == 0 {
+    true => 0,
+    false => {
+      let col_w = board_column_width(screen_w, col_count)
+      let gap = board_column_gap()
+      let per_col = col_w + gap
+      let computed = (screen_w + gap) / per_col
+      match computed > col_count {
+        true => col_count,
+        false => match computed < 1 {
+          true => 1,
+          false => computed,
+        },
+      }
+    },
+  }
+}
+
+fn repeat(ch: Str, count: Int) Str {
+  mut out = ""
+  if count > 0 {
+    for i in 0..(count - 1) {
+      out =+ ch
+    }
+  }
+  out
+}
+
+fn visible_scroll(scroll: Int, selected: Int, visible_count: Int, col_count: Int) Int {
+  let safe_visible = match visible_count < 1 {
+    true => 1,
+    false => visible_count,
+  }
+  let max_scroll = match col_count > safe_visible {
+    true => col_count - safe_visible,
+    false => 0,
+  }
+  let clamped = match scroll > max_scroll {
+    true => max_scroll,
+    false => match scroll < 0 {
+      true => 0,
+      false => scroll,
+    },
+  }
+
+  let with_selected = match selected < clamped {
+    true => selected,
+    false => match selected >= clamped + safe_visible {
+      true => selected - safe_visible + 1,
+      false => clamped,
+    },
+  }
+
+  match with_selected > max_scroll {
+    true => max_scroll,
+    false => match with_selected < 0 {
+      true => 0,
+      false => with_selected,
+    },
+  }
+}
+
+fn row_text(value: Str, selected: Bool) ui::Widget {
+  match selected {
+    true => ui::text(value, style: ui::style(reverse: true)),
+    false => ui::text(value),
+  }
+}
+
+fn metadata_text(issue: issues::Issue) Str {
+  let has_cycle = not issue.cycle_label.is_empty() and not (issue.cycle_label == "—")
+  let has_project = not issue.project_name.is_empty() and not (issue.project_name == "—")
+  match {
+    has_cycle and has_project => "{issue.cycle_label} · {issue.project_name}",
+    has_cycle => issue.cycle_label,
+    has_project => issue.project_name,
+    _ => "",
+  }
+}
+
+fn metadata_row(value: Str, selected: Bool) ui::Widget {
+  match selected {
+    true => ui::text(value, style: ui::style(reverse: true)),
+    false => ui::text(value, style: ui::style(foreground: "border")),
+  }
+}
+
+fn card_body(issue: issues::Issue, selected: Bool, col_w: Int) ui::Widget {
+  let cursor = " "
+  let glyph = state::priority_glyph(issue.priority)
+  let title_indent = "   "
+  let title_w = col_w - 3
+  let wrapped = text::wrap_title(issue.title, title_w)
+  mut children = [
+    row_text("{cursor}{glyph} {issue.identifier}", selected),
+    row_text("{title_indent}{wrapped.line1}", selected),
+  ]
+  if not wrapped.line2.is_empty() {
+    children.push(row_text("{title_indent}{wrapped.line2}", selected))
+  }
+  let meta = metadata_text(issue)
+  if not meta.is_empty() {
+    children.push(metadata_row("{title_indent}{text::truncate_with_ellipsis(meta, title_w)}", selected))
+  }
+  ui::column_stretch(children)
+}
+
+fn issue_card(issue: issues::Issue, selected: Bool, last: Bool, col_w: Int) ui::Widget {
+  let first = match selected {
+    true => ui::box(card_body(issue, selected, col_w), style: ui::style(reverse: true)),
+    false => card_body(issue, selected, col_w),
+  }
+  mut children = [first]
+  if not last {
+    children.push(ui::text(repeat("─", col_w - 1), style: ui::style(foreground: "border")))
+    children.push(ui::sized_box(0, 1))
+  }
+  ui::column_stretch(children)
+}
+
+fn board_column(col: issues::BoardColumn, col_idx: Int, selected_col: Int, selected_row: Int, screen_w: Int, col_count: Int) ui::Widget {
+  let col_w = board_column_width(screen_w, col_count)
+  let suffix = match col.state_type == "completed" {
+    true => " · last 10",
+    false => "",
+  }
+  let header = text::truncate_with_ellipsis("{col.name} ({col.issues.size()}){suffix}", col_w)
+  mut children = [
+    ui::text(header, style: ui::style(bold: true)),
+    ui::text(repeat("─", col_w - 1), style: ui::style(foreground: "border")),
+    ui::sized_box(0, 1),
+  ]
+  let last_idx = col.issues.size() - 1
+  for issue, row_idx in col.issues {
+    children.push(issue_card(
+      issue: issue,
+      selected: col_idx == selected_col and row_idx == selected_row,
+      last: row_idx == last_idx,
+      col_w: col_w,
+    ))
+  }
+  ui::constrained_width(col_w, ui::column_stretch(children))
+}
+
+fn board(columns: [issues::BoardColumn], selected_col: Int, selected_row: Int, scroll: Int, screen_w: Int) ui::Widget {
+  let col_count = columns.size()
+  let visible_count = board_visible_count(screen_w, col_count)
+  let start_col = visible_scroll(scroll, selected_col, visible_count, col_count)
+  let end_excl = match start_col + visible_count > col_count {
+    true => col_count,
+    false => start_col + visible_count,
+  }
+
+  mut widgets: [ui::Widget] = []
+  if start_col > 0 {
+    widgets.push(ui::text("‹"))
+  }
+  for col, col_idx in columns {
+    if col_idx >= start_col and col_idx < end_excl {
+      if widgets.size() > 0 {
+        widgets.push(ui::sized_box(board_column_gap(), 0))
+      }
+      widgets.push(board_column(col, col_idx, selected_col, selected_row, screen_w, col_count))
+    }
+  }
+  if end_excl < col_count {
+    widgets.push(ui::sized_box(board_column_gap(), 0))
+    widgets.push(ui::text("›"))
+  }
+  ui::focusable(ui::row(widgets))
+}
+
+fn selected_row_count(columns: [issues::BoardColumn], col: Int) Int {
+  match columns.size() == 0 {
+    true => 0,
+    false => columns.at(clamp(col, columns.size())).issues.size(),
+  }
+}
+
+fn selected_issue(columns: [issues::BoardColumn], col: Int, row: Int) issues::Issue? {
+  match columns.size() == 0 {
+    true => maybe::none(),
+    false => {
+      let safe_col = clamp(col, columns.size())
+      let issues = columns.at(safe_col).issues
+      match issues.size() == 0 {
+        true => maybe::none(),
+        false => maybe::some(issues.at(clamp(row, issues.size()))),
+      }
+    },
+  }
+}
+
+fn selected_issue_id(columns: [issues::BoardColumn], col: Int, row: Int) Str {
+  match selected_issue(columns, col, row) {
+    issue => issue.id,
+    _ => "",
+  }
+}
+
+fn selection_for_issue(columns: [issues::BoardColumn], issue_id: Str, fallback_col: Int, fallback_row: Int) [Int] {
+  mut found = false
+  mut found_col = fallback_col
+  mut found_row = fallback_row
+  if not issue_id.is_empty() {
+    for column, col_idx in columns {
+      for issue, row_idx in column.issues {
+        if issue.id == issue_id {
+          found = true
+          found_col = col_idx
+          found_row = row_idx
+        }
+      }
+    }
+  }
+  match found {
+    true => [found_col, found_row],
+    false => {
+      let col = clamp(fallback_col, columns.size())
+      [col, clamp(fallback_row, selected_row_count(columns, col))]
+    },
+  }
+}
+
+fn apply_refreshed_columns(mut state: MyIssuesUiState, result: [issues::BoardColumn]!Str, preserve_issue_id: Str, fallback_col: Int, fallback_row: Int, silent: Bool) MyIssuesUiState {
+  match result {
+    ok(columns) => {
+      state.columns = columns
+      state.error = ""
+      let selection = selection_for_issue(columns, preserve_issue_id, fallback_col, fallback_row)
+      state.col = selection.at(0)
+      state.row = selection.at(1)
+      state.scroll = visible_scroll(state.scroll, state.col, board_visible_count(state.viewport_width, columns.size()), columns.size())
+    },
+    err(e) => {
+      if not silent {
+        state.error = e
+      }
+    },
+  }
+  state.loaded = true
+  state.loading = false
+  state
+}
+
+fn start_background_refresh(api_key: Str, rt: ui::Runtime<MyIssuesUiState>) {
+  async::start(fn() {
+    while {
+      async::sleep(duration::from_minutes(5))
+      let result = issues::load(api_key)
+      match result {
+        ok(_) => (),
+        err(e) => ui::show_toast_runtime(rt, "Unable to refresh my issues", maybe::some(e), ui::ToastVariant::error, maybe::none()),
+      }
+      rt.dispatch(fn(state: ui::State<MyIssuesUiState>) {
+        let current = state.value()
+        let preserve_id = selected_issue_id(current.columns, current.col, current.row)
+        state.set(fn(mut next: MyIssuesUiState) {
+          next = apply_refreshed_columns(next, result, preserve_id, current.col, current.row, true)
+        })
+      })
+    }
+  })
+}
+
+fn state_picker_rows(picker: state::StatePicker) ui::Widget {
+  mut rows: [ui::Widget] = []
+  for s, i in picker.states {
+    let sid = decode::run(s, decode::field("id", decode::string)).expect("Missing state.id")
+    let sname = decode::run(s, decode::field("name", decode::string)).expect("Missing state.name")
+    let cursor_mark = match i == picker.cursor {
+      true => "▸",
+      false => " ",
+    }
+    let current_suffix = match sid == picker.current_state_id {
+      true => "  (current)",
+      false => "",
+    }
+    rows.push(ui::text(" {cursor_mark} {sname}{current_suffix}"))
+  }
+  ui::column_stretch(rows)
+}
+
+fn cycle_picker_rows(picker: state::CyclePicker) ui::Widget {
+  let row_count = picker.cycles.size() + 1
+  mut rows: [ui::Widget] = []
+  for r in 0..(row_count - 1) {
+    let cursor_mark = match r == picker.cursor {
+      true => "▸",
+      false => " ",
+    }
+    mut label = ""
+    if r == 0 {
+      let suffix = match picker.current_cycle_id.is_empty() {
+        true => "  (current)",
+        false => "",
+      }
+      label = "(no cycle){suffix}"
+    } else {
+      let c = picker.cycles.at(r - 1)
+      let number = decode::run(c, decode::field("number", decode::int)).expect("Missing cycle.number")
+      let cid = decode::run(c, decode::field("id", decode::string)).expect("Missing cycle.id")
+      let name_opt = decode::run(c, decode::field("name", decode::nullable(decode::string))).expect("Missing cycle.name")
+      let base = match name_opt {
+        n => n,
+        _ => "Cycle {number}",
+      }
+      let suffix = match cid == picker.current_cycle_id {
+        true => "  (current)",
+        false => "",
+      }
+      label = "{base}{suffix}"
+    }
+    rows.push(ui::text(" {cursor_mark} {label}"))
+  }
+  ui::column_stretch(rows)
+}
+
+fn picker_footer() ui::Widget {
+  ui::text("↑↓ select  ↵ confirm  Esc cancel")
+}
+
+fn state_picker_modal(picker: state::StatePicker, on_dismiss: fn(ui::EventContext)) ui::Widget {
+  modal::dialog(
+    title: "Status — {picker.issue_identifier} ({picker.team_name})",
+    child: state_picker_rows(picker),
+    footer: picker_footer(),
+    width: 50,
+    on_dismiss: on_dismiss,
+  )
+}
+
+fn cycle_picker_modal(picker: state::CyclePicker, on_dismiss: fn(ui::EventContext)) ui::Widget {
+  modal::dialog(
+    title: "Cycle — {picker.issue_identifier} ({picker.team_name})",
+    child: cycle_picker_rows(picker),
+    footer: picker_footer(),
+    width: 60,
+    on_dismiss: on_dismiss,
+  )
+}
+
+type StatePickerOption = state::StatePicker?
+type CyclePickerOption = state::CyclePicker?
+
+struct MyIssuesUiState {
+  columns: [issues::BoardColumn],
+  loading: Bool,
+  loaded: Bool,
+  error: Str,
+  col: Int,
+  row: Int,
+  scroll: Int,
+  viewport_width: Int,
+  state_picker: StatePickerOption,
+  cycle_picker: CyclePickerOption,
+}
+
+fn initial_state() MyIssuesUiState {
+  MyIssuesUiState{
+    columns: [],
+    loading: false,
+    loaded: false,
+    error: "",
+    col: 0,
+    row: 0,
+    scroll: 0,
+    viewport_width: 90,
+    state_picker: maybe::none(),
+    cycle_picker: maybe::none(),
+  }
+}
+
+fn base_content(columns: [issues::BoardColumn], loading: Bool, error: Str, col: Int, row: Int, scroll: Int, screen_w: Int) ui::Widget {
+  if loading {
+    ui::text("Loading my issues…")
+  } else if not error.is_empty() {
+    ui::text("Unable to load my issues", style: ui::style(bold: true))
+  } else if columns.size() == 0 {
+    ui::center(ui::text("No issues assigned to you."))
+  } else {
+    board(columns, col, row, scroll, screen_w)
+  }
+}
+
+fn content(columns: [issues::BoardColumn], loading: Bool, error: Str, col: Int, row: Int, scroll: Int, screen_w: Int, state_picker: StatePickerOption, cycle_picker: CyclePickerOption, on_picker_dismiss: fn(ui::EventContext)) ui::Widget {
+  let base = base_content(columns: columns, loading: loading, error: error, col: col, row: row, scroll: scroll, screen_w: screen_w)
+  match state_picker {
+    p => ui::overlay_modal(base, state_picker_modal(p, on_picker_dismiss)),
+    _ => match cycle_picker {
+      p => ui::overlay_modal(base, cycle_picker_modal(p, on_picker_dismiss)),
+      _ => base,
+    },
+  }
+}
+
+fn new(api_key: Str, on_open_issue: fn(ui::EventContext, issues::Issue)) ui::Widget {
+  ui::stateful(
+    key: "my-issues",
+    init: fn(ctx: ui::BuildContext) MyIssuesUiState {
+      let initial = initial_state()
+      mut next = initial
+      next.loading = true
+      let rt = ctx.runtime<MyIssuesUiState>()
+      async::start(fn() {
+        let result = issues::load(api_key)
+        rt.dispatch(fn(state: ui::State<MyIssuesUiState>) {
+          state.set(fn(mut loaded: MyIssuesUiState) {
+            loaded = apply_refreshed_columns(loaded, result, "", 0, 0, false)
+          })
+        })
+      })
+      start_background_refresh(api_key, rt)
+      next
+    },
+    build: fn(ctx: ui::BuildContext, state: ui::State<MyIssuesUiState>) ui::Widget {
+      let model = state.value()
+      let rt = ctx.runtime<MyIssuesUiState>()
+      let col = clamp(model.col, model.columns.size())
+      let row = clamp(model.row, selected_row_count(model.columns, col))
+      let screen_w = model.viewport_width
+      let visible_count = board_visible_count(screen_w, model.columns.size())
+      let scroll = visible_scroll(
+        model.scroll,
+        col,
+        visible_count,
+        model.columns.size(),
+      )
+      ui::actions(
+        child: ui::shortcuts(
+          child: ui::on_width(
+            ui::focusable_key("tab.my_issues", content(
+              columns: model.columns,
+              loading: model.loading,
+              error: model.error,
+              col: col,
+              row: row,
+              scroll: scroll,
+              screen_w: screen_w,
+              state_picker: model.state_picker,
+              cycle_picker: model.cycle_picker,
+              on_picker_dismiss: fn(_ctx: ui::EventContext) {
+                state.set(fn(mut next: MyIssuesUiState) {
+                  next.state_picker = maybe::none()
+                  next.cycle_picker = maybe::none()
+                })
+              },
+            )),
+            fn(width: Int) {
+              if width > 0 and not (width == model.viewport_width) {
+                state.set(fn(mut next: MyIssuesUiState) {
+                  next.viewport_width = width
+                  next.scroll = visible_scroll(next.scroll, col, board_visible_count(width, model.columns.size()), model.columns.size())
+                })
+              }
+            },
+          ),
+          bindings: [
+            "Up": "my_issues.previous_row",
+            "k": "my_issues.previous_row",
+            "Down": "my_issues.next_row",
+            "j": "my_issues.next_row",
+            "Left": "my_issues.previous_col",
+            "h": "my_issues.previous_col",
+            "Right": "my_issues.next_col",
+            "l": "my_issues.next_col",
+            "Enter": "my_issues.open",
+            "r": "my_issues.refresh",
+            "s": "my_issues.open_state_picker",
+            "y": "my_issues.open_cycle_picker",
+            "Escape": "picker.dismiss",
+            "Esc": "picker.dismiss",
+            "Space": "picker.confirm",
+          ],
+        ),
+        bindings: [
+          ui::action("my_issues.previous_row", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            state.set(fn(mut next: MyIssuesUiState) {
+              match next.state_picker {
+                p => {
+                  if p.cursor > 0 {
+                    p.cursor = p.cursor - 1
+                    next.state_picker = maybe::some(p)
+                  }
+                },
+                _ => match next.cycle_picker {
+                  p => {
+                    if p.cursor > 0 {
+                      p.cursor = p.cursor - 1
+                      next.cycle_picker = maybe::some(p)
+                    }
+                  },
+                  _ => { next.row = clamp(row - 1, selected_row_count(model.columns, col)) },
+                },
+              }
+            })
+            ui::EventResult::handled
+          }),
+          ui::action("my_issues.next_row", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            state.set(fn(mut next: MyIssuesUiState) {
+              match next.state_picker {
+                p => {
+                  if p.cursor < p.states.size() - 1 {
+                    p.cursor = p.cursor + 1
+                    next.state_picker = maybe::some(p)
+                  }
+                },
+                _ => match next.cycle_picker {
+                  p => {
+                    if p.cursor < p.cycles.size() {
+                      p.cursor = p.cursor + 1
+                      next.cycle_picker = maybe::some(p)
+                    }
+                  },
+                  _ => { next.row = clamp(row + 1, selected_row_count(model.columns, col)) },
+                },
+              }
+            })
+            ui::EventResult::handled
+          }),
+          ui::action("my_issues.previous_col", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            let next_col = clamp(col - 1, model.columns.size())
+            state.set(fn(mut next: MyIssuesUiState) {
+              next.col = next_col
+              next.row = clamp(row, selected_row_count(model.columns, next_col))
+              next.scroll = visible_scroll(scroll, next_col, visible_count, model.columns.size())
+            })
+            ui::EventResult::handled
+          }),
+          ui::action("my_issues.next_col", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            let next_col = clamp(col + 1, model.columns.size())
+            state.set(fn(mut next: MyIssuesUiState) {
+              next.col = next_col
+              next.row = clamp(row, selected_row_count(model.columns, next_col))
+              next.scroll = visible_scroll(scroll, next_col, visible_count, model.columns.size())
+            })
+            ui::EventResult::handled
+          }),
+          ui::action("my_issues.refresh", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            if not model.loading {
+              state.set(fn(mut next: MyIssuesUiState) {
+                next.loading = true
+              })
+              async::start(fn() {
+                let result = issues::load(api_key)
+                rt.dispatch(fn(state: ui::State<MyIssuesUiState>) {
+                  state.set(fn(mut refreshed: MyIssuesUiState) {
+                    let preserve_id = selected_issue_id(model.columns, col, row)
+                    refreshed = apply_refreshed_columns(refreshed, result, preserve_id, col, row, false)
+                  })
+                })
+              })
+              ()
+            }
+            ui::EventResult::handled
+          }),
+          ui::action("my_issues.open_state_picker", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            if model.state_picker.is_none() and model.cycle_picker.is_none() {
+              match selected_issue(model.columns, col, row) {
+                issue => {
+                  match api::open_state_picker(api_key, issue.raw, true, 0) {
+                    ok(p) => {
+                      state.set(fn(mut next: MyIssuesUiState) {
+                        next.state_picker = maybe::some(p)
+                      })
+                    },
+                    err(_) => (),
+                  }
+                },
+                _ => (),
+              }
+            }
+            ui::EventResult::handled
+          }),
+          ui::action("my_issues.open_cycle_picker", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            if model.state_picker.is_none() and model.cycle_picker.is_none() {
+              match selected_issue(model.columns, col, row) {
+                issue => {
+                  match api::open_cycle_picker(api_key, issue.raw, true, 0) {
+                    ok(p) => {
+                      state.set(fn(mut next: MyIssuesUiState) {
+                        next.cycle_picker = maybe::some(p)
+                      })
+                    },
+                    err(_) => (),
+                  }
+                },
+                _ => (),
+              }
+            }
+            ui::EventResult::handled
+          }),
+          ui::action("picker.dismiss", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            state.set(fn(mut next: MyIssuesUiState) {
+              next.state_picker = maybe::none()
+              next.cycle_picker = maybe::none()
+            })
+            ui::EventResult::handled
+          }),
+          ui::action("picker.confirm", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            match model.state_picker {
+              p => {
+                let target = p.states.at(p.cursor)
+                let new_state_id = decode::run(target, decode::field("id", decode::string)).expect("Missing state.id")
+                if new_state_id == p.current_state_id {
+                  state.set(fn(mut next: MyIssuesUiState) {
+                    next.state_picker = maybe::none()
+                  })
+                } else {
+                  match api::update_issue_state(api_key, p.issue_id, new_state_id) {
+                    ok(_) => {
+                      state.set(fn(mut next: MyIssuesUiState) {
+                        next.state_picker = maybe::none()
+                        match issues::load(api_key) {
+                          ok(columns) => {
+                            next.columns = columns
+                            next.error = ""
+                            next.col = clamp(col, columns.size())
+                            next.row = clamp(row, selected_row_count(columns, col))
+                          },
+                          err(e) => { next.error = e },
+                        }
+                        next.loaded = true
+                        next.loading = false
+                      })
+                    },
+                    err(_) => (),
+                  }
+                }
+              },
+              _ => match model.cycle_picker {
+                p => {
+                  let target_cycle_id = match p.cursor == 0 {
+                    true => "",
+                    false => {
+                      let c = p.cycles.at(p.cursor - 1)
+                      decode::run(c, decode::field("id", decode::string)).expect("Missing cycle.id")
+                    },
+                  }
+                  if target_cycle_id == p.current_cycle_id {
+                    state.set(fn(mut next: MyIssuesUiState) {
+                      next.cycle_picker = maybe::none()
+                    })
+                  } else {
+                    match api::update_issue_cycle(api_key, p.issue_id, target_cycle_id) {
+                      ok(_) => {
+                        state.set(fn(mut next: MyIssuesUiState) {
+                          next.cycle_picker = maybe::none()
+                          match issues::load(api_key) {
+                            ok(columns) => {
+                              next.columns = columns
+                              next.error = ""
+                              next.col = clamp(col, columns.size())
+                              next.row = clamp(row, selected_row_count(columns, col))
+                            },
+                            err(e) => { next.error = e },
+                          }
+                          next.loaded = true
+                          next.loading = false
+                        })
+                      },
+                      err(_) => (),
+                    }
+                  }
+                },
+                _ => (),
+              },
+            }
+            ui::EventResult::handled
+          }),
+          ui::action("my_issues.open", fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            if model.state_picker.is_none() and model.cycle_picker.is_none() {
+              match selected_issue(model.columns, col, row) {
+                issue => on_open_issue(ctx, issue),
+                _ => (),
+              }
+            }
+            ui::EventResult::handled
+          }),
+        ],
+      )
+    },
+  )
+}
