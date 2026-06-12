@@ -302,15 +302,7 @@ fn fetch_board(api_key: Str, my_id: Str) [state::BoardColumn]!Str {
 // Construct a StatePicker for the given issue. Fetches the team's
 // states, sorts them, and positions the cursor on the issue's
 // current state.
-fn open_state_picker(api_key: Str, issue: Dynamic, from_board: Bool, tab_idx: Int) state::StatePicker!Str {
-  let issue_id = decode::run(issue, decode::field("id", decode::string)).expect("Missing id")
-  let identifier = decode::run(issue, decode::field("identifier", decode::string)).expect("Missing identifier")
-  let s = decode::run(issue, decode::field("state", decode::dynamic)).expect("Missing state")
-  let current_state_id = decode::run(s, decode::field("id", decode::string)).expect("Missing state.id")
-  let team = decode::run(issue, decode::field("team", decode::dynamic)).expect("Missing team")
-  let team_id = decode::run(team, decode::field("id", decode::string)).expect("Missing team.id")
-  let team_name = decode::run(team, decode::field("name", decode::string)).expect("Missing team.name")
-
+fn open_state_picker(api_key: Str, issue_id: Str, identifier: Str, current_state_id: Str, team_id: Str, team_name: Str, from_board: Bool, tab_idx: Int) state::StatePicker!Str {
   let raw_states = try fetch_team_states(api_key, team_id)
   let states = sort_states_for_picker(raw_states)
 
@@ -339,20 +331,7 @@ fn open_state_picker(api_key: Str, issue: Dynamic, from_board: Bool, tab_idx: In
 // cycles, sorts them, and positions the cursor on the issue's
 // current cycle. Cursor index 0 is the implicit "(no cycle)" option;
 // real cycles start at index 1.
-fn open_cycle_picker(api_key: Str, issue: Dynamic, from_board: Bool, tab_idx: Int) state::CyclePicker!Str {
-  let issue_id = decode::run(issue, decode::field("id", decode::string)).expect("Missing id")
-  let identifier = decode::run(issue, decode::field("identifier", decode::string)).expect("Missing identifier")
-  let team = decode::run(issue, decode::field("team", decode::dynamic)).expect("Missing team")
-  let team_id = decode::run(team, decode::field("id", decode::string)).expect("Missing team.id")
-  let team_name = decode::run(team, decode::field("name", decode::string)).expect("Missing team.name")
-
-  // The issue may not have a cycle. "" means "no current cycle".
-  let cycle_obj = decode_utils::optional_field(issue, "cycle")
-  let current_cycle_id = match cycle_obj {
-    c => decode::run(c, decode::field("id", decode::string)).expect("Missing cycle.id"),
-    _ => "",
-  }
-
+fn open_cycle_picker(api_key: Str, issue_id: Str, identifier: Str, team_id: Str, team_name: Str, current_cycle_id: Str, from_board: Bool, tab_idx: Int) state::CyclePicker!Str {
   let result = try fetch_team_cycles(api_key, team_id)
 
   // Filter to a useful slice. When the team has an active cycle,

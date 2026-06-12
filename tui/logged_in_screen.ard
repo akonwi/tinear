@@ -245,7 +245,16 @@ fn open_state_picker(api_key: Str, issue: issues::Issue, model: LoggedInUiState)
   mut next = model
   match selected_issue_tab_index(model) {
     idx => {
-      match api::open_state_picker(api_key, issue.raw, false, idx) {
+      match api::open_state_picker(
+        api_key,
+        issue.id,
+        issue.identifier,
+        issue.state_id,
+        issue.team_id,
+        issue.team_name,
+        false,
+        idx,
+      ) {
         ok(p) => { next.state_picker = maybe::some(p) },
         err(_) => (),
       }
@@ -259,7 +268,16 @@ fn open_cycle_picker(api_key: Str, issue: issues::Issue, model: LoggedInUiState)
   mut next = model
   match selected_issue_tab_index(model) {
     idx => {
-      match api::open_cycle_picker(api_key, issue.raw, false, idx) {
+      match api::open_cycle_picker(
+        api_key,
+        issue.id,
+        issue.identifier,
+        issue.team_id,
+        issue.team_name,
+        issue.cycle_id,
+        false,
+        idx,
+      ) {
         ok(p) => { next.cycle_picker = maybe::some(p) },
         err(_) => (),
       }

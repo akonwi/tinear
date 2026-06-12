@@ -8,12 +8,7 @@ use tinear/tui/state
 extern fn normalize_text(value: Str) Str = "tinear.NormalizeLinearText"
 
 // Typed issue model used by the TUI.
-//
-// `raw` is kept as an escape hatch for older API helpers that still expect the
-// Linear GraphQL Dynamic shape (state/cycle pickers, mutations, etc.). Rendering
-// code should prefer the typed fields.
 struct Issue {
-  raw: Dynamic,
   id: Str,
   identifier: Str,
   title: Str,
@@ -114,7 +109,6 @@ fn decode_issue(raw: Dynamic) Issue {
   let state = decode::run(raw, decode::field("state", decode::dynamic)).expect("Missing state")
   let team = decode::run(raw, decode::field("team", decode::dynamic)).expect("Missing team")
   Issue{
-    raw: raw,
     id: decode::run(raw, decode::field("id", decode::string)).expect("Missing issue.id"),
     identifier: decode::run(raw, decode::field("identifier", decode::string)).expect("Missing issue.identifier"),
     title: normalize_text(decode::run(raw, decode::field("title", decode::string)).expect("Missing issue.title")),
