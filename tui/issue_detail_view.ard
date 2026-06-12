@@ -2,7 +2,6 @@ use ard/async
 use ard/maybe
 
 use tinear/models/issues
-use tinear/tui/api
 use tinear/tui/hints
 use tinear/tui/state
 use tinear/tui/text
@@ -174,7 +173,7 @@ fn submit_comment(api_key: Str, issue: issues::Issue, body: Str, state: ui::Stat
       next.compose_error = ""
     })
     async::start(fn() {
-      let result = api::create_comment(api_key, issue.id, body)
+      let result = issues::create_comment(api_key, issue.id, body)
       match result {
         ok(_) => {
           let refreshed = issues::load_comments(api_key, issue.id)

@@ -62,36 +62,12 @@ struct BoardColumn {
   issues: [Dynamic],
 }
 
-// Modal picker for changing an issue's workflow state.
-struct StatePicker {
-  issue_id: Str,
-  issue_identifier: Str,
-  current_state_id: Str,
-  team_name: Str,
-  states: [Dynamic],
-  cursor: Int,
-  from_board: Bool,
-  tab_idx: Int,
-}
-
 // Result of fetching a team's cycles. `active_cycle_number` is the number of
 // the team's currently active cycle, used to filter the list of cycles to a
 // useful slice (past + active + next) instead of every future cycle the team has
-// scheduled.
+// scheduled. This is the raw API shape used before models/issues.ard decodes
+// cycles into typed model data.
 struct TeamCyclesResult {
   active_cycle_number: Int?,
   cycles: [Dynamic],
-}
-
-// Modal picker for changing an issue's cycle. The implicit "(no cycle)" option
-// occupies cursor index 0, so cycles[i] corresponds to cursor index i + 1.
-struct CyclePicker {
-  issue_id: Str,
-  issue_identifier: Str,
-  current_cycle_id: Str,
-  team_name: Str,
-  cycles: [Dynamic],
-  cursor: Int,
-  from_board: Bool,
-  tab_idx: Int,
 }

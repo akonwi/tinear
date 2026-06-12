@@ -42,10 +42,11 @@ wrappers.
 | `tui/welcome_screen.ard` | Login/auth screen for unauthenticated users |
 | `tui/inbox_view.ard` | Inbox list + notification detail modal |
 | `tui/my_issues_view.ard` | My Issues board + picker modals |
+| `tui/picker.ard` | Reusable picker primitive plus state/cycle picker builders |
 | `tui/modal.ard` | Shared vaxis/ui modal/dialog wrapper |
 | `tui/hints.ard` | Footer hint bar |
-| `tui/api.ard` | GraphQL fetch/mutation helpers and picker construction |
-| `tui/state.ard` | Shared Linear UI model structs + workflow/priority helpers |
+| `models/*.ard` | Typed data models plus Linear fetch/mutation helpers |
+| `tui/state.ard` | Shared Linear UI workflow/priority helpers |
 | `tui/decode.ard` | `optional_field` — missing-or-null aware field decoder |
 | `tui/text.ard` | Byte- and display-width string helpers (truncate, pad, wrap) |
 

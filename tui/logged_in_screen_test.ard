@@ -13,7 +13,7 @@ fn test_issue(id: Str, identifier: Str) issues::Issue {
 }
 
 fn test_state(tab: Str) logged_in_screen::LoggedInUiState {
-  logged_in_screen::LoggedInUiState{tab: tab, issue_tabs: [], state_picker: maybe::none(), cycle_picker: maybe::none()}
+  logged_in_screen::LoggedInUiState{tab: tab, issue_tabs: [], active_picker: maybe::none()}
 }
 
 test fn test_open_issue_adds_and_selects_issue_tab_without_duplicates() Void!Str {

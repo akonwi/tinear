@@ -1,0 +1,42 @@
+use ard/testing
+
+use tinear/tui/picker
+use tinear/tui/ui/test as uitest
+
+test fn test_picker_renders_options_and_current_marker() Void!Str {
+  let app = uitest::app(picker::view(picker::Picker{
+    title: "Status",
+    options: [
+      picker::Option{id: "todo", label: "Todo", current: false},
+      picker::Option{id: "started", label: "In Progress", current: true},
+    ],
+    cursor: 1,
+    width: 50,
+  }))
+  app.pump(60, 6)
+
+  try testing::assert(app.contains("Todo"), "picker should render first option")
+  try testing::assert(app.contains("▸ In Progress  (current)"), "picker should render cursor and current marker")
+  testing::assert(not app.contains("▸ Todo"), "only selected option should have cursor")
+}
+
+test fn test_picker_navigation_and_selection() Void!Str {
+  let p = picker::Picker{
+    title: "Cycle",
+    options: [
+      picker::Option{id: "", label: "(no cycle)", current: false},
+      picker::Option{id: "cycle-1", label: "Cycle 1", current: true},
+    ],
+    cursor: 0,
+    width: 60,
+  }
+  let moved = picker::next(p)
+
+  match picker::selected(moved) {
+    option => {
+      try testing::assert(option.id == "cycle-1", "selected option should move down")
+      testing::assert(option.current, "selected option should preserve current flag")
+    },
+    _ => testing::assert(false, "expected selected option"),
+  }
+}
