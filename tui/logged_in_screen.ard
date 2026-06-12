@@ -159,12 +159,12 @@ fn screen_content(api_key: Str, model: LoggedInUiState, inbox: ui::Widget, my_is
   ])
 }
 
-fn content(api_key: Str, model: LoggedInUiState, inbox: ui::Widget, my_issues: ui::Widget, on_state: fn(issues::Issue), on_cycle: fn(issues::Issue), on_picker_dismiss: fn(ui::EventContext)) ui::Widget {
+fn content(api_key: Str, model: LoggedInUiState, inbox: ui::Widget, my_issues: ui::Widget, on_state: fn(issues::Issue), on_cycle: fn(issues::Issue), on_picker_previous: fn(ui::EventContext), on_picker_next: fn(ui::EventContext), on_picker_confirm: fn(ui::EventContext), on_picker_dismiss: fn(ui::EventContext)) ui::Widget {
   let base = screen_content(api_key, model, inbox, my_issues, on_state, on_cycle)
   match model.active_picker {
     active => ui::overlay_modal(base, modal::dialog(
       title: active.picker.title,
-      child: picker::view(active.picker),
+      child: picker::new(active.picker, on_picker_previous, on_picker_next, on_picker_confirm),
       footer: picker::footer(),
       width: active.picker.width,
       on_dismiss: on_picker_dismiss,
@@ -259,6 +259,40 @@ fn open_cycle_picker(api_key: Str, issue: issues::Issue, model: LoggedInUiState)
   next
 }
 
+fn confirm_active_picker(api_key: Str, active: picker::Active, model: LoggedInUiState, state: ui::State<LoggedInUiState>, ctx: ui::EventContext) {
+  match picker::selected(active.picker) {
+    option => {
+      if option.current {
+        state.set(fn(mut next: LoggedInUiState) { next.active_picker = maybe::none() })
+        focus_selected_after_rebuild(ctx, model)
+      } else {
+        let result = match active.kind == picker::state_kind() {
+          true => issues::update_state(api_key, active.issue_id, option.id),
+          false => issues::update_cycle(api_key, active.issue_id, option.id),
+        }
+        match result {
+          ok(_) => {
+            mut next_model = model
+            state.set(fn(mut next: LoggedInUiState) {
+              next.active_picker = maybe::none()
+              match issues::load_issue(api_key, active.issue_id) {
+                ok(updated) => {
+                  next = replace_issue(next, updated)
+                  next_model = next
+                },
+                err(_) => { next_model = next },
+              }
+            })
+            focus_selected_after_rebuild(ctx, next_model)
+          },
+          err(_) => (),
+        }
+      }
+    },
+    _ => (),
+  }
+}
+
 fn new(api_key: Str) ui::Widget {
   let inbox = inbox_view::new(api_key)
   ui::stateful(
@@ -291,6 +325,36 @@ fn new(api_key: Str) ui::Widget {
           on_cycle: fn(issue: issues::Issue) {
             let next_model = open_cycle_picker(api_key, issue, model)
             state.set(fn(mut next: LoggedInUiState) { next = next_model })
+          },
+          on_picker_previous: fn(_ctx: ui::EventContext) {
+            state.set(fn(mut next: LoggedInUiState) {
+              match next.active_picker {
+                active => {
+                  mut updated = active
+                  updated.picker = picker::previous(updated.picker)
+                  next.active_picker = maybe::some(updated)
+                },
+                _ => (),
+              }
+            })
+          },
+          on_picker_next: fn(_ctx: ui::EventContext) {
+            state.set(fn(mut next: LoggedInUiState) {
+              match next.active_picker {
+                active => {
+                  mut updated = active
+                  updated.picker = picker::next(updated.picker)
+                  next.active_picker = maybe::some(updated)
+                },
+                _ => (),
+              }
+            })
+          },
+          on_picker_confirm: fn(ctx: ui::EventContext) {
+            match model.active_picker {
+              active => confirm_active_picker(api_key, active, model, state, ctx),
+              _ => (),
+            }
           },
           on_picker_dismiss: fn(ctx: ui::EventContext) {
             state.set(fn(mut next: LoggedInUiState) {
@@ -402,37 +466,7 @@ fn new(api_key: Str) ui::Widget {
         ui::action("detail_picker.confirm", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
           match model.active_picker {
             active => {
-              match picker::selected(active.picker) {
-                option => {
-                  if option.current {
-                    state.set(fn(mut next: LoggedInUiState) { next.active_picker = maybe::none() })
-                    focus_selected_after_rebuild(_ctx, model)
-                  } else {
-                    let result = match active.kind == picker::state_kind() {
-                      true => issues::update_state(api_key, active.issue_id, option.id),
-                      false => issues::update_cycle(api_key, active.issue_id, option.id),
-                    }
-                    match result {
-                      ok(_) => {
-                        mut next_model = model
-                        state.set(fn(mut next: LoggedInUiState) {
-                          next.active_picker = maybe::none()
-                          match issues::load_issue(api_key, active.issue_id) {
-                            ok(updated) => {
-                              next = replace_issue(next, updated)
-                              next_model = next
-                            },
-                            err(_) => { next_model = next },
-                          }
-                        })
-                        focus_selected_after_rebuild(_ctx, next_model)
-                      },
-                      err(_) => (),
-                    }
-                  }
-                },
-                _ => (),
-              }
+              confirm_active_picker(api_key, active, model, state, _ctx)
               ui::EventResult::handled
             },
             _ => ui::EventResult::ignored,

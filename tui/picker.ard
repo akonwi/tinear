@@ -51,6 +51,36 @@ fn view(picker: Picker) ui::Widget {
   ui::column_stretch(rows)
 }
 
+fn new(picker: Picker, on_previous: fn(ui::EventContext), on_next: fn(ui::EventContext), on_confirm: fn(ui::EventContext)) ui::Widget {
+  ui::actions(
+    child: ui::shortcuts(
+      child: ui::focusable(view(picker)),
+      bindings: [
+        "Up": "picker.previous",
+        "k": "picker.previous",
+        "Down": "picker.next",
+        "j": "picker.next",
+        "Enter": "picker.confirm",
+        "Space": "picker.confirm",
+      ],
+    ),
+    bindings: [
+      ui::action("picker.previous", fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+        on_previous(ctx)
+        ui::EventResult::handled
+      }),
+      ui::action("picker.next", fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+        on_next(ctx)
+        ui::EventResult::handled
+      }),
+      ui::action("picker.confirm", fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+        on_confirm(ctx)
+        ui::EventResult::handled
+      }),
+    ],
+  )
+}
+
 fn footer() ui::Widget {
   ui::text("↑↓ select  ↵ confirm  Esc cancel")
 }

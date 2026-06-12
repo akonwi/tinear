@@ -1,6 +1,7 @@
 use ard/testing
 
 use tinear/tui/picker
+use tinear/tui/ui
 use tinear/tui/ui/test as uitest
 
 test fn test_picker_renders_options_and_current_marker() Void!Str {
@@ -39,4 +40,24 @@ test fn test_picker_navigation_and_selection() Void!Str {
     },
     _ => testing::assert(false, "expected selected option"),
   }
+}
+
+test fn test_picker_confirms_on_enter() Void!Str {
+  mut confirmed = false
+  let app = uitest::app(picker::new(
+    picker::Picker{
+      title: "Status",
+      options: [picker::Option{id: "todo", label: "Todo", current: false}],
+      cursor: 0,
+      width: 50,
+    },
+    fn(_ctx: ui::EventContext) {},
+    fn(_ctx: ui::EventContext) {},
+    fn(_ctx: ui::EventContext) { confirmed = true },
+  ))
+  app.pump(60, 6)
+
+  app.enter()
+
+  testing::assert(confirmed, "Enter should confirm picker")
 }
