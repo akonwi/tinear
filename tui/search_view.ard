@@ -60,10 +60,10 @@ fn result_row(issue: issues::Issue, selected: Bool) ui::Widget {
   }
   let state_name = text::truncate_with_ellipsis(issue.state_name, 10)
   let children = [
-    ui::sized_box_child(2, 1, row_text(cursor, selected)),
-    ui::sized_box_child(10, 1, row_text(issue.identifier, selected)),
+    ui::box(row_text(cursor, selected), width: 2, height: 1),
+    ui::box(row_text(issue.identifier, selected), width: 10, height: 1),
     ui::expanded(row_text(text::truncate_with_ellipsis(issue.title, 32), selected)),
-    ui::sized_box_child(10, 1, row_text(state_name, selected)),
+    ui::box(row_text(state_name, selected), width: 10, height: 1),
   ]
   match selected {
     true => ui::row(children: children, style: ui::style(reverse: true)),

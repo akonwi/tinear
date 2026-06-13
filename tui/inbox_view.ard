@@ -36,7 +36,7 @@ fn row_line(value: Str, selected: Bool) ui::Widget {
 
 fn render_item(item: inbox::Item, selected: Bool) ui::Widget {
   let children = [
-    ui::sized_box_child(10, 1, row_text(item.target_id, selected)),
+    ui::box(row_text(item.target_id, selected), width: 10, height: 1),
     row_text(" ", selected),
     row_text(item.actor_name, selected),
     row_text(" ", selected),

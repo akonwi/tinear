@@ -29,8 +29,8 @@ fn value_or_dash(value: Str) Str {
 fn field_pair(label: Str, value: Str, width: Int) ui::Widget {
   ui::row(
     [
-      ui::sized_box_child(10, 1, ui::text(label, style: ui::style(foreground: "border"))),
-      ui::sized_box_child(width, 1, ui::text(text::truncate_with_ellipsis(value_or_dash(value), width))),
+      ui::box(ui::text(label, style: ui::style(foreground: "border")), width: 10, height: 1),
+      ui::box(ui::text(text::truncate_with_ellipsis(value_or_dash(value), width)), width: width, height: 1),
     ],
   )
 }
