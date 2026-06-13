@@ -25,7 +25,8 @@ fn dialog(
       child: ui::focusable(
         ui::center(
           ui::box(
-            ui::constrained_width(width, content),
+            content,
+            width: width,
             border: ui::border(top: true, right: true, bottom: true, left: true, style: ui::style(foreground: "border")),
           ),
         ),
