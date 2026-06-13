@@ -3,6 +3,7 @@ use ard/decode
 use ard/duration
 use ard/maybe
 
+use tinear/models/cache
 use tinear/models/inbox
 use tinear/os
 use tinear/tui/hints
@@ -389,6 +390,24 @@ fn has_item_id(items: [inbox::Item], id: Str) Bool {
   found
 }
 
+fn without_item_id(items: [inbox::Item], id: Str) [inbox::Item] {
+  mut kept: [inbox::Item] = []
+  for item in items {
+    if not (item.notification_id == id) {
+      kept.push(item)
+    }
+  }
+  kept
+}
+
+fn cache_from_state(state: InboxUiState) cache::InboxCache {
+  cache::InboxCache{items: state.items, cursor: state.cursor}
+}
+
+fn save_cache(state: InboxUiState) {
+  let _ = cache::save_inbox(cache_from_state(state))
+}
+
 fn apply_refreshed_items(
   mut state: InboxUiState,
   result: [inbox::Item]!Str,
@@ -407,6 +426,7 @@ fn apply_refreshed_items(
         state.detail = maybe::none()
       }
       state.error = ""
+      save_cache(state)
     },
     err(e) => {
       if not silent {
@@ -466,27 +486,60 @@ struct InboxUiState {
   detail: Dynamic?,
 }
 
+fn initial_state() InboxUiState {
+  let no_detail: Dynamic? = maybe::none()
+  match cache::load_inbox() {
+    cached => InboxUiState{
+      items: cached.items,
+      cursor: clamp_cursor(cached.cursor, cached.items.size()),
+      loading: cached.items.size() == 0,
+      loaded: cached.items.size() > 0,
+      error: "",
+      detail_open: false,
+      detail_id: "",
+      detail_loading: false,
+      detail_error: "",
+      detail: no_detail,
+    },
+    _ => InboxUiState{
+      items: [],
+      cursor: 0,
+      loading: true,
+      loaded: false,
+      error: "",
+      detail_open: false,
+      detail_id: "",
+      detail_loading: false,
+      detail_error: "",
+      detail: no_detail,
+    },
+  }
+}
+
 fn new(api_key: Str) ui::Widget {
   ui::stateful(
     key: "inbox",
     init: fn(ctx: ui::BuildContext) InboxUiState {
-      let no_detail: Dynamic? = maybe::none()
-      let empty = InboxUiState{
-        items: [],
-        cursor: 0,
-        loading: false,
-        loaded: false,
-        error: "",
-        detail_open: false,
-        detail_id: "",
-        detail_loading: false,
-        detail_error: "",
-        detail: no_detail,
-      }
-      mut initial = empty
-      initial.loading = true
-      initial = apply_refreshed_items(initial, inbox::load(api_key), "", 0, false)
-      start_background_refresh(api_key, ctx.runtime<InboxUiState>())
+      let initial = initial_state()
+      let has_cached_data = initial.loaded
+      let rt = ctx.runtime<InboxUiState>()
+      async::start(
+        fn() {
+          let result = inbox::load(api_key)
+          rt.dispatch(
+            fn(state: ui::State<InboxUiState>) {
+              let current = state.value()
+              let preserve_id = item_id_at(current.items, current.cursor)
+              state.set(
+                fn(mut loaded: InboxUiState) {
+                  loaded = apply_refreshed_items(loaded, result, preserve_id, current.cursor, has_cached_data)
+                },
+              )
+            },
+          )
+        },
+      )
+      start_background_refresh(api_key, rt)
       initial
     },
     build: fn(_ctx: ui::BuildContext, state: ui::State<InboxUiState>) ui::Widget {
@@ -541,6 +594,7 @@ fn new(api_key: Str) ui::Widget {
                 state.set(
                   fn(mut next: InboxUiState) {
                     next.cursor = clamp_cursor(cursor - 1, model.items.size())
+                    save_cache(next)
                   },
                 )
               }
@@ -554,6 +608,7 @@ fn new(api_key: Str) ui::Widget {
                 state.set(
                   fn(mut next: InboxUiState) {
                     next.cursor = clamp_cursor(cursor + 1, model.items.size())
+                    save_cache(next)
                   },
                 )
               }
@@ -665,8 +720,15 @@ fn new(api_key: Str) ui::Widget {
                           ok(updated_items) => {
                             adjusted.items = updated_items
                             adjusted.error = ""
+                            adjusted.cursor = clamp_cursor(cursor, updated_items.size())
+                            save_cache(adjusted)
                           },
-                          err(e) => { adjusted.error = e },
+                          err(e) => {
+                            adjusted.items = without_item_id(adjusted.items, selected.notification_id)
+                            adjusted.cursor = clamp_cursor(cursor, adjusted.items.size())
+                            adjusted.error = e
+                            save_cache(adjusted)
+                          },
                         }
                         adjusted.loaded = true
                         adjusted.loading = false

@@ -1,0 +1,151 @@
+use ard/fs
+use ard/json
+use ard/maybe
+
+use tinear/config
+use tinear/models/inbox
+use tinear/models/issues
+
+fn version() Int { 1 }
+
+struct LoggedInCache {
+  tab: Str,
+  issue_tabs: [issues::Issue],
+}
+
+struct InboxCache {
+  items: [inbox::Item],
+  cursor: Int,
+}
+
+struct MyIssuesCache {
+  columns: [issues::BoardColumn],
+  col: Int,
+  row: Int,
+  scroll: Int,
+}
+
+struct DataCache {
+  version: Int,
+  logged_in: LoggedInCache,
+  inbox: InboxCache,
+  my_issues: MyIssuesCache,
+}
+
+fn empty_logged_in() LoggedInCache {
+  LoggedInCache{tab: "Inbox", issue_tabs: []}
+}
+
+fn empty_inbox() InboxCache {
+  InboxCache{items: [], cursor: 0}
+}
+
+fn empty_my_issues() MyIssuesCache {
+  MyIssuesCache{columns: [], col: 0, row: 0, scroll: 0}
+}
+
+fn empty() DataCache {
+  DataCache{
+    version: version(),
+    logged_in: empty_logged_in(),
+    inbox: empty_inbox(),
+    my_issues: empty_my_issues(),
+  }
+}
+
+fn get_data_path() Str!Str {
+  let dir = try config::get_config_dir()
+  Result::ok("{dir}/data.json")
+}
+
+fn decode(content: Str) DataCache? {
+  match json::parse<DataCache>(content) {
+    ok(cache) => match cache.version == version() {
+      true => maybe::some(cache),
+      false => maybe::none(),
+    },
+    err(_) => maybe::none(),
+  }
+}
+
+fn encode(cache: DataCache) Str!Str {
+  mut normalized = cache
+  normalized.version = version()
+  json::encode(normalized)
+}
+
+fn load() DataCache? {
+  match get_data_path() {
+    ok(path) => {
+      match fs::read(path) {
+        ok(content) => decode(content),
+        err(_) => maybe::none(),
+      }
+    },
+    err(_) => maybe::none(),
+  }
+}
+
+fn current_for_update() DataCache!Str {
+  let path = try get_data_path()
+  if not fs::exists(path) {
+    Result::ok(empty())
+  } else {
+    let content = try fs::read(path)
+    match decode(content) {
+      cache => Result::ok(cache),
+      _ => Result::err("Invalid data cache"),
+    }
+  }
+}
+
+fn save(cache: DataCache) Void!Str {
+  let dir = try config::get_config_dir()
+  if not fs::exists(dir) {
+    try fs::create_dir(dir)
+  }
+
+  let content = try encode(cache)
+  let path = try get_data_path()
+  try fs::write(path, content)
+  Result::ok(())
+}
+
+fn load_logged_in() LoggedInCache? {
+  match load() {
+    cache => maybe::some(cache.logged_in),
+    _ => maybe::none(),
+  }
+}
+
+fn load_inbox() InboxCache? {
+  match load() {
+    cache => maybe::some(cache.inbox),
+    _ => maybe::none(),
+  }
+}
+
+fn load_my_issues() MyIssuesCache? {
+  match load() {
+    cache => maybe::some(cache.my_issues),
+    _ => maybe::none(),
+  }
+}
+
+fn save_logged_in(logged_in: LoggedInCache) Void!Str {
+  mut cache = try current_for_update()
+  cache.logged_in = logged_in
+  save(cache)
+}
+
+fn save_inbox(inbox: InboxCache) Void!Str {
+  mut cache = try current_for_update()
+  cache.inbox = inbox
+  save(cache)
+}
+
+fn save_my_issues(my_issues: MyIssuesCache) Void!Str {
+  mut cache = try current_for_update()
+  cache.my_issues = my_issues
+  save(cache)
+}

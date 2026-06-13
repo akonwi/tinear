@@ -1,5 +1,6 @@
 use ard/maybe
 
+use tinear/models/cache
 use tinear/models/issues
 use tinear/tui/hints
 use tinear/tui/inbox_view
@@ -30,6 +31,55 @@ fn selected_tab(model: LoggedInUiState) Str {
   match model.tab {
     "" => "Inbox",
     _ => model.tab,
+  }
+}
+
+fn is_valid_tab(tab: Str, issue_tabs: [issues::Issue]) Bool {
+  if tab == "Inbox" or tab == "My Issues" or tab.is_empty() {
+    true
+  } else {
+    mut found = false
+    for issue in issue_tabs {
+      if issue.identifier == tab {
+        found = true
+      }
+    }
+    found
+  }
+}
+
+fn normalize_tab(tab: Str, issue_tabs: [issues::Issue]) Str {
+  match is_valid_tab(tab, issue_tabs) {
+    true => match tab.is_empty() {
+      true => "Inbox",
+      false => tab,
+    },
+    false => "Inbox",
+  }
+}
+
+fn cache_from_model(model: LoggedInUiState) cache::LoggedInCache {
+  cache::LoggedInCache{tab: normalize_tab(selected_tab(model), model.issue_tabs), issue_tabs: model.issue_tabs}
+}
+
+fn save_cache(model: LoggedInUiState) {
+  let _ = cache::save_logged_in(cache_from_model(model))
+}
+
+fn initial_state() LoggedInUiState {
+  match cache::load_logged_in() {
+    cached => LoggedInUiState{
+      tab: normalize_tab(cached.tab, cached.issue_tabs),
+      issue_tabs: cached.issue_tabs,
+      active_picker: maybe::none(),
+      search_open: false,
+    },
+    _ => LoggedInUiState{
+      tab: "Inbox",
+      issue_tabs: [],
+      active_picker: maybe::none(),
+      search_open: false,
+    },
   }
 }
 
@@ -322,6 +372,7 @@ fn confirm_active_picker(
               ok(updated) => {
                 next = replace_issue(next, updated)
                 next_model = next
+                save_cache(next)
               },
               err(_) => { next_model = next },
             }
@@ -377,12 +428,7 @@ fn new(api_key: Str) ui::Widget {
   ui::stateful(
     key: "logged-in",
     init: fn(_ctx: ui::BuildContext) LoggedInUiState {
-      LoggedInUiState{
-        tab: "Inbox",
-        issue_tabs: [],
-        active_picker: maybe::none(),
-        search_open: false,
-      }
+      initial_state()
     },
     build: fn(_ctx: ui::BuildContext, state: ui::State<LoggedInUiState>) ui::Widget {
       let model = state.value()
@@ -393,6 +439,7 @@ fn new(api_key: Str) ui::Widget {
           state.set(
             fn(mut next: LoggedInUiState) {
               next = next_model
+              save_cache(next)
             },
           )
           ui::dispatch_after(
@@ -411,6 +458,7 @@ fn new(api_key: Str) ui::Widget {
           state.set(fn(mut next: LoggedInUiState) {
             next = next_model
             next.search_open = false
+            save_cache(next)
           })
           ui::dispatch_after(ctx, 0, fn() {
             focus_tab(next_model, next_model.tab)
@@ -485,6 +533,7 @@ fn new(api_key: Str) ui::Widget {
               state.set(
                 fn(mut updated: LoggedInUiState) {
                   updated.tab = next
+                  save_cache(updated)
                 },
               )
               ui::dispatch_after(
@@ -504,6 +553,7 @@ fn new(api_key: Str) ui::Widget {
               state.set(
                 fn(mut updated: LoggedInUiState) {
                   updated.tab = previous
+                  save_cache(updated)
                 },
               )
               ui::dispatch_after(
@@ -522,6 +572,7 @@ fn new(api_key: Str) ui::Widget {
               state.set(
                 fn(mut next: LoggedInUiState) {
                   next.tab = "Inbox"
+                  save_cache(next)
                 },
               )
               ui::dispatch_after(
@@ -540,6 +591,7 @@ fn new(api_key: Str) ui::Widget {
               state.set(
                 fn(mut next: LoggedInUiState) {
                   next.tab = "My Issues"
+                  save_cache(next)
                 },
               )
               ui::dispatch_after(
@@ -568,6 +620,7 @@ fn new(api_key: Str) ui::Widget {
                 state.set(
                   fn(mut next: LoggedInUiState) {
                     next = next_model
+                    save_cache(next)
                   },
                 )
                 ui::dispatch_after(
