@@ -1,14 +1,13 @@
-use tinear/vaxis
+extern fn text_backspace(text: Str) Str = "tinear.TextBackspace"
 
 // ---- byte-based helpers ------------------------------------------------
 // `.size()` returns UTF-8 byte length, so these are accurate only when the
-// input is ASCII or when you only care about byte budgets. Prefer the
-// _display variants below when fitting into a fixed-cell slot.
+// input is ASCII or when you only care about byte budgets.
 
 fn truncate(s: Str, max: Int) Str {
   mut result = s
   while result.size() > max {
-    result = vaxis::text_backspace(result)
+    result = text_backspace(result)
   }
   result
 }
@@ -32,41 +31,6 @@ fn pad_str(s: Str, width: Int) Str {
       }
       result
     },
-  }
-}
-
-// ---- display-width helpers ---------------------------------------------
-// Use vaxis's rendered_width which counts grapheme cells (not bytes), so
-// strings containing multi-byte runes like — or ▸ pad/truncate to the
-// right number of terminal cells.
-
-fn pad_str_display(vx: vaxis::Vaxis, s: Str, width: Int) Str {
-  let len = vaxis::rendered_width(vx, s)
-  match len >= width {
-    true => s,
-    false => {
-      mut result = s
-      let pads = width - len - 1
-      for i in 0..pads {
-        result =+ " "
-      }
-      result
-    },
-  }
-}
-
-fn truncate_display(vx: vaxis::Vaxis, s: Str, max: Int) Str {
-  mut result = s
-  while vaxis::rendered_width(vx, result) > max {
-    result = vaxis::text_backspace(result)
-  }
-  result
-}
-
-fn truncate_with_ellipsis_display(vx: vaxis::Vaxis, s: Str, max: Int) Str {
-  match vaxis::rendered_width(vx, s) <= max {
-    true => s,
-    false => truncate_display(vx, s, max - 1) + "…",
   }
 }
 
