@@ -185,7 +185,7 @@ fn board_column(
       ),
     )
   }
-  ui::constrained_width(col_w, ui::column_stretch(children))
+  ui::box(ui::column_stretch(children), width: col_w)
 }
 
 fn board(
