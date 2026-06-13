@@ -287,7 +287,7 @@ fn overlay(child: Widget, overlay: Widget, position: OverlayPosition, trap_focus
   )
 }
 
-extern fn box(child: Widget, border: BoxBorder?, style: Style?) Widget = "tinear.UiBox"
+extern fn box(child: Widget?, width: Int?, height: Int?, border: BoxBorder?, style: Style?) Widget = "tinear.UiBox"
 extern fn _text_field(
   value: Str,
   placeholder: Str,

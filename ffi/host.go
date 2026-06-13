@@ -1159,7 +1159,9 @@ func UiBorderNew(top bool, right bool, bottom bool, left bool, style ardruntime.
 }
 
 type uiBox struct {
-	Child  ui.Widget
+	Child  ardruntime.Maybe[ui.Widget]
+	Width  ardruntime.Maybe[int]
+	Height ardruntime.Maybe[int]
 	Border ardruntime.Maybe[UiBoxBorder]
 	Style  ardruntime.Maybe[UiStyle]
 }
@@ -1189,11 +1191,27 @@ func (s *uiBoxState) Build(ctx ui.BuildContext) ui.Widget {
 			Style:  borderStyle,
 		}
 	}
-	return ui.DecoratedBox(decoration, w.Child)
+	var child ui.Widget
+	if w.Child.IsSome() {
+		child = w.Child.Value()
+	}
+	boxed := ui.DecoratedBox(decoration, child)
+	if w.Width.IsSome() || w.Height.IsSome() {
+		width := 0
+		height := 0
+		if w.Width.IsSome() {
+			width = w.Width.Value()
+		}
+		if w.Height.IsSome() {
+			height = w.Height.Value()
+		}
+		return ui.SizedBox{Width: width, Height: height, Child: boxed}
+	}
+	return boxed
 }
 
-func UiBox(child ui.Widget, border ardruntime.Maybe[UiBoxBorder], style ardruntime.Maybe[UiStyle]) ui.Widget {
-	return uiBox{Child: child, Border: border, Style: style}
+func UiBox(child ardruntime.Maybe[ui.Widget], width ardruntime.Maybe[int], height ardruntime.Maybe[int], border ardruntime.Maybe[UiBoxBorder], style ardruntime.Maybe[UiStyle]) ui.Widget {
+	return uiBox{Child: child, Width: width, Height: height, Border: border, Style: style}
 }
 
 func UiTextField(value string, placeholder string, minWidth int, obscure bool, onChanged func(ui.EventContext, string), onSubmitted func(ui.EventContext, string)) ui.Widget {

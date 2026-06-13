@@ -188,7 +188,7 @@ fn dialog_body(api_key: Str, model: SearchUiState, state: ui::State<SearchUiStat
       auto_focus: true,
     ),
     ui::divider(style: ui::style(foreground: "border")),
-    ui::sized_box_child(0, 8, results_body(model)),
+    ui::box(results_body(model), height: 8),
   ])
 }
 

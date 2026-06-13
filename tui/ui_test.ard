@@ -47,6 +47,26 @@ test fn test_ui_key_debug_renders_title_and_description_toast() Void!Str {
   )
 }
 
+test fn test_ui_box_can_render_sized_spacer_with_border() Void!Str {
+  let app = uitest::app(
+    ui::row([
+      ui::box(
+        width: 5,
+        height: 3,
+        border: ui::border(top: true, right: true, bottom: true, left: true, style: ui::style(foreground: "border")),
+      ),
+      ui::text("x"),
+    ]),
+  )
+
+  app.pump(10, 5)
+
+  let rendered = app.text()
+  try testing::assert(rendered.contains("┌───┐"), "box should respect width, got '{rendered}'")
+  try testing::assert(rendered.contains("│   │"), "box should render middle row, got '{rendered}'")
+  testing::assert(rendered.contains("└───┘"), "box should respect height, got '{rendered}'")
+}
+
 test fn test_ui_overlay_positions_child_bottom_right() Void!Str {
   let app = uitest::app(ui::overlay(
     child: ui::text("Base"),
