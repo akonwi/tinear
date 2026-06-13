@@ -5,7 +5,6 @@ use ard/maybe
 
 use tinear/models/inbox
 use tinear/os
-use tinear/tui/decode as decode_utils
 use tinear/tui/hints
 use tinear/tui/modal
 use tinear/tui/state
@@ -78,16 +77,40 @@ fn nullable_string(data: Dynamic, name: Str, fallback: Str) Str {
   }
 }
 
+fn optional_dynamic(data: Dynamic, name: Str) Dynamic? {
+  match decode::run(data, decode::field(name, decode::dynamic)) {
+    ok(value) => match decode::is_void(value) {
+      true => maybe::none(),
+      false => maybe::some(value),
+    },
+    err(_) => maybe::none(),
+  }
+}
+
+fn user_display_name(user: Dynamic) Str {
+  let display_name = decode::run(
+    user,
+    decode::nullable(decode::field("displayName", decode::string)),
+  ).expect("optional user.displayName invalid")
+  match display_name {
+    value => match value.is_empty() {
+      true => decode::run(user, decode::field("name", decode::string)).expect("Missing user.name"),
+      false => value,
+    },
+    _ => decode::run(user, decode::field("name", decode::string)).expect("Missing user.name"),
+  }
+}
+
 fn optional_name(data: Dynamic, name: Str) Str {
-  match decode_utils::optional_field(data, name) {
+  match optional_dynamic(data, name) {
     obj => decode::run(obj, decode::field("name", decode::string)).expect("Missing name"),
     _ => "—",
   }
 }
 
 fn optional_user_name(data: Dynamic, name: Str) Str {
-  match decode_utils::optional_field(data, name) {
-    obj => decode_utils::user_display_name(obj),
+  match optional_dynamic(data, name) {
+    obj => user_display_name(obj),
     _ => "—",
   }
 }
@@ -107,7 +130,7 @@ fn is_pr_comment_type(n_type: Str) Bool {
 fn relevant_url(notif: Dynamic) Str {
   let n_type = field_string(notif, "type", "")
   if is_pr_type(n_type) {
-    let pr_url = match decode_utils::optional_field(notif, "pullRequest") {
+    let pr_url = match optional_dynamic(notif, "pullRequest") {
       pr => field_string(pr, "url", ""),
       _ => "",
     }
@@ -126,7 +149,7 @@ fn relevant_url(notif: Dynamic) Str {
       pr_url
     }
   } else {
-    match decode_utils::optional_field(notif, "issue") {
+    match optional_dynamic(notif, "issue") {
       issue => field_string(issue, "url", ""),
       _ => nullable_string(notif, "url", ""),
     }
@@ -134,7 +157,7 @@ fn relevant_url(notif: Dynamic) Str {
 }
 
 fn status_transition(notif: Dynamic) Str {
-  let issue_obj = decode_utils::optional_field(notif, "issue")
+  let issue_obj = optional_dynamic(notif, "issue")
   let empty: [Dynamic] = []
   let entries = match issue_obj {
     iss => {
@@ -149,11 +172,11 @@ fn status_transition(notif: Dynamic) Str {
   mut to_name = ""
   for entry in entries {
     if from_name.is_empty() {
-      let f = match decode_utils::optional_field(entry, "fromState") {
+      let f = match optional_dynamic(entry, "fromState") {
         v => field_string(v, "name", ""),
         _ => "",
       }
-      let t = match decode_utils::optional_field(entry, "toState") {
+      let t = match optional_dynamic(entry, "toState") {
         v => field_string(v, "name", ""),
         _ => "",
       }
@@ -171,7 +194,7 @@ fn status_transition(notif: Dynamic) Str {
 
 fn issue_update_text(notif: Dynamic, n_type: Str) Str {
   if is_issue_comment_type(n_type) {
-    match decode_utils::optional_field(notif, "comment") {
+    match optional_dynamic(notif, "comment") {
       c => {
         let author = optional_user_name(c, "user")
         let created = text::format_date(field_string(c, "createdAt", ""))
@@ -183,7 +206,7 @@ fn issue_update_text(notif: Dynamic, n_type: Str) Str {
   } else if n_type == "issueStatusChanged" {
     "Status change\n{status_transition(notif)}"
   } else {
-    match decode_utils::optional_field(notif, "issue") {
+    match optional_dynamic(notif, "issue") {
       issue => {
         let desc = nullable_string(issue, "description", "")
         match desc.is_empty() {
@@ -200,7 +223,7 @@ fn issue_detail_text(item: inbox::Item, notif: Dynamic) Str {
   let n_type = field_string(notif, "type", item.notification_type)
   let actor = optional_user_name(notif, "actor")
   let created = text::format_date(nullable_string(notif, "createdAt", ""))
-  match decode_utils::optional_field(notif, "issue") {
+  match optional_dynamic(notif, "issue") {
     issue => {
       let status = optional_name(issue, "state")
       let team = optional_name(issue, "team")
@@ -220,7 +243,7 @@ fn pr_detail_text(item: inbox::Item, notif: Dynamic) Str {
   let n_type = field_string(notif, "type", item.notification_type)
   let actor = optional_user_name(notif, "actor")
   let created = text::format_date(nullable_string(notif, "createdAt", ""))
-  match decode_utils::optional_field(notif, "pullRequest") {
+  match optional_dynamic(notif, "pullRequest") {
     pr => {
       let status = field_string(pr, "status", "—")
       let source = field_string(pr, "sourceBranch", "—")

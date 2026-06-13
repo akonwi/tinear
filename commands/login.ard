@@ -3,7 +3,6 @@ use ard/io
 
 use tinear/config
 use tinear/linear/client
-use tinear/tui/decode as decode_utils
 
 fn require_non_empty(s: Str, msg: Str) Str!Str {
   match s.is_empty() {
@@ -14,6 +13,20 @@ fn require_non_empty(s: Str, msg: Str) Str!Str {
 
 fn fetch_user(api_key: Str) Dynamic!Str {
   client::graphql(api_key, "query \{ viewer \{ id name displayName email \} \}")
+}
+
+fn user_display_name(user: Dynamic) Str {
+  let display_name = decode::run(
+    user,
+    decode::nullable(decode::field("displayName", decode::string)),
+  ).expect("optional user.displayName invalid")
+  match display_name {
+    value => match value.is_empty() {
+      true => decode::run(user, decode::field("name", decode::string)).expect("Missing user.name"),
+      false => value,
+    },
+    _ => decode::run(user, decode::field("name", decode::string)).expect("Missing user.name"),
+  }
 }
 
 fn login(api_key: Str) Dynamic!Str {
@@ -43,7 +56,7 @@ fn run_inner(args: [Str]) Void!Str {
   ).and_then(
     fn(data) {
       let viewer = decode::run(data, decode::field("viewer", decode::dynamic)).expect("Missing viewer")
-      let name = decode_utils::user_display_name(viewer)
+      let name = user_display_name(viewer)
       let email = decode::run(viewer, decode::field("email", decode::string)).expect("Missing email")
 
       io::print("")

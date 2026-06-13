@@ -3,7 +3,6 @@ use ard/json
 use ard/maybe
 
 use tinear/linear/client
-use tinear/tui/decode as decode_utils
 use tinear/tui/state
 
 extern fn normalize_text(value: Str) Str = "tinear.NormalizeLinearText"
@@ -65,9 +64,12 @@ struct TeamCyclesResult {
 }
 
 fn optional_str(data: Dynamic, name: Str, fallback: Str) Str {
-  match decode_utils::optional_field(data, name) {
-    v => decode::run(v, decode::string).expect("field not string"),
-    _ => fallback,
+  match decode::run(data, decode::field(name, decode::nullable(decode::string))) {
+    ok(value) => match value {
+      v => v,
+      _ => fallback,
+    },
+    err(_) => fallback,
   }
 }
 
@@ -93,37 +95,52 @@ fn nullable_int(data: Dynamic, name: Str) Int? {
 }
 
 fn nested_str(data: Dynamic, name: Str, nested: Str, fallback: Str) Str {
-  match decode_utils::optional_field(data, name) {
-    obj => optional_str(obj, nested, fallback),
-    _ => fallback,
+  match decode::run(data, decode::path([name, nested], decode::nullable(decode::string))) {
+    ok(value) => match value {
+      v => v,
+      _ => fallback,
+    },
+    err(_) => fallback,
+  }
+}
+
+fn user_display_name(user: Dynamic) Str {
+  let display_name = decode::run(
+    user,
+    decode::nullable(decode::field("displayName", decode::string)),
+  ).expect("optional user.displayName invalid")
+  match display_name {
+    value => match value.is_empty() {
+      true => decode::run(user, decode::field("name", decode::string)).expect("Missing user.name"),
+      false => value,
+    },
+    _ => decode::run(user, decode::field("name", decode::string)).expect("Missing user.name"),
   }
 }
 
 fn user_display_name_opt(data: Dynamic, name: Str) Str {
-  match decode_utils::optional_field(data, name) {
-    user => decode_utils::user_display_name(user),
-    _ => "—",
+  let display_name = nested_str(data, name, "displayName", "")
+  match display_name.is_empty() {
+    true => nested_str(data, name, "name", "—"),
+    false => display_name,
   }
 }
 
 fn cycle_id(raw: Dynamic) Str {
-  match decode_utils::optional_field(raw, "cycle") {
-    cycle => optional_str(cycle, "id", ""),
-    _ => "",
-  }
+  nested_str(raw, "cycle", "id", "")
 }
 
 fn cycle_label(raw: Dynamic) Str {
-  match decode_utils::optional_field(raw, "cycle") {
-    cycle => {
-      let number = decode::run(cycle, decode::field("number", decode::int)).expect("Missing cycle.number")
-      let name = decode::run(
-        cycle,
-        decode::field("name", decode::nullable(decode::string)),
-      ).expect("Missing cycle.name")
-      match name {
-        n => normalize_text(n),
-        _ => "Cycle {number}",
+  let number = match decode::run(raw, decode::path(["cycle", "number"], decode::nullable(decode::int))) {
+    ok(value) => value,
+    err(_) => maybe::none(),
+  }
+  match number {
+    n => {
+      let name = nested_str(raw, "cycle", "name", "")
+      match name.is_empty() {
+        true => "Cycle {n}",
+        false => normalize_text(name),
       }
     },
     _ => "—",
@@ -174,7 +191,7 @@ fn decode_comment(raw: Dynamic) Comment {
   let user = decode::run(raw, decode::field("user", decode::dynamic)).expect("Missing comment.user")
   Comment{
     id: decode::run(raw, decode::field("id", decode::string)).expect("Missing comment.id"),
-    author: decode_utils::user_display_name(user),
+    author: user_display_name(user),
     created_at: decode::run(raw, decode::field("createdAt", decode::string)).expect("Missing comment.createdAt"),
     body: normalize_text(
       decode::run(raw, decode::field("body", decode::string)).expect("Missing comment.body"),
@@ -287,15 +304,15 @@ fn fetch_team_cycles(api_key: Str, team_id: Str) TeamCyclesResult!Str {
     team_obj,
     decode::path(["cycles", "nodes"], decode::list(decode::dynamic)),
   ).expect("Missing team.cycles.nodes")
-  let active_obj = decode_utils::optional_field(team_obj, "activeCycle")
-  let active_number = match active_obj {
-    a => {
-      maybe::some(
-        decode::run(a, decode::field("number", decode::int)).expect("Missing activeCycle.number"),
-      )
-    },
-    _ => maybe::none(),
+
+  let active_number = match decode::run(
+    team_obj,
+    decode::path(["activeCycle", "number"], decode::nullable(decode::int)),
+  ) {
+    ok(value) => value,
+    err(_) => maybe::none(),
   }
+
   mut cycles: [Cycle] = []
   for raw in nodes {
     cycles.push(decode_cycle(raw))

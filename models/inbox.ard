@@ -1,7 +1,7 @@
 use ard/decode
+use ard/maybe
 
 use tinear/linear/client
-use tinear/tui/decode as decode_utils
 use tinear/tui/text
 
 struct Item {
@@ -47,35 +47,45 @@ struct IdTitle {
   title: Str,
 }
 
+fn optional_nested_str(data: Dynamic, name: Str, nested: Str, fallback: Str) Str {
+  match decode::run(data, decode::path([name, nested], decode::nullable(decode::string))) {
+    ok(value) => match value {
+      v => v,
+      _ => fallback,
+    },
+    err(_) => fallback,
+  }
+}
+
+fn optional_nested_int(data: Dynamic, name: Str, nested: Str) Int? {
+  match decode::run(data, decode::path([name, nested], decode::nullable(decode::int))) {
+    ok(value) => value,
+    err(_) => maybe::none(),
+  }
+}
+
+fn user_display_name_at(data: Dynamic, name: Str) Str {
+  let display_name = optional_nested_str(data, name, "displayName", "")
+  match display_name.is_empty() {
+    true => optional_nested_str(data, name, "name", "—"),
+    false => display_name,
+  }
+}
+
 private fn dynamic_id_and_title(notif: Dynamic, n_type: Str) IdTitle {
   match is_pr_type(n_type) {
     true => {
-      let pr_obj = decode_utils::optional_field(notif, "pullRequest")
-      let id = match pr_obj {
-        pr => {
-          let num = decode::run(pr, decode::field("number", decode::int)).expect("Missing PR number")
-          "PR #{num.to_str()}"
-        },
+      let number = optional_nested_int(notif, "pullRequest", "number")
+      let id = match number {
+        n => "PR #{n.to_str()}",
         _ => "—",
       }
-      let title = match pr_obj {
-        pr => decode::run(pr, decode::field("title", decode::string)).expect("Missing PR title"),
-        _ => "",
-      }
+      let title = optional_nested_str(notif, "pullRequest", "title", "")
       IdTitle{id: id, title: title}
     },
     false => {
-      let issue_obj = decode_utils::optional_field(notif, "issue")
-      let id = match issue_obj {
-        iss => {
-          decode::run(iss, decode::field("identifier", decode::string)).expect("Missing issue identifier")
-        },
-        _ => "—",
-      }
-      let title = match issue_obj {
-        iss => decode::run(iss, decode::field("title", decode::string)).expect("Missing issue title"),
-        _ => "",
-      }
+      let id = optional_nested_str(notif, "issue", "identifier", "—")
+      let title = optional_nested_str(notif, "issue", "title", "")
       IdTitle{id: id, title: title}
     },
   }
@@ -86,11 +96,7 @@ fn decode_item(notif: Dynamic) Item {
   let n_type = decode::run(notif, decode::field("type", decode::string)).expect("Missing notification type")
   let type_label = format_type(n_type)
 
-  let actor_obj = decode_utils::optional_field(notif, "actor")
-  let actor_name = match actor_obj {
-    act => decode_utils::user_display_name(act),
-    _ => "—",
-  }
+  let actor_name = user_display_name_at(notif, "actor")
 
   let info = dynamic_id_and_title(notif, n_type)
   Item{
