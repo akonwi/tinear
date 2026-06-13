@@ -197,7 +197,7 @@ fn content(
   let picker_open = model.active_picker.is_some()
   let picker_overlay = match model.active_picker {
     active => picker::new(active),
-    _ => ui::sized_box(0, 0),
+    _ => ui::box(),
   }
   let with_picker = ui::overlay(
     child: base,
@@ -208,7 +208,7 @@ fn content(
   )
   let search_overlay = match model.search_open {
     true => search,
-    false => ui::sized_box(0, 0),
+    false => ui::box(),
   }
   ui::overlay(
     child: with_picker,

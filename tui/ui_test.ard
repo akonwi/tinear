@@ -67,6 +67,28 @@ test fn test_ui_box_can_render_sized_spacer_with_border() Void!Str {
   testing::assert(rendered.contains("└───┘"), "box should respect height, got '{rendered}'")
 }
 
+test fn test_ui_box_spacer_does_not_paint_over_parent_border() Void!Str {
+  let app = uitest::app(
+    ui::row([
+      ui::box(
+        ui::column_min([
+          ui::box(height: 1),
+          ui::text("x"),
+          ui::box(height: 1),
+        ]),
+        width: 5,
+        border: ui::border(top: true, right: true, bottom: true, left: true, style: ui::style(foreground: "border")),
+      ),
+    ]),
+  )
+
+  app.pump(20, 8)
+  let rendered = app.text()
+
+  try testing::assert(rendered.contains("┌───┐"), "parent box should retain top border, got '{rendered}'")
+  testing::assert(rendered.contains("└───┘"), "parent box should retain bottom border, got '{rendered}'")
+}
+
 test fn test_ui_overlay_positions_child_bottom_right() Void!Str {
   let app = uitest::app(ui::overlay(
     child: ui::text("Base"),

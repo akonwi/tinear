@@ -309,7 +309,7 @@ fn detail_modal(
     child: ui::column_stretch(
       [
         detail_body(item: item, loading_detail: loading_detail, detail_error: detail_error, detail: detail),
-        ui::sized_box(1, 1),
+        ui::box(width: 1, height: 1),
       ],
     ),
     footer: detail_footer(),

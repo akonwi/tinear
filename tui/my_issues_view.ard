@@ -150,7 +150,7 @@ fn issue_card(issue: issues::Issue, selected: Bool, last: Bool, col_w: Int) ui::
   mut children = [first]
   if not last {
     children.push(ui::text(repeat("─", col_w - 1), style: ui::style(foreground: "border")))
-    children.push(ui::sized_box(0, 1))
+    children.push(ui::box(height: 1))
   }
   ui::column_stretch(children)
 }
@@ -172,7 +172,7 @@ fn board_column(
   mut children = [
     ui::text(header, style: ui::style(bold: true)),
     ui::text(repeat("─", col_w - 1), style: ui::style(foreground: "border")),
-    ui::sized_box(0, 1),
+    ui::box(height: 1),
   ]
   let last_idx = col.issues.size() - 1
   for issue, row_idx in col.issues {
@@ -210,13 +210,13 @@ fn board(
   for col, col_idx in columns {
     if col_idx >= start_col and col_idx < end_excl {
       if widgets.size() > 0 {
-        widgets.push(ui::sized_box(board_column_gap(), 0))
+        widgets.push(ui::box(width: board_column_gap()))
       }
       widgets.push(board_column(col, col_idx, selected_col, selected_row, screen_w, col_count))
     }
   }
   if end_excl < col_count {
-    widgets.push(ui::sized_box(board_column_gap(), 0))
+    widgets.push(ui::box(width: board_column_gap()))
     widgets.push(ui::text("›"))
   }
   ui::focusable(ui::row(widgets))

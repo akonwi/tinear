@@ -39,7 +39,7 @@ fn field_row(left_label: Str, left_value: Str, right_label: Str, right_value: St
   ui::row(
     [
       field_pair(left_label, left_value, 24),
-      ui::sized_box(3, 0),
+      ui::box(width: 3),
       field_pair(right_label, right_value, 24),
     ],
   )
@@ -64,7 +64,7 @@ fn metadata_header(issue: issues::Issue) ui::Widget {
           ui::expanded(ui::text(issue.title, style: ui::style(bold: true))),
         ],
       ),
-      ui::sized_box(0, 1),
+      ui::box(height: 1),
       field_row("Status", issue.state_name, "Priority", priority_value(issue)),
       field_row("Assignee", issue.assignee_name, "Cycle", issue.cycle_label),
       field_row("Project", issue.project_name, "Team", issue.team_name),
@@ -172,7 +172,7 @@ fn scroll_body(
     ui::column_stretch(
       [
         description_section(issue, viewport_width),
-        ui::sized_box(0, 1),
+        ui::box(height: 1),
         comments_section(comments, loading, error, viewport_width),
       ],
     ),
@@ -294,7 +294,7 @@ fn compose_area(
     }
     ui::column_stretch([ui::divider(style: ui::style(foreground: "border")), body])
   } else {
-    ui::sized_box(0, 0)
+    ui::box()
   }
 }
 

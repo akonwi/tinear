@@ -1172,30 +1172,35 @@ type uiBoxState struct{ ui.StateBase }
 
 func (s *uiBoxState) Build(ctx ui.BuildContext) ui.Widget {
 	w := s.Widget().(uiBox)
-	theme := ui.MustDepend[ui.Theme](ctx)
-	decoration := ui.Decoration{}
-	if w.Style.IsSome() {
-		decoration.Style = w.Style.Value().vaxisStyleWithTheme(theme)
-	}
-	if w.Border.IsSome() {
-		b := w.Border.Value()
-		borderStyle := ui.Style{Foreground: theme.Border}
-		if b.Style.IsSome() {
-			borderStyle = b.Style.Value().vaxisStyleWithTheme(theme)
-		}
-		decoration.Border = ui.Border{
-			Top:    b.Top,
-			Right:  b.Right,
-			Bottom: b.Bottom,
-			Left:   b.Left,
-			Style:  borderStyle,
-		}
-	}
 	var child ui.Widget
 	if w.Child.IsSome() {
 		child = w.Child.Value()
 	}
-	boxed := ui.DecoratedBox(decoration, child)
+
+	hasDecoration := w.Style.IsSome() || w.Border.IsSome()
+	if hasDecoration {
+		theme := ui.MustDepend[ui.Theme](ctx)
+		decoration := ui.Decoration{}
+		if w.Style.IsSome() {
+			decoration.Style = w.Style.Value().vaxisStyleWithTheme(theme)
+		}
+		if w.Border.IsSome() {
+			b := w.Border.Value()
+			borderStyle := ui.Style{Foreground: theme.Border}
+			if b.Style.IsSome() {
+				borderStyle = b.Style.Value().vaxisStyleWithTheme(theme)
+			}
+			decoration.Border = ui.Border{
+				Top:    b.Top,
+				Right:  b.Right,
+				Bottom: b.Bottom,
+				Left:   b.Left,
+				Style:  borderStyle,
+			}
+		}
+		child = ui.DecoratedBox(decoration, child)
+	}
+
 	if w.Width.IsSome() || w.Height.IsSome() {
 		width := 0
 		height := 0
@@ -1205,9 +1210,12 @@ func (s *uiBoxState) Build(ctx ui.BuildContext) ui.Widget {
 		if w.Height.IsSome() {
 			height = w.Height.Value()
 		}
-		return ui.SizedBox{Width: width, Height: height, Child: boxed}
+		return ui.SizedBox{Width: width, Height: height, Child: child}
 	}
-	return boxed
+	if child != nil {
+		return child
+	}
+	return ui.SizedBox{}
 }
 
 func UiBox(child ardruntime.Maybe[ui.Widget], width ardruntime.Maybe[int], height ardruntime.Maybe[int], border ardruntime.Maybe[UiBoxBorder], style ardruntime.Maybe[UiStyle]) ui.Widget {

@@ -9,9 +9,9 @@ fn logo_lines() [ui::Widget] {
 
 fn new(api_key: Str, has_error: Bool, on_changed: fn(Str), on_submit: fn(Str)) ui::Widget {
   mut children = logo_lines()
-  children.push(ui::sized_box(0, 2))
+  children.push(ui::box(height: 2))
   children.push(ui::text("Enter your Linear API key"))
-  children.push(ui::sized_box(0, 1))
+  children.push(ui::box(height: 1))
   children.push(
     ui::text_field(
       value: api_key,
@@ -26,7 +26,7 @@ fn new(api_key: Str, has_error: Bool, on_changed: fn(Str), on_submit: fn(Str)) u
       },
     ),
   )
-  children.push(ui::sized_box(0, 1))
+  children.push(ui::box(height: 1))
   children.push(
     ui::button(
       "Login",
@@ -36,7 +36,7 @@ fn new(api_key: Str, has_error: Bool, on_changed: fn(Str), on_submit: fn(Str)) u
     ),
   )
   if has_error {
-    children.push(ui::sized_box(0, 1))
+    children.push(ui::box(height: 1))
     children.push(ui::text("Invalid API token"))
   }
   ui::center(ui::padding_all(1, ui::column_min(children)))

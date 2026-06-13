@@ -10,13 +10,13 @@ fn dialog(
   let separator = ui::divider(style: ui::style(foreground: "border"))
   let content = ui::column_min(
     [
-      ui::sized_box(1, 1),
+      ui::box(width: 1, height: 1),
       ui::padding_horizontal(1, ui::text(title)),
       ui::padding_horizontal(1, separator),
       ui::padding_horizontal(1, child),
       ui::padding_horizontal(1, separator),
       ui::padding_horizontal(1, footer),
-      ui::sized_box(1, 1),
+      ui::box(width: 1, height: 1),
     ],
   )
 
