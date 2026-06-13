@@ -84,6 +84,40 @@ test fn test_ui_test_app_dispatches_shortcut_actions() Void!Str {
   testing::assert(pressed, "shortcut should dispatch action")
 }
 
+test fn test_ui_capture_shortcuts_fire_before_focused_text_field() Void!Str {
+  mut moved = false
+  let app = uitest::app(
+    ui::actions(
+      child: ui::shortcuts_capture(
+        child: ui::focus_scope(
+          child: ui::text_field(
+            value: "",
+            placeholder: "Search",
+            min_width: 20,
+            obscure: false,
+            on_changed: fn(_ctx: ui::EventContext, _next: Str) {},
+            on_submitted: fn(_ctx: ui::EventContext, _submitted: Str) {},
+          ),
+          trap: false,
+          auto_focus: true,
+        ),
+        bindings: ["Down": "move.down"],
+      ),
+      bindings: [
+        ui::action("move.down", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          moved = true
+          ui::EventResult::handled
+        }),
+      ],
+    ),
+  )
+
+  app.pump(30, 3)
+  app.down()
+
+  testing::assert(moved, "capture shortcut should handle Down before focused text field")
+}
+
 test fn test_ui_text_area_edits_multiline_value() Void!Str {
   mut value = ""
   let app = uitest::app(

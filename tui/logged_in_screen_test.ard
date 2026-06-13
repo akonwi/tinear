@@ -17,6 +17,7 @@ fn test_state(tab: Str) logged_in_screen::LoggedInUiState {
     tab: tab,
     issue_tabs: [],
     active_picker: maybe::none(),
+    search_open: false,
   }
 }
 

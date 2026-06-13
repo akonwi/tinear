@@ -542,5 +542,5 @@ fn new(api_key: Str, issue: issues::Issue, on_state: fn(issues::Issue), on_cycle
 }
 
 fn footer() ui::Widget {
-  hints::bar(["↑↓ scroll", "c comment", "s status", "y cycle", "Esc close"])
+  hints::bar(["↑↓ scroll", "c comment", "s status", "y cycle", "Esc close", "? search"])
 }

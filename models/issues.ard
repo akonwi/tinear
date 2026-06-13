@@ -320,11 +320,26 @@ fn fetch_team_cycles(api_key: Str, team_id: Str) TeamCyclesResult!Str {
   Result::ok(TeamCyclesResult{active_cycle_number: active_number, cycles: cycles})
 }
 
+fn issue_fields() Str {
+  "id identifier title description priority state \{ id name type position \} team \{ id name key \} project \{ name \} assignee \{ name displayName \} cycle \{ id number name \}"
+}
+
 fn fetch_single_issue(api_key: Str, issue_id: Str) Dynamic!Str {
-  let query = "query \{ issue(id: \"{issue_id}\") \{ id identifier title description priority state \{ id name type position \} team \{ id name key \} project \{ name \} assignee \{ name displayName \} cycle \{ id number name \} \} \}"
+  let query = "query \{ issue(id: \"{issue_id}\") \{ {issue_fields()} \} \}"
   let data = try client::graphql(api_key, query)
   let issue = decode::run(data, decode::field("issue", decode::dynamic)).expect("Missing issue")
   Result::ok(issue)
+}
+
+fn fetch_issue_search(api_key: Str, term: Str) [Dynamic]!Str {
+  let q = json::encode(term).expect("encode search query")
+  let query = "query \{ searchIssues(term: {q}, first: 20) \{ nodes \{ {issue_fields()} \} \} \}"
+  let data = try client::graphql(api_key, query)
+  let nodes = decode::run(
+    data,
+    decode::path(["searchIssues", "nodes"], decode::list(decode::dynamic)),
+  ).expect("Missing searchIssues.nodes")
+  Result::ok(nodes)
 }
 
 fn sort_columns_by_position(cols: [state::BoardColumn]) [state::BoardColumn] {
@@ -441,6 +456,15 @@ fn load_team_cycles(api_key: Str, team_id: Str) TeamCyclesResult!Str {
 fn load_issue(api_key: Str, issue_id: Str) Issue!Str {
   let raw = try fetch_single_issue(api_key, issue_id)
   Result::ok(decode_issue(raw))
+}
+
+fn search(api_key: Str, term: Str) [Issue]!Str {
+  let raw_issues = try fetch_issue_search(api_key, term)
+  mut results: [Issue] = []
+  for raw in raw_issues {
+    results.push(decode_issue(raw))
+  }
+  Result::ok(results)
 }
 
 fn load(api_key: Str) [BoardColumn]!Str {

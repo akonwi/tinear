@@ -61,6 +61,7 @@ fn action(name: Str, handler: fn(EventContext, Str) EventResult) ActionBinding {
 // Key.MatchString format, e.g. "q", "Enter", "Ctrl+c", "Shift+Tab". Map
 // values are intent names.
 extern fn shortcuts(child: Widget, bindings: [Str: Str]) Widget = "tinear.UiShortcuts"
+extern fn shortcuts_capture(child: Widget, bindings: [Str: Str]) Widget = "tinear.UiShortcutsCapture"
 
 // Make `child` an event focus target. Ancestor shortcuts/actions can then
 // receive keyboard events through the focused path.

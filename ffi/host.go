@@ -246,11 +246,13 @@ func UiActions(child ui.Widget, bindings []UiActionBinding) ui.Widget {
 type uiShortcutsCompat struct {
 	Bindings map[string]ui.Intent
 	Child    ui.Widget
+	Capture  bool
 }
 
 type renderShortcutsCompat struct {
 	ui.SingleChildRenderObject
 	Bindings map[string]ui.Intent
+	Capture  bool
 }
 
 func UiShortcuts(child ui.Widget, bindings map[string]string) ui.Widget {
@@ -261,16 +263,25 @@ func UiShortcuts(child ui.Widget, bindings map[string]string) ui.Widget {
 	return uiShortcutsCompat{Bindings: mapped, Child: child}
 }
 
+func UiShortcutsCapture(child ui.Widget, bindings map[string]string) ui.Widget {
+	mapped := map[string]ui.Intent{}
+	for binding, intentName := range bindings {
+		mapped[binding] = UiStringIntent(intentName)
+	}
+	return uiShortcutsCompat{Bindings: mapped, Child: child, Capture: true}
+}
+
 func (w uiShortcutsCompat) WidgetChild() ui.Widget {
 	return w.Child
 }
 
 func (w uiShortcutsCompat) CreateRenderObject(ctx ui.BuildContext) ui.RenderObject {
-	return &renderShortcutsCompat{Bindings: w.Bindings}
+	return &renderShortcutsCompat{Bindings: w.Bindings, Capture: w.Capture}
 }
 
 func (w uiShortcutsCompat) UpdateRenderObject(ctx ui.BuildContext, ro ui.RenderObject) {
 	ro.(*renderShortcutsCompat).Bindings = w.Bindings
+	ro.(*renderShortcutsCompat).Capture = w.Capture
 }
 
 func (r *renderShortcutsCompat) Layout(ctx ui.LayoutContext, c ui.Constraints) {
@@ -300,7 +311,11 @@ func (r *renderShortcutsCompat) HitTest(*ui.HitTestResult, ui.Point) bool {
 }
 
 func (r *renderShortcutsCompat) HandleEvent(ctx ui.EventContext, ev ui.Event) ui.EventResult {
-	if ctx.Phase() != ui.TargetPhase && ctx.Phase() != ui.BubblePhase {
+	if r.Capture {
+		if ctx.Phase() != ui.CapturePhase {
+			return ui.EventIgnored
+		}
+	} else if ctx.Phase() != ui.TargetPhase && ctx.Phase() != ui.BubblePhase {
 		return ui.EventIgnored
 	}
 	key, ok := ev.(ui.Key)

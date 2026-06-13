@@ -7,6 +7,7 @@ use tinear/tui/issue_detail_view
 use tinear/tui/issue_picker
 use tinear/tui/my_issues_view
 use tinear/tui/picker
+use tinear/tui/search_view
 use tinear/tui/ui
 
 type ActivePickerOption = picker::Props?
@@ -22,6 +23,7 @@ struct LoggedInUiState {
   tab: Str,
   issue_tabs: [issues::Issue],
   active_picker: ActivePickerOption,
+  search_open: Bool,
 }
 
 fn selected_tab(model: LoggedInUiState) Str {
@@ -153,8 +155,8 @@ fn body(
 
 fn footer(model: LoggedInUiState) ui::Widget {
   match selected_tab(model) {
-    "My Issues" => hints::bar(["↑↓", "← →", "↵ open", "s status", "y cycle", "r refresh"]),
-    "Inbox" => hints::bar(["Tab switch", "↑↓ select", "⌫ delete", "r refresh", "↵ open"]),
+    "My Issues" => hints::bar(["↑↓", "← →", "↵ open", "s status", "y cycle", "r refresh", "? search"]),
+    "Inbox" => hints::bar(["Tab switch", "↑↓ select", "⌫ delete", "r refresh", "↵ open", "? search"]),
     _ => issue_detail_view::footer(),
   }
 }
@@ -189,18 +191,32 @@ fn content(
   my_issues: ui::Widget,
   on_state: fn(issues::Issue),
   on_cycle: fn(issues::Issue),
+  search: ui::Widget,
 ) ui::Widget {
   let base = screen_content(api_key, model, inbox, my_issues, on_state, on_cycle)
-  match model.active_picker {
-    active => ui::overlay(
-      child: base,
-      overlay: picker::new(active),
-      position: ui::OverlayPosition::center,
-      trap_focus: true,
-      auto_focus: true,
-    ),
-    _ => base,
+  let picker_open = model.active_picker.is_some()
+  let picker_overlay = match model.active_picker {
+    active => picker::new(active),
+    _ => ui::sized_box(0, 0),
   }
+  let with_picker = ui::overlay(
+    child: base,
+    overlay: picker_overlay,
+    position: ui::OverlayPosition::center,
+    trap_focus: picker_open,
+    auto_focus: picker_open,
+  )
+  let search_overlay = match model.search_open {
+    true => search,
+    false => ui::sized_box(0, 0),
+  }
+  ui::overlay(
+    child: with_picker,
+    overlay: search_overlay,
+    position: ui::OverlayPosition::center,
+    trap_focus: model.search_open,
+    auto_focus: model.search_open,
+  )
 }
 
 fn open_issue(model: LoggedInUiState, issue: issues::Issue) LoggedInUiState {
@@ -365,6 +381,7 @@ fn new(api_key: Str) ui::Widget {
         tab: "Inbox",
         issue_tabs: [],
         active_picker: maybe::none(),
+        search_open: false,
       }
     },
     build: fn(_ctx: ui::BuildContext, state: ui::State<LoggedInUiState>) ui::Widget {
@@ -385,6 +402,25 @@ fn new(api_key: Str) ui::Widget {
               focus_tab(next_model, next_model.tab)
             },
           )
+        },
+      )
+      let search = search_view::new(
+        api_key,
+        fn(ctx: ui::EventContext, issue: issues::Issue) {
+          let next_model = open_issue(model, issue)
+          state.set(fn(mut next: LoggedInUiState) {
+            next = next_model
+            next.search_open = false
+          })
+          ui::dispatch_after(ctx, 0, fn() {
+            focus_tab(next_model, next_model.tab)
+          })
+        },
+        fn(ctx: ui::EventContext) {
+          state.set(fn(mut next: LoggedInUiState) {
+            next.search_open = false
+          })
+          focus_selected_after_rebuild(ctx, model)
         },
       )
       ui::actions(
@@ -410,13 +446,14 @@ fn new(api_key: Str) ui::Widget {
                 },
               )
             },
-
+            search: search,
           ),
           bindings: [
             "Tab": "tabs.next",
             "Shift+Tab": "tabs.previous",
             "1": "tabs.inbox",
             "2": "tabs.my_issues",
+            "?": "global.search",
             "Escape": "tabs.escape",
             "Esc": "tabs.escape",
             "Up": "detail_picker.previous",
@@ -428,6 +465,19 @@ fn new(api_key: Str) ui::Widget {
           ],
         ),
         bindings: [
+          ui::action(
+            "global.search",
+            fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              if model.active_picker.is_some() {
+                ui::EventResult::ignored
+              } else {
+                state.set(fn(mut next: LoggedInUiState) {
+                  next.search_open = true
+                })
+                ui::EventResult::handled
+              }
+            },
+          ),
           ui::action(
             "tabs.next",
             fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {

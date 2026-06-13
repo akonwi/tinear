@@ -1,0 +1,19 @@
+use ard/testing
+
+use tinear/models/issues
+use tinear/tui/search_view
+use tinear/tui/ui/test as uitest
+use tinear/tui/ui
+
+fn noop_open(_ctx: ui::EventContext, _issue: issues::Issue) {}
+fn noop_dismiss(_ctx: ui::EventContext) {}
+
+test fn test_search_dialog_renders_initial_state() Void!Str {
+  let app = uitest::app(search_view::new("test-api-key", noop_open, noop_dismiss))
+  app.pump(80, 24)
+
+  try testing::assert(app.contains("Search Issues"), "search dialog should render title")
+  try testing::assert(app.contains("Search issues…"), "search dialog should render input placeholder")
+  try testing::assert(app.contains("Type to search across issues"), "search dialog should render empty-state copy")
+  testing::assert(app.contains("↵ open"), "search dialog should render footer hints")
+}
