@@ -192,7 +192,13 @@ fn content(
 ) ui::Widget {
   let base = screen_content(api_key, model, inbox, my_issues, on_state, on_cycle)
   match model.active_picker {
-    active => ui::overlay_modal(base, picker::new(active)),
+    active => ui::overlay(
+      child: base,
+      overlay: picker::new(active),
+      position: ui::OverlayPosition::center,
+      trap_focus: true,
+      auto_focus: true,
+    ),
     _ => base,
   }
 }

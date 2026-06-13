@@ -1101,11 +1101,32 @@ func UiDivider(style ardruntime.Maybe[UiStyle], vertical bool) ui.Widget {
 	return uiThemedDivider{Style: style, Vertical: vertical}
 }
 
-func UiOverlayModal(child ui.Widget, modal ui.Widget) ui.Widget {
+func normalizeOverlayPosition(position int) ui.Alignment {
+	switch position {
+	case 1:
+		return ui.TopLeft
+	case 2:
+		return ui.TopRight
+	case 3:
+		return ui.BottomLeft
+	case 4:
+		return ui.BottomRight
+	default:
+		return ui.CenterAlign
+	}
+}
+
+// using this generic with constraint for easier enum interop without reflecting
+func UiOverlay[T ~int](child ui.Widget, overlay ui.Widget, position T, trapFocus bool, autoFocus bool) ui.Widget {
+	entryChild := overlay
+	if trapFocus || autoFocus {
+		entryChild = ui.FocusScope{Trap: trapFocus, AutoFocus: autoFocus, Child: overlay}
+	}
 	return ui.Overlay{
 		Child: child,
 		Entries: []ui.OverlayEntry{{
-			Child: ui.FocusScope{Trap: true, AutoFocus: true, Child: modal},
+			Child:     entryChild,
+			Alignment: normalizeOverlayPosition(int(position)),
 		}},
 	}
 }

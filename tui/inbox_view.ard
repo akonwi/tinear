@@ -337,15 +337,18 @@ fn content(
     ui::center(ui::text("Inbox empty"))
   } else if detail_open {
     let item = items.at(cursor)
-    ui::overlay_modal(
-      render_rows(items, cursor),
-      detail_modal(
+    ui::overlay(
+      child: render_rows(items, cursor),
+      overlay: detail_modal(
         item: item,
         loading_detail: loading_detail,
         detail_error: detail_error,
         detail: detail,
         on_dismiss: on_detail_dismiss,
       ),
+      position: ui::OverlayPosition::center,
+      trap_focus: true,
+      auto_focus: true,
     )
   } else {
     render_rows(items, cursor)

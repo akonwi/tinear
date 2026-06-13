@@ -26,15 +26,15 @@ test fn test_modal_dialog_renders_title_and_dismisses_on_escape() Void!Str {
   testing::assert(dismissed, "Escape should dispatch modal dismiss action")
 }
 
-test fn test_overlay_modal_escape_takes_priority_over_ancestor_shortcut() Void!Str {
+test fn test_overlay_with_focus_trap_escape_takes_priority_over_ancestor_shortcut() Void!Str {
   mut dismissed = false
   mut ancestor = false
   let app = uitest::app(
     ui::actions(
       child: ui::shortcuts(
-        child: ui::overlay_modal(
-          ui::focusable(ui::text("Base")),
-          modal::dialog(
+        child: ui::overlay(
+          child: ui::focusable(ui::text("Base")),
+          overlay: modal::dialog(
             title: "Status",
             child: ui::text("In Progress"),
             footer: ui::text("Esc cancel"),
@@ -43,6 +43,9 @@ test fn test_overlay_modal_escape_takes_priority_over_ancestor_shortcut() Void!S
               dismissed = true
             },
           ),
+          position: ui::OverlayPosition::center,
+          trap_focus: true,
+          auto_focus: true,
         ),
         bindings: ["Escape": "ancestor.escape", "Esc": "ancestor.escape"],
       ),

@@ -47,6 +47,20 @@ test fn test_ui_key_debug_renders_title_and_description_toast() Void!Str {
   )
 }
 
+test fn test_ui_overlay_positions_child_bottom_right() Void!Str {
+  let app = uitest::app(ui::overlay(
+    child: ui::text("Base"),
+    overlay: ui::text("T"),
+    position: ui::OverlayPosition::bottom_right,
+    trap_focus: false,
+    auto_focus: false,
+  ))
+
+  app.pump(10, 3)
+
+  testing::assert(app.cell_grapheme(9, 2) == "T", "bottom-right overlay should paint in last cell")
+}
+
 test fn test_ui_test_app_dispatches_shortcut_actions() Void!Str {
   mut pressed = false
   let app = uitest::app(

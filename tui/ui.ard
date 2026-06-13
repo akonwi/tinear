@@ -28,6 +28,14 @@ enum ToastVariant {
   debug,
 }
 
+enum OverlayPosition {
+  center,
+  top_left,
+  top_right,
+  bottom_left,
+  bottom_right,
+}
+
 // Start a vaxis/ui app with `root` as the root widget. App-level behavior such
 // as quit shortcuts should be composed into `root` with `actions`/`shortcuts`.
 extern fn run(root: Widget) Void!Str = "tinear.UiRun"
@@ -266,7 +274,18 @@ fn divider(style: Style?, vertical: Bool?) Widget {
   divider_raw(style: style, vertical: bool_or(vertical, false))
 }
 
-extern fn overlay_modal(child: Widget, modal: Widget) Widget = "tinear.UiOverlayModal"
+extern fn overlay_raw(child: Widget, overlay: Widget, position: OverlayPosition, trap_focus: Bool, auto_focus: Bool) Widget = "tinear.UiOverlay"
+
+fn overlay(child: Widget, overlay: Widget, position: OverlayPosition, trap_focus: Bool?, auto_focus: Bool?) Widget {
+  overlay_raw(
+    child: child,
+    overlay: overlay,
+    position: position,
+    trap_focus: bool_or(trap_focus, false),
+    auto_focus: bool_or(auto_focus, false),
+  )
+}
+
 extern fn box(child: Widget, border: BoxBorder?, style: Style?) Widget = "tinear.UiBox"
 extern fn _text_field(
   value: Str,
