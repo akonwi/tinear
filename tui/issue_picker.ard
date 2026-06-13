@@ -3,6 +3,7 @@ use ard/maybe
 use tinear/models/issues
 use tinear/tui/picker
 use tinear/tui/state
+use tinear/tui/ui
 
 fn sort_states(states: [issues::WorkflowState]) [issues::WorkflowState] {
   let n = states.size()
@@ -57,7 +58,7 @@ fn cycle_label(cycle: issues::Cycle) Str {
   }
 }
 
-fn state_props(api_key: Str, issue: issues::Issue) picker::Props!Str {
+fn state_props(api_key: Str, issue: issues::Issue, on_confirm: fn(ui::EventContext, picker::Option), on_dismiss: fn(ui::EventContext)) picker::Props!Str {
   let states = sort_states(try issues::load_team_states(api_key, issue.team_id))
   mut options: [picker::Option] = []
   for s in states {
@@ -76,11 +77,13 @@ fn state_props(api_key: Str, issue: issues::Issue) picker::Props!Str {
       options: options,
       inititial_id: issue.state_id,
       width: maybe::none(),
+      on_confirm: on_confirm,
+      on_dismiss: on_dismiss,
     },
   )
 }
 
-fn cycle_props(api_key: Str, issue: issues::Issue) picker::Props!Str {
+fn cycle_props(api_key: Str, issue: issues::Issue, on_confirm: fn(ui::EventContext, picker::Option), on_dismiss: fn(ui::EventContext)) picker::Props!Str {
   let result = try issues::load_team_cycles(api_key, issue.team_id)
 
   mut filtered: [issues::Cycle] = []
@@ -120,6 +123,8 @@ fn cycle_props(api_key: Str, issue: issues::Issue) picker::Props!Str {
       options: options,
       inititial_id: issue.cycle_id,
       width: maybe::some(60),
+      on_confirm: on_confirm,
+      on_dismiss: on_dismiss,
     },
   )
 }

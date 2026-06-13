@@ -346,13 +346,7 @@ fn start_background_refresh(api_key: Str, rt: ui::Runtime<MyIssuesUiState>) {
   )
 }
 
-struct ActivePicker {
-  target: Str,
-  issue_id: Str,
-  props: picker::Props,
-}
-
-type ActivePickerOption = ActivePicker?
+type ActivePickerOption = picker::Props?
 
 fn state_picker_target() Str {
   "state"
@@ -409,7 +403,8 @@ fn base_content(
 
 fn confirm_active_picker(
   api_key: Str,
-  active: ActivePicker,
+  target: Str,
+  issue_id: Str,
   option: picker::Option,
   state: ui::State<MyIssuesUiState>,
   col: Int,
@@ -422,9 +417,9 @@ fn confirm_active_picker(
       },
     )
   } else {
-    let result = match active.target == state_picker_target() {
-      true => issues::update_state(api_key, active.issue_id, option.id),
-      false => issues::update_cycle(api_key, active.issue_id, option.id),
+    let result = match target == state_picker_target() {
+      true => issues::update_state(api_key, issue_id, option.id),
+      false => issues::update_cycle(api_key, issue_id, option.id),
     }
     match result {
       ok(_) => {
@@ -459,8 +454,6 @@ fn content(
   scroll: Int,
   screen_w: Int,
   active_picker: ActivePickerOption,
-  on_picker_confirm: fn(ui::EventContext, picker::Option),
-  on_picker_dismiss: fn(ui::EventContext),
 ) ui::Widget {
   let base = base_content(
     columns: columns,
@@ -472,7 +465,7 @@ fn content(
     screen_w: screen_w,
   )
   match active_picker {
-    active => ui::overlay_modal(base, picker::new(active.props, on_picker_confirm, on_picker_dismiss)),
+    active => ui::overlay_modal(base, picker::new(active)),
     _ => base,
   }
 }
@@ -524,19 +517,6 @@ fn new(api_key: Str, on_open_issue: fn(ui::EventContext, issues::Issue)) ui::Wid
                 scroll: scroll,
                 screen_w: screen_w,
                 active_picker: model.active_picker,
-                on_picker_confirm: fn(_ctx: ui::EventContext, option: picker::Option) {
-                  match model.active_picker {
-                    active => confirm_active_picker(api_key, active, option, state, col, row),
-                    _ => (),
-                  }
-                },
-                on_picker_dismiss: fn(_ctx: ui::EventContext) {
-                  state.set(
-                    fn(mut next: MyIssuesUiState) {
-                      next.active_picker = maybe::none()
-                    },
-                  )
-                },
               ),
             ),
             fn(width: Int) {
@@ -663,17 +643,20 @@ fn new(api_key: Str, on_open_issue: fn(ui::EventContext, issues::Issue)) ui::Wid
               if model.active_picker.is_none() {
                 match selected_issue(model.columns, col, row) {
                   issue => {
-                    match issue_picker::state_props(api_key, issue) {
+                    match issue_picker::state_props(
+                      api_key,
+                      issue,
+                      fn(_ctx: ui::EventContext, option: picker::Option) {
+                        confirm_active_picker(api_key, state_picker_target(), issue.id, option, state, col, row)
+                      },
+                      fn(_ctx: ui::EventContext) {
+                        state.set(fn(mut next: MyIssuesUiState) { next.active_picker = maybe::none() })
+                      },
+                    ) {
                       ok(props) => {
                         state.set(
                           fn(mut next: MyIssuesUiState) {
-                            next.active_picker = maybe::some(
-                              ActivePicker{
-                                target: state_picker_target(),
-                                issue_id: issue.id,
-                                props: props,
-                              },
-                            )
+                            next.active_picker = maybe::some(props)
                           },
                         )
                       },
@@ -692,17 +675,20 @@ fn new(api_key: Str, on_open_issue: fn(ui::EventContext, issues::Issue)) ui::Wid
               if model.active_picker.is_none() {
                 match selected_issue(model.columns, col, row) {
                   issue => {
-                    match issue_picker::cycle_props(api_key, issue) {
+                    match issue_picker::cycle_props(
+                      api_key,
+                      issue,
+                      fn(_ctx: ui::EventContext, option: picker::Option) {
+                        confirm_active_picker(api_key, cycle_picker_target(), issue.id, option, state, col, row)
+                      },
+                      fn(_ctx: ui::EventContext) {
+                        state.set(fn(mut next: MyIssuesUiState) { next.active_picker = maybe::none() })
+                      },
+                    ) {
                       ok(props) => {
                         state.set(
                           fn(mut next: MyIssuesUiState) {
-                            next.active_picker = maybe::some(
-                              ActivePicker{
-                                target: cycle_picker_target(),
-                                issue_id: issue.id,
-                                props: props,
-                              },
-                            )
+                            next.active_picker = maybe::some(props)
                           },
                         )
                       },

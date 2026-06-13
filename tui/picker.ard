@@ -14,6 +14,8 @@ struct Props {
   options: [Option],
   inititial_id: Str,
   width: Int?,
+  on_confirm: fn(ui::EventContext, Option),
+  on_dismiss: fn(ui::EventContext),
 }
 
 struct CursorState {
@@ -67,7 +69,7 @@ fn selected_at(props: Props, cursor: Int) Option? {
   }
 }
 
-fn new(props: Props, on_confirm: fn(ui::EventContext, Option), on_dismiss: fn(ui::EventContext)) ui::Widget {
+fn new(props: Props) ui::Widget {
   ui::stateful(
     key: props.title,
     init: fn(_ctx: ui::BuildContext) CursorState {
@@ -76,6 +78,8 @@ fn new(props: Props, on_confirm: fn(ui::EventContext, Option), on_dismiss: fn(ui
     build: fn(_ctx: ui::BuildContext, state: ui::State<CursorState>) ui::Widget {
       let model = state.value()
       let cursor = clamp_cursor(model.cursor, props.options.size())
+      let on_confirm = props.on_confirm
+      let on_dismiss = props.on_dismiss
       ui::actions(
         child: ui::shortcuts(
           child: modal::dialog(

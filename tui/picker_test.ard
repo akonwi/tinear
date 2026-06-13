@@ -23,9 +23,9 @@ test fn test_picker_renders_options_and_current_marker() Void!Str {
           },
         ],
         inititial_id: "started",
+        on_confirm: fn(_ctx: ui::EventContext, _option: picker::Option) {},
+        on_dismiss: fn(_ctx: ui::EventContext) {},
       },
-      fn(_ctx: ui::EventContext, _option: picker::Option) {},
-      fn(_ctx: ui::EventContext) {},
     ),
   )
   app.pump(60, 6)
@@ -58,11 +58,11 @@ test fn test_picker_confirms_current_cursor_on_enter() Void!Str {
         ],
         inititial_id: "todo",
         width: maybe::none(),
+        on_confirm: fn(_ctx: ui::EventContext, option: picker::Option) {
+          selected_id = option.id
+        },
+        on_dismiss: fn(_ctx: ui::EventContext) {},
       },
-      fn(_ctx: ui::EventContext, option: picker::Option) {
-        selected_id = option.id
-      },
-      fn(_ctx: ui::EventContext) {},
     ),
   )
   app.pump(60, 6)
