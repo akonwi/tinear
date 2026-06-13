@@ -997,18 +997,6 @@ func UiPaddingHorizontal(horizontal int, child ui.Widget) ui.Widget {
 	return ui.Padding(ui.Symmetric(horizontal, 0), child)
 }
 
-func UiSizedBox(width int, height int) ui.Widget {
-	return ui.SizedBox{Width: width, Height: height}
-}
-
-func UiSizedBoxChild(width int, height int, child ui.Widget) ui.Widget {
-	return ui.SizedBox{Width: width, Height: height, Child: child}
-}
-
-func UiConstrainedWidth(width int, child ui.Widget) ui.Widget {
-	return ui.ConstrainedBox{Constraints: ui.Constraints{MinWidth: width, MaxWidth: width}, Child: child}
-}
-
 func UiExpanded(child ui.Widget) ui.Widget {
 	return ui.Expanded(child)
 }
