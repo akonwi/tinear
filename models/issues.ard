@@ -5,7 +5,58 @@ use ard/maybe
 use tinear/linear/client
 use tinear/tui/state
 
-extern fn normalize_text(value: Str) Str = "tinear.NormalizeLinearText"
+fn replace_common_mojibake(value: Str) Str {
+  mut normalized = value
+  // UTF-8 punctuation decoded as Windows-1252/C1 controls.
+  normalized = normalized.replace_all("â\u0080\u0094", "-")
+  normalized = normalized.replace_all("â\u0080\u0093", "-")
+  normalized = normalized.replace_all("â\u0080\u0098", "'")
+  normalized = normalized.replace_all("â\u0080\u0099", "'")
+  normalized = normalized.replace_all("â\u0080\u009c", "\"")
+  normalized = normalized.replace_all("â\u0080\u009d", "\"")
+  normalized = normalized.replace_all("â\u0080¦", "...")
+  normalized = normalized.replace_all("â\u0080¢", "*")
+
+  // Same mojibake after further Windows-1252-ish display/clipboard conversion.
+  normalized = normalized.replace_all("â€”", "-")
+  normalized = normalized.replace_all("â€“", "-")
+  normalized = normalized.replace_all("â€˜", "'")
+  normalized = normalized.replace_all("â€™", "'")
+  normalized = normalized.replace_all("â€œ", "\"")
+  normalized = normalized.replace_all("â€�", "\"")
+  normalized = normalized.replace_all("â€¦", "...")
+  normalized = normalized.replace_all("â€¢", "*")
+
+  // macOS/NS-style mojibake variants.
+  normalized = normalized.replace_all("‚Äî", "-")
+  normalized = normalized.replace_all("‚Äì", "-")
+  normalized = normalized.replace_all("‚Äò", "'")
+  normalized = normalized.replace_all("‚Äô", "'")
+  normalized = normalized.replace_all("‚Äú", "\"")
+  normalized = normalized.replace_all("‚Äù", "\"")
+  normalized = normalized.replace_all("‚Ä¶", "...")
+  normalized = normalized.replace_all("‚Ä¢", "*")
+
+  normalized.replace_all("\u00a0", " ")
+}
+
+fn normalize_degraded_mojibake(value: Str) Str {
+  mut normalized = ""
+  for ch in value {
+    match ch {
+      'Â' => (),
+      '�' => (),
+      '¢' => { normalized = normalized + "-" },
+      'â' => { normalized = normalized + "-" },
+      _ => { normalized = normalized + ch.to_str() },
+    }
+  }
+  normalized
+}
+
+fn normalize_text(value: Str) Str {
+  normalize_degraded_mojibake(replace_common_mojibake(value))
+}
 
 // Typed issue model used by the TUI.
 struct Issue {

@@ -7,7 +7,6 @@ import (
 	goruntime "runtime"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"git.sr.ht/~rockorager/vaxis"
 	"git.sr.ht/~rockorager/vaxis/ui"
@@ -31,46 +30,6 @@ func OpenURL(url string) error {
 
 func TestVaxisNil() *vaxis.Vaxis {
 	return nil
-}
-
-var linearTextNormalizer = strings.NewReplacer(
-	// Correct common mojibake forms first.
-	"â\u0080\u0094", "-",
-	"â\u0080\u0093", "-",
-	"â\u0080\u0098", "'",
-	"â\u0080\u0099", "'",
-	"â\u0080\u009c", "\"",
-	"â\u0080\u009d", "\"",
-	"â\u0080¦", "...",
-	"â\u0080¢", "*",
-	"â€”", "-",
-	"â€“", "-",
-	"â€˜", "'",
-	"â€™", "'",
-	"â€œ", "\"",
-	"â€�", "\"",
-	"â€¦", "...",
-	"â€¢", "*",
-	"‚Äî", "-",
-	"‚Äì", "-",
-	"‚Äò", "'",
-	"‚Äô", "'",
-	"‚Äú", "\"",
-	"‚Äù", "\"",
-	"‚Ä¶", "...",
-	"‚Ä¢", "*",
-	"\u00a0", " ",
-)
-
-func NormalizeLinearText(value string) string {
-	normalized := linearTextNormalizer.Replace(value)
-	// Degraded mojibake can arrive/render as variable runs of Â around ¢. Treat
-	// the padding as noise and the cent marker as a dash fallback.
-	normalized = strings.ReplaceAll(normalized, "Â", "")
-	normalized = strings.ReplaceAll(normalized, "¢", "-")
-	normalized = strings.ReplaceAll(normalized, "â", "-")
-	normalized = strings.ReplaceAll(normalized, "�", "")
-	return normalized
 }
 
 type UiStringIntent string
@@ -1399,17 +1358,6 @@ func TestWasRendered(id int) bool {
 
 func TestMarkTabSelected(index int) {
 	testRenderMarks[1000+index] = true
-}
-
-func TextBackspace(text string) string {
-	if text == "" {
-		return ""
-	}
-	_, size := utf8.DecodeLastRuneInString(text)
-	if size <= 0 {
-		return ""
-	}
-	return text[:len(text)-size]
 }
 
 func makeStyle(fg int, bg int, bold bool, dim bool, italic bool, underline bool, reverse bool) vaxis.Style {

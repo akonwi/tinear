@@ -1,15 +1,27 @@
-extern fn text_backspace(text: Str) Str = "tinear.TextBackspace"
-
 // ---- byte-based helpers ------------------------------------------------
-// `.size()` returns UTF-8 byte length, so these are accurate only when the
-// input is ASCII or when you only care about byte budgets.
+// `.size()` returns UTF-8 byte length. These helpers iterate by Rune so they
+// never split a UTF-8 sequence, but their budgets are byte counts rather than
+// terminal display widths.
 
 fn truncate(s: Str, max: Int) Str {
-  mut result = s
-  while result.size() > max {
-    result = text_backspace(result)
+  match max <= 0 {
+    true => "",
+    false => {
+      mut result = ""
+      mut taking = true
+      for c in s {
+        if taking {
+          let next = result + c.to_str()
+          if next.size() <= max {
+            result = next
+          } else {
+            taking = false
+          }
+        }
+      }
+      result
+    }
   }
-  result
 }
 
 fn truncate_with_ellipsis(s: Str, max: Int) Str {
@@ -53,7 +65,7 @@ fn wrap_line(s: Str, width: Int) [Str] {
     mut last_space = -1
     mut i = 0
     for c in remainder {
-      if i < width and c == " " {
+      if i < width and c == ' ' {
         last_space = i
       }
       i = i + 1
@@ -68,12 +80,13 @@ fn wrap_line(s: Str, width: Int) [Str] {
     mut new_remainder = ""
     mut idx = 0
     for c in remainder {
+      let ch = c.to_str()
       if idx < break_at {
-        line = line + c
+        line = line + ch
       } else if idx == break_at and skip_break {
         ()
       } else {
-        new_remainder = new_remainder + c
+        new_remainder = new_remainder + ch
       }
       idx = idx + 1
     }
@@ -92,12 +105,12 @@ fn wrap_text(s: Str, width: Int) [Str] {
   mut segments: [Str] = []
   mut current = ""
   for c in s {
-    if c == "\n" {
+    if c == '\n' {
       segments.push(current)
       current = ""
       ()
     } else {
-      current = current + c
+      current = current + c.to_str()
       ()
     }
   }
@@ -126,7 +139,7 @@ fn wrap_title(title: Str, width: Int) TitleLines {
       mut last_space = -1
       mut i = 0
       for c in title {
-        if i < width and c == " " {
+        if i < width and c == ' ' {
           last_space = i
         }
         i = i + 1
@@ -144,12 +157,13 @@ fn wrap_title(title: Str, width: Int) TitleLines {
       mut line2 = ""
       mut idx = 0
       for c in title {
+        let ch = c.to_str()
         if idx < break_at {
-          line1 = line1 + c
+          line1 = line1 + ch
         } else if idx == break_at and skip_break_char {
           // skip the breaking space
         } else {
-          line2 = line2 + c
+          line2 = line2 + ch
         }
         idx = idx + 1
       }
