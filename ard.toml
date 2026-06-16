@@ -1,2 +1,5 @@
 name = "tinear"
 ard = ">= 0.21.0"
+
+[dependencies]
+vaxis = { path = "../vaxis-ard" }

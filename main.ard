@@ -1,5 +1,0 @@
-use tinear/commands/tui
-
-fn main() {
-  tui::run()
-}

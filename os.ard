@@ -1,5 +1,0 @@
-// OS-level utilities not provided by ard/stdlib.
-
-// Launch the system's default handler (browser, etc.) for the URL.
-// Returns immediately; does not wait for the launched process.
-extern fn open_url(url: Str) Void!Str = "tinear.OpenURL"
