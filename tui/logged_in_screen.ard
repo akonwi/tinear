@@ -56,7 +56,7 @@ fn close_current_issue_tab(s: Model) Model {
   if issue_idx >= 0 and issue_idx < s.issue_tabs.size() {
     mut remaining: [Str] = []
     for label, idx in s.issue_tabs {
-      if idx != issue_idx {
+      if not (idx == issue_idx) {
         remaining.push(label)
       }
     }
@@ -68,15 +68,26 @@ fn close_current_issue_tab(s: Model) Model {
 
 // ── Rendering ─────────────────────────────────────────────────────────
 
-fn tab_chip(label: Str, selected: Bool) ui::Widget {
+fn tab_chip(label: Str, selected: Bool, on_press: fn(ui::EventContext)) ui::Widget {
   let padded = " {label} "
+  // ClickAffordance::none suppresses the default underline that vaxis/ui adds
+  // to clickable Text. Tabs have their own visual treatment (reverse video).
   match selected {
-    true => ui::styled_text(padded, attrs: ui::TextAttrs{ reverse: true }),
-    false => ui::text(padded),
+    true => ui::styled_text(
+      padded,
+      attrs: ui::TextAttrs{ reverse: true },
+      on_pressed: on_press,
+      click_affordance: ui::ClickAffordance::none,
+    ),
+    false => ui::text(
+      padded,
+      on_pressed: on_press,
+      click_affordance: ui::ClickAffordance::none,
+    ),
   }
 }
 
-fn tab_bar(theme: ui::Theme, s: Model) ui::Widget {
+fn tab_bar(theme: ui::Theme, s: Model, on_tab_press: fn(Int)) ui::Widget {
   mut children: [ui::Widget] = []
   let n = total_tabs(s)
   if n > 0 {
@@ -84,7 +95,13 @@ fn tab_bar(theme: ui::Theme, s: Model) ui::Widget {
       if i > 0 {
         children.push(ui::styled_text("│", fg: theme.border))
       }
-      children.push(tab_chip(tab_label_at(s, i), i == s.tab_index))
+      // `for` binds an immutable per-iteration `i`, captured by value
+      // by the closure below — no loop-closure trap.
+      children.push(tab_chip(
+        tab_label_at(s, i),
+        i == s.tab_index,
+        fn(_ctx: ui::EventContext) { on_tab_press(i) },
+      ))
     }
   }
   ui::row(children)
@@ -124,11 +141,11 @@ fn hints_bar(theme: ui::Theme, items: [Str]) ui::Widget {
   ui::row(children)
 }
 
-fn screen(theme: ui::Theme, s: Model) ui::Widget {
+fn screen(theme: ui::Theme, s: Model, on_tab_press: fn(Int)) ui::Widget {
   let separator = ui::divider(fg: theme.border, bg: theme.background)
   ui::column(
     [
-      tab_bar(theme, s),
+      tab_bar(theme, s, on_tab_press),
       separator,
       ui::expanded(placeholder_body(s)),
       separator,
@@ -152,6 +169,9 @@ fn new() ui::Widget {
     build: fn(ctx: ui::BuildContext, state: ui::State<Model>) ui::Widget {
       let theme = ui::must_have_theme(ctx)
       let model = state.value()
+      let on_tab_press = fn(idx: Int) {
+        state.set(fn(mut s: Model) { s.tab_index = idx })
+      }
       // Tab / Shift+Tab / Escape are already mapped to NextFocusIntent,
       // PreviousFocusIntent and DismissIntent by the app-level Shortcuts that
       // wraps every vaxis/ui root. We can't override those keys from an inner
@@ -162,7 +182,7 @@ fn new() ui::Widget {
       ui::shortcuts(
         ui::actions(
           ui::focus_scope(
-            ui::focus(screen(theme, model)),
+            ui::focus(screen(theme, model, on_tab_press)),
             trap: false,
             auto_focus: true,
           ),
