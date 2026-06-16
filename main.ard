@@ -1,0 +1,48 @@
+use vaxis/ui
+
+struct AppState {}
+
+fn logo() ui::Widget {
+  ui::column(
+    [
+      ui::styled_text("▀█▀ ▀ █▀█ █▀▀ ▄▀█ █▀█", attrs: ui::TextAttrs{ bold: true }),
+      ui::styled_text(" █  █ █ █ ██▄ █▀█ █▀▄", attrs: ui::TextAttrs{ bold: true }),
+    ],
+    main_size: ui::MainSize::min,
+    cross_align: ui::CrossAlign::center,
+  )
+}
+
+fn body(ctx: ui::BuildContext, _state: ui::State<AppState>) ui::Widget {
+  let theme = ui::must_have_theme(ctx)
+  ui::decorated_box(
+    ui::center(logo()),
+    fg: theme.foreground,
+    bg: theme.background,
+  )
+}
+
+fn root() ui::Widget {
+  ui::shortcuts(
+    ui::actions(
+      ui::focus(
+        ui::stateful(
+          key: "tinear",
+          init: fn(_ctx: ui::BuildContext) AppState { AppState{} },
+          build: body,
+        ),
+      ),
+      [
+        ui::action("tinear.quit", fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          ui::quit(ctx)
+          ui::EventResult::handled
+        }),
+      ],
+    ),
+    ["Ctrl+c": "tinear.quit"],
+  )
+}
+
+fn main() Void {
+  ui::run(root(), ui::default_theme_set())
+}
