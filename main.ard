@@ -31,17 +31,15 @@ fn body(ctx: ui::BuildContext, state: ui::State<AppState>) ui::Widget {
 fn root() ui::Widget {
   ui::shortcuts(
     ui::actions(
-      ui::focus(
-        ui::stateful(
-          key: "tinear",
-          init: fn(_ctx: ui::BuildContext) AppState {
-            match config::load() {
-              ok(cfg) => AppState{ api_key: cfg.api_key },
-              err(_) => AppState{ api_key: "" },
-            }
-          },
-          build: body,
-        ),
+      ui::stateful(
+        key: "tinear",
+        init: fn(_ctx: ui::BuildContext) AppState {
+          match config::load() {
+            ok(cfg) => AppState{ api_key: cfg.api_key },
+            err(_) => AppState{ api_key: "" },
+          }
+        },
+        build: body,
       ),
       [
         ui::action("tinear.quit", fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {

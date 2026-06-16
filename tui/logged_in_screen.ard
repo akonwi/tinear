@@ -152,17 +152,37 @@ fn new() ui::Widget {
     build: fn(ctx: ui::BuildContext, state: ui::State<Model>) ui::Widget {
       let theme = ui::must_have_theme(ctx)
       let model = state.value()
+      // Tab / Shift+Tab / Escape are already mapped to NextFocusIntent,
+      // PreviousFocusIntent and DismissIntent by the app-level Shortcuts that
+      // wraps every vaxis/ui root. We can't override those keys from an inner
+      // Shortcuts because the outer one consumes them during capture phase.
+      // Instead we install handlers for those upstream intents in our Actions.
+      // Invoke walks UP from the focused widget and finds our handler before
+      // it reaches the app-level Actions, so we win.
       ui::shortcuts(
         ui::actions(
-          screen(theme, model),
+          ui::focus_scope(
+            ui::focus(screen(theme, model)),
+            trap: false,
+            auto_focus: true,
+          ),
           [
-            ui::action("tabs.next", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            ui::action("vaxis.next-focus", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
               state.set(fn(mut s: Model) { s.tab_index = cycle_next(s) })
               ui::EventResult::handled
             }),
-            ui::action("tabs.prev", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            ui::action("vaxis.previous-focus", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
               state.set(fn(mut s: Model) { s.tab_index = cycle_prev(s) })
               ui::EventResult::handled
+            }),
+            ui::action("vaxis.dismiss", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              match selected_is_issue_tab(model) {
+                true => {
+                  state.set(fn(mut s: Model) { s = close_current_issue_tab(s) })
+                  ui::EventResult::handled
+                },
+                false => ui::EventResult::ignored,
+              }
             }),
             ui::action("tabs.inbox", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
               state.set(fn(mut s: Model) { s.tab_index = 0 })
@@ -172,23 +192,11 @@ fn new() ui::Widget {
               state.set(fn(mut s: Model) { s.tab_index = 1 })
               ui::EventResult::handled
             }),
-            ui::action("tabs.escape", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              match selected_is_issue_tab(model) {
-                true => {
-                  state.set(fn(mut s: Model) { s = close_current_issue_tab(s) })
-                  ui::EventResult::handled
-                },
-                false => ui::EventResult::ignored,
-              }
-            }),
           ],
         ),
         [
-          "Tab": "tabs.next",
-          "Shift+Tab": "tabs.prev",
           "1": "tabs.inbox",
           "2": "tabs.my_issues",
-          "Escape": "tabs.escape",
         ],
       )
     },
