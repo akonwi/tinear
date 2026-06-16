@@ -1,56 +1,31 @@
 use vaxis/ui
 
+use tinear/config
+use tinear/tui/welcome_screen
+
 struct AppState {
   api_key: Str,
-  has_error: Bool,
 }
 
-fn logo_lines() [ui::Widget] {
-  [
-    ui::styled_text("▀█▀ ▀ █▀█ █▀▀ ▄▀█ █▀█", attrs: ui::TextAttrs{ bold: true }),
-    ui::styled_text(" █  █ █ █ ██▄ █▀█ █▀▄", attrs: ui::TextAttrs{ bold: true }),
-  ]
+impl AppState {
+  fn has_auth() Bool { not self.api_key.is_empty() }
 }
 
-// Vertical spacer of `height` rows. `sized_box` with width 0 leaves
-// width unconstrained so the spacer doesn't force any minimum width.
-fn spacer(height: Int) ui::Widget {
-  ui::sized_box(0, height, ui::text(""))
-}
-
-fn welcome_form(model: AppState, state: ui::State<AppState>) ui::Widget {
-  mut children = logo_lines()
-  children.push(spacer(2))
-  children.push(ui::text("Enter your Linear API key"))
-  children.push(spacer(1))
-  children.push(ui::text_field(
-    value: model.api_key,
-    placeholder: "Paste Linear API key",
-    min_width: 48,
-    on_submitted: fn(_ctx: ui::EventContext, _value: Str) {
-      // TODO: validate via login::login and transition to logged-in screen
-    },
-  ))
-  children.push(spacer(1))
-  children.push(ui::button("Login", fn(_ctx: ui::EventContext) {
-    // TODO: validate via login::login and transition to logged-in screen
-  }))
-  if model.has_error {
-    children.push(spacer(1))
-    children.push(ui::text("Invalid API token"))
-  }
-  ui::column(
-    children,
-    main_size: ui::MainSize::min,
-    cross_align: ui::CrossAlign::center,
-  )
+fn logged_in_placeholder() ui::Widget {
+  ui::text("Logged in")
 }
 
 fn body(ctx: ui::BuildContext, state: ui::State<AppState>) ui::Widget {
   let theme = ui::must_have_theme(ctx)
   let model = state.value()
+  let content = match model.has_auth() {
+    true => logged_in_placeholder(),
+    false => welcome_screen::new(fn(api_key: Str) {
+      state.set(fn(mut s: AppState) { s.api_key = api_key })
+    }),
+  }
   ui::decorated_box(
-    ui::center(ui::padding(1, welcome_form(model, state))),
+    ui::center(ui::padding(1, content)),
     fg: theme.foreground,
     bg: theme.background,
   )
@@ -63,7 +38,10 @@ fn root() ui::Widget {
         ui::stateful(
           key: "tinear",
           init: fn(_ctx: ui::BuildContext) AppState {
-            AppState{ api_key: "", has_error: false }
+            match config::load() {
+              ok(cfg) => AppState{ api_key: cfg.api_key },
+              err(_) => AppState{ api_key: "" },
+            }
           },
           build: body,
         ),

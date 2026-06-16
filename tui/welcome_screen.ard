@@ -1,0 +1,76 @@
+use vaxis/ui
+
+use tinear/commands/login
+
+struct State {
+  draft_api_key: Str,
+  has_error: Bool,
+}
+
+fn logo_lines() [ui::Widget] {
+  [
+    ui::styled_text("▀█▀ ▀ █▀█ █▀▀ ▄▀█ █▀█", attrs: ui::TextAttrs{ bold: true }),
+    ui::styled_text(" █  █ █ █ ██▄ █▀█ █▀▄", attrs: ui::TextAttrs{ bold: true }),
+  ]
+}
+
+fn spacer(height: Int) ui::Widget {
+  ui::sized_box(0, height, ui::text(""))
+}
+
+fn submit_login(api_key: Str, state: ui::State<State>, on_login_success: fn(Str)) {
+  match api_key.is_empty() {
+    true => state.set(fn(mut s: State) { s.has_error = true }),
+    false => match login::login(api_key) {
+      ok(_) => on_login_success(api_key),
+      err(_) => state.set(fn(mut s: State) { s.has_error = true }),
+    },
+  }
+}
+
+fn form(theme: ui::Theme, model: State, state: ui::State<State>, on_login_success: fn(Str)) ui::Widget {
+  mut children = logo_lines()
+  children.push(spacer(2))
+  children.push(ui::text("Enter your Linear API key"))
+  children.push(spacer(1))
+  children.push(ui::text_field(
+    value: model.draft_api_key,
+    on_changed: fn(_ctx: ui::EventContext, value: Str) {
+      state.set(fn(mut s: State) {
+        s.draft_api_key = value
+        s.has_error = false
+      })
+    },
+    placeholder: "Paste Linear API key",
+    min_width: 48,
+    on_submitted: fn(_ctx: ui::EventContext, value: Str) {
+      submit_login(value, state, on_login_success)
+    },
+  ))
+  children.push(spacer(1))
+  children.push(ui::button("Login", fn(_ctx: ui::EventContext) {
+    submit_login(model.draft_api_key, state, on_login_success)
+  }))
+  if model.has_error {
+    children.push(spacer(1))
+    children.push(ui::styled_text("Invalid API token", fg: theme.danger_text))
+  }
+  ui::column(
+    children,
+    main_size: ui::MainSize::min,
+    cross_align: ui::CrossAlign::center,
+  )
+}
+
+fn new(on_login_success: fn(Str)) ui::Widget {
+  ui::stateful(
+    key: "welcome",
+    init: fn(_ctx: ui::BuildContext) State {
+      State{ draft_api_key: "", has_error: false }
+    },
+    build: fn(ctx: ui::BuildContext, state: ui::State<State>) ui::Widget {
+      let theme = ui::must_have_theme(ctx)
+      form(theme, state.value(), state, on_login_success)
+    },
+  )
+}
