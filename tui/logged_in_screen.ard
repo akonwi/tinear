@@ -1,0 +1,196 @@
+use vaxis/ui
+
+// Minimal shell for the logged-in view.
+//
+// Two permanent tabs (Inbox, My Issues) plus zero or more dynamic issue
+// detail tabs. Tab math treats them as one flat list:
+//   index 0       -> Inbox
+//   index 1       -> My Issues
+//   index 2..n+1  -> issue_tabs[i - 2]
+//
+// For this first pass:
+// - tab bodies are placeholders
+// - no cache, no overlays, no real Linear data
+// - two dummy issue tabs are seeded so tab math is exercised
+struct Model {
+  tab_index: Int,
+  issue_tabs: [Str],
+}
+
+fn total_tabs(s: Model) Int { 2 + s.issue_tabs.size() }
+
+fn tab_label_at(s: Model, i: Int) Str {
+  match i {
+    0 => "Inbox",
+    1 => "My Issues",
+    _ => {
+      let issue_idx = i - 2
+      match issue_idx >= 0 and issue_idx < s.issue_tabs.size() {
+        true => s.issue_tabs.at(issue_idx),
+        false => "?",
+      }
+    },
+  }
+}
+
+fn cycle_next(s: Model) Int {
+  let n = total_tabs(s)
+  match s.tab_index + 1 >= n {
+    true => 0,
+    false => s.tab_index + 1,
+  }
+}
+
+fn cycle_prev(s: Model) Int {
+  match s.tab_index <= 0 {
+    true => total_tabs(s) - 1,
+    false => s.tab_index - 1,
+  }
+}
+
+fn selected_is_issue_tab(s: Model) Bool { s.tab_index >= 2 }
+
+fn close_current_issue_tab(s: Model) Model {
+  mut next = s
+  let issue_idx = s.tab_index - 2
+  if issue_idx >= 0 and issue_idx < s.issue_tabs.size() {
+    mut remaining: [Str] = []
+    for label, idx in s.issue_tabs {
+      if idx != issue_idx {
+        remaining.push(label)
+      }
+    }
+    next.issue_tabs = remaining
+    next.tab_index = 1
+  }
+  next
+}
+
+// ── Rendering ─────────────────────────────────────────────────────────
+
+fn tab_chip(label: Str, selected: Bool) ui::Widget {
+  let padded = " {label} "
+  match selected {
+    true => ui::styled_text(padded, attrs: ui::TextAttrs{ reverse: true }),
+    false => ui::text(padded),
+  }
+}
+
+fn tab_bar(theme: ui::Theme, s: Model) ui::Widget {
+  mut children: [ui::Widget] = []
+  let n = total_tabs(s)
+  if n > 0 {
+    for i in 0..n - 1 {
+      if i > 0 {
+        children.push(ui::styled_text("│", fg: theme.border))
+      }
+      children.push(tab_chip(tab_label_at(s, i), i == s.tab_index))
+    }
+  }
+  ui::row(children)
+}
+
+fn placeholder_body(s: Model) ui::Widget {
+  let label = tab_label_at(s, s.tab_index)
+  ui::center(
+    ui::column(
+      [
+        ui::styled_text(label, attrs: ui::TextAttrs{ bold: true }),
+        ui::sized_box(0, 1, ui::text("")),
+        ui::text("(placeholder)"),
+      ],
+      main_size: ui::MainSize::min,
+      cross_align: ui::CrossAlign::center,
+    ),
+  )
+}
+
+fn hints_for(s: Model) [Str] {
+  match {
+    s.tab_index == 0 => ["Tab switch", "↑↓ select", "⌫ delete", "r refresh", "↵ open", "? search"],
+    s.tab_index == 1 => ["↑↓", "←→", "↵ open", "s status", "y cycle", "r refresh", "? search"],
+    _ => ["s status", "y cycle", "esc close", "o open in browser"],
+  }
+}
+
+fn hints_bar(theme: ui::Theme, items: [Str]) ui::Widget {
+  mut children: [ui::Widget] = []
+  for item, idx in items {
+    if idx > 0 {
+      children.push(ui::styled_text("  ·  ", fg: theme.muted_foreground))
+    }
+    children.push(ui::styled_text(item, fg: theme.muted_foreground))
+  }
+  ui::row(children)
+}
+
+fn screen(theme: ui::Theme, s: Model) ui::Widget {
+  let separator = ui::divider(fg: theme.border, bg: theme.background)
+  ui::column(
+    [
+      tab_bar(theme, s),
+      separator,
+      ui::expanded(placeholder_body(s)),
+      separator,
+      hints_bar(theme, hints_for(s)),
+    ],
+  )
+}
+
+// ── Entry point ───────────────────────────────────────────────────────
+
+fn new() ui::Widget {
+  ui::stateful(
+    key: "logged-in",
+    init: fn(_ctx: ui::BuildContext) Model {
+      Model{
+        tab_index: 0,
+        // Seed two dummy issue tabs so tab math is exercised in the shell.
+        issue_tabs: ["ENG-101", "ENG-202"],
+      }
+    },
+    build: fn(ctx: ui::BuildContext, state: ui::State<Model>) ui::Widget {
+      let theme = ui::must_have_theme(ctx)
+      let model = state.value()
+      ui::shortcuts(
+        ui::actions(
+          screen(theme, model),
+          [
+            ui::action("tabs.next", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              state.set(fn(mut s: Model) { s.tab_index = cycle_next(s) })
+              ui::EventResult::handled
+            }),
+            ui::action("tabs.prev", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              state.set(fn(mut s: Model) { s.tab_index = cycle_prev(s) })
+              ui::EventResult::handled
+            }),
+            ui::action("tabs.inbox", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              state.set(fn(mut s: Model) { s.tab_index = 0 })
+              ui::EventResult::handled
+            }),
+            ui::action("tabs.my_issues", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              state.set(fn(mut s: Model) { s.tab_index = 1 })
+              ui::EventResult::handled
+            }),
+            ui::action("tabs.escape", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              match selected_is_issue_tab(model) {
+                true => {
+                  state.set(fn(mut s: Model) { s = close_current_issue_tab(s) })
+                  ui::EventResult::handled
+                },
+                false => ui::EventResult::ignored,
+              }
+            }),
+          ],
+        ),
+        [
+          "Tab": "tabs.next",
+          "Shift+Tab": "tabs.prev",
+          "1": "tabs.inbox",
+          "2": "tabs.my_issues",
+          "Escape": "tabs.escape",
+        ],
+      )
+    },
+  )
+}

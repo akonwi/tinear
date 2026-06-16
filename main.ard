@@ -1,6 +1,7 @@
 use vaxis/ui
 
 use tinear/config
+use tinear/tui/logged_in_screen
 use tinear/tui/welcome_screen
 
 struct AppState {
@@ -11,15 +12,11 @@ impl AppState {
   fn has_auth() Bool { not self.api_key.is_empty() }
 }
 
-fn logged_in_placeholder() ui::Widget {
-  ui::text("Logged in")
-}
-
 fn body(ctx: ui::BuildContext, state: ui::State<AppState>) ui::Widget {
   let theme = ui::must_have_theme(ctx)
   let model = state.value()
   let content = match model.has_auth() {
-    true => logged_in_placeholder(),
+    true => logged_in_screen::new(),
     false => welcome_screen::new(fn(api_key: Str) {
       state.set(fn(mut s: AppState) { s.api_key = api_key })
     }),
