@@ -1,5 +1,5 @@
 name = "tinear"
-ard = ">= 0.21.0"
+ard = ">= 0.23.0"
 
 [dependencies]
-vaxis = { path = "../vaxis-ard" }
+vaxis = { git = "https://github.com/akonwi/vaxis-ard.git", commit = "c59c5bc117da54a0b43ef5af931b04a211054d1a" }

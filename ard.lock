@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "root": "root",
+  "packages": [
+    {
+      "id": "git:e5bd4a09be472f99:c59c5bc117da54a0b43ef5af931b04a211054d1a",
+      "name": "vaxis",
+      "git": "https://github.com/akonwi/vaxis-ard.git",
+      "commit": "c59c5bc117da54a0b43ef5af931b04a211054d1a",
+      "requested": "latest",
+      "integrity": "sha256:995f7c775cac2a14b4386e83fbb1237c95458e3af8802e300e27041a91440b14"
+    },
+    {
+      "id": "root",
+      "name": "tinear",
+      "path": ".",
+      "dependencies": {
+        "vaxis": "git:e5bd4a09be472f99:c59c5bc117da54a0b43ef5af931b04a211054d1a"
+      }
+    }
+  ]
+}
