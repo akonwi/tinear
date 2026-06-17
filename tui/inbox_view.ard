@@ -118,23 +118,28 @@ fn load_inbox(api_key: Str, state: ui::State<View>, rt: ui::Runtime<View>) {
 
 // ── List rendering ────────────────────────────────────────────────────
 
-// A single inbox row. The split layout shows id + actor + type;
-// the title lives in the detail pane on the right.
-fn render_row(item: inbox::Item, selected: Bool) ui::Widget {
-  let title = ui::row([
-    ui::text(text::pad_str(item.target_id, 10)),
-    ui::text(" "),
-    ui::expanded(ui::text(item.actor_name)),
-    ui::text(" "),
-    ui::text(item.type_label),
-  ])
-  ui::list_tile(title: title, selected: selected)
+// A single inbox row. Two lines per tile:
+//   line 1 (title):    issue title, ellipsis-truncated to pane width
+//   line 2 (subtitle): actor name + action (e.g. "alice commented")
+//
+// list_tile arranges title + subtitle in a vertical Flex internally.
+fn render_row(theme: ui::Theme, item: inbox::Item, selected: Bool) ui::Widget {
+  let title = ui::rich_text(
+    [ui::span(item.title, fg: theme.foreground)],
+    overflow: ui::TextOverflow::ellipsis,
+    max_lines: 1,
+  )
+  let subtitle = ui::styled_text(
+    "{item.actor_name} {item.type_label}",
+    fg: theme.muted_foreground,
+  )
+  ui::list_tile(title: title, subtitle: subtitle, selected: selected)
 }
 
-fn list_rows(model: View) [ui::Widget] {
+fn list_rows(theme: ui::Theme, model: View) [ui::Widget] {
   mut rows: [ui::Widget] = []
   for item, idx in model.items {
-    rows.push(render_row(item, idx == model.cursor))
+    rows.push(render_row(theme, item, idx == model.cursor))
   }
   rows
 }
@@ -144,7 +149,7 @@ fn list_rows(model: View) [ui::Widget] {
 // size from the runtime.
 let LIST_PANE_WIDTH: Int = 36
 
-fn list_pane(model: View) ui::Widget {
+fn list_pane(theme: ui::Theme, model: View) ui::Widget {
   // scroll_pane lays its child out with unbounded width AND height (so
   // the child can be larger than the pane and scroll). That unbounded
   // width means the row inside each list_tile has no flex space to
@@ -161,7 +166,7 @@ fn list_pane(model: View) ui::Widget {
       LIST_PANE_WIDTH,
       0,
       ui::column(
-        list_rows(model),
+        list_rows(theme, model),
         main_size: ui::MainSize::min,
         cross_align: ui::CrossAlign::stretch,
       ),
@@ -388,7 +393,7 @@ fn render_split(theme: ui::Theme, model: View) ui::Widget {
   // body. We want both panes tall.
   ui::row(
     [
-      ui::sized_box(LIST_PANE_WIDTH, 0, list_pane(model)),
+      ui::sized_box(LIST_PANE_WIDTH, 0, list_pane(theme, model)),
       separator,
       ui::expanded(ui::padding(detail_pane(theme, model), horizontal: 1)),
     ],

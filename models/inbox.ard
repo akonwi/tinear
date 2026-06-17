@@ -343,14 +343,4 @@ fn load_detail(api_key: Str, notification_id: Str) Detail!Str {
   Result::ok(decode_detail(notif))
 }
 
-impl Item {
-  fn draw(idx: Int, cursor: Int) Str {
-    let cursor_mark = match idx == cursor {
-      true => "▸",
-      false => " ",
-    }
 
-    let id_part = text::pad_str(self.target_id, 10)
-    "{cursor_mark} {id_part} {self.actor_name} {self.type_label}  {self.title}"
-  }
-}
