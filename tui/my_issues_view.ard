@@ -214,29 +214,24 @@ fn card_content(theme: ui::Theme, item: issues::Issue) ui::Widget {
   )
 }
 
-// Selected: render with an accent bar (2 cols, theme.primary bg) on the
-// left and a subtle theme.surface bg on the rest. Replaces the normal
-// 2-col left padding so the card doesn't shift horizontally between
-// selected / unselected.
-fn render_card(theme: ui::Theme, item: issues::Issue, selected: Bool) ui::Widget {
-  let content = card_content(theme, item)
-  match selected {
-    true => ui::row(
-      [
-        ui::sized_box(
-          2, 0,
-          ui::decorated_box(ui::text(""), bg: theme.primary, fg: theme.primary),
-        ),
-        ui::expanded(ui::decorated_box(content, bg: theme.surface)),
-      ],
-      cross_align: ui::CrossAlign::stretch,
-    ),
-    false => ui::padding(content, left: 2),
-  }
+// Cards lean on list_tile's built-in Selected / Focused styling. The
+// cursor-here card renders with theme.Primary bg and a click anywhere
+// on the card fires `on_click`. Click also moves the cursor (set up
+// by the build closure) so the visual stays in sync with the keyboard
+// cursor.
+fn render_card(
+  theme: ui::Theme, item: issues::Issue, selected: Bool,
+  on_click: fn(ui::EventContext),
+) ui::Widget {
+  ui::list_tile(
+    title: card_content(theme, item),
+    selected: selected,
+    on_pressed: on_click,
+  )
 }
 
-// Indented divider between cards (cols 2..n-2 of the column width),
-// flanked by blank rows so adjacent cards don't crowd.
+// Indented divider between cards. Inset matches list_tile's default
+// Symmetric(1, 0) padding so the line tracks the card content margins.
 //
 // ui::divider paints via DrawCell (no style merge); without an explicit
 // bg the line picks up the terminal default and reads as a thick dark
@@ -244,7 +239,7 @@ fn render_card(theme: ui::Theme, item: issues::Issue, selected: Bool) ui::Widget
 fn card_divider(theme: ui::Theme) ui::Widget {
   ui::padding(
     ui::divider(fg: theme.border, bg: theme.background),
-    horizontal: 2,
+    horizontal: 1,
   )
 }
 
@@ -253,6 +248,7 @@ fn blank_row() ui::Widget { ui::sized_box(0, 1, ui::text("")) }
 fn render_column(
   theme: ui::Theme, col: issues::BoardColumn,
   col_idx: Int, cursor_col: Int, cursor_row: Int,
+  on_card_click: fn(Int, Int),
 ) ui::Widget {
   let header_text = "{col.name} ({col.issues.size().to_str()})"
   let header = ui::styled_text(
@@ -267,7 +263,13 @@ fn render_column(
   let is_active_col = col_idx == cursor_col
   let last_idx = col.issues.size() - 1
   for issue, row_idx in col.issues {
-    children.push(render_card(theme, issue, is_active_col and row_idx == cursor_row))
+    // `for` introduces an immutable per-iteration row_idx, captured by
+    // value by the closure below — no loop-closure trap. col_idx is
+    // already a parameter (immutable) so its capture is also safe.
+    children.push(render_card(
+      theme, issue, is_active_col and row_idx == cursor_row,
+      fn(_ctx: ui::EventContext) { on_card_click(col_idx, row_idx) },
+    ))
     if row_idx < last_idx {
       children.push(blank_row())
       children.push(card_divider(theme))
@@ -313,13 +315,15 @@ fn overflow_indicator(theme: ui::Theme, glyph: Str, show: Bool) ui::Widget {
 // wrapped in a scroll_pane (horizontal scroll) so wider boards can
 // extend off-screen, flanked by 1-col chevron indicators that hint at
 // more columns existing in each direction.
-fn render_board(theme: ui::Theme, v: Board) ui::Widget {
+fn render_board(
+  theme: ui::Theme, v: Board, on_card_click: fn(Int, Int),
+) ui::Widget {
   mut row_children: [ui::Widget] = []
   for col, idx in v.columns {
     if idx > 0 {
       row_children.push(ui::sized_box(COLUMN_GAP, 0, ui::text("")))
     }
-    row_children.push(render_column(theme, col, idx, v.cursor_col, v.cursor_row))
+    row_children.push(render_column(theme, col, idx, v.cursor_col, v.cursor_row, on_card_click))
   }
   // True "is content scrolled off?" check, read from the scroll pane's
   // own metrics. On the very first build the controller hasn't been
@@ -346,7 +350,7 @@ fn render_board(theme: ui::Theme, v: Board) ui::Widget {
   )
 }
 
-fn body(theme: ui::Theme, v: Board) ui::Widget {
+fn body(theme: ui::Theme, v: Board, on_card_click: fn(Int, Int)) ui::Widget {
   match {
     v.loading => ui::column([
       ui::expanded(ui::center(ui::text("Loading issues…"))),
@@ -373,7 +377,7 @@ fn body(theme: ui::Theme, v: Board) ui::Widget {
         ),
       ),
     ]),
-    _ => ui::column([ui::expanded(render_board(theme, v))]),
+    _ => ui::column([ui::expanded(render_board(theme, v, on_card_click))]),
   }
 }
 
@@ -407,10 +411,31 @@ fn new(
         load_board(api_key, state, rt, notify)
       }
 
+      // Click handler: select the card AND open the issue (same as
+      // moving the cursor with j/k/h/l and then pressing Enter). We
+      // can read the Issue out of `model` here because the click only
+      // fires from the most recent build, so the (col, row) indices
+      // are valid for `model.columns` even though `state.set` above
+      // hasn't taken effect yet (state.set is queued for next frame;
+      // the in-scope model is still the previous snapshot, with the
+      // same columns array).
+      let on_card_click = fn(col: Int, row: Int) {
+        state.set(fn(mut v: Board) {
+          v.cursor_col = col
+          v.cursor_row = row
+        })
+        if col < model.columns.size() {
+          let column = model.columns.at(col)
+          if row < column.issues.size() {
+            on_open_issue(column.issues.at(row))
+          }
+        }
+      }
+
       ui::shortcuts(
         ui::actions(
           ui::focus_scope(
-            ui::focus(body(theme, model)),
+            ui::focus(body(theme, model, on_card_click)),
             trap: false,
             auto_focus: true,
           ),
