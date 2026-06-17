@@ -70,6 +70,31 @@ fn close_current_issue_tab(s: Model) Model {
   next
 }
 
+// Open `identifier` as an issue tab. If it's already in `issue_tabs`,
+// just switch to it; otherwise append a new tab and select it. Used by
+// the inbox's Enter action to surface a notification's issue.
+fn open_issue_tab(s: Model, identifier: Str) Model {
+  mut existing_idx = -1
+  for tab, i in s.issue_tabs {
+    if tab == identifier {
+      existing_idx = i
+    }
+  }
+  mut next = s
+  if existing_idx >= 0 {
+    next.tab_index = 2 + existing_idx
+  } else {
+    mut new_tabs: [Str] = []
+    for tab in s.issue_tabs {
+      new_tabs.push(tab)
+    }
+    new_tabs.push(identifier)
+    next.issue_tabs = new_tabs
+    next.tab_index = 2 + new_tabs.size() - 1
+  }
+  next
+}
+
 // ── Rendering ─────────────────────────────────────────────────────────
 
 // Tab chip. Mirrors the theming used by upstream ListTile:
@@ -206,9 +231,15 @@ fn new(api_key: Str) ui::Widget {
       let on_tab_press = fn(idx: Int) {
         state.set(fn(mut s: Model) { s.tab_index = idx })
       }
-      // TODO: when the issue detail view exists, open the selected
-      // inbox item as a new issue tab here.
-      let on_open = fn(_item: inbox::Item) {}
+      // Open an inbox item: issue notifications get their target_id
+      // promoted into the dynamic issue_tabs list and the tab is
+      // selected. PR / project notifications don't have a tab concept
+      // yet — they'll get their own actions (open URL, etc.) later.
+      let on_open = fn(item: inbox::Item) {
+        if item.notification_type.starts_with("issue") {
+          state.set(fn(mut s: Model) { s = open_issue_tab(s, item.target_id) })
+        }
+      }
       // Tab / Shift+Tab / Escape are already mapped to NextFocusIntent,
       // PreviousFocusIntent and DismissIntent by the app-level Shortcuts that
       // wraps every vaxis/ui root. We can't override those keys from an inner
