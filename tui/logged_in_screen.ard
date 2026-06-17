@@ -301,32 +301,11 @@ fn new(api_key: Str, notify: fn(Str, Str, toast::ToastVariant)) ui::Widget {
               state.set(fn(mut s: Model) { s.tab_index = 1 })
               ui::EventResult::handled
             }),
-            // Dev: fire one toast per variant for visual review. Bound
-            // to `t` below. Remove once the toast system is signed off.
-            ui::action("dev.toast_demo", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              notify(
-                "Inbox refreshed",
-                "7 notifications loaded",
-                toast::ToastVariant::info,
-              )
-              notify(
-                "Notification archived",
-                "",
-                toast::ToastVariant::success,
-              )
-              notify(
-                "Couldn't archive notification",
-                "network timeout",
-                toast::ToastVariant::error,
-              )
-              ui::EventResult::handled
-            }),
           ],
         ),
         [
           "1": "tabs.inbox",
           "2": "tabs.my_issues",
-          "t": "dev.toast_demo",
         ],
       )
     },

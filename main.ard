@@ -77,21 +77,27 @@ fn body(ctx: ui::BuildContext, state: ui::State<AppState>) ui::Widget {
   // Toast overlay rides above the screen content, anchored bottom-right
   // with 1 col of padding from the right edge and 2 rows from the bottom
   // (above the hint bar). modal: false so it doesn't trap focus.
-  let layered = match model.toasts.size() == 0 {
-    true => centered,
-    false => ui::overlay(
-      centered,
-      [ui::overlay_entry(
-        ui::padding(
-          toast::render_stack(theme, model.toasts),
-          right: 1, bottom: 2,
-        ),
-        modal: false,
-        align_x: 1,
-        align_y: 1,
-      )],
-    ),
+  //
+  // The widget type at this slot must be STABLE across rebuilds:
+  // if it flips between `centered` and `overlay(centered, ...)` when
+  // toasts.size() crosses 0, the framework treats it as a different
+  // widget type and unmounts the entire subtree underneath — including
+  // logged_in_screen and inbox_view, which would force the inbox to
+  // re-fetch on every toast appear/disappear. Always use overlay; pass
+  // an empty entries list when there's nothing to layer.
+  mut entries: [ui::OverlayEntry] = []
+  if model.toasts.size() > 0 {
+    entries.push(ui::overlay_entry(
+      ui::padding(
+        toast::render_stack(theme, model.toasts),
+        right: 1, bottom: 2,
+      ),
+      modal: false,
+      align_x: 1,
+      align_y: 1,
+    ))
   }
+  let layered = ui::overlay(centered, entries)
   ui::decorated_box(
     layered,
     fg: theme.foreground,
