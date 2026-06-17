@@ -48,6 +48,8 @@ fn clamp_cursor(cursor: Int, count: Int) Int {
 
 // Background detail fetch. Late results are discarded if the user has
 // since moved to a different item (detail_request_id no longer matches).
+// Errors are surfaced inline in the detail pane (no toast — the pane
+// itself is the dedicated slot for that failure mode).
 fn fetch_detail(api_key: Str, target_id: Str, rt: ui::Runtime<View>) {
   async::start(fn() {
     let result = inbox::load_detail(api_key, target_id)
@@ -95,6 +97,9 @@ fn request_detail_for_cursor(
   }
 }
 
+// Errors are surfaced inline via the error_pane the body renders when
+// `view.error` is non-empty — no toast for load failures since the pane
+// itself is the dedicated UI slot for that.
 fn load_inbox(api_key: Str, state: ui::State<View>, rt: ui::Runtime<View>) {
   async::start(fn() {
     let result = inbox::load(api_key)
