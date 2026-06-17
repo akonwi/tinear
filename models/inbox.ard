@@ -266,11 +266,29 @@ fn decode_detail_history(raw: Dynamic) DetailHistory {
   }
 }
 
+// Linear's GraphQL API doesn't expose PR comment bodies (PR comments live
+// on GitHub/GitLab; only the comment id is stored). The closest signal
+// is `notification.subtitle`, which Linear pre-formats as e.g. "andy
+// mentioned you in a comment". It's metadata rather than the comment
+// text, but it's all we have. When the notification carries a
+// pullRequestCommentId we surface this subtitle as a synthetic
+// DetailComment so the detail pane shows a Comment section instead of
+// falling through to the (always empty) PR description.
 fn decode_pr_detail(notif: Dynamic) Detail {
   let number = optional_nested_int(notif, "pullRequest", "number")
   let identifier = match number {
     n => "PR #{n.to_str()}",
     _ => "—",
+  }
+  let comment_id = path_str1(notif, "pullRequestCommentId", "")
+  let subtitle = path_str1(notif, "subtitle", "")
+  let triggering = match comment_id.is_empty() or subtitle.is_empty() {
+    true => maybe::none(),
+    false => maybe::some(DetailComment{
+      author: decode_user_display(path_dynamic1(notif, "actor")),
+      created_at: path_str1(notif, "createdAt", ""),
+      body: subtitle,
+    }),
   }
   Detail{
     is_pr: true,
@@ -284,7 +302,7 @@ fn decode_pr_detail(notif: Dynamic) Detail {
     team_key: "",
     project_name: "",
     url: path_str2(notif, "pullRequest", "url", ""),
-    triggering_comment: maybe::none(),
+    triggering_comment: triggering,
     comments: [],
     history: [],
   }
