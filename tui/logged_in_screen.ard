@@ -1,6 +1,7 @@
 use vaxis/ui
 
 use tinear/models/inbox
+use tinear/os
 use tinear/tui/hints_bar
 use tinear/tui/inbox_view
 
@@ -231,13 +232,22 @@ fn new(api_key: Str) ui::Widget {
       let on_tab_press = fn(idx: Int) {
         state.set(fn(mut s: Model) { s.tab_index = idx })
       }
-      // Open an inbox item: issue notifications get their target_id
-      // promoted into the dynamic issue_tabs list and the tab is
-      // selected. PR / project notifications don't have a tab concept
-      // yet — they'll get their own actions (open URL, etc.) later.
+      // Open an inbox item. Routing:
+      //   issue/comment/mention notifications -> promote target_id to a
+      //     new (or existing) tab in issue_tabs and select it
+      //   PR notifications -> launch notification.url in the system
+      //     browser. The URL is Linear's deep-link to the specific
+      //     comment/mention activity, so it lands the user in the right
+      //     spot in Linear's review UI.
+      //   project / other notifications -> if a url is present, open it
+      //     in the browser; otherwise no-op.
       let on_open = fn(item: inbox::Item) {
         if item.notification_type.starts_with("issue") {
           state.set(fn(mut s: Model) { s = open_issue_tab(s, item.target_id) })
+        } else {
+          if not item.url.is_empty() {
+            let _ = os::open_url(item.url)
+          }
         }
       }
       // Tab / Shift+Tab / Escape are already mapped to NextFocusIntent,

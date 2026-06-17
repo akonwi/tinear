@@ -12,6 +12,19 @@ struct Item {
   actor_name: Str,
   target_id: Str,
   title: Str,
+  // URL the `open` action launches in the browser when there's no
+  // in-app destination (PR / project notifications, primarily).
+  //
+  // For PR notifications this is `pullRequest.url` (the GitHub /
+  // GitLab PR page) so the user lands directly on the hosting
+  // provider. We deliberately do NOT use `notification.url` for PRs
+  // even though it includes a `#comment-...` fragment, because that
+  // fragment is Linear's internal review-UI link, not a GitHub deep
+  // link.
+  //
+  // For other types we use `notification.url`, which is Linear's
+  // deep-link to the activity.
+  url: Str,
 }
 
 fn format_type(n_type: Str) Str {
@@ -100,6 +113,16 @@ fn decode_item(notif: Dynamic) Item {
   let actor_name = user_display_name_at(notif, "actor")
 
   let info = dynamic_id_and_title(notif, n_type)
+  let url = match is_pr_type(n_type) {
+    true => optional_nested_str(notif, "pullRequest", "url", ""),
+    false => match decode::run(notif, decode::field("url", decode::nullable(decode::string))) {
+      ok(value) => match value {
+        v => v,
+        _ => "",
+      },
+      err(_) => "",
+    },
+  }
   Item{
     notification_id: notification_id,
     notification_type: n_type,
@@ -107,6 +130,7 @@ fn decode_item(notif: Dynamic) Item {
     actor_name: actor_name,
     target_id: info.id,
     title: info.title,
+    url: url,
   }
 }
 
