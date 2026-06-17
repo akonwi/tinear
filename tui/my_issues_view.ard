@@ -1,0 +1,467 @@
+use ard/async
+use ard/maybe
+use vaxis
+use vaxis/ui
+
+use tinear/models/issues
+use tinear/tui/toast
+
+// Width of one board column. Matches the main branch's value.
+let COLUMN_WIDTH: Int = 50
+
+// Horizontal gap between adjacent columns.
+let COLUMN_GAP: Int = 3
+
+// Local state for the My Issues view.
+//
+// Cursor is (col, row) inside the board. Empty columns are skipped by
+// the navigation actions so the cursor never lands on a column with
+// zero issues.
+//
+// `board_scroll` controls the outer horizontal scroll so left/right
+// movement can keep the cursor's column in view; individual column
+// scrolling is handled by ListView default actions if we add it later.
+struct Board {
+  columns: [issues::BoardColumn],
+  cursor_col: Int,
+  cursor_row: Int,
+  loading: Bool,
+  error: Str,
+  board_scroll: ui::ScrollPaneController,
+}
+
+fn clamp(value: Int, count: Int) Int {
+  match {
+    count <= 0 => 0,
+    value < 0 => 0,
+    value >= count => count - 1,
+    _ => value,
+  }
+}
+
+fn col_size(columns: [issues::BoardColumn], idx: Int) Int {
+  match idx >= 0 and idx < columns.size() {
+    true => columns.at(idx).issues.size(),
+    false => 0,
+  }
+}
+
+// Returns the first non-empty column index at or after `start`, or -1 if
+// none exists.
+fn next_non_empty(columns: [issues::BoardColumn], start: Int) Int {
+  mut idx = start
+  mut found = -1
+  while idx < columns.size() {
+    if columns.at(idx).issues.size() > 0 and found < 0 {
+      found = idx
+    }
+    idx = idx + 1
+  }
+  found
+}
+
+// Returns the last non-empty column index at or before `start`, or -1
+// if none exists.
+fn prev_non_empty(columns: [issues::BoardColumn], start: Int) Int {
+  mut idx = start
+  mut found = -1
+  while idx >= 0 {
+    if columns.at(idx).issues.size() > 0 and found < 0 {
+      found = idx
+    }
+    idx = idx - 1
+  }
+  found
+}
+
+fn selected_issue(v: Board) issues::Issue? {
+  mut found: issues::Issue? = maybe::none()
+  if v.columns.size() > 0 and v.cursor_col < v.columns.size() {
+    let col = v.columns.at(v.cursor_col)
+    if v.cursor_row < col.issues.size() {
+      found = maybe::some(col.issues.at(v.cursor_row))
+    }
+  }
+  found
+}
+
+// ── Async load ────────────────────────────────────────────────────────
+
+fn apply_loaded(s: ui::State<Board>, columns: [issues::BoardColumn]) {
+  s.set(fn(mut v: Board) {
+    v.columns = columns
+    v.error = ""
+    v.loading = false
+    // Snap cursor onto the first non-empty column if the current one
+    // is gone or empty.
+    let first = next_non_empty(columns, 0)
+    if first < 0 {
+      v.cursor_col = 0
+      v.cursor_row = 0
+    } else {
+      if v.cursor_col >= columns.size() or columns.at(v.cursor_col).issues.size() == 0 {
+        v.cursor_col = first
+        v.cursor_row = 0
+      } else {
+        v.cursor_row = clamp(v.cursor_row, columns.at(v.cursor_col).issues.size())
+      }
+    }
+  })
+}
+
+fn load_board(
+  api_key: Str, state: ui::State<Board>, rt: ui::Runtime<Board>,
+  notify: fn(Str, Str, toast::ToastVariant),
+) {
+  async::start(fn() {
+    let result = issues::load(api_key)
+    rt.dispatch(fn(s: ui::State<Board>) {
+      match result {
+        ok(columns) => apply_loaded(s, columns),
+        err(e) => {
+          s.set(fn(mut v: Board) {
+            v.error = e
+            v.loading = false
+          })
+          notify("My Issues", "Failed to load: {e}", toast::ToastVariant::error)
+        },
+      }
+    })
+  })
+}
+
+// ── Rendering ─────────────────────────────────────────────────────────
+
+// Single-glyph priority indicator. Picked so every card's identifier
+// lines up regardless of priority (space for none, no double-width
+// runes).
+fn priority_glyph(p: Int?) Str {
+  match p {
+    n => match n {
+      1 => "!",
+      2 => "↑",
+      3 => "~",
+      4 => "↓",
+      _ => " ",
+    },
+    _ => " ",
+  }
+}
+
+fn priority_color(theme: ui::Theme, p: Int?) vaxis::Color {
+  match p {
+    n => match n {
+      1 => theme.danger_text,
+      2 => theme.warning_text,
+      3 => theme.foreground,
+      4 => theme.muted_foreground,
+      _ => theme.foreground,
+    },
+    _ => theme.foreground,
+  }
+}
+
+// "{cycle} · {project}", collapsing to just one of them if the other
+// is missing. Empty string means: don't render the metadata line.
+fn metadata_text(item: issues::Issue) Str {
+  let has_cycle = not item.cycle_label.is_empty() and not (item.cycle_label == "—")
+  let has_project = not item.project_name.is_empty() and not (item.project_name == "—")
+  match {
+    has_cycle and has_project => "{item.cycle_label} · {item.project_name}",
+    has_cycle => item.cycle_label,
+    has_project => item.project_name,
+    _ => "",
+  }
+}
+
+// Card body without any selection chrome. Used by render_card and
+// reused as-is for the unselected branch.
+fn card_content(theme: ui::Theme, item: issues::Issue) ui::Widget {
+  let glyph = priority_glyph(item.priority)
+  let gcolor = priority_color(theme, item.priority)
+  let id_line = ui::row([
+    ui::styled_text(glyph, fg: gcolor),
+    ui::text(" "),
+    ui::styled_text(item.identifier, fg: theme.foreground, attrs: ui::TextAttrs{ bold: true }),
+  ])
+  let title = ui::rich_text(
+    [ui::span(item.title, fg: theme.foreground)],
+    overflow: ui::TextOverflow::ellipsis,
+    max_lines: 2,
+    soft_wrap: true,
+  )
+  mut indented: [ui::Widget] = [title]
+  let meta = metadata_text(item)
+  if not meta.is_empty() {
+    indented.push(ui::styled_text(meta, fg: theme.muted_foreground))
+  }
+  ui::column(
+    [
+      id_line,
+      // Indent title and metadata 2 more cols so they hang under the
+      // identifier text (which sits at col 2 after the glyph + space).
+      ui::padding(
+        ui::column(
+          indented,
+          main_size: ui::MainSize::min,
+          cross_align: ui::CrossAlign::stretch,
+        ),
+        left: 2,
+      ),
+    ],
+    main_size: ui::MainSize::min,
+    cross_align: ui::CrossAlign::stretch,
+  )
+}
+
+// Selected: render with an accent bar (2 cols, theme.primary bg) on the
+// left and a subtle theme.surface bg on the rest. Replaces the normal
+// 2-col left padding so the card doesn't shift horizontally between
+// selected / unselected.
+fn render_card(theme: ui::Theme, item: issues::Issue, selected: Bool) ui::Widget {
+  let content = card_content(theme, item)
+  match selected {
+    true => ui::row(
+      [
+        ui::sized_box(
+          2, 0,
+          ui::decorated_box(ui::text(""), bg: theme.primary, fg: theme.primary),
+        ),
+        ui::expanded(ui::decorated_box(content, bg: theme.surface)),
+      ],
+      cross_align: ui::CrossAlign::stretch,
+    ),
+    false => ui::padding(content, left: 2),
+  }
+}
+
+// Indented divider between cards (cols 2..n-2 of the column width),
+// flanked by blank rows so adjacent cards don't crowd.
+//
+// ui::divider paints via DrawCell (no style merge); without an explicit
+// bg the line picks up the terminal default and reads as a thick dark
+// bar over the themed bg. Pass theme.background so it blends.
+fn card_divider(theme: ui::Theme) ui::Widget {
+  ui::padding(
+    ui::divider(fg: theme.border, bg: theme.background),
+    horizontal: 2,
+  )
+}
+
+fn blank_row() ui::Widget { ui::sized_box(0, 1, ui::text("")) }
+
+fn render_column(
+  theme: ui::Theme, col: issues::BoardColumn,
+  col_idx: Int, cursor_col: Int, cursor_row: Int,
+) ui::Widget {
+  let header_text = "{col.name} ({col.issues.size().to_str()})"
+  let header = ui::styled_text(
+    header_text,
+    fg: theme.muted_foreground,
+    attrs: ui::TextAttrs{ bold: true },
+  )
+
+  mut children: [ui::Widget] = [
+    ui::padding(header, vertical: 1),
+  ]
+  let is_active_col = col_idx == cursor_col
+  let last_idx = col.issues.size() - 1
+  for issue, row_idx in col.issues {
+    children.push(render_card(theme, issue, is_active_col and row_idx == cursor_row))
+    if row_idx < last_idx {
+      children.push(blank_row())
+      children.push(card_divider(theme))
+      children.push(blank_row())
+    }
+  }
+  if col.issues.size() == 0 {
+    children.push(blank_row())
+    children.push(
+      ui::center(ui::styled_text("No issues", fg: theme.muted_foreground)),
+    )
+  }
+
+  ui::sized_box(
+    COLUMN_WIDTH,
+    0,
+    ui::column(
+      children,
+      main_size: ui::MainSize::min,
+      cross_align: ui::CrossAlign::stretch,
+    ),
+  )
+}
+
+// Build the row of columns plus gaps between them. The whole row is
+// wrapped in a scroll_pane (horizontal scroll) so wider boards can
+// extend off-screen.
+fn render_board(theme: ui::Theme, v: Board) ui::Widget {
+  mut row_children: [ui::Widget] = []
+  for col, idx in v.columns {
+    if idx > 0 {
+      row_children.push(ui::sized_box(COLUMN_GAP, 0, ui::text("")))
+    }
+    row_children.push(render_column(theme, col, idx, v.cursor_col, v.cursor_row))
+  }
+  ui::scroll_pane(
+    ui::row(row_children, cross_align: ui::CrossAlign::start),
+    controller: v.board_scroll,
+  )
+}
+
+fn body(theme: ui::Theme, v: Board) ui::Widget {
+  match {
+    v.loading => ui::column([
+      ui::expanded(ui::center(ui::text("Loading issues…"))),
+    ]),
+    not v.error.is_empty() => ui::column([
+      ui::expanded(
+        ui::center(
+          ui::column(
+            [
+              ui::styled_text(v.error, fg: theme.danger_text),
+              ui::sized_box(0, 1, ui::text("")),
+              ui::styled_text("press r to retry", fg: theme.muted_foreground),
+            ],
+            main_size: ui::MainSize::min,
+            cross_align: ui::CrossAlign::center,
+          ),
+        ),
+      ),
+    ]),
+    v.columns.size() == 0 => ui::column([
+      ui::expanded(
+        ui::center(
+          ui::styled_text("No issues assigned to you", fg: theme.muted_foreground),
+        ),
+      ),
+    ]),
+    _ => ui::column([ui::expanded(render_board(theme, v))]),
+  }
+}
+
+// ── Entry point ───────────────────────────────────────────────────────
+
+fn new(
+  api_key: Str,
+  on_open_issue: fn(issues::Issue),
+  notify: fn(Str, Str, toast::ToastVariant),
+) ui::Widget {
+  ui::stateful(
+    key: "my-issues-view",
+    init: fn(_ctx: ui::BuildContext) Board {
+      Board{
+        columns: [],
+        cursor_col: 0,
+        cursor_row: 0,
+        loading: true,
+        error: "",
+        board_scroll: ui::scroll_pane_controller(),
+      }
+    },
+    build: fn(ctx: ui::BuildContext, state: ui::State<Board>) ui::Widget {
+      let theme = ui::must_have_theme(ctx)
+      let model = state.value()
+      let rt = ctx.runtime<Board>()
+
+      // Kick the initial fetch the first build, same pattern as
+      // inbox_view.
+      if model.loading and model.columns.size() == 0 and model.error.is_empty() {
+        load_board(api_key, state, rt, notify)
+      }
+
+      ui::shortcuts(
+        ui::actions(
+          ui::focus_scope(
+            ui::focus(body(theme, model)),
+            trap: false,
+            auto_focus: true,
+          ),
+          [
+            ui::action("board.row_down", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              if model.columns.size() > 0 {
+                let count = col_size(model.columns, model.cursor_col)
+                if count > 0 {
+                  let next_row = clamp(model.cursor_row + 1, count)
+                  state.set(fn(mut v: Board) { v.cursor_row = next_row })
+                }
+              }
+              ui::EventResult::handled
+            }),
+            ui::action("board.row_up", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              if model.columns.size() > 0 {
+                let count = col_size(model.columns, model.cursor_col)
+                if count > 0 {
+                  let next_row = clamp(model.cursor_row - 1, count)
+                  state.set(fn(mut v: Board) { v.cursor_row = next_row })
+                }
+              }
+              ui::EventResult::handled
+            }),
+            ui::action("board.col_next", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              if model.columns.size() > 0 {
+                let target = next_non_empty(model.columns, model.cursor_col + 1)
+                if target >= 0 {
+                  state.set(fn(mut v: Board) {
+                    v.cursor_col = target
+                    v.cursor_row = clamp(v.cursor_row, col_size(v.columns, target))
+                  })
+                  let _ = ui::scroll_pane_scroll_to(
+                    model.board_scroll,
+                    target * (COLUMN_WIDTH + COLUMN_GAP),
+                    0,
+                  )
+                }
+              }
+              ui::EventResult::handled
+            }),
+            ui::action("board.col_prev", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              if model.columns.size() > 0 {
+                let target = prev_non_empty(model.columns, model.cursor_col - 1)
+                if target >= 0 {
+                  state.set(fn(mut v: Board) {
+                    v.cursor_col = target
+                    v.cursor_row = clamp(v.cursor_row, col_size(v.columns, target))
+                  })
+                  let _ = ui::scroll_pane_scroll_to(
+                    model.board_scroll,
+                    target * (COLUMN_WIDTH + COLUMN_GAP),
+                    0,
+                  )
+                }
+              }
+              ui::EventResult::handled
+            }),
+            ui::action("board.open", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              match selected_issue(model) {
+                issue => on_open_issue(issue),
+                _ => (),
+              }
+              ui::EventResult::handled
+            }),
+            ui::action("board.refresh", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              state.set(fn(mut v: Board) {
+                v.loading = true
+                v.error = ""
+              })
+              load_board(api_key, state, rt, notify)
+              ui::EventResult::handled
+            }),
+          ],
+        ),
+        [
+          "j": "board.row_down",
+          "Down": "board.row_down",
+          "k": "board.row_up",
+          "Up": "board.row_up",
+          "l": "board.col_next",
+          "Right": "board.col_next",
+          "h": "board.col_prev",
+          "Left": "board.col_prev",
+          "Enter": "board.open",
+          "r": "board.refresh",
+        ],
+      )
+    },
+  )
+}

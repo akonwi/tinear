@@ -1,9 +1,11 @@
 use vaxis/ui
 
 use tinear/models/inbox
+use tinear/models/issues
 use tinear/os
 use tinear/tui/hints_bar
 use tinear/tui/inbox_view
+use tinear/tui/my_issues_view
 use tinear/tui/toast
 
 // Minimal shell for the logged-in view.
@@ -169,12 +171,13 @@ fn placeholder_for(label: Str) ui::Widget {
 // once via ui::indexed_stack so each tab's local state (cursor, scroll,
 // fetched data) survives switching tabs — only the visible tab paints.
 fn body_for(
-  api_key: Str, s: Model, on_open: fn(inbox::Item),
+  api_key: Str, s: Model,
+  on_open: fn(inbox::Item), on_open_issue: fn(issues::Issue),
   notify: fn(Str, Str, toast::ToastVariant),
 ) ui::Widget {
   mut children: [ui::Widget] = [
     inbox_view::new(api_key, on_open, notify),
-    placeholder_for("My Issues"),
+    my_issues_view::new(api_key, on_open_issue, notify),
   ]
   for label in s.issue_tabs {
     children.push(placeholder_for(label))
@@ -214,13 +217,14 @@ fn hints_for(s: Model) [hints_bar::Hint] {
 
 fn screen(
   theme: ui::Theme, s: Model, api_key: Str,
-  on_tab_press: fn(Int), on_open: fn(inbox::Item),
+  on_tab_press: fn(Int),
+  on_open: fn(inbox::Item), on_open_issue: fn(issues::Issue),
   notify: fn(Str, Str, toast::ToastVariant),
 ) ui::Widget {
   ui::column(
     [
       tab_bar(theme, s, on_tab_press),
-      ui::expanded(body_for(api_key, s, on_open, notify)),
+      ui::expanded(body_for(api_key, s, on_open, on_open_issue, notify)),
       hints_bar::new(theme, hints_for(s)),
     ],
   )
@@ -261,6 +265,11 @@ fn new(api_key: Str, notify: fn(Str, Str, toast::ToastVariant)) ui::Widget {
           }
         }
       }
+      // From the My Issues board, Enter on a card promotes the issue
+      // to a dynamic tab. Same shell helper as the inbox uses.
+      let on_open_issue = fn(issue: issues::Issue) {
+        state.set(fn(mut s: Model) { s = open_issue_tab(s, issue.identifier) })
+      }
       // Tab / Shift+Tab / Escape are already mapped to NextFocusIntent,
       // PreviousFocusIntent and DismissIntent by the app-level Shortcuts that
       // wraps every vaxis/ui root. We can't override those keys from an inner
@@ -271,7 +280,7 @@ fn new(api_key: Str, notify: fn(Str, Str, toast::ToastVariant)) ui::Widget {
       ui::shortcuts(
         ui::actions(
           ui::focus_scope(
-            ui::focus(screen(theme, model, api_key, on_tab_press, on_open, notify)),
+            ui::focus(screen(theme, model, api_key, on_tab_press, on_open, on_open_issue, notify)),
             trap: false,
             auto_focus: true,
           ),
