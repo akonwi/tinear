@@ -1,4 +1,5 @@
 use ard/async
+use ard/maybe
 use vaxis/ui
 
 use tinear/models/inbox
@@ -6,16 +7,28 @@ use tinear/tui/text
 
 // Local state for the Inbox view.
 //
-// `controller` is created once in `init` and stored here so the scroll
-// position survives rebuilds; if we let `scroll_pane(child)` create a
-// fresh controller every build the view would re-snap to the top on
-// every state change.
+// `list_scroll` is created once in `init` and stored here so the list's
+// scroll position survives rebuilds. Same for `detail_scroll`.
+//
+// Detail-pane fields:
+//   detail_request_id  the notification id we currently want to display
+//                      (set when cursor moves to a new item)
+//   detail_loaded_id   the notification id of the loaded detail (cache key)
+//   detail             the loaded data, when present
+//   detail_loading     true while a fetch is in flight for detail_request_id
+//   detail_error       last detail-load error message (cleared on success)
 struct View {
   items: [inbox::Item],
   cursor: Int,
   loading: Bool,
   error: Str,
-  controller: ui::ScrollPaneController,
+  list_scroll: ui::ScrollPaneController,
+  detail_scroll: ui::ScrollPaneController,
+  detail_request_id: Str,
+  detail_loaded_id: Str,
+  detail: inbox::Detail?,
+  detail_loading: Bool,
+  detail_error: Str,
 }
 
 fn clamp_cursor(cursor: Int, count: Int) Int {
@@ -27,62 +40,92 @@ fn clamp_cursor(cursor: Int, count: Int) Int {
   }
 }
 
-// Kicks off a background fetch and re-enters the UI runtime to apply the
-// result. Used both at mount (from `init`) and from the refresh action.
-fn load_inbox(api_key: Str, rt: ui::Runtime<View>) {
+// ── Async work ────────────────────────────────────────────────────────
+
+// Background detail fetch. Late results are discarded if the user has
+// since moved to a different item (detail_request_id no longer matches).
+fn fetch_detail(api_key: Str, target_id: Str, rt: ui::Runtime<View>) {
   async::start(fn() {
-    let result = inbox::load(api_key)
+    let result = inbox::load_detail(api_key, target_id)
     rt.dispatch(fn(state: ui::State<View>) {
       state.set(fn(mut s: View) {
-        match result {
-          ok(items) => {
-            s.items = items
-            s.error = ""
-            s.cursor = clamp_cursor(s.cursor, items.size())
-          },
-          err(e) => { s.error = e },
+        if s.detail_request_id == target_id {
+          match result {
+            ok(d) => {
+              s.detail = maybe::some(d)
+              s.detail_loaded_id = target_id
+              s.detail_loading = false
+              s.detail_error = ""
+            },
+            err(e) => {
+              s.detail_loading = false
+              s.detail_error = e
+            },
+          }
         }
-        s.loading = false
       })
     })
   })
 }
 
-// ── Rendering ─────────────────────────────────────────────────────────
+// Request the detail for whatever item the cursor is currently on, if it
+// differs from what's already loaded or in-flight. Safe to call from any
+// action handler.
+fn request_detail_for_cursor(
+  api_key: Str, state: ui::State<View>, rt: ui::Runtime<View>,
+) {
+  let s = state.value()
+  if s.items.size() > 0 {
+    let target_id = s.items.at(s.cursor).notification_id
+    let already_requested = s.detail_request_id == target_id
+    let already_loaded = s.detail_loaded_id == target_id
+    if not target_id.is_empty() and not already_requested and not already_loaded {
+      state.set(fn(mut x: View) {
+        x.detail_request_id = target_id
+        x.detail_loading = true
+        x.detail_error = ""
+        x.detail = maybe::none()
+      })
+      fetch_detail(api_key, target_id, rt)
+    }
+  }
+}
 
+fn load_inbox(api_key: Str, state: ui::State<View>, rt: ui::Runtime<View>) {
+  async::start(fn() {
+    let result = inbox::load(api_key)
+    rt.dispatch(fn(s: ui::State<View>) {
+      s.set(fn(mut v: View) {
+        match result {
+          ok(items) => {
+            v.items = items
+            v.error = ""
+            v.cursor = clamp_cursor(v.cursor, items.size())
+          },
+          err(e) => { v.error = e },
+        }
+        v.loading = false
+      })
+      // After the inbox lands, kick off a detail fetch for whatever item
+      // ends up under the cursor (cursor 0 on first load).
+      request_detail_for_cursor(api_key, s, rt)
+    })
+  })
+}
+
+// ── List rendering ────────────────────────────────────────────────────
+
+// A single inbox row. The split layout shows id + actor + type;
+// the title lives in the detail pane on the right.
 fn render_row(item: inbox::Item, selected: Bool) ui::Widget {
-  // The four logical cells live inside a single Title slot. ListTile owns
-  // the surface, full-row highlight, and theme-driven Selected styling —
-  // we no longer need a manual decorated_box reverse-video wrapper.
-  //
-  // No `on_pressed` here on purpose: that would make each row a focus
-  // target and we'd have to keep our cursor in sync with the framework's
-  // focused row. Activation lives at the inbox-view level via the Enter
-  // shortcut, which dispatches `inbox.open` based on the cursor.
   let title = ui::row([
     ui::text(text::pad_str(item.target_id, 10)),
     ui::text(" "),
-    ui::text(item.actor_name),
+    ui::expanded(ui::text(item.actor_name)),
     ui::text(" "),
     ui::text(item.type_label),
-    ui::text("  "),
-    ui::expanded(ui::text(item.title)),
   ])
   ui::list_tile(title: title, selected: selected)
-}
-
-fn error_pane(theme: ui::Theme, error: Str) ui::Widget {
-  ui::center(
-    ui::column(
-      [
-        ui::styled_text(error, fg: theme.danger_text),
-        ui::sized_box(0, 1, ui::text("")),
-        ui::styled_text("press r to retry", fg: theme.muted_foreground),
-      ],
-      main_size: ui::MainSize::min,
-      cross_align: ui::CrossAlign::center,
-    ),
-  )
 }
 
 fn list_rows(model: View) [ui::Widget] {
@@ -93,20 +136,265 @@ fn list_rows(model: View) [ui::Widget] {
   rows
 }
 
+fn list_pane(model: View) ui::Widget {
+  // main_size: min keeps the column the height of its rows (otherwise it
+  // expands to fill the scroll pane's unbounded constraints and the rows
+  // visually drift toward the middle of the pane).
+  ui::scroll_pane(
+    ui::column(
+      list_rows(model),
+      main_size: ui::MainSize::min,
+      cross_align: ui::CrossAlign::stretch,
+    ),
+    controller: model.list_scroll,
+  )
+}
+
+// ── Detail rendering ──────────────────────────────────────────────────
+
+// Header reminds the reader WHY they got the notification: who acted,
+// what they did, and which item it's about. This is the context that
+// gets lost if we lead with the full issue title.
+fn detail_header(theme: ui::Theme, item: inbox::Item, d: inbox::Detail) ui::Widget {
+  let context_line = "{item.actor_name} {item.type_label}"
+  let id_label = match d.team_key.is_empty() {
+    false => "{d.identifier} · {d.team_key}",
+    true => d.identifier,
+  }
+  ui::column(
+    [
+      ui::styled_text(context_line, fg: theme.accent_text, attrs: ui::TextAttrs{ bold: true }),
+      ui::styled_text(id_label, fg: theme.muted_foreground),
+      ui::sized_box(0, 1, ui::text("")),
+      ui::rich_text([ui::span(d.title, fg: theme.foreground, attrs: ui::TextAttrs{ bold: true })], soft_wrap: true),
+    ],
+    main_size: ui::MainSize::min,
+    cross_align: ui::CrossAlign::start,
+  )
+}
+
+fn priority_label(p: Int?) Str {
+  match p {
+    n => match n {
+      0 => "No priority",
+      1 => "Urgent",
+      2 => "High",
+      3 => "Medium",
+      4 => "Low",
+      _ => "Priority {n.to_str()}",
+    },
+    _ => "—",
+  }
+}
+
+fn meta_row(theme: ui::Theme, label: Str, value: Str) ui::Widget {
+  ui::row([
+    ui::sized_box(12, 1, ui::styled_text(label, fg: theme.muted_foreground)),
+    ui::expanded(ui::styled_text(value, fg: theme.foreground)),
+  ])
+}
+
+// Compact metadata: just status and assignee. Keeping this short means
+// the description (the thing the user actually wants to read) lands on
+// screen without a scroll.
+fn detail_meta(theme: ui::Theme, d: inbox::Detail) ui::Widget {
+  ui::column(
+    [
+      meta_row(theme, "Status", d.state_name),
+      meta_row(theme, "Assignee", d.assignee_name),
+    ],
+    main_size: ui::MainSize::min,
+    cross_align: ui::CrossAlign::stretch,
+  )
+}
+
+fn section_divider(theme: ui::Theme, label: Str) ui::Widget {
+  ui::column(
+    [
+      ui::sized_box(0, 1, ui::text("")),
+      ui::styled_text(label, fg: theme.muted_foreground, attrs: ui::TextAttrs{ bold: true }),
+      ui::sized_box(0, 1, ui::text("")),
+    ],
+    main_size: ui::MainSize::min,
+    cross_align: ui::CrossAlign::start,
+  )
+}
+
+fn detail_description(theme: ui::Theme, body: Str) ui::Widget {
+  match body.is_empty() {
+    true => ui::styled_text("(no description)", fg: theme.muted_foreground),
+    false => ui::rich_text([ui::span(body, fg: theme.foreground)], soft_wrap: true),
+  }
+}
+
+fn render_comment(theme: ui::Theme, c: inbox::DetailComment) ui::Widget {
+  let header = match c.created_at.is_empty() {
+    false => "{c.author} · {c.created_at}",
+    true => c.author,
+  }
+  ui::column(
+    [
+      ui::styled_text(header, fg: theme.muted_foreground),
+      ui::rich_text([ui::span(c.body, fg: theme.foreground)], soft_wrap: true),
+      ui::sized_box(0, 1, ui::text("")),
+    ],
+    main_size: ui::MainSize::min,
+    cross_align: ui::CrossAlign::start,
+  )
+}
+
+fn detail_comments(theme: ui::Theme, comments: [inbox::DetailComment]) [ui::Widget] {
+  match comments.size() == 0 {
+    true => [],
+    false => {
+      mut children: [ui::Widget] = [section_divider(theme, "Comments")]
+      for c in comments {
+        children.push(render_comment(theme, c))
+      }
+      children
+    },
+  }
+}
+
+fn render_history(theme: ui::Theme, h: inbox::DetailHistory) ui::Widget {
+  let label = match h.from_state.is_empty() {
+    false => "{h.from_state} → {h.to_state}",
+    true => h.to_state,
+  }
+  let line = match h.created_at.is_empty() {
+    false => "{label} · {h.created_at}",
+    true => label,
+  }
+  ui::styled_text(line, fg: theme.muted_foreground)
+}
+
+fn detail_history(theme: ui::Theme, history: [inbox::DetailHistory]) [ui::Widget] {
+  match history.size() == 0 {
+    true => [],
+    false => {
+      mut children: [ui::Widget] = [section_divider(theme, "History")]
+      for h in history {
+        children.push(render_history(theme, h))
+      }
+      children
+    },
+  }
+}
+
+fn render_detail(
+  theme: ui::Theme, item: inbox::Item, d: inbox::Detail, scroll: ui::ScrollPaneController,
+) ui::Widget {
+  // Layout order: notification context, identifier, issue title, compact
+  // metadata, then the *thing that triggered the notification* (the
+  // specific comment/mention if present, else the issue description).
+  // For comment/mention notifications the user wants to see THAT comment
+  // immediately, not scroll past the whole issue body to find it.
+  mut children: [ui::Widget] = [
+    detail_header(theme, item, d),
+    section_divider(theme, "Details"),
+    detail_meta(theme, d),
+  ]
+  match d.triggering_comment {
+    c => {
+      children.push(section_divider(theme, "Comment"))
+      children.push(render_comment(theme, c))
+    },
+    _ => {
+      children.push(section_divider(theme, "Description"))
+      children.push(detail_description(theme, d.description))
+    },
+  }
+  if d.comments.size() > 0 {
+    children.push(ui::sized_box(0, 1, ui::text("")))
+    children.push(ui::styled_text(
+      "{d.comments.size().to_str()} comments in thread — press Enter for the full issue",
+      fg: theme.muted_foreground,
+    ))
+  }
+  ui::scroll_pane(
+    ui::column(children, main_size: ui::MainSize::min, cross_align: ui::CrossAlign::stretch),
+    controller: scroll,
+  )
+}
+
+fn detail_pane(theme: ui::Theme, model: View) ui::Widget {
+  if model.detail_loading {
+    ui::center(ui::styled_text("Loading detail…", fg: theme.muted_foreground))
+  } else if not model.detail_error.is_empty() {
+    ui::center(
+      ui::column(
+        [
+          ui::styled_text("Failed to load detail", fg: theme.danger_text),
+          ui::sized_box(0, 1, ui::text("")),
+          ui::rich_text([ui::span(model.detail_error, fg: theme.muted_foreground)], soft_wrap: true),
+        ],
+        main_size: ui::MainSize::min,
+        cross_align: ui::CrossAlign::center,
+      ),
+    )
+  } else if model.items.size() > 0 {
+    let item = model.items.at(model.cursor)
+    match model.detail {
+      d => render_detail(theme, item, d, model.detail_scroll),
+      _ => ui::center(ui::styled_text("Select a notification", fg: theme.muted_foreground)),
+    }
+  } else {
+    ui::center(ui::styled_text("Select a notification", fg: theme.muted_foreground))
+  }
+}
+
+// ── Split body ────────────────────────────────────────────────────────
+
+// Width of the list pane (left side) in the split. Fixed at 36 cols for
+// v1; future versions can make this responsive once we expose terminal
+// size from the runtime.
+fn list_pane_width() Int { 36 }
+
+fn render_split(theme: ui::Theme, model: View) ui::Widget {
+  let separator = ui::sized_box(
+    1,
+    0,
+    ui::decorated_box(
+      ui::text(""),
+      bg: theme.background,
+      border: ui::Borders{ left: true },
+      border_fg: theme.border,
+      border_bg: theme.background,
+    ),
+  )
+  // cross_align: stretch is critical here. ui::row defaults to
+  // CrossAlign::center, which would loose-constrain each child's vertical
+  // size, size them to their intrinsic content, and centre them in the
+  // row — leaving the list and detail floating in the middle of the
+  // body. We want both panes tall.
+  ui::row(
+    [
+      ui::sized_box(list_pane_width(), 0, list_pane(model)),
+      separator,
+      ui::expanded(ui::padding(detail_pane(theme, model), horizontal: 1)),
+    ],
+    cross_align: ui::CrossAlign::stretch,
+  )
+}
+
+fn error_pane(theme: ui::Theme, err: Str) ui::Widget {
+  ui::center(
+    ui::column(
+      [
+        ui::styled_text(err, fg: theme.danger_text),
+        ui::sized_box(0, 1, ui::text("")),
+        ui::styled_text("press r to retry", fg: theme.muted_foreground),
+      ],
+      main_size: ui::MainSize::min,
+      cross_align: ui::CrossAlign::center,
+    ),
+  )
+}
+
 // All body branches return a `column` so the outermost widget type at the
-// build's body slot never changes between frames. See
-// `docs/widget-reconciliation.md` in vaxis-ard for why this matters: a
-// stateful nested inside ancestor renderObjectElements (which is exactly
-// our case — inbox_view lives inside logged_in_screen's tab body, itself
-// inside main's decorated_box/center) can't flip its outermost render
-// object type without leaving the ancestor's render-children list stale.
+// build's body slot never changes between rebuilds — see
+// `docs/widget-reconciliation.md` in vaxis-ard for context.
 fn body(theme: ui::Theme, model: View) ui::Widget {
-  // Each branch returns a `column` so the outer widget type is stable across
-  // rebuilds (see docs/widget-reconciliation.md in vaxis-ard). For the
-  // single-message branches, wrap the message in `expanded(center(…))` so the
-  // body area is filled and the message ends up both horizontally and
-  // vertically centered; a bare `center` inside a column collapses to the
-  // child's intrinsic height and sticks to the top.
   match {
     model.loading => ui::column([
       ui::expanded(ui::center(ui::text("Loading inbox…"))),
@@ -117,7 +405,7 @@ fn body(theme: ui::Theme, model: View) ui::Widget {
     model.items.size() == 0 => ui::column([
       ui::expanded(ui::center(ui::styled_text("No notifications", fg: theme.muted_foreground))),
     ]),
-    _ => ui::column(list_rows(model)),
+    _ => ui::column([ui::expanded(render_split(theme, model))]),
   }
 }
 
@@ -127,20 +415,32 @@ fn new(api_key: Str, on_open: fn(inbox::Item)) ui::Widget {
   ui::stateful(
     key: "inbox-view",
     init: fn(ctx: ui::BuildContext) View {
-      let rt = ctx.runtime<View>()
-      load_inbox(api_key, rt)
       View{
         items: [],
         cursor: 0,
         loading: true,
         error: "",
-        controller: ui::scroll_pane_controller(),
+        list_scroll: ui::scroll_pane_controller(),
+        detail_scroll: ui::scroll_pane_controller(),
+        detail_request_id: "",
+        detail_loaded_id: "",
+        detail: maybe::none(),
+        detail_loading: false,
+        detail_error: "",
       }
     },
     build: fn(ctx: ui::BuildContext, state: ui::State<View>) ui::Widget {
       let theme = ui::must_have_theme(ctx)
       let model = state.value()
       let rt = ctx.runtime<View>()
+
+      // Kick the initial fetch once (when items is empty + still loading)
+      // from build. This avoids the cross-module monomorphization issues
+      // we'd hit if we did it from `init` and lets `state` be in scope.
+      if model.loading and model.items.size() == 0 and model.error.is_empty() {
+        load_inbox(api_key, state, rt)
+      }
+
       ui::shortcuts(
         ui::actions(
           ui::focus_scope(
@@ -152,13 +452,17 @@ fn new(api_key: Str, on_open: fn(inbox::Item)) ui::Widget {
             ui::action("inbox.next", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
               let next_cursor = clamp_cursor(model.cursor + 1, model.items.size())
               state.set(fn(mut s: View) { s.cursor = next_cursor })
-              let _ = ui::scroll_pane_scroll_to(model.controller, 0, next_cursor)
+              let _ = ui::scroll_pane_scroll_to(model.list_scroll, 0, next_cursor)
+              let _ = ui::scroll_pane_scroll_to(model.detail_scroll, 0, 0)
+              request_detail_for_cursor(api_key, state, rt)
               ui::EventResult::handled
             }),
             ui::action("inbox.prev", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
               let next_cursor = clamp_cursor(model.cursor - 1, model.items.size())
               state.set(fn(mut s: View) { s.cursor = next_cursor })
-              let _ = ui::scroll_pane_scroll_to(model.controller, 0, next_cursor)
+              let _ = ui::scroll_pane_scroll_to(model.list_scroll, 0, next_cursor)
+              let _ = ui::scroll_pane_scroll_to(model.detail_scroll, 0, 0)
+              request_detail_for_cursor(api_key, state, rt)
               ui::EventResult::handled
             }),
             ui::action("inbox.open", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
@@ -172,8 +476,6 @@ fn new(api_key: Str, on_open: fn(inbox::Item)) ui::Widget {
                 let item = model.items.at(model.cursor)
                 let id = item.notification_id
                 let key = api_key
-                // Fire-and-forget archive; optimistically remove the row.
-                // A failed archive will reappear on the next refresh.
                 async::start(fn() { let _ = inbox::archive(key, id) })
                 state.set(fn(mut s: View) {
                   mut remaining: [inbox::Item] = []
@@ -184,7 +486,14 @@ fn new(api_key: Str, on_open: fn(inbox::Item)) ui::Widget {
                   }
                   s.items = remaining
                   s.cursor = clamp_cursor(model.cursor, remaining.size())
+                  // Invalidate any in-flight or stale detail.
+                  s.detail = maybe::none()
+                  s.detail_loaded_id = ""
+                  s.detail_request_id = ""
+                  s.detail_loading = false
+                  s.detail_error = ""
                 })
+                request_detail_for_cursor(api_key, state, rt)
               }
               ui::EventResult::handled
             }),
@@ -193,7 +502,27 @@ fn new(api_key: Str, on_open: fn(inbox::Item)) ui::Widget {
                 s.loading = true
                 s.error = ""
               })
-              load_inbox(api_key, rt)
+              load_inbox(api_key, state, rt)
+              ui::EventResult::handled
+            }),
+            // Detail-pane scrolling forwarded from list-focused shortcuts.
+            ui::action("inbox.detail.line_down", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              let _ = ui::scroll_pane_scroll_by(model.detail_scroll, 0, 1)
+              ui::EventResult::handled
+            }),
+            ui::action("inbox.detail.line_up", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              let _ = ui::scroll_pane_scroll_by(model.detail_scroll, 0, -1)
+              ui::EventResult::handled
+            }),
+            // Coarse page-scroll approximation: scroll by 10 rows. Once
+            // we expose ScrollByPages from the binding this can be a real
+            // page.
+            ui::action("inbox.detail.page_down", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              let _ = ui::scroll_pane_scroll_by(model.detail_scroll, 0, 10)
+              ui::EventResult::handled
+            }),
+            ui::action("inbox.detail.page_up", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              let _ = ui::scroll_pane_scroll_by(model.detail_scroll, 0, -10)
               ui::EventResult::handled
             }),
           ],
@@ -206,6 +535,12 @@ fn new(api_key: Str, on_open: fn(inbox::Item)) ui::Widget {
           "Enter": "inbox.open",
           "Backspace": "inbox.delete",
           "r": "inbox.refresh",
+          "l": "inbox.detail.line_down",
+          "Right": "inbox.detail.line_down",
+          "h": "inbox.detail.line_up",
+          "Left": "inbox.detail.line_up",
+          "Space": "inbox.detail.page_down",
+          "Shift+Space": "inbox.detail.page_up",
         ],
       )
     },
