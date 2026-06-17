@@ -23,7 +23,10 @@ struct View {
   loading: Bool,
   error: Str,
   list_scroll: ui::ScrollPaneController,
-  detail_scroll: ui::ScrollPaneController,
+  // Detail pane uses a ScrollController (single-axis) instead of a
+  // ScrollPaneController (both axes) so its child gets a bounded cross-axis
+  // width, which is what makes soft_wrap actually wrap.
+  detail_scroll: ui::ScrollController,
   detail_request_id: Str,
   detail_loaded_id: Str,
   detail: inbox::Detail?,
@@ -299,7 +302,7 @@ fn detail_history(theme: ui::Theme, history: [inbox::DetailHistory]) [ui::Widget
 }
 
 fn render_detail(
-  theme: ui::Theme, item: inbox::Item, d: inbox::Detail, scroll: ui::ScrollPaneController,
+  theme: ui::Theme, item: inbox::Item, d: inbox::Detail, scroll: ui::ScrollController,
 ) ui::Widget {
   // Layout order: notification context, identifier, issue title, compact
   // metadata, then the *thing that triggered the notification* (the
@@ -328,7 +331,11 @@ fn render_detail(
       fg: theme.muted_foreground,
     ))
   }
-  ui::scroll_pane(
+  // scroll_view (single-axis) keeps the child's cross-axis (width)
+  // bounded so soft_wrap can actually wrap title and comment text.
+  // scroll_pane would unbound both axes and the wrapped text would
+  // render on a single very long line.
+  ui::scroll_view(
     ui::column(children, main_size: ui::MainSize::min, cross_align: ui::CrossAlign::stretch),
     controller: scroll,
   )
@@ -433,7 +440,7 @@ fn new(api_key: Str, on_open: fn(inbox::Item)) ui::Widget {
         loading: true,
         error: "",
         list_scroll: ui::scroll_pane_controller(),
-        detail_scroll: ui::scroll_pane_controller(),
+        detail_scroll: ui::scroll_controller(),
         detail_request_id: "",
         detail_loaded_id: "",
         detail: maybe::none(),
@@ -465,7 +472,7 @@ fn new(api_key: Str, on_open: fn(inbox::Item)) ui::Widget {
               let next_cursor = clamp_cursor(model.cursor + 1, model.items.size())
               state.set(fn(mut s: View) { s.cursor = next_cursor })
               let _ = ui::scroll_pane_scroll_to(model.list_scroll, 0, next_cursor)
-              let _ = ui::scroll_pane_scroll_to(model.detail_scroll, 0, 0)
+              let _ = ui::scroll_controller_scroll_to_start(model.detail_scroll)
               request_detail_for_cursor(api_key, state, rt)
               ui::EventResult::handled
             }),
@@ -473,7 +480,7 @@ fn new(api_key: Str, on_open: fn(inbox::Item)) ui::Widget {
               let next_cursor = clamp_cursor(model.cursor - 1, model.items.size())
               state.set(fn(mut s: View) { s.cursor = next_cursor })
               let _ = ui::scroll_pane_scroll_to(model.list_scroll, 0, next_cursor)
-              let _ = ui::scroll_pane_scroll_to(model.detail_scroll, 0, 0)
+              let _ = ui::scroll_controller_scroll_to_start(model.detail_scroll)
               request_detail_for_cursor(api_key, state, rt)
               ui::EventResult::handled
             }),
@@ -519,22 +526,22 @@ fn new(api_key: Str, on_open: fn(inbox::Item)) ui::Widget {
             }),
             // Detail-pane scrolling forwarded from list-focused shortcuts.
             ui::action("inbox.detail.line_down", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              let _ = ui::scroll_pane_scroll_by(model.detail_scroll, 0, 1)
+              let _ = ui::scroll_controller_scroll_by_lines(model.detail_scroll, 1)
               ui::EventResult::handled
             }),
             ui::action("inbox.detail.line_up", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              let _ = ui::scroll_pane_scroll_by(model.detail_scroll, 0, -1)
+              let _ = ui::scroll_controller_scroll_by_lines(model.detail_scroll, -1)
               ui::EventResult::handled
             }),
             // Coarse page-scroll approximation: scroll by 10 rows. Once
-            // we expose ScrollByPages from the binding this can be a real
-            // page.
+            // upstream exposes ScrollByPages on ScrollController we can
+            // make this a real page.
             ui::action("inbox.detail.page_down", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              let _ = ui::scroll_pane_scroll_by(model.detail_scroll, 0, 10)
+              let _ = ui::scroll_controller_scroll_by_lines(model.detail_scroll, 10)
               ui::EventResult::handled
             }),
             ui::action("inbox.detail.page_up", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              let _ = ui::scroll_pane_scroll_by(model.detail_scroll, 0, -10)
+              let _ = ui::scroll_controller_scroll_by_lines(model.detail_scroll, -10)
               ui::EventResult::handled
             }),
           ],
