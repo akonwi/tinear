@@ -1,28 +1,99 @@
+use ard/async
+use ard/duration
 use vaxis/ui
 
 use tinear/config
 use tinear/tui/logged_in_screen
+use tinear/tui/toast
 use tinear/tui/welcome_screen
+
+let DEFAULT_TOAST_TTL_MS: Int = 5000
 
 struct AppState {
   api_key: Str,
+  toasts: [toast::Toast],
+  next_toast_id: Int,
 }
 
 impl AppState {
   fn has_auth() Bool { not self.api_key.is_empty() }
 }
 
+// Append a new toast and schedule its removal once the TTL elapses. Safe
+// to call from event handlers (rt.dispatch lands the state mutation on
+// the UI thread) and from background fibers.
+fn dispatch_toast(
+  rt: ui::Runtime<AppState>,
+  title: Str, description: Str, variant: toast::ToastVariant, ttl_ms: Int,
+) {
+  rt.dispatch(fn(state: ui::State<AppState>) {
+    let toast_id = state.value().next_toast_id + 1
+    state.set(fn(mut s: AppState) {
+      s.next_toast_id = toast_id
+      mut next_toasts: [toast::Toast] = []
+      for t in s.toasts { next_toasts.push(t) }
+      next_toasts.push(toast::Toast{
+        id: toast_id,
+        title: title,
+        description: description,
+        variant: variant,
+        ttl_ms: ttl_ms,
+      })
+      s.toasts = next_toasts
+    })
+    // async::start returns a Fiber; discard it so the dispatch
+    // callback's return type stays Void.
+    let _ = async::start(fn() {
+      async::sleep(duration::from_millis(ttl_ms))
+      rt.dispatch(fn(state: ui::State<AppState>) {
+        state.set(fn(mut s: AppState) {
+          mut remaining: [toast::Toast] = []
+          for t in s.toasts {
+            if not (t.id == toast_id) {
+              remaining.push(t)
+            }
+          }
+          s.toasts = remaining
+        })
+      })
+    })
+  })
+}
+
 fn body(ctx: ui::BuildContext, state: ui::State<AppState>) ui::Widget {
   let theme = ui::must_have_theme(ctx)
   let model = state.value()
+  let rt = ctx.runtime<AppState>()
+  let notify = fn(title: Str, description: Str, variant: toast::ToastVariant) {
+    dispatch_toast(rt, title, description, variant, DEFAULT_TOAST_TTL_MS)
+  }
   let content = match model.has_auth() {
-    true => logged_in_screen::new(model.api_key),
+    true => logged_in_screen::new(model.api_key, notify),
     false => welcome_screen::new(fn(api_key: Str) {
       state.set(fn(mut s: AppState) { s.api_key = api_key })
     }),
   }
+  let centered = ui::center(ui::padding(content, horizontal: 1))
+  // Toast overlay rides above the screen content, anchored bottom-right
+  // with 1 col of padding from the right edge and 2 rows from the bottom
+  // (above the hint bar). modal: false so it doesn't trap focus.
+  let layered = match model.toasts.size() == 0 {
+    true => centered,
+    false => ui::overlay(
+      centered,
+      [ui::overlay_entry(
+        ui::padding(
+          toast::render_stack(theme, model.toasts),
+          right: 1, bottom: 2,
+        ),
+        modal: false,
+        align_x: 1,
+        align_y: 1,
+      )],
+    ),
+  }
   ui::decorated_box(
-    ui::center(ui::padding(content, horizontal: 1)),
+    layered,
     fg: theme.foreground,
     bg: theme.background,
   )
@@ -35,8 +106,16 @@ fn root() ui::Widget {
         key: "tinear",
         init: fn(_ctx: ui::BuildContext) AppState {
           match config::load() {
-            ok(cfg) => AppState{ api_key: cfg.api_key },
-            err(_) => AppState{ api_key: "" },
+            ok(cfg) => AppState{
+              api_key: cfg.api_key,
+              toasts: [],
+              next_toast_id: 0,
+            },
+            err(_) => AppState{
+              api_key: "",
+              toasts: [],
+              next_toast_id: 0,
+            },
           }
         },
         build: body,

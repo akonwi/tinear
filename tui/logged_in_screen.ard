@@ -4,6 +4,7 @@ use tinear/models/inbox
 use tinear/os
 use tinear/tui/hints_bar
 use tinear/tui/inbox_view
+use tinear/tui/toast
 
 // Minimal shell for the logged-in view.
 //
@@ -150,8 +151,7 @@ fn tab_bar(theme: ui::Theme, s: Model, on_tab_press: fn(Int)) ui::Widget {
   ])
 }
 
-fn placeholder_body(s: Model) ui::Widget {
-  let label = tab_label_at(s, s.tab_index)
+fn placeholder_for(label: Str) ui::Widget {
   ui::center(
     ui::column(
       [
@@ -165,13 +165,23 @@ fn placeholder_body(s: Model) ui::Widget {
   )
 }
 
-// Resolves the active tab to a body widget. Inbox is wired up to the real
-// view; My Issues and dynamic issue tabs are still placeholder.
-fn body_for(api_key: Str, s: Model, on_open: fn(inbox::Item)) ui::Widget {
-  match s.tab_index {
-    0 => inbox_view::new(api_key, on_open),
-    _ => placeholder_body(s),
+// Resolves the active tab to a body widget. All bodies are mounted at
+// once via ui::indexed_stack so each tab's local state (cursor, scroll,
+// fetched data) survives switching tabs — only the visible tab paints.
+fn body_for(
+  api_key: Str, s: Model, on_open: fn(inbox::Item),
+  notify: fn(Str, Str, toast::ToastVariant),
+) ui::Widget {
+  mut children: [ui::Widget] = [
+    inbox_view::new(api_key, on_open, notify),
+    placeholder_for("My Issues"),
+  ]
+  for label in s.issue_tabs {
+    children.push(placeholder_for(label))
   }
+  ui::indexed_stack(
+    s.tab_index, children, alignment: ui::Alignment::top_left,
+  )
 }
 
 fn hints_for(s: Model) [hints_bar::Hint] {
@@ -205,11 +215,12 @@ fn hints_for(s: Model) [hints_bar::Hint] {
 fn screen(
   theme: ui::Theme, s: Model, api_key: Str,
   on_tab_press: fn(Int), on_open: fn(inbox::Item),
+  notify: fn(Str, Str, toast::ToastVariant),
 ) ui::Widget {
   ui::column(
     [
       tab_bar(theme, s, on_tab_press),
-      ui::expanded(body_for(api_key, s, on_open)),
+      ui::expanded(body_for(api_key, s, on_open, notify)),
       hints_bar::new(theme, hints_for(s)),
     ],
   )
@@ -217,7 +228,7 @@ fn screen(
 
 // ── Entry point ───────────────────────────────────────────────────────
 
-fn new(api_key: Str) ui::Widget {
+fn new(api_key: Str, notify: fn(Str, Str, toast::ToastVariant)) ui::Widget {
   ui::stateful(
     key: "logged-in",
     init: fn(_ctx: ui::BuildContext) Model {
@@ -260,7 +271,7 @@ fn new(api_key: Str) ui::Widget {
       ui::shortcuts(
         ui::actions(
           ui::focus_scope(
-            ui::focus(screen(theme, model, api_key, on_tab_press, on_open)),
+            ui::focus(screen(theme, model, api_key, on_tab_press, on_open, notify)),
             trap: false,
             auto_focus: true,
           ),
@@ -290,11 +301,32 @@ fn new(api_key: Str) ui::Widget {
               state.set(fn(mut s: Model) { s.tab_index = 1 })
               ui::EventResult::handled
             }),
+            // Dev: fire one toast per variant for visual review. Bound
+            // to `t` below. Remove once the toast system is signed off.
+            ui::action("dev.toast_demo", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              notify(
+                "Inbox refreshed",
+                "7 notifications loaded",
+                toast::ToastVariant::info,
+              )
+              notify(
+                "Notification archived",
+                "",
+                toast::ToastVariant::success,
+              )
+              notify(
+                "Couldn't archive notification",
+                "network timeout",
+                toast::ToastVariant::error,
+              )
+              ui::EventResult::handled
+            }),
           ],
         ),
         [
           "1": "tabs.inbox",
           "2": "tabs.my_issues",
+          "t": "dev.toast_demo",
         ],
       )
     },

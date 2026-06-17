@@ -4,6 +4,7 @@ use vaxis/ui
 
 use tinear/models/inbox
 use tinear/tui/text
+use tinear/tui/toast
 
 // Local state for the Inbox view.
 //
@@ -435,7 +436,11 @@ fn body(theme: ui::Theme, model: View) ui::Widget {
 
 // ── Entry point ───────────────────────────────────────────────────────
 
-fn new(api_key: Str, on_open: fn(inbox::Item)) ui::Widget {
+fn new(
+  api_key: Str,
+  on_open: fn(inbox::Item),
+  notify: fn(Str, Str, toast::ToastVariant),
+) ui::Widget {
   ui::stateful(
     key: "inbox-view",
     init: fn(ctx: ui::BuildContext) View {
@@ -500,7 +505,23 @@ fn new(api_key: Str, on_open: fn(inbox::Item)) ui::Widget {
                 let item = model.items.at(model.cursor)
                 let id = item.notification_id
                 let key = api_key
-                async::start(fn() { let _ = inbox::archive(key, id) })
+                // Fire-and-forget archive; on failure surface a toast.
+                // A failed archive will also reappear on the next manual
+                // refresh since we removed it locally.
+                async::start(fn() {
+                  match inbox::archive(key, id) {
+                    ok(_) => (),
+                    err(e) => notify(
+                      "Couldn't archive notification",
+                      e,
+                      toast::ToastVariant::error,
+                    ),
+                  }
+                })
+                // Batch every post-delete mutation into ONE state.set so
+                // the optimistic update is a single rebuild: drop the
+                // row, clamp the cursor, and update the detail-pane
+                // tracking fields based on the new cursor target.
                 state.set(fn(mut s: View) {
                   mut remaining: [inbox::Item] = []
                   for it, idx in s.items {
@@ -510,14 +531,30 @@ fn new(api_key: Str, on_open: fn(inbox::Item)) ui::Widget {
                   }
                   s.items = remaining
                   s.cursor = clamp_cursor(model.cursor, remaining.size())
-                  // Invalidate any in-flight or stale detail.
-                  s.detail = maybe::none()
-                  s.detail_loaded_id = ""
-                  s.detail_request_id = ""
-                  s.detail_loading = false
-                  s.detail_error = ""
+                  if remaining.size() == 0 {
+                    s.detail = maybe::none()
+                    s.detail_loaded_id = ""
+                    s.detail_request_id = ""
+                    s.detail_loading = false
+                    s.detail_error = ""
+                  } else {
+                    let new_target = remaining.at(s.cursor).notification_id
+                    if not (s.detail_loaded_id == new_target) {
+                      s.detail = maybe::none()
+                      s.detail_request_id = new_target
+                      s.detail_loading = true
+                      s.detail_error = ""
+                    }
+                  }
                 })
-                request_detail_for_cursor(api_key, state, rt)
+                // After the single state mutation, kick off a fetch for
+                // the new cursor target if that detail isn't already
+                // cached.
+                let after = state.value()
+                let needs_fetch = after.items.size() > 0 and after.detail_loading and not after.detail_request_id.is_empty()
+                if needs_fetch {
+                  fetch_detail(api_key, after.detail_request_id, rt)
+                }
               }
               ui::EventResult::handled
             }),
