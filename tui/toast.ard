@@ -36,21 +36,39 @@ fn variant_color(theme: ui::Theme, v: ToastVariant) vaxis::Color {
   }
 }
 
-// Map animation progress (0..1, linear over the toast's full TTL) to a
-// right-side padding amount in cells. The first and last `slide_phase`
-// fraction of the lifecycle slides the toast in and out by `slide_cells`.
-fn slide_offset(progress: Float) Int {
+// Approximate the toast's natural rendered width. The exact size at
+// layout time is unknown to us at build time (Ard has no text-width
+// measurement primitive bound), so we estimate from the underlying
+// string lengths. The actual content lays out inside this estimate
+// when reveal_width == this value: borders (2) + horizontal padding
+// (2 * 2) + the wider of title or description.
+fn natural_width(toast: Toast) Int {
+  let title_w = toast.title.size()
+  let desc_w = toast.description.size()
+  let content_w = match title_w >= desc_w {
+    true => title_w,
+    false => desc_w,
+  }
+  content_w + 6
+}
+
+// Map animation progress (0..1, linear over the toast's full TTL) to the
+// VISIBLE width of the outer container. The toast itself stays at its
+// natural size; we wrap it in a sized_box whose width animates
+// 0 → natural → 0, with the toast right-aligned inside. As width grows
+// during slide-in, the toast appears to unfurl from the right edge.
+fn reveal_width(progress: Float, max_width: Int) Int {
   let slide_phase = Float::from_int(5) / Float::from_int(100)  // 0.05
-  let slide_cells = Float::from_int(15)
   let one = Float::from_int(1)
+  let max_w = Float::from_int(max_width)
   if progress < slide_phase {
     let t = progress / slide_phase
-    ui::float_to_int((one - t) * slide_cells)
+    ui::float_to_int(t * max_w)
   } else if progress > one - slide_phase {
-    let t = (progress - (one - slide_phase)) / slide_phase
-    ui::float_to_int(t * slide_cells)
+    let t = (one - progress) / slide_phase
+    ui::float_to_int(t * max_w)
   } else {
-    0
+    max_width
   }
 }
 
@@ -95,10 +113,16 @@ fn render_body(theme: ui::Theme, toast: Toast) ui::Widget {
 }
 
 // Each toast is its own stateful widget so it owns its own AnimationController.
-// The controller runs over the full ttl_ms and the slide-out completes
-// exactly as the parent removes this entry from the state list — keeping
-// the unmount timing aligned with the end of the animation.
+// The controller runs over the full ttl_ms.
+//
+// Reveal animation: the toast is wrapped in a sized_box whose width
+// animates 0 → natural_width → 0 over the first/last 5% of the TTL.
+// `row(main_align: end)` right-aligns the toast inside the box so the
+// growing visible window exposes the toast from its right edge, giving
+// a "rolling out from the right" feel without needing off-screen
+// positioning (which the overlay setup can't produce).
 fn render_animated(theme: ui::Theme, toast: Toast) ui::Widget {
+  let max_w = natural_width(toast)
   ui::stateful(
     key: "toast-{toast.id.to_str()}",
     init: fn(ctx: ui::BuildContext) ViewState {
@@ -108,8 +132,14 @@ fn render_animated(theme: ui::Theme, toast: Toast) ui::Widget {
     },
     build: fn(_ctx: ui::BuildContext, state: ui::State<ViewState>) ui::Widget {
       let progress = ui::anim_value(state.value().anim)
-      let right_pad = slide_offset(progress)
-      ui::padding(render_body(theme, toast), right: right_pad)
+      let visible_w = reveal_width(progress, max_w)
+      ui::sized_box(
+        visible_w, 0,
+        ui::row(
+          [render_body(theme, toast)],
+          main_align: ui::MainAlign::end,
+        ),
+      )
     },
   )
 }
