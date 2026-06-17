@@ -292,9 +292,27 @@ fn render_column(
   )
 }
 
+// Overflow indicator: 1-col chevron pinned to the top of the board
+// area. We always reserve a 1-col slot on each side so the layout
+// doesn't shift when the indicator appears/disappears.
+//
+// `show` controls whether the glyph is visible. The cross-align: start
+// alignment keeps the chevron next to the column headers vertically.
+fn overflow_indicator(theme: ui::Theme, glyph: Str, show: Bool) ui::Widget {
+  let content = match show {
+    true => ui::styled_text(glyph, fg: theme.muted_foreground),
+    false => ui::text(" "),
+  }
+  ui::sized_box(
+    1, 0,
+    ui::padding(content, vertical: 1),
+  )
+}
+
 // Build the row of columns plus gaps between them. The whole row is
 // wrapped in a scroll_pane (horizontal scroll) so wider boards can
-// extend off-screen.
+// extend off-screen, flanked by 1-col chevron indicators that hint at
+// more columns existing in each direction.
 fn render_board(theme: ui::Theme, v: Board) ui::Widget {
   mut row_children: [ui::Widget] = []
   for col, idx in v.columns {
@@ -303,9 +321,28 @@ fn render_board(theme: ui::Theme, v: Board) ui::Widget {
     }
     row_children.push(render_column(theme, col, idx, v.cursor_col, v.cursor_row))
   }
-  ui::scroll_pane(
-    ui::row(row_children, cross_align: ui::CrossAlign::start),
-    controller: v.board_scroll,
+  // True "is content scrolled off?" check, read from the scroll pane's
+  // own metrics. On the very first build the controller hasn't been
+  // attached yet (zero-valued metrics), so chevrons start hidden and
+  // appear once layout has run — acceptable since there's nothing to
+  // scroll yet on frame 1 anyway.
+  let metrics = ui::scroll_pane_metrics(
+    v.board_scroll, axis: ui::ScrollAxis::horizontal,
+  )
+  let has_left = metrics.scroll_offset > 0
+  let has_right = metrics.scroll_offset < metrics.max_scroll_offset
+  ui::row(
+    [
+      overflow_indicator(theme, "‹", has_left),
+      ui::expanded(
+        ui::scroll_pane(
+          ui::row(row_children, cross_align: ui::CrossAlign::start),
+          controller: v.board_scroll,
+        ),
+      ),
+      overflow_indicator(theme, "›", has_right),
+    ],
+    cross_align: ui::CrossAlign::stretch,
   )
 }
 
