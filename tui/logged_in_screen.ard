@@ -1,6 +1,8 @@
 use vaxis/ui
 
+use tinear/models/inbox
 use tinear/tui/hints_bar
+use tinear/tui/inbox_view
 
 // Minimal shell for the logged-in view.
 //
@@ -70,19 +72,26 @@ fn close_current_issue_tab(s: Model) Model {
 
 // ── Rendering ─────────────────────────────────────────────────────────
 
-fn tab_chip(label: Str, selected: Bool, on_press: fn(ui::EventContext)) ui::Widget {
+// Tab chip. Mirrors the theming used by upstream ListTile:
+//
+//   selected   => fg theme.foreground on bg theme.primary  (same as ListTile.Selected)
+//   unselected => fg theme.muted_foreground, transparent bg
+//
+// ClickAffordance::none suppresses the default underline vaxis/ui adds
+// to clickable Text; the bg fill is the visual affordance for tabs.
+fn tab_chip(theme: ui::Theme, label: Str, selected: Bool, on_press: fn(ui::EventContext)) ui::Widget {
   let padded = " {label} "
-  // ClickAffordance::none suppresses the default underline that vaxis/ui adds
-  // to clickable Text. Tabs have their own visual treatment (reverse video).
   match selected {
     true => ui::styled_text(
       padded,
-      attrs: ui::TextAttrs{ reverse: true },
+      fg: theme.foreground,
+      bg: theme.primary,
       on_pressed: on_press,
       click_affordance: ui::ClickAffordance::none,
     ),
-    false => ui::text(
+    false => ui::styled_text(
       padded,
+      fg: theme.muted_foreground,
       on_pressed: on_press,
       click_affordance: ui::ClickAffordance::none,
     ),
@@ -102,6 +111,7 @@ fn tab_bar(theme: ui::Theme, s: Model, on_tab_press: fn(Int)) ui::Widget {
       // `for` binds an immutable per-iteration `i`, captured by value
       // by the closure below — no loop-closure trap.
       chips.push(tab_chip(
+        theme,
         tab_label_at(s, i),
         i == s.tab_index,
         fn(_ctx: ui::EventContext) { on_tab_press(i) },
@@ -127,6 +137,15 @@ fn placeholder_body(s: Model) ui::Widget {
       cross_align: ui::CrossAlign::center,
     ),
   )
+}
+
+// Resolves the active tab to a body widget. Inbox is wired up to the real
+// view; My Issues and dynamic issue tabs are still placeholder.
+fn body_for(api_key: Str, s: Model, on_open: fn(inbox::Item)) ui::Widget {
+  match s.tab_index {
+    0 => inbox_view::new(api_key, on_open),
+    _ => placeholder_body(s),
+  }
 }
 
 fn hints_for(s: Model) [hints_bar::Hint] {
@@ -157,11 +176,14 @@ fn hints_for(s: Model) [hints_bar::Hint] {
   }
 }
 
-fn screen(theme: ui::Theme, s: Model, on_tab_press: fn(Int)) ui::Widget {
+fn screen(
+  theme: ui::Theme, s: Model, api_key: Str,
+  on_tab_press: fn(Int), on_open: fn(inbox::Item),
+) ui::Widget {
   ui::column(
     [
       tab_bar(theme, s, on_tab_press),
-      ui::expanded(placeholder_body(s)),
+      ui::expanded(body_for(api_key, s, on_open)),
       hints_bar::new(theme, hints_for(s)),
     ],
   )
@@ -169,14 +191,13 @@ fn screen(theme: ui::Theme, s: Model, on_tab_press: fn(Int)) ui::Widget {
 
 // ── Entry point ───────────────────────────────────────────────────────
 
-fn new() ui::Widget {
+fn new(api_key: Str) ui::Widget {
   ui::stateful(
     key: "logged-in",
     init: fn(_ctx: ui::BuildContext) Model {
       Model{
         tab_index: 0,
-        // Seed two dummy issue tabs so tab math is exercised in the shell.
-        issue_tabs: ["ENG-101", "ENG-202"],
+        issue_tabs: [],
       }
     },
     build: fn(ctx: ui::BuildContext, state: ui::State<Model>) ui::Widget {
@@ -185,6 +206,9 @@ fn new() ui::Widget {
       let on_tab_press = fn(idx: Int) {
         state.set(fn(mut s: Model) { s.tab_index = idx })
       }
+      // TODO: when the issue detail view exists, open the selected
+      // inbox item as a new issue tab here.
+      let on_open = fn(_item: inbox::Item) {}
       // Tab / Shift+Tab / Escape are already mapped to NextFocusIntent,
       // PreviousFocusIntent and DismissIntent by the app-level Shortcuts that
       // wraps every vaxis/ui root. We can't override those keys from an inner
@@ -195,7 +219,7 @@ fn new() ui::Widget {
       ui::shortcuts(
         ui::actions(
           ui::focus_scope(
-            ui::focus(screen(theme, model, on_tab_press)),
+            ui::focus(screen(theme, model, api_key, on_tab_press, on_open)),
             trap: false,
             auto_focus: true,
           ),

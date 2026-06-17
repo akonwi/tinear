@@ -1,0 +1,213 @@
+use ard/async
+use vaxis/ui
+
+use tinear/models/inbox
+use tinear/tui/text
+
+// Local state for the Inbox view.
+//
+// `controller` is created once in `init` and stored here so the scroll
+// position survives rebuilds; if we let `scroll_pane(child)` create a
+// fresh controller every build the view would re-snap to the top on
+// every state change.
+struct View {
+  items: [inbox::Item],
+  cursor: Int,
+  loading: Bool,
+  error: Str,
+  controller: ui::ScrollPaneController,
+}
+
+fn clamp_cursor(cursor: Int, count: Int) Int {
+  match {
+    count <= 0 => 0,
+    cursor < 0 => 0,
+    cursor >= count => count - 1,
+    _ => cursor,
+  }
+}
+
+// Kicks off a background fetch and re-enters the UI runtime to apply the
+// result. Used both at mount (from `init`) and from the refresh action.
+fn load_inbox(api_key: Str, rt: ui::Runtime<View>) {
+  async::start(fn() {
+    let result = inbox::load(api_key)
+    rt.dispatch(fn(state: ui::State<View>) {
+      state.set(fn(mut s: View) {
+        match result {
+          ok(items) => {
+            s.items = items
+            s.error = ""
+            s.cursor = clamp_cursor(s.cursor, items.size())
+          },
+          err(e) => { s.error = e },
+        }
+        s.loading = false
+      })
+    })
+  })
+}
+
+// ── Rendering ─────────────────────────────────────────────────────────
+
+fn render_row(item: inbox::Item, selected: Bool) ui::Widget {
+  // The four logical cells live inside a single Title slot. ListTile owns
+  // the surface, full-row highlight, and theme-driven Selected styling —
+  // we no longer need a manual decorated_box reverse-video wrapper.
+  //
+  // No `on_pressed` here on purpose: that would make each row a focus
+  // target and we'd have to keep our cursor in sync with the framework's
+  // focused row. Activation lives at the inbox-view level via the Enter
+  // shortcut, which dispatches `inbox.open` based on the cursor.
+  let title = ui::row([
+    ui::text(text::pad_str(item.target_id, 10)),
+    ui::text(" "),
+    ui::text(item.actor_name),
+    ui::text(" "),
+    ui::text(item.type_label),
+    ui::text("  "),
+    ui::expanded(ui::text(item.title)),
+  ])
+  ui::list_tile(title: title, selected: selected)
+}
+
+fn error_pane(theme: ui::Theme, error: Str) ui::Widget {
+  ui::center(
+    ui::column(
+      [
+        ui::styled_text(error, fg: theme.danger_text),
+        ui::sized_box(0, 1, ui::text("")),
+        ui::styled_text("press r to retry", fg: theme.muted_foreground),
+      ],
+      main_size: ui::MainSize::min,
+      cross_align: ui::CrossAlign::center,
+    ),
+  )
+}
+
+fn list_rows(model: View) [ui::Widget] {
+  mut rows: [ui::Widget] = []
+  for item, idx in model.items {
+    rows.push(render_row(item, idx == model.cursor))
+  }
+  rows
+}
+
+// All body branches return a `column` so the outermost widget type at the
+// build's body slot never changes between frames. See
+// `docs/widget-reconciliation.md` in vaxis-ard for why this matters: a
+// stateful nested inside ancestor renderObjectElements (which is exactly
+// our case — inbox_view lives inside logged_in_screen's tab body, itself
+// inside main's decorated_box/center) can't flip its outermost render
+// object type without leaving the ancestor's render-children list stale.
+fn body(theme: ui::Theme, model: View) ui::Widget {
+  // Each branch returns a `column` so the outer widget type is stable across
+  // rebuilds (see docs/widget-reconciliation.md in vaxis-ard). For the
+  // single-message branches, wrap the message in `expanded(center(…))` so the
+  // body area is filled and the message ends up both horizontally and
+  // vertically centered; a bare `center` inside a column collapses to the
+  // child's intrinsic height and sticks to the top.
+  match {
+    model.loading => ui::column([
+      ui::expanded(ui::center(ui::text("Loading inbox…"))),
+    ]),
+    not model.error.is_empty() => ui::column([
+      ui::expanded(error_pane(theme, model.error)),
+    ]),
+    model.items.size() == 0 => ui::column([
+      ui::expanded(ui::center(ui::styled_text("No notifications", fg: theme.muted_foreground))),
+    ]),
+    _ => ui::column(list_rows(model)),
+  }
+}
+
+// ── Entry point ───────────────────────────────────────────────────────
+
+fn new(api_key: Str, on_open: fn(inbox::Item)) ui::Widget {
+  ui::stateful(
+    key: "inbox-view",
+    init: fn(ctx: ui::BuildContext) View {
+      let rt = ctx.runtime<View>()
+      load_inbox(api_key, rt)
+      View{
+        items: [],
+        cursor: 0,
+        loading: true,
+        error: "",
+        controller: ui::scroll_pane_controller(),
+      }
+    },
+    build: fn(ctx: ui::BuildContext, state: ui::State<View>) ui::Widget {
+      let theme = ui::must_have_theme(ctx)
+      let model = state.value()
+      let rt = ctx.runtime<View>()
+      ui::shortcuts(
+        ui::actions(
+          ui::focus_scope(
+            ui::focus(body(theme, model)),
+            trap: false,
+            auto_focus: true,
+          ),
+          [
+            ui::action("inbox.next", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              let next_cursor = clamp_cursor(model.cursor + 1, model.items.size())
+              state.set(fn(mut s: View) { s.cursor = next_cursor })
+              let _ = ui::scroll_pane_scroll_to(model.controller, 0, next_cursor)
+              ui::EventResult::handled
+            }),
+            ui::action("inbox.prev", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              let next_cursor = clamp_cursor(model.cursor - 1, model.items.size())
+              state.set(fn(mut s: View) { s.cursor = next_cursor })
+              let _ = ui::scroll_pane_scroll_to(model.controller, 0, next_cursor)
+              ui::EventResult::handled
+            }),
+            ui::action("inbox.open", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              if model.cursor < model.items.size() {
+                on_open(model.items.at(model.cursor))
+              }
+              ui::EventResult::handled
+            }),
+            ui::action("inbox.delete", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              if model.cursor < model.items.size() {
+                let item = model.items.at(model.cursor)
+                let id = item.notification_id
+                let key = api_key
+                // Fire-and-forget archive; optimistically remove the row.
+                // A failed archive will reappear on the next refresh.
+                async::start(fn() { let _ = inbox::archive(key, id) })
+                state.set(fn(mut s: View) {
+                  mut remaining: [inbox::Item] = []
+                  for it, idx in s.items {
+                    if not (idx == model.cursor) {
+                      remaining.push(it)
+                    }
+                  }
+                  s.items = remaining
+                  s.cursor = clamp_cursor(model.cursor, remaining.size())
+                })
+              }
+              ui::EventResult::handled
+            }),
+            ui::action("inbox.refresh", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              state.set(fn(mut s: View) {
+                s.loading = true
+                s.error = ""
+              })
+              load_inbox(api_key, rt)
+              ui::EventResult::handled
+            }),
+          ],
+        ),
+        [
+          "j": "inbox.next",
+          "Down": "inbox.next",
+          "k": "inbox.prev",
+          "Up": "inbox.prev",
+          "Enter": "inbox.open",
+          "Backspace": "inbox.delete",
+          "r": "inbox.refresh",
+        ],
+      )
+    },
+  )
+}

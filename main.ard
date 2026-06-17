@@ -16,7 +16,7 @@ fn body(ctx: ui::BuildContext, state: ui::State<AppState>) ui::Widget {
   let theme = ui::must_have_theme(ctx)
   let model = state.value()
   let content = match model.has_auth() {
-    true => logged_in_screen::new(),
+    true => logged_in_screen::new(model.api_key),
     false => welcome_screen::new(fn(api_key: Str) {
       state.set(fn(mut s: AppState) { s.api_key = api_key })
     }),
