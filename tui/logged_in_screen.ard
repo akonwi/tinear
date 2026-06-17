@@ -1,5 +1,7 @@
 use vaxis/ui
 
+use tinear/tui/hints_bar
+
 // Minimal shell for the logged-in view.
 //
 // Two permanent tabs (Inbox, My Issues) plus zero or more dynamic issue
@@ -87,24 +89,29 @@ fn tab_chip(label: Str, selected: Bool, on_press: fn(ui::EventContext)) ui::Widg
   }
 }
 
+// Tab bar widget. Owns its own bottom border so the composing column
+// doesn't need to space anything around it.
 fn tab_bar(theme: ui::Theme, s: Model, on_tab_press: fn(Int)) ui::Widget {
-  mut children: [ui::Widget] = []
+  mut chips: [ui::Widget] = []
   let n = total_tabs(s)
   if n > 0 {
     for i in 0..n - 1 {
       if i > 0 {
-        children.push(ui::styled_text("│", fg: theme.border))
+        chips.push(ui::styled_text("│", fg: theme.border))
       }
       // `for` binds an immutable per-iteration `i`, captured by value
       // by the closure below — no loop-closure trap.
-      children.push(tab_chip(
+      chips.push(tab_chip(
         tab_label_at(s, i),
         i == s.tab_index,
         fn(_ctx: ui::EventContext) { on_tab_press(i) },
       ))
     }
   }
-  ui::row(children)
+  ui::column([
+    ui::row(chips),
+    ui::divider(fg: theme.border, bg: theme.background),
+  ])
 }
 
 fn placeholder_body(s: Model) ui::Widget {
@@ -122,34 +129,40 @@ fn placeholder_body(s: Model) ui::Widget {
   )
 }
 
-fn hints_for(s: Model) [Str] {
+fn hints_for(s: Model) [hints_bar::Hint] {
   match {
-    s.tab_index == 0 => ["Tab switch", "↑↓ select", "⌫ delete", "r refresh", "↵ open", "? search"],
-    s.tab_index == 1 => ["↑↓", "←→", "↵ open", "s status", "y cycle", "r refresh", "? search"],
-    _ => ["s status", "y cycle", "esc close", "o open in browser"],
+    s.tab_index == 0 => [
+      hints_bar::Hint{ key: "Tab", label: "switch" },
+      hints_bar::Hint{ key: "↑↓",  label: "select" },
+      hints_bar::Hint{ key: "⌫",   label: "delete" },
+      hints_bar::Hint{ key: "r",   label: "refresh" },
+      hints_bar::Hint{ key: "↵",   label: "open" },
+      hints_bar::Hint{ key: "?",   label: "search" },
+    ],
+    s.tab_index == 1 => [
+      hints_bar::Hint{ key: "↑↓", label: "" },
+      hints_bar::Hint{ key: "←→", label: "" },
+      hints_bar::Hint{ key: "↵",  label: "open" },
+      hints_bar::Hint{ key: "s",  label: "status" },
+      hints_bar::Hint{ key: "y",  label: "cycle" },
+      hints_bar::Hint{ key: "r",  label: "refresh" },
+      hints_bar::Hint{ key: "?",  label: "search" },
+    ],
+    _ => [
+      hints_bar::Hint{ key: "s",   label: "status" },
+      hints_bar::Hint{ key: "y",   label: "cycle" },
+      hints_bar::Hint{ key: "esc", label: "close" },
+      hints_bar::Hint{ key: "o",   label: "open in browser" },
+    ],
   }
-}
-
-fn hints_bar(theme: ui::Theme, items: [Str]) ui::Widget {
-  mut children: [ui::Widget] = []
-  for item, idx in items {
-    if idx > 0 {
-      children.push(ui::styled_text("  ·  ", fg: theme.muted_foreground))
-    }
-    children.push(ui::styled_text(item, fg: theme.muted_foreground))
-  }
-  ui::row(children)
 }
 
 fn screen(theme: ui::Theme, s: Model, on_tab_press: fn(Int)) ui::Widget {
-  let separator = ui::divider(fg: theme.border, bg: theme.background)
   ui::column(
     [
       tab_bar(theme, s, on_tab_press),
-      separator,
       ui::expanded(placeholder_body(s)),
-      separator,
-      hints_bar(theme, hints_for(s)),
+      hints_bar::new(theme, hints_for(s)),
     ],
   )
 }

@@ -22,7 +22,7 @@ fn body(ctx: ui::BuildContext, state: ui::State<AppState>) ui::Widget {
     }),
   }
   ui::decorated_box(
-    ui::center(ui::padding(1, content)),
+    ui::center(ui::padding(content, horizontal: 1)),
     fg: theme.foreground,
     bg: theme.background,
   )
