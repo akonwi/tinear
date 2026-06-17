@@ -136,15 +136,32 @@ fn list_rows(model: View) [ui::Widget] {
   rows
 }
 
+// Width of the list pane (left side) in the split. Fixed at 36 cols for
+// v1; future versions can make this responsive once we expose terminal
+// size from the runtime.
+let LIST_PANE_WIDTH: Int = 36
+
 fn list_pane(model: View) ui::Widget {
-  // main_size: min keeps the column the height of its rows (otherwise it
-  // expands to fill the scroll pane's unbounded constraints and the rows
-  // visually drift toward the middle of the pane).
+  // scroll_pane lays its child out with unbounded width AND height (so
+  // the child can be larger than the pane and scroll). That unbounded
+  // width means the row inside each list_tile has no flex space to
+  // hand to its `expanded(actor)` cell — the row collapses to its
+  // intrinsic content width and the selected-row highlight ends up
+  // only as wide as the text, not the pane.
+  //
+  // We pin the column's width with an inner sized_box so the
+  // list_tiles get full-pane width and the highlight spans the whole
+  // row. main_size: min keeps the column the height of its rows so
+  // they sit at the top instead of stretching vertically.
   ui::scroll_pane(
-    ui::column(
-      list_rows(model),
-      main_size: ui::MainSize::min,
-      cross_align: ui::CrossAlign::stretch,
+    ui::sized_box(
+      LIST_PANE_WIDTH,
+      0,
+      ui::column(
+        list_rows(model),
+        main_size: ui::MainSize::min,
+        cross_align: ui::CrossAlign::stretch,
+      ),
     ),
     controller: model.list_scroll,
   )
@@ -345,11 +362,6 @@ fn detail_pane(theme: ui::Theme, model: View) ui::Widget {
 
 // ── Split body ────────────────────────────────────────────────────────
 
-// Width of the list pane (left side) in the split. Fixed at 36 cols for
-// v1; future versions can make this responsive once we expose terminal
-// size from the runtime.
-fn list_pane_width() Int { 36 }
-
 fn render_split(theme: ui::Theme, model: View) ui::Widget {
   let separator = ui::sized_box(
     1,
@@ -369,7 +381,7 @@ fn render_split(theme: ui::Theme, model: View) ui::Widget {
   // body. We want both panes tall.
   ui::row(
     [
-      ui::sized_box(list_pane_width(), 0, list_pane(model)),
+      ui::sized_box(LIST_PANE_WIDTH, 0, list_pane(model)),
       separator,
       ui::expanded(ui::padding(detail_pane(theme, model), horizontal: 1)),
     ],
