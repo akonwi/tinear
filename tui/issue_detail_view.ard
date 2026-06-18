@@ -190,31 +190,38 @@ fn metadata_header(theme: ui::Theme, issue: issues::Issue) ui::Widget {
   )
 }
 
-// One section-tab chip. Active tab gets theme.primary background and
-// bold foreground; inactive uses muted_foreground. Both are clickable
-// — clicking calls on_press which the parent wires to a state.set
-// that swaps active_section.
+// Section-tab chip. Matches the app-level tab_chip styling in
+// logged_in_screen.ard so the description/comments toggle reads as
+// the same control to the user:
+//   active   => fg theme.foreground on bg theme.primary
+//   inactive => fg theme.muted_foreground, transparent bg
+// click_affordance: none keeps the bg fill as the only affordance
+// (no competing underline).
 fn section_tab(
   theme: ui::Theme, label: Str, active: Bool, on_press: fn(ui::EventContext),
 ) ui::Widget {
-  let fg = match active {
-    true => theme.foreground,
-    false => theme.muted_foreground,
+  let padded = " {label} "
+  match active {
+    true => ui::styled_text(
+      padded,
+      fg: theme.foreground,
+      bg: theme.primary,
+      on_pressed: on_press,
+      click_affordance: ui::ClickAffordance::none,
+    ),
+    false => ui::styled_text(
+      padded,
+      fg: theme.muted_foreground,
+      on_pressed: on_press,
+      click_affordance: ui::ClickAffordance::none,
+    ),
   }
-  let bg = match active {
-    true => theme.primary,
-    false => theme.background,
-  }
-  ui::styled_text(
-    " {label} ", fg: fg, bg: bg,
-    attrs: ui::TextAttrs{ bold: active },
-    on_pressed: on_press,
-  )
 }
 
 // Tab bar that replaces the old per-section headers. Renders
-// "Description" and "Comments (N)" side by side, then a divider
-// underneath. Active tab is highlighted.
+// "Description" and "Comments (N)" side by side, separated by the
+// same theme.border pipe used by the app-level tab bar, with a
+// border underneath.
 fn section_tabs(
   theme: ui::Theme, model: Detail, state: ui::State<Detail>,
 ) ui::Widget {
@@ -242,7 +249,7 @@ fn section_tabs(
             model.active_section == SECTION_DESCRIPTION,
             fn(_ctx: ui::EventContext) { switch_to(target_desc) },
           ),
-          ui::text("  "),
+          ui::styled_text("│", fg: theme.border),
           section_tab(
             theme, comments_label,
             model.active_section == SECTION_COMMENTS,
