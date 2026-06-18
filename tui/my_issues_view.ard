@@ -5,6 +5,7 @@ use vaxis/ui
 
 use tinear/models/issues
 use tinear/tui/issue_pickers
+use tinear/tui/refresh
 use tinear/tui/toast
 
 // Width of one board column. Matches the main branch's value.
@@ -165,6 +166,58 @@ fn load_board(
         },
       }
     })
+  })
+}
+
+// Background refresh. Re-fetches the board silently (no loading
+// flash, no controller reset) and tries to keep the cursor on the
+// same issue id by scanning the new columns for it. If the issue
+// moved to a different column (status changed externally) the
+// cursor follows; if it disappeared, fall back to clamping the
+// previous (col, row) indices.
+fn refresh_board(
+  api_key: Str, rt: ui::Runtime<Board>,
+  notify: fn(Str, Str, toast::ToastVariant),
+) {
+  let _ = async::start(fn() {
+    let result = issues::load(api_key)
+    match result {
+      ok(columns) => {
+        rt.dispatch(fn(s: ui::State<Board>) {
+          s.set(fn(mut v: Board) {
+            // Capture the id at the cursor before swapping columns.
+            mut preserve_id = ""
+            if v.cursor_col >= 0 and v.cursor_col < v.columns.size() {
+              let col = v.columns.at(v.cursor_col)
+              if v.cursor_row >= 0 and v.cursor_row < col.issues.size() {
+                preserve_id = col.issues.at(v.cursor_row).id
+              }
+            }
+            v.columns = columns
+            v.error = ""
+            // Re-locate the previously-selected issue. Default to
+            // clamped previous indices if not found.
+            mut new_col = clamp(v.cursor_col, columns.size())
+            mut new_row = clamp(v.cursor_row, col_size(columns, new_col))
+            if not preserve_id.is_empty() {
+              for col, c_idx in columns {
+                for issue, r_idx in col.issues {
+                  if issue.id == preserve_id {
+                    new_col = c_idx
+                    new_row = r_idx
+                  }
+                }
+              }
+            }
+            v.cursor_col = new_col
+            v.cursor_row = new_row
+          })
+        })
+      },
+      err(e) => {
+        notify("My Issues refresh", e, toast::ToastVariant::error)
+      },
+    }
   })
 }
 
@@ -557,6 +610,11 @@ fn new(
       // real problem with dispatching from init.)
       let rt = ctx.runtime<Board>()
       load_board(api_key, rt, notify)
+      // Background refresh every 5 minutes. See refresh::schedule_periodic
+      // docs for the lifecycle caveat.
+      refresh::schedule_periodic(5 * 60 * 1000, fn() {
+        refresh_board(api_key, rt, notify)
+      })
       Board{
         columns: [],
         cursor_col: 0,

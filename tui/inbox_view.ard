@@ -3,6 +3,7 @@ use ard/maybe
 use vaxis/ui
 
 use tinear/models/inbox
+use tinear/tui/refresh
 use tinear/tui/text
 use tinear/tui/toast
 

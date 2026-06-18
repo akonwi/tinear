@@ -7,6 +7,7 @@ use tinear/tui/compose_view
 use tinear/tui/hints_bar
 use tinear/tui/issue_pickers
 use tinear/tui/modal
+use tinear/tui/refresh
 use tinear/tui/state
 use tinear/tui/text as text
 use tinear/tui/toast
@@ -110,6 +111,47 @@ fn load_comments(
 }
 
 // ── Layout ───────────────────────────────────────────────────────────
+
+// Silent refresh of both the issue and its comments. Used by the
+// background refresh loop. Errors surface as toasts but don't touch
+// the existing data — the user keeps the last good snapshot.
+fn refresh_detail(
+  api_key: Str, identifier: Str, rt: ui::Runtime<Detail>,
+  notify: fn(Str, Str, toast::ToastVariant),
+) {
+  let _ = async::start(fn() {
+    let issue_result = issues::load_issue(api_key, identifier)
+    match issue_result {
+      ok(issue) => {
+        rt.dispatch(fn(s: ui::State<Detail>) {
+          s.set(fn(mut v: Detail) {
+            v.issue = maybe::some(issue)
+            v.issue_error = ""
+          })
+        })
+      },
+      err(e) => {
+        notify("Issue refresh", e, toast::ToastVariant::error)
+      },
+    }
+  })
+  let _ = async::start(fn() {
+    let comments_result = issues::load_comments(api_key, identifier)
+    match comments_result {
+      ok(comments) => {
+        rt.dispatch(fn(s: ui::State<Detail>) {
+          s.set(fn(mut v: Detail) {
+            v.comments = comments
+            v.comments_error = ""
+          })
+        })
+      },
+      err(e) => {
+        notify("Comments refresh", e, toast::ToastVariant::error)
+      },
+    }
+  })
+}
 
 fn value_or_dash(value: Str) Str {
   match value.is_empty() {
@@ -461,6 +503,13 @@ fn new(
       let rt = ctx.runtime<Detail>()
       load_issue(api_key, identifier, rt)
       load_comments(api_key, identifier, rt)
+      // Background refresh every 5 minutes. The fiber keeps polling
+      // even after this tab is closed (no cancellation yet); the
+      // dispatch is a safe no-op against a disposed state, so this
+      // is wasteful but harmless.
+      refresh::schedule_periodic(5 * 60 * 1000, fn() {
+        refresh_detail(api_key, identifier, rt, notify)
+      })
       Detail{
         identifier: identifier,
         issue: maybe::none(),
