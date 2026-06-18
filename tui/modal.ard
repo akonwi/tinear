@@ -1,0 +1,118 @@
+use vaxis
+use vaxis/ui
+
+// A pending modal request. The app root keeps a single `ModalDef?` in
+// state; setting it to some(def) presents the modal, setting it back to
+// none dismisses it.
+//
+// `build` is invoked at render time with:
+//   - the current theme (the theme can change between requests, so we
+//     don't bake it in at request time)
+//   - a `close` callback the modal can call to dismiss itself (typically
+//     wired as the show_modal frame's on_dismiss and/or to internal
+//     pickers' confirm/cancel actions)
+//
+// The builder usually constructs `modal::show_modal(theme, title, ...)`
+// internally; nothing forces that, but it's the conventional shape.
+struct ModalDef {
+  build: fn(ui::Theme, fn()) ui::Widget,
+}
+
+// Reusable modal frame in the spirit of the original main branch's
+// `tui/modal.ard`: bordered surface with a title, optional body, and a
+// footer for keyboard hints. Used by pickers and confirmation dialogs.
+//
+// What it gives you for free:
+//   - bordered themed surface (theme.border edges, theme.surface fill)
+//   - title row (bold)
+//   - dividers separating title / body / footer
+//   - 1-row top + bottom internal padding for breathing room
+//   - 1-col internal horizontal padding so content isn't flush with the
+//     border
+//   - focus trap (focus_scope with Trap = true and AutoFocus = true)
+//   - Escape -> on_dismiss, by handling the upstream DismissIntent
+//     rather than re-binding the key (avoids fighting the app-level
+//     Shortcuts; same trick we use for Tab elsewhere)
+//
+// What you still own:
+//   - mounting the result over the rest of the app via ui::overlay or
+//     ui::overlay_modal (this helper just returns the modal frame; it
+//     doesn't position itself)
+//   - keybindings inside the body (up/down/enter for pickers, etc.) and
+//     their corresponding intents/actions
+//
+// Width: `width: None` (the default) hugs the content. Pass an Int to
+// fix the modal's width.
+fn show_modal(
+  theme: ui::Theme,
+  title: Str,
+  child: ui::Widget,
+  footer: ui::Widget,
+  width: Int?,
+  on_dismiss: fn(ui::EventContext),
+) ui::Widget {
+  let separator = ui::divider(fg: theme.border, bg: theme.surface)
+  // The caller's `child` MUST include at least one focusable widget
+  // (e.g. an outer ui::focus wrapping its body, or a list_tile/text
+  // with on_pressed). Without one, the modal's focus_scope auto_focus
+  // has no target and focus stays on whatever was focused before the
+  // modal opened (typically a view underneath), causing keystrokes to
+  // bypass the modal body's shortcuts/actions.
+  //
+  // We intentionally do NOT wrap `child` in ui::focus here. Doing so
+  // would put the focusable ABOVE any shortcuts/actions the body
+  // installs, and events bubble up from the focused element — so the
+  // body's own handlers would never fire and only the modal frame's
+  // dismiss action would catch input.
+  let content = ui::column(
+    [
+      ui::sized_box(0, 1, ui::text("")),
+      ui::padding(
+        ui::styled_text(
+          title,
+          fg: theme.foreground,
+          attrs: ui::TextAttrs{ bold: true },
+        ),
+        horizontal: 1,
+      ),
+      ui::padding(separator, horizontal: 1),
+      ui::padding(child, horizontal: 1),
+      ui::padding(separator, horizontal: 1),
+      ui::padding(footer, horizontal: 1),
+      ui::sized_box(0, 1, ui::text("")),
+    ],
+    main_size: ui::MainSize::min,
+    cross_align: ui::CrossAlign::stretch,
+  )
+  let bordered = ui::decorated_box(
+    content,
+    bg: theme.surface,
+    border: ui::Borders{ top: true, right: true, bottom: true, left: true },
+    border_fg: theme.border,
+    border_bg: theme.surface,
+  )
+  let sized = match width {
+    w => ui::constrained_box(bordered, min_w: w, max_w: w),
+    _ => bordered,
+  }
+  // reclaim_focus: true so that swapping the body subtree (e.g.
+  // loading view -> picker body, when the caller calls show_modal
+  // again with the same title) snaps focus back into the modal
+  // instead of leaving it on the focused element that just got
+  // disposed.
+  ui::actions(
+    ui::focus_scope(
+      sized,
+      trap: true, auto_focus: true, reclaim_focus: true,
+    ),
+    [
+      ui::action(
+        "vaxis.dismiss",
+        fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
+          on_dismiss(ctx)
+          ui::EventResult::handled
+        },
+      ),
+    ],
+  )
+}

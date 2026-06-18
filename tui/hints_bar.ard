@@ -38,7 +38,9 @@ fn render_hint(theme: ui::Theme, hint: Hint) ui::Widget {
   }
 }
 
-fn new(theme: ui::Theme, items: [Hint]) ui::Widget {
+// Bare hints row, no top border. Used inside containers (modal frames,
+// etc.) that already supply their own divider above the footer.
+fn row(theme: ui::Theme, items: [Hint]) ui::Widget {
   mut children: [ui::Widget] = []
   for hint, idx in items {
     if idx > 0 {
@@ -46,8 +48,12 @@ fn new(theme: ui::Theme, items: [Hint]) ui::Widget {
     }
     children.push(render_hint(theme, hint))
   }
+  ui::row(children)
+}
+
+fn new(theme: ui::Theme, items: [Hint]) ui::Widget {
   ui::column([
     ui::divider(fg: theme.border, bg: theme.background),
-    ui::row(children),
+    row(theme, items),
   ])
 }

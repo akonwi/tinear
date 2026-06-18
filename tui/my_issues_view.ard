@@ -4,6 +4,9 @@ use vaxis
 use vaxis/ui
 
 use tinear/models/issues
+use tinear/tui/hints_bar
+use tinear/tui/modal
+use tinear/tui/picker
 use tinear/tui/toast
 
 // Width of one board column. Matches the main branch's value.
@@ -383,10 +386,245 @@ fn body(theme: ui::Theme, v: Board, on_card_click: fn(Int, Int)) ui::Widget {
 
 // ── Entry point ───────────────────────────────────────────────────────
 
+// Shared title for both the loading frame and the populated picker so
+// the modal feels like one continuous surface rather than a flicker
+// between two unrelated modals.
+fn state_picker_title(issue: issues::Issue) Str {
+  "Change state \u2014 {issue.identifier}"
+}
+
+fn cycle_picker_title(issue: issues::Issue) Str {
+  "Change cycle \u2014 {issue.identifier}"
+}
+
+// Cycles are labelled by name if set, otherwise "Cycle N". Matches
+// Linear's own convention.
+fn cycle_label(c: issues::Cycle) Str {
+  match c.name.is_empty() {
+    true => "Cycle {c.number}",
+    false => c.name,
+  }
+}
+
+// Sort cycles by number descending (newest first) so the next cycle
+// sits at the top.
+fn sort_cycles(cycles: [issues::Cycle]) [issues::Cycle] {
+  let n = cycles.size()
+  if n < 2 {
+    cycles
+  } else {
+    mut result = cycles
+    for i in 0..n - 2 {
+      for j in 0..n - 2 - i {
+        let a = result.at(j)
+        let b = result.at(j + 1)
+        if a.number < b.number {
+          result.set(j, b)
+          result.set(j + 1, a)
+        }
+      }
+    }
+    result
+  }
+}
+
+// Limit cycles to: anything up to one cycle past the team's current
+// active cycle (so users can move issues into the next cycle), plus
+// the issue's currently-assigned cycle (in case it's older). Mirrors
+// the filtering on `main`.
+fn filter_cycles_for_issue(
+  result: issues::TeamCyclesResult, current_cycle_id: Str,
+) [issues::Cycle] {
+  match result.active_cycle_number {
+    active_n => {
+      mut filtered: [issues::Cycle] = []
+      for c in result.cycles {
+        if c.number <= active_n + 1 or c.id == current_cycle_id {
+          filtered.push(c)
+        }
+      }
+      filtered
+    },
+    _ => result.cycles,
+  }
+}
+
+// Builder for the loading-state modal we show while team states are
+// fetching. Same title + width as the picker that will replace it, so
+// the user sees the modal frame stay put and only the body updates.
+//
+// The body is wrapped in ui::focus so the modal frame's focus_scope
+// auto_focus has a target inside the modal (otherwise focus stays on
+// the underlying view and only Esc reaches the modal's dismiss
+// handler). modal::show_modal deliberately does not add a focusable
+// itself, so each caller's body must bring one.
+fn loading_modal_builder(title: Str) fn(ui::Theme, fn()) ui::Widget {
+  fn(theme: ui::Theme, close: fn()) ui::Widget {
+    modal::show_modal(
+      theme: theme,
+      title: title,
+      child: ui::focus(ui::sized_box(
+        0, 3,
+        ui::center(
+          ui::styled_text("Loading\u2026", fg: theme.muted_foreground),
+        ),
+      )),
+      footer: hints_bar::row(theme, [
+        hints_bar::Hint{ key: "Esc", label: "cancel" },
+      ]),
+      width: maybe::some(50),
+      on_dismiss: fn(_ctx: ui::EventContext) { close() },
+    )
+  }
+}
+
+// Open the state picker for the given issue. Immediately presents a
+// "Loading\u2026" modal so the UI feels snappy, then kicks off the team
+// states fetch in the background. On success we replace the modal with
+// the real picker (same title so the frame stays put). On failure we
+// close the loading modal and toast the error.
+//
+// On confirm the picker dispatches issues::update_state in the
+// background and re-fetches the board so the card appears in its new
+// column.
+// Open the cycle picker for the given issue. Same loading-then-picker
+// flow as open_state_picker. The first option is a synthetic
+// "(no cycle)" entry with id="" that maps to clearing the cycle on the
+// Linear side; issues::update_cycle treats an empty cycle_id as the
+// null-cycle mutation.
+fn open_cycle_picker(
+  api_key: Str,
+  issue: issues::Issue,
+  state: ui::State<Board>,
+  rt: ui::Runtime<Board>,
+  notify: fn(Str, Str, toast::ToastVariant),
+  show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
+  close_modal: fn(),
+) {
+  let key = api_key
+  let team_id = issue.team_id
+  let issue_id = issue.id
+  let current_cycle_id = issue.cycle_id
+  let title = cycle_picker_title(issue)
+
+  show_modal(loading_modal_builder(title))
+
+  let _ = async::start(fn() {
+    let result = issues::load_team_cycles(key, team_id)
+    rt.dispatch(fn(_state: ui::State<Board>) {
+      match result {
+        ok(tcr) => {
+          let cycles = sort_cycles(filter_cycles_for_issue(tcr, current_cycle_id))
+          mut options: [picker::Option] = [
+            picker::Option{
+              id: "",
+              label: "(no cycle)",
+              current: current_cycle_id.is_empty(),
+            },
+          ]
+          for c in cycles {
+            options.push(picker::Option{
+              id: c.id,
+              label: cycle_label(c),
+              current: c.id == current_cycle_id,
+            })
+          }
+          show_modal(picker::new(picker::Props{
+            title: title,
+            options: options,
+            width: maybe::some(60),
+            on_confirm: fn(opt: picker::Option) {
+              let _ = async::start(fn() {
+                let r = issues::update_cycle(key, issue_id, opt.id)
+                rt.dispatch(fn(s: ui::State<Board>) {
+                  match r {
+                    ok(_) => load_board(key, s, rt, notify),
+                    err(e) => {
+                      notify("Update cycle", e, toast::ToastVariant::error)
+                    },
+                  }
+                })
+              })
+            },
+          }))
+        },
+        err(e) => {
+          close_modal()
+          notify("Cycle picker", "Failed to load cycles: {e}", toast::ToastVariant::error)
+        },
+      }
+    })
+  })
+}
+
+fn open_state_picker(
+  api_key: Str,
+  issue: issues::Issue,
+  state: ui::State<Board>,
+  rt: ui::Runtime<Board>,
+  notify: fn(Str, Str, toast::ToastVariant),
+  show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
+  close_modal: fn(),
+) {
+  let key = api_key
+  let team_id = issue.team_id
+  let issue_id = issue.id
+  let current_state_id = issue.state_id
+  let title = state_picker_title(issue)
+
+  // Immediate loading modal.
+  show_modal(loading_modal_builder(title))
+
+  // Background fetch -> swap modal for the picker (or close + toast).
+  let _ = async::start(fn() {
+    let result = issues::load_team_states(key, team_id)
+    rt.dispatch(fn(_state: ui::State<Board>) {
+      match result {
+        ok(states) => {
+          mut options: [picker::Option] = []
+          for ws in states {
+            options.push(picker::Option{
+              id: ws.id,
+              label: ws.name,
+              current: ws.id == current_state_id,
+            })
+          }
+          show_modal(picker::new(picker::Props{
+            title: title,
+            options: options,
+            width: maybe::some(50),
+            on_confirm: fn(opt: picker::Option) {
+              // async::start returns a Fiber; discard so the
+              // on_confirm closure's return type stays Void.
+              let _ = async::start(fn() {
+                let r = issues::update_state(key, issue_id, opt.id)
+                rt.dispatch(fn(s: ui::State<Board>) {
+                  match r {
+                    ok(_) => load_board(key, s, rt, notify),
+                    err(e) => {
+                      notify("Update state", e, toast::ToastVariant::error)
+                    },
+                  }
+                })
+              })
+            },
+          }))
+        },
+        err(e) => {
+          close_modal()
+          notify("State picker", "Failed to load states: {e}", toast::ToastVariant::error)
+        },
+      }
+    })
+  })
+}
+
 fn new(
   api_key: Str,
   on_open_issue: fn(issues::Issue),
   notify: fn(Str, Str, toast::ToastVariant),
+  show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
+  close_modal: fn(),
 ) ui::Widget {
   ui::stateful(
     key: "my-issues-view",
@@ -432,12 +670,27 @@ fn new(
         }
       }
 
+      // reclaim_focus: true so that when a picker modal closes, this
+      // scope's auto_focus pass re-runs and snaps focus back to the
+      // board's outer ui::focus (the first focusable in the scope).
+      // Without it, focus is left nowhere after the modal subtree
+      // disposes, and the first h/j/k/l press is swallowed.
+      //
+      // This is safe to enable because:
+      //   - we wrap in ui::focus(body(...)) so reclaim has a stable
+      //     target inside the board's shortcuts/actions (events bubble
+      //     UP from there into the board's handlers);
+      //   - reclaim only fires when focusedWithin = false. While focus
+      //     is on a board card or in the modal, focusedWithin stays
+      //     true (the card) or false (the modal) and reclaim either
+      //     no-ops or correctly fires on modal close.
       ui::shortcuts(
         ui::actions(
           ui::focus_scope(
             ui::focus(body(theme, model, on_card_click)),
             trap: false,
             auto_focus: true,
+            reclaim_focus: true,
           ),
           [
             ui::action("board.row_down", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
@@ -509,6 +762,24 @@ fn new(
               load_board(api_key, state, rt, notify)
               ui::EventResult::handled
             }),
+            ui::action("board.state_picker", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              match selected_issue(model) {
+                issue => open_state_picker(
+                  api_key, issue, state, rt, notify, show_modal, close_modal,
+                ),
+                _ => (),
+              }
+              ui::EventResult::handled
+            }),
+            ui::action("board.cycle_picker", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              match selected_issue(model) {
+                issue => open_cycle_picker(
+                  api_key, issue, state, rt, notify, show_modal, close_modal,
+                ),
+                _ => (),
+              }
+              ui::EventResult::handled
+            }),
           ],
         ),
         [
@@ -522,6 +793,8 @@ fn new(
           "Left": "board.col_prev",
           "Enter": "board.open",
           "r": "board.refresh",
+          "s": "board.state_picker",
+          "y": "board.cycle_picker",
         ],
       )
     },

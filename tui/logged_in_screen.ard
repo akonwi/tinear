@@ -5,6 +5,7 @@ use tinear/models/issues
 use tinear/os
 use tinear/tui/hints_bar
 use tinear/tui/inbox_view
+use tinear/tui/modal
 use tinear/tui/my_issues_view
 use tinear/tui/toast
 
@@ -174,10 +175,12 @@ fn body_for(
   api_key: Str, s: Model,
   on_open: fn(inbox::Item), on_open_issue: fn(issues::Issue),
   notify: fn(Str, Str, toast::ToastVariant),
+  show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
+  close_modal: fn(),
 ) ui::Widget {
   mut children: [ui::Widget] = [
     inbox_view::new(api_key, on_open, notify),
-    my_issues_view::new(api_key, on_open_issue, notify),
+    my_issues_view::new(api_key, on_open_issue, notify, show_modal, close_modal),
   ]
   for label in s.issue_tabs {
     children.push(placeholder_for(label))
@@ -220,11 +223,13 @@ fn screen(
   on_tab_press: fn(Int),
   on_open: fn(inbox::Item), on_open_issue: fn(issues::Issue),
   notify: fn(Str, Str, toast::ToastVariant),
+  show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
+  close_modal: fn(),
 ) ui::Widget {
   ui::column(
     [
       tab_bar(theme, s, on_tab_press),
-      ui::expanded(body_for(api_key, s, on_open, on_open_issue, notify)),
+      ui::expanded(body_for(api_key, s, on_open, on_open_issue, notify, show_modal, close_modal)),
       hints_bar::new(theme, hints_for(s)),
     ],
   )
@@ -232,7 +237,12 @@ fn screen(
 
 // ── Entry point ───────────────────────────────────────────────────────
 
-fn new(api_key: Str, notify: fn(Str, Str, toast::ToastVariant)) ui::Widget {
+fn new(
+  api_key: Str,
+  notify: fn(Str, Str, toast::ToastVariant),
+  show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
+  close_modal: fn(),
+) ui::Widget {
   ui::stateful(
     key: "logged-in",
     init: fn(_ctx: ui::BuildContext) Model {
@@ -280,7 +290,7 @@ fn new(api_key: Str, notify: fn(Str, Str, toast::ToastVariant)) ui::Widget {
       ui::shortcuts(
         ui::actions(
           ui::focus_scope(
-            ui::focus(screen(theme, model, api_key, on_tab_press, on_open, on_open_issue, notify)),
+            ui::focus(screen(theme, model, api_key, on_tab_press, on_open, on_open_issue, notify, show_modal, close_modal)),
             trap: false,
             auto_focus: true,
           ),
