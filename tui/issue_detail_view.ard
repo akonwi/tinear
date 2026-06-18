@@ -3,7 +3,10 @@ use ard/maybe
 use vaxis/ui
 
 use tinear/models/issues
+use tinear/tui/compose_view
+use tinear/tui/hints_bar
 use tinear/tui/issue_pickers
+use tinear/tui/modal
 use tinear/tui/state
 use tinear/tui/text as text
 use tinear/tui/toast
@@ -31,10 +34,11 @@ use tinear/tui/toast
 //   │ ↑↓ scroll   c comment   s status   y cycle  │
 //   └────────────────────────────────────────────┘
 //
-// When the user presses `c` a compose area swaps in below the body
-// for writing a new comment; Ctrl+Enter (or Ctrl+m/Ctrl+j) submits,
-// Esc cancels. While compose is open, Esc handles the cancel and
-// does NOT bubble up to logged_in_screen (which would close the tab).
+// Pressing `n` while on the Comments section opens the compose modal
+// (tui/compose_view.ard) with its own text_area, sending state, and
+// error display. Ctrl+Enter / Ctrl+m / Ctrl+j submits; Esc dismisses.
+// On success the compose modal reloads this view's comments via the
+// runtime passed in, then closes itself.
 
 // Section identifiers for the tabbed body. Stored as a small Int
 // (rather than a typed enum) so it matches the existing style of
@@ -61,12 +65,6 @@ struct Detail {
 
   // Active section in the description/comments tab bar.
   active_section: Int,
-
-  // Compose-comment state.
-  compose_open: Bool,
-  compose_text: Str,
-  compose_sending: Bool,
-  compose_error: Str,
 }
 
 // ── Async loads ──────────────────────────────────────────────────────
@@ -385,134 +383,36 @@ fn active_body(
 
 // ── Compose ──────────────────────────────────────────────────────────
 
-fn compose_area(
-  theme: ui::Theme, model: Detail, state: ui::State<Detail>,
-  on_submit: fn(ui::EventContext, Str),
-) ui::Widget {
-  if not model.compose_open {
-    ui::sized_box(0, 0, ui::text(""))
-  } else {
-    let body = match model.compose_sending {
-      true => ui::padding(
-        ui::styled_text("Sending\u2026", fg: theme.muted_foreground),
-        horizontal: 1,
-      ),
-      false => {
-        mut rows: [ui::Widget] = []
-        if not model.compose_error.is_empty() {
-          rows.push(ui::styled_text(
-            "Failed to send \u2014 Ctrl+Enter retry",
-            fg: theme.danger_text,
-          ))
-        }
-        rows.push(
-          ui::focus_scope(
-            ui::text_field(
-              value: model.compose_text,
-              placeholder: "Write a comment\u2026",
-              min_width: 40,
-              on_changed: fn(_ctx: ui::EventContext, next_text: Str) {
-                state.set(fn(mut next: Detail) {
-                  next.compose_text = next_text
-                  next.compose_error = ""
-                })
-              },
-              on_submitted: on_submit,
-            ),
-            trap: false, auto_focus: true,
-          ),
-        )
-        rows.push(ui::styled_text(
-          "Ctrl+Enter send   Esc cancel",
-          fg: theme.muted_foreground,
-        ))
-        ui::padding(
-          ui::column(
-            rows,
-            main_size: ui::MainSize::min,
-            cross_align: ui::CrossAlign::stretch,
-          ),
-          horizontal: 1,
-        )
-      },
-    }
-    ui::column(
-      [
-        ui::divider(fg: theme.border, bg: theme.background),
-        body,
-      ],
-      main_size: ui::MainSize::min,
-      cross_align: ui::CrossAlign::stretch,
-    )
-  }
-}
-
-fn submit_comment(
-  api_key: Str,
-  issue: issues::Issue,
-  body: Str,
-  rt: ui::Runtime<Detail>,
+// Dispatched by the compose modal after a successful create_comment.
+// We re-fetch comments and scroll to the end so the new comment is
+// visible. detail_rt comes from this view's ctx.runtime; we keep the
+// fetch on a background fiber so the modal can close immediately.
+fn refresh_comments_after_post(
+  api_key: Str, identifier: Str, rt: ui::Runtime<Detail>,
 ) {
-  let trimmed = body.trim()
-  if trimmed.is_empty() {
-    ()
-  } else {
-    // Mark sending. Caller already called state.set elsewhere; we
-    // just kick the async path here. (The action handler that calls
-    // submit_comment marks compose_sending immediately so the UI
-    // updates before this fiber starts.)
-    let _ = async::start(fn() {
-      let result = issues::create_comment(api_key, issue.id, trimmed)
-      match result {
-        ok(_) => {
-          let refreshed = issues::load_comments(api_key, issue.id)
-          rt.dispatch(fn(s: ui::State<Detail>) {
-            s.set(fn(mut next: Detail) {
-              match refreshed {
-                ok(comments) => {
-                  next.comments = comments
-                  next.comments_error = ""
-                  next.compose_open = false
-                  next.compose_text = ""
-                  next.compose_error = ""
-                },
-                err(e) => { next.compose_error = e },
-              }
-              next.compose_sending = false
-            })
-            // Scroll body to the end so the freshly-posted comment
-            // is visible.
-            let _ = ui::scroll_controller_scroll_to_end(s.value().scroll)
-          })
-        },
-        err(e) => {
-          rt.dispatch(fn(s: ui::State<Detail>) {
-            s.set(fn(mut next: Detail) {
-              next.compose_sending = false
-              next.compose_error = e
-            })
-          })
-        },
-      }
+  let _ = async::start(fn() {
+    let refreshed = issues::load_comments(api_key, identifier)
+    rt.dispatch(fn(s: ui::State<Detail>) {
+      s.set(fn(mut next: Detail) {
+        match refreshed {
+          ok(comments) => {
+            next.comments = comments
+            next.comments_error = ""
+          },
+          err(e) => { next.comments_error = e },
+        }
+      })
+      let _ = ui::scroll_controller_scroll_to_end(s.value().scroll)
     })
-  }
+  })
 }
 
 // ── Top-level layout ─────────────────────────────────────────────────
 
 fn loaded_layout(
-  theme: ui::Theme, api_key: Str, issue: issues::Issue,
-  model: Detail, state: ui::State<Detail>, rt: ui::Runtime<Detail>,
+  theme: ui::Theme, issue: issues::Issue,
+  model: Detail, state: ui::State<Detail>,
 ) ui::Widget {
-  let on_submit = fn(_ctx: ui::EventContext, submitted: Str) {
-    if model.compose_open and not model.compose_sending {
-      state.set(fn(mut next: Detail) {
-        next.compose_sending = true
-        next.compose_error = ""
-      })
-      submit_comment(api_key, issue, submitted, rt)
-    }
-  }
   // Description / comments wrap at approximately viewport-width minus
   // our 2 cols of horizontal padding. We don't measure the live
   // viewport here; assume the standard layout gives the detail tab
@@ -531,7 +431,6 @@ fn loaded_layout(
           controller: model.scroll,
         ),
       ),
-      compose_area(theme, model, state, on_submit),
     ],
     main_size: ui::MainSize::max,
     cross_align: ui::CrossAlign::stretch,
@@ -587,10 +486,6 @@ fn new(
         comments_error: "",
         scroll: ui::scroll_controller(),
         active_section: SECTION_DESCRIPTION,
-        compose_open: false,
-        compose_text: "",
-        compose_sending: false,
-        compose_error: "",
       }
     },
     build: fn(ctx: ui::BuildContext, state: ui::State<Detail>) ui::Widget {
@@ -612,7 +507,7 @@ fn new(
       // original widget type and silently drops the new one. See
       // vaxis-ard/docs/widget-reconciliation.md.
       let body_widget = match model.issue {
-        issue => loaded_layout(theme, api_key, issue, model, state, rt),
+        issue => loaded_layout(theme, issue, model, state),
         _ => match {
           not model.issue_error.is_empty() => error_placeholder(
             theme, identifier, model.issue_error,
@@ -639,157 +534,6 @@ fn new(
       // auto_focus / reclaim; otherwise hidden tabs fight for focus
       // every rebuild and keystrokes route to invisible views.
       //
-      // Actions list is built dynamically so we can OMIT the
-      // vaxis.dismiss handler when compose is closed. If we always
-      // registered it and just returned Ignored, dispatch would
-      // stop at our handler (closer Actions wins, even on Ignored —
-      // see vaxis-ard/docs/events-and-focus.md §8.5) and never reach
-      // logged_in_screen's vaxis.dismiss handler that closes the
-      // tab. Omitting the binding lets the intent bubble up
-      // naturally.
-      mut bindings: [ui::ActionBinding] = [
-            ui::action("issue_detail.scroll_up", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              let _ = ui::scroll_controller_scroll_by_lines(model.scroll, -1)
-              ui::EventResult::handled
-            }),
-            ui::action("issue_detail.scroll_down", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              let _ = ui::scroll_controller_scroll_by_lines(model.scroll, 1)
-              ui::EventResult::handled
-            }),
-            // `n` starts a new comment. If the user is on the
-            // Description section, we switch to Comments first so
-            // the new comment shows up in context once it's posted.
-            // Both transitions happen in one state.set so the user
-            // sees a single rebuild (no flash of Comments without
-            // the compose box).
-            ui::action("issue_detail.compose", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              if model.compose_open {
-                ui::EventResult::ignored
-              } else {
-                state.set(fn(mut next: Detail) {
-                  next.active_section = SECTION_COMMENTS
-                  next.compose_open = true
-                  next.compose_error = ""
-                })
-                // Scroll to the end so the compose box appears in
-                // view at the bottom of the body.
-                let _ = ui::scroll_controller_scroll_to_end(model.scroll)
-                ui::EventResult::handled
-              }
-            }),
-            ui::action("issue_detail.section_description", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              if model.compose_open or model.active_section == SECTION_DESCRIPTION {
-                ui::EventResult::ignored
-              } else {
-                state.set(fn(mut next: Detail) { next.active_section = SECTION_DESCRIPTION })
-                let _ = ui::scroll_controller_scroll_to_start(model.scroll)
-                ui::EventResult::handled
-              }
-            }),
-            ui::action("issue_detail.section_comments", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              if model.compose_open or model.active_section == SECTION_COMMENTS {
-                ui::EventResult::ignored
-              } else {
-                state.set(fn(mut next: Detail) { next.active_section = SECTION_COMMENTS })
-                let _ = ui::scroll_controller_scroll_to_start(model.scroll)
-                ui::EventResult::handled
-              }
-            }),
-            ui::action("issue_detail.submit_comment", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              if model.compose_open and not model.compose_sending {
-                match issue_opt {
-                  issue => {
-                    state.set(fn(mut next: Detail) {
-                      next.compose_sending = true
-                      next.compose_error = ""
-                    })
-                    submit_comment(api_key, issue, model.compose_text, rt)
-                  },
-                  _ => (),
-                }
-                ui::EventResult::handled
-              } else {
-                ui::EventResult::ignored
-              }
-            }),
-
-            ui::action("issue_detail.state_picker", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              match issue_opt {
-                issue => {
-                  if model.compose_open {
-                    ()
-                  } else {
-                    let issue_id = issue.id
-                    issue_pickers::open_state_picker(
-                      api_key, issue, show_modal, close_modal, notify,
-                      fn(new_state_id: Str) {
-                        let _ = async::start(fn() {
-                          let r = issues::update_state(api_key, issue_id, new_state_id)
-                          rt.dispatch(fn(s: ui::State<Detail>) {
-                            match r {
-                              ok(_) => load_issue(api_key, identifier, rt),
-                              err(e) => notify(
-                                "Update state", e, toast::ToastVariant::error,
-                              ),
-                            }
-                          })
-                        })
-                      },
-                    )
-                  }
-                },
-                _ => (),
-              }
-              ui::EventResult::handled
-            }),
-            ui::action("issue_detail.cycle_picker", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              match issue_opt {
-                issue => {
-                  if model.compose_open {
-                    ()
-                  } else {
-                    let issue_id = issue.id
-                    issue_pickers::open_cycle_picker(
-                      api_key, issue, show_modal, close_modal, notify,
-                      fn(new_cycle_id: Str) {
-                        let _ = async::start(fn() {
-                          let r = issues::update_cycle(api_key, issue_id, new_cycle_id)
-                          rt.dispatch(fn(s: ui::State<Detail>) {
-                            match r {
-                              ok(_) => load_issue(api_key, identifier, rt),
-                              err(e) => notify(
-                                "Update cycle", e, toast::ToastVariant::error,
-                              ),
-                            }
-                          })
-                        })
-                      },
-                    )
-                  }
-                },
-                _ => (),
-              }
-              ui::EventResult::handled
-            }),
-      ]
-      // Only intercept vaxis.dismiss while compose is open: cancel
-      // compose without bubbling further. When compose is closed we
-      // leave the binding off the Actions entirely so dispatch falls
-      // through to logged_in_screen's vaxis.dismiss handler (close
-      // active issue tab).
-      if model.compose_open {
-        bindings.push(
-          ui::action("vaxis.dismiss", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-            state.set(fn(mut next: Detail) {
-              next.compose_open = false
-              next.compose_text = ""
-              next.compose_sending = false
-              next.compose_error = ""
-            })
-            ui::EventResult::handled
-          }),
-        )
-      }
       ui::shortcuts(
         ui::actions(
           ui::focus_scope(
@@ -798,7 +542,125 @@ fn new(
             auto_focus: active,
             reclaim_focus: active,
           ),
-          bindings,
+          [
+            ui::action("issue_detail.scroll_up", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              let _ = ui::scroll_controller_scroll_by_lines(model.scroll, -1)
+              ui::EventResult::handled
+            }),
+            ui::action("issue_detail.scroll_down", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              let _ = ui::scroll_controller_scroll_by_lines(model.scroll, 1)
+              ui::EventResult::handled
+            }),
+            // `n` opens the compose modal. If the user is on the
+            // Description section we also switch to Comments first
+            // so the freshly-posted comment will show up in context
+            // once we re-render. Both transitions happen in one
+            // state.set so the user sees a single rebuild.
+            ui::action("issue_detail.compose", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              match issue_opt {
+                issue => {
+                  if not (model.active_section == SECTION_COMMENTS) {
+                    state.set(fn(mut next: Detail) {
+                      next.active_section = SECTION_COMMENTS
+                    })
+                    let _ = ui::scroll_controller_scroll_to_end(model.scroll)
+                  }
+                  let id = identifier
+                  let key = api_key
+                  let detail_rt = rt
+                  let refresh_cb = fn() {
+                    refresh_comments_after_post(key, id, detail_rt)
+                  }
+                  show_modal(fn(theme_inner: ui::Theme, close: fn()) ui::Widget {
+                    modal::show_modal(
+                      theme: theme_inner,
+                      title: "New comment \u2014 {issue.identifier}",
+                      child: compose_view::new(
+                        api_key, issue, refresh_cb, close,
+                      ),
+                      footer: hints_bar::row(theme_inner, [
+                        hints_bar::Hint{ key: "Ctrl+\u21b5", label: "send" },
+                        hints_bar::Hint{ key: "Esc",         label: "cancel" },
+                      ]),
+                      width: maybe::some(70),
+                      on_dismiss: fn(_ctx: ui::EventContext) { close() },
+                    )
+                  })
+                },
+                _ => (),
+              }
+              ui::EventResult::handled
+            }),
+            ui::action("issue_detail.section_description", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              if model.active_section == SECTION_DESCRIPTION {
+                ui::EventResult::ignored
+              } else {
+                state.set(fn(mut next: Detail) { next.active_section = SECTION_DESCRIPTION })
+                let _ = ui::scroll_controller_scroll_to_start(model.scroll)
+                ui::EventResult::handled
+              }
+            }),
+            ui::action("issue_detail.section_comments", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              if model.active_section == SECTION_COMMENTS {
+                ui::EventResult::ignored
+              } else {
+                state.set(fn(mut next: Detail) { next.active_section = SECTION_COMMENTS })
+                let _ = ui::scroll_controller_scroll_to_start(model.scroll)
+                ui::EventResult::handled
+              }
+            }),
+
+            ui::action("issue_detail.state_picker", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              match issue_opt {
+                issue => {
+                  let issue_id = issue.id
+                  issue_pickers::open_state_picker(
+                    api_key, issue, show_modal, close_modal, notify,
+                    fn(new_state_id: Str) {
+                      let _ = async::start(fn() {
+                        let r = issues::update_state(api_key, issue_id, new_state_id)
+                        rt.dispatch(fn(s: ui::State<Detail>) {
+                          match r {
+                            ok(_) => load_issue(api_key, identifier, rt),
+                            err(e) => notify(
+                              "Update state", e, toast::ToastVariant::error,
+                            ),
+                          }
+                        })
+                      })
+                    },
+                  )
+                },
+                _ => (),
+              }
+              ui::EventResult::handled
+            }),
+            ui::action("issue_detail.cycle_picker", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              match issue_opt {
+                issue => {
+                  let issue_id = issue.id
+                  issue_pickers::open_cycle_picker(
+                    api_key, issue, show_modal, close_modal, notify,
+                    fn(new_cycle_id: Str) {
+                      let _ = async::start(fn() {
+                        let r = issues::update_cycle(api_key, issue_id, new_cycle_id)
+                        rt.dispatch(fn(s: ui::State<Detail>) {
+                          match r {
+                            ok(_) => load_issue(api_key, identifier, rt),
+                            err(e) => notify(
+                              "Update cycle", e, toast::ToastVariant::error,
+                            ),
+                          }
+                        })
+                      })
+                    },
+                  )
+                },
+                _ => (),
+              }
+              ui::EventResult::handled
+            }),
+          ],
         ),
         [
           "j": "issue_detail.scroll_down",
@@ -808,9 +670,6 @@ fn new(
           "d": "issue_detail.section_description",
           "c": "issue_detail.section_comments",
           "n": "issue_detail.compose",
-          "Ctrl+Enter": "issue_detail.submit_comment",
-          "Ctrl+m": "issue_detail.submit_comment",
-          "Ctrl+j": "issue_detail.submit_comment",
           "s": "issue_detail.state_picker",
           "y": "issue_detail.cycle_picker",
         ],
