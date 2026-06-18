@@ -1,0 +1,797 @@
+use ard/async
+use ard/maybe
+use vaxis/ui
+
+use tinear/models/issues
+use tinear/tui/issue_pickers
+use tinear/tui/state
+use tinear/tui/text as text
+use tinear/tui/toast
+
+// Issue detail tab.
+//
+// Layout:
+//   ┌────────────────────────────────────────────┐
+//   │ <identifier>   <title>                      │  ← sticky header
+//   │ Status   X      Priority  Y                 │
+//   │ Assignee Z      Cycle     W                 │
+//   │ Project  P      Team      T                 │
+//   ├────────────────────────────────────────────┤
+//   │ Description                                 │
+//   │ ───                                         │
+//   │ <wrapped description body>                  │   scrollable
+//   │                                             │   (j/k)
+//   │ Comments (N)                                │
+//   │ ───                                         │
+//   │ author · date                               │
+//   │ <wrapped comment body>                      │
+//   │ ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈                       │
+//   │ author · date …                             │
+//   ├────────────────────────────────────────────┤
+//   │ ↑↓ scroll   c comment   s status   y cycle  │
+//   └────────────────────────────────────────────┘
+//
+// When the user presses `c` a compose area swaps in below the body
+// for writing a new comment; Ctrl+Enter (or Ctrl+m/Ctrl+j) submits,
+// Esc cancels. While compose is open, Esc handles the cancel and
+// does NOT bubble up to logged_in_screen (which would close the tab).
+
+// Section identifiers for the tabbed body. Stored as a small Int
+// (rather than a typed enum) so it matches the existing style of
+// small tab indexes in this codebase and keeps state copies cheap.
+let SECTION_DESCRIPTION: Int = 0
+let SECTION_COMMENTS: Int = 1
+
+struct Detail {
+  // Loaded issue (populated on first fetch). Identifier is held
+  // separately so we can show "Loading {identifier}…" until the
+  // first fetch completes.
+  identifier: Str,
+  issue: issues::Issue?,
+  issue_loading: Bool,
+  issue_error: Str,
+
+  // Comments.
+  comments: [issues::Comment],
+  comments_loading: Bool,
+  comments_error: Str,
+
+  // Body scroll controller.
+  scroll: ui::ScrollController,
+
+  // Active section in the description/comments tab bar.
+  active_section: Int,
+
+  // Compose-comment state.
+  compose_open: Bool,
+  compose_text: Str,
+  compose_sending: Bool,
+  compose_error: Str,
+}
+
+// ── Async loads ──────────────────────────────────────────────────────
+
+fn load_issue(
+  api_key: Str, identifier: Str, rt: ui::Runtime<Detail>,
+) {
+  let _ = async::start(fn() {
+    let result = issues::load_issue(api_key, identifier)
+    rt.dispatch(fn(s: ui::State<Detail>) {
+      s.set(fn(mut v: Detail) {
+        match result {
+          ok(issue) => {
+            v.issue = maybe::some(issue)
+            v.issue_error = ""
+          },
+          err(e) => { v.issue_error = e },
+        }
+        v.issue_loading = false
+      })
+    })
+  })
+}
+
+fn load_comments(
+  api_key: Str, identifier: Str, rt: ui::Runtime<Detail>,
+) {
+  let _ = async::start(fn() {
+    let result = issues::load_comments(api_key, identifier)
+    rt.dispatch(fn(s: ui::State<Detail>) {
+      s.set(fn(mut v: Detail) {
+        match result {
+          ok(comments) => {
+            v.comments = comments
+            v.comments_error = ""
+          },
+          err(e) => { v.comments_error = e },
+        }
+        v.comments_loading = false
+      })
+    })
+  })
+}
+
+// ── Layout ───────────────────────────────────────────────────────────
+
+fn value_or_dash(value: Str) Str {
+  match value.is_empty() {
+    true => "\u2014",
+    false => value,
+  }
+}
+
+// One labelled field: "Label  Value" with a fixed-width label column.
+fn field_pair(theme: ui::Theme, label: Str, value: Str, value_width: Int) ui::Widget {
+  ui::row(
+    [
+      ui::sized_box(
+        10, 1,
+        ui::styled_text(label, fg: theme.muted_foreground),
+      ),
+      ui::sized_box(
+        value_width, 1,
+        ui::styled_text(
+          text::truncate_with_ellipsis(value_or_dash(value), value_width),
+          fg: theme.foreground,
+        ),
+      ),
+    ],
+  )
+}
+
+fn field_row(
+  theme: ui::Theme,
+  left_label: Str, left_value: Str,
+  right_label: Str, right_value: Str,
+) ui::Widget {
+  ui::row(
+    [
+      field_pair(theme, left_label, left_value, 24),
+      ui::sized_box(3, 1, ui::text("")),
+      field_pair(theme, right_label, right_value, 24),
+    ],
+  )
+}
+
+fn priority_value(issue: issues::Issue) Str {
+  let label = state::priority_label(issue.priority)
+  let glyph = state::priority_glyph(issue.priority)
+  match glyph.trim().is_empty() {
+    true => label,
+    false => "{glyph} {label}",
+  }
+}
+
+fn metadata_header(theme: ui::Theme, issue: issues::Issue) ui::Widget {
+  ui::column(
+    [
+      ui::row(
+        [
+          ui::styled_text(
+            issue.identifier,
+            fg: theme.foreground,
+            attrs: ui::TextAttrs{ bold: true },
+          ),
+          ui::text("  "),
+          ui::expanded(ui::styled_text(
+            issue.title,
+            fg: theme.foreground,
+            attrs: ui::TextAttrs{ bold: true },
+          )),
+        ],
+      ),
+      ui::sized_box(0, 1, ui::text("")),
+      field_row(theme, "Status", issue.state_name, "Priority", priority_value(issue)),
+      field_row(theme, "Assignee", issue.assignee_name, "Cycle", issue.cycle_label),
+      field_row(theme, "Project", issue.project_name, "Team", issue.team_name),
+    ],
+    main_size: ui::MainSize::min,
+    cross_align: ui::CrossAlign::stretch,
+  )
+}
+
+// One section-tab chip. Active tab gets theme.primary background and
+// bold foreground; inactive uses muted_foreground. Both are clickable
+// — clicking calls on_press which the parent wires to a state.set
+// that swaps active_section.
+fn section_tab(
+  theme: ui::Theme, label: Str, active: Bool, on_press: fn(ui::EventContext),
+) ui::Widget {
+  let fg = match active {
+    true => theme.foreground,
+    false => theme.muted_foreground,
+  }
+  let bg = match active {
+    true => theme.primary,
+    false => theme.background,
+  }
+  ui::styled_text(
+    " {label} ", fg: fg, bg: bg,
+    attrs: ui::TextAttrs{ bold: active },
+    on_pressed: on_press,
+  )
+}
+
+// Tab bar that replaces the old per-section headers. Renders
+// "Description" and "Comments (N)" side by side, then a divider
+// underneath. Active tab is highlighted.
+fn section_tabs(
+  theme: ui::Theme, model: Detail, state: ui::State<Detail>,
+) ui::Widget {
+  let comments_label = match model.comments_loading {
+    true => "Comments",
+    false => "Comments ({model.comments.size().to_str()})",
+  }
+  let switch_to = fn(target: Int) {
+    if not (model.active_section == target) {
+      state.set(fn(mut next: Detail) { next.active_section = target })
+      // Reset scroll so the new section starts at the top — the
+      // previous section's offset would otherwise be applied to
+      // unrelated content.
+      let _ = ui::scroll_controller_scroll_to_start(model.scroll)
+    }
+  }
+  let target_desc = SECTION_DESCRIPTION
+  let target_comments = SECTION_COMMENTS
+  ui::column(
+    [
+      ui::row(
+        [
+          section_tab(
+            theme, "Description",
+            model.active_section == SECTION_DESCRIPTION,
+            fn(_ctx: ui::EventContext) { switch_to(target_desc) },
+          ),
+          ui::text("  "),
+          section_tab(
+            theme, comments_label,
+            model.active_section == SECTION_COMMENTS,
+            fn(_ctx: ui::EventContext) { switch_to(target_comments) },
+          ),
+        ],
+      ),
+      ui::divider(fg: theme.border, bg: theme.background),
+    ],
+    main_size: ui::MainSize::min,
+    cross_align: ui::CrossAlign::stretch,
+  )
+}
+
+// Wrap a text body across lines at `width` columns and render as a
+// stretched column of styled_text rows.
+fn wrapped_text(theme: ui::Theme, value: Str, width: Int) ui::Widget {
+  mut rows: [ui::Widget] = []
+  for line in text::wrap_text(value, width) {
+    rows.push(ui::styled_text(line, fg: theme.foreground))
+  }
+  if rows.size() == 0 {
+    rows.push(ui::text(""))
+  }
+  ui::column(
+    rows, main_size: ui::MainSize::min, cross_align: ui::CrossAlign::stretch,
+  )
+}
+
+fn description_body_widget(theme: ui::Theme, issue: issues::Issue, body_width: Int) ui::Widget {
+  match issue.description {
+    desc => match desc.is_empty() {
+      true => ui::styled_text("(no description)", fg: theme.muted_foreground),
+      false => wrapped_text(theme, desc, body_width),
+    },
+    _ => ui::styled_text("(no description)", fg: theme.muted_foreground),
+  }
+}
+
+fn repeat(ch: Str, count: Int) Str {
+  mut out = ""
+  if count > 0 {
+    for _ in 0..count - 1 {
+      out =+ ch
+    }
+  }
+  out
+}
+
+fn comment_card(
+  theme: ui::Theme, comment: issues::Comment,
+  body_width: Int, is_last: Bool,
+) ui::Widget {
+  mut children: [ui::Widget] = [
+    ui::row(
+      [
+        ui::styled_text(
+          comment.author,
+          fg: theme.foreground,
+          attrs: ui::TextAttrs{ bold: true },
+        ),
+        ui::styled_text(" \u00b7 ", fg: theme.muted_foreground),
+        ui::styled_text(
+          text::format_date(comment.created_at),
+          fg: theme.muted_foreground,
+        ),
+      ],
+    ),
+    wrapped_text(theme, comment.body, body_width),
+  ]
+  if not is_last {
+    children.push(
+      ui::styled_text(repeat("\u2508", body_width), fg: theme.border),
+    )
+  }
+  ui::column(
+    children,
+    main_size: ui::MainSize::min,
+    cross_align: ui::CrossAlign::stretch,
+  )
+}
+
+fn comments_body(
+  theme: ui::Theme,
+  comments: [issues::Comment], loading: Bool, error: Str, body_width: Int,
+) ui::Widget {
+  match {
+    loading => ui::styled_text("Loading comments\u2026", fg: theme.muted_foreground),
+    not error.is_empty() => ui::styled_text(
+      "Unable to load comments: {error}", fg: theme.danger_text,
+    ),
+    comments.size() == 0 => ui::styled_text(
+      "(no comments)", fg: theme.muted_foreground,
+    ),
+    _ => {
+      mut rows: [ui::Widget] = []
+      let last_idx = comments.size() - 1
+      for c, idx in comments {
+        rows.push(comment_card(theme, c, body_width, idx == last_idx))
+      }
+      ui::column(
+        rows,
+        main_size: ui::MainSize::min,
+        cross_align: ui::CrossAlign::stretch,
+      )
+    },
+  }
+}
+
+// Build whichever section's body is active. Both arms return
+// ui::padding(column(...)) so the widget type at this slot stays
+// stable across section switches — the conditional content changes
+// one level deeper, which reconciliation handles cleanly.
+fn active_body(
+  theme: ui::Theme, issue: issues::Issue, model: Detail, body_width: Int,
+) ui::Widget {
+  let inner = match model.active_section == SECTION_COMMENTS {
+    true => comments_body(
+      theme, model.comments, model.comments_loading,
+      model.comments_error, body_width,
+    ),
+    false => description_body_widget(theme, issue, body_width),
+  }
+  ui::padding(
+    ui::column(
+      [inner],
+      main_size: ui::MainSize::min,
+      cross_align: ui::CrossAlign::stretch,
+    ),
+    horizontal: 1,
+  )
+}
+
+// ── Compose ──────────────────────────────────────────────────────────
+
+fn compose_area(
+  theme: ui::Theme, model: Detail, state: ui::State<Detail>,
+  on_submit: fn(ui::EventContext, Str),
+) ui::Widget {
+  if not model.compose_open {
+    ui::sized_box(0, 0, ui::text(""))
+  } else {
+    let body = match model.compose_sending {
+      true => ui::padding(
+        ui::styled_text("Sending\u2026", fg: theme.muted_foreground),
+        horizontal: 1,
+      ),
+      false => {
+        mut rows: [ui::Widget] = []
+        if not model.compose_error.is_empty() {
+          rows.push(ui::styled_text(
+            "Failed to send \u2014 Ctrl+Enter retry",
+            fg: theme.danger_text,
+          ))
+        }
+        rows.push(
+          ui::focus_scope(
+            ui::text_field(
+              value: model.compose_text,
+              placeholder: "Write a comment\u2026",
+              min_width: 40,
+              on_changed: fn(_ctx: ui::EventContext, next_text: Str) {
+                state.set(fn(mut next: Detail) {
+                  next.compose_text = next_text
+                  next.compose_error = ""
+                })
+              },
+              on_submitted: on_submit,
+            ),
+            trap: false, auto_focus: true,
+          ),
+        )
+        rows.push(ui::styled_text(
+          "Ctrl+Enter send   Esc cancel",
+          fg: theme.muted_foreground,
+        ))
+        ui::padding(
+          ui::column(
+            rows,
+            main_size: ui::MainSize::min,
+            cross_align: ui::CrossAlign::stretch,
+          ),
+          horizontal: 1,
+        )
+      },
+    }
+    ui::column(
+      [
+        ui::divider(fg: theme.border, bg: theme.background),
+        body,
+      ],
+      main_size: ui::MainSize::min,
+      cross_align: ui::CrossAlign::stretch,
+    )
+  }
+}
+
+fn submit_comment(
+  api_key: Str,
+  issue: issues::Issue,
+  body: Str,
+  rt: ui::Runtime<Detail>,
+) {
+  let trimmed = body.trim()
+  if trimmed.is_empty() {
+    ()
+  } else {
+    // Mark sending. Caller already called state.set elsewhere; we
+    // just kick the async path here. (The action handler that calls
+    // submit_comment marks compose_sending immediately so the UI
+    // updates before this fiber starts.)
+    let _ = async::start(fn() {
+      let result = issues::create_comment(api_key, issue.id, trimmed)
+      match result {
+        ok(_) => {
+          let refreshed = issues::load_comments(api_key, issue.id)
+          rt.dispatch(fn(s: ui::State<Detail>) {
+            s.set(fn(mut next: Detail) {
+              match refreshed {
+                ok(comments) => {
+                  next.comments = comments
+                  next.comments_error = ""
+                  next.compose_open = false
+                  next.compose_text = ""
+                  next.compose_error = ""
+                },
+                err(e) => { next.compose_error = e },
+              }
+              next.compose_sending = false
+            })
+            // Scroll body to the end so the freshly-posted comment
+            // is visible.
+            let _ = ui::scroll_controller_scroll_to_end(s.value().scroll)
+          })
+        },
+        err(e) => {
+          rt.dispatch(fn(s: ui::State<Detail>) {
+            s.set(fn(mut next: Detail) {
+              next.compose_sending = false
+              next.compose_error = e
+            })
+          })
+        },
+      }
+    })
+  }
+}
+
+// ── Top-level layout ─────────────────────────────────────────────────
+
+fn loaded_layout(
+  theme: ui::Theme, api_key: Str, issue: issues::Issue,
+  model: Detail, state: ui::State<Detail>, rt: ui::Runtime<Detail>,
+) ui::Widget {
+  let on_submit = fn(_ctx: ui::EventContext, submitted: Str) {
+    if model.compose_open and not model.compose_sending {
+      state.set(fn(mut next: Detail) {
+        next.compose_sending = true
+        next.compose_error = ""
+      })
+      submit_comment(api_key, issue, submitted, rt)
+    }
+  }
+  // Description / comments wrap at approximately viewport-width minus
+  // our 2 cols of horizontal padding. We don't measure the live
+  // viewport here; assume the standard layout gives the detail tab
+  // most of the terminal width. 80 - 4 padding cols = ~76; a static
+  // value still wraps acceptably across common widths.
+  let body_width = 76
+  ui::column(
+    [
+      ui::padding(metadata_header(theme, issue), horizontal: 1),
+      ui::divider(fg: theme.border, bg: theme.background),
+      ui::padding(section_tabs(theme, model, state), horizontal: 1),
+      ui::expanded(
+        ui::scroll_view(
+          active_body(theme, issue, model, body_width),
+          axis: ui::ScrollAxis::vertical,
+          controller: model.scroll,
+        ),
+      ),
+      compose_area(theme, model, state, on_submit),
+    ],
+    main_size: ui::MainSize::max,
+    cross_align: ui::CrossAlign::stretch,
+  )
+}
+
+fn loading_placeholder(theme: ui::Theme, identifier: Str) ui::Widget {
+  ui::center(
+    ui::styled_text("Loading {identifier}\u2026", fg: theme.muted_foreground),
+  )
+}
+
+fn error_placeholder(theme: ui::Theme, identifier: Str, error: Str) ui::Widget {
+  ui::center(
+    ui::column(
+      [
+        ui::styled_text(
+          "Couldn't load {identifier}", fg: theme.danger_text,
+          attrs: ui::TextAttrs{ bold: true },
+        ),
+        ui::sized_box(0, 1, ui::text("")),
+        ui::styled_text(error, fg: theme.muted_foreground),
+      ],
+      main_size: ui::MainSize::min,
+      cross_align: ui::CrossAlign::center,
+    ),
+  )
+}
+
+// ── Public widget ────────────────────────────────────────────────────
+
+fn new(
+  api_key: Str,
+  identifier: Str,
+  notify: fn(Str, Str, toast::ToastVariant),
+  show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
+  close_modal: fn(),
+  active: Bool,
+) ui::Widget {
+  ui::stateful(
+    key: "issue-detail:{identifier}",
+    init: fn(ctx: ui::BuildContext) Detail {
+      let rt = ctx.runtime<Detail>()
+      load_issue(api_key, identifier, rt)
+      load_comments(api_key, identifier, rt)
+      Detail{
+        identifier: identifier,
+        issue: maybe::none(),
+        issue_loading: true,
+        issue_error: "",
+        comments: [],
+        comments_loading: true,
+        comments_error: "",
+        scroll: ui::scroll_controller(),
+        active_section: SECTION_DESCRIPTION,
+        compose_open: false,
+        compose_text: "",
+        compose_sending: false,
+        compose_error: "",
+      }
+    },
+    build: fn(ctx: ui::BuildContext, state: ui::State<Detail>) ui::Widget {
+      let theme = ui::must_have_theme(ctx)
+      let model = state.value()
+      let rt = ctx.runtime<Detail>()
+
+      // Body chooses between loading / error / loaded layouts. We
+      // wrap the result in our own actions + shortcuts so detail-
+      // local keys (s, y, c, j/k, Ctrl+Enter, Esc) bubble through
+      // them BEFORE reaching logged_in_screen's actions (which is
+      // the one that closes the active tab on Esc).
+      //
+      // Wrap the conditional body in a stable outer column so the
+      // widget type at this slot never changes between rebuilds.
+      // Without the wrapper, switching from loading_placeholder
+      // (ui::center) to loaded_layout (ui::column) on first load
+      // would trip vaxis's element reconciliation: it keeps the
+      // original widget type and silently drops the new one. See
+      // vaxis-ard/docs/widget-reconciliation.md.
+      let body_widget = match model.issue {
+        issue => loaded_layout(theme, api_key, issue, model, state, rt),
+        _ => match {
+          not model.issue_error.is_empty() => error_placeholder(
+            theme, identifier, model.issue_error,
+          ),
+          _ => loading_placeholder(theme, identifier),
+        },
+      }
+      // ui::expanded so body_widget actually fills the available
+      // height. Without it the outer column treats body_widget as a
+      // single child with intrinsic height, and the
+      // ui::expanded(ui::scroll_view(...)) inside body_widget has no
+      // bounded extent to clip against — scrolling doesn't work
+      // and overflowing content paints over the hints bar below.
+      let inner = ui::column(
+        [ui::expanded(body_widget)],
+        main_size: ui::MainSize::max,
+        cross_align: ui::CrossAlign::stretch,
+      )
+
+      let issue_opt = model.issue
+      // Only the active issue tab participates in focus management.
+      // With multiple issue tabs (or inbox/board) all mounted via
+      // indexed_stack, only the visible one's focus_scope should
+      // auto_focus / reclaim; otherwise hidden tabs fight for focus
+      // every rebuild and keystrokes route to invisible views.
+      ui::shortcuts(
+        ui::actions(
+          ui::focus_scope(
+            ui::focus(inner),
+            trap: false,
+            auto_focus: active,
+            reclaim_focus: active,
+          ),
+          [
+            ui::action("issue_detail.scroll_up", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              let _ = ui::scroll_controller_scroll_by_lines(model.scroll, -1)
+              ui::EventResult::handled
+            }),
+            ui::action("issue_detail.scroll_down", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              let _ = ui::scroll_controller_scroll_by_lines(model.scroll, 1)
+              ui::EventResult::handled
+            }),
+            // `n` starts a new comment. Only meaningful while the
+            // Comments section is active — from Description we silently
+            // ignore so the key passes through (no-op rather than
+            // surprise compose).
+            ui::action("issue_detail.compose", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              if model.compose_open or not (model.active_section == SECTION_COMMENTS) {
+                ui::EventResult::ignored
+              } else {
+                state.set(fn(mut next: Detail) {
+                  next.compose_open = true
+                  next.compose_error = ""
+                })
+                // Scroll to the end so the compose box appears in
+                // view at the bottom of the body.
+                let _ = ui::scroll_controller_scroll_to_end(model.scroll)
+                ui::EventResult::handled
+              }
+            }),
+            ui::action("issue_detail.section_description", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              if model.compose_open or model.active_section == SECTION_DESCRIPTION {
+                ui::EventResult::ignored
+              } else {
+                state.set(fn(mut next: Detail) { next.active_section = SECTION_DESCRIPTION })
+                let _ = ui::scroll_controller_scroll_to_start(model.scroll)
+                ui::EventResult::handled
+              }
+            }),
+            ui::action("issue_detail.section_comments", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              if model.compose_open or model.active_section == SECTION_COMMENTS {
+                ui::EventResult::ignored
+              } else {
+                state.set(fn(mut next: Detail) { next.active_section = SECTION_COMMENTS })
+                let _ = ui::scroll_controller_scroll_to_start(model.scroll)
+                ui::EventResult::handled
+              }
+            }),
+            ui::action("issue_detail.submit_comment", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              if model.compose_open and not model.compose_sending {
+                match issue_opt {
+                  issue => {
+                    state.set(fn(mut next: Detail) {
+                      next.compose_sending = true
+                      next.compose_error = ""
+                    })
+                    submit_comment(api_key, issue, model.compose_text, rt)
+                  },
+                  _ => (),
+                }
+                ui::EventResult::handled
+              } else {
+                ui::EventResult::ignored
+              }
+            }),
+            // While compose is open, Esc cancels compose and stops
+            // here (handled). Otherwise we ignore so logged_in_screen
+            // closes the tab.
+            ui::action("vaxis.dismiss", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              if model.compose_open {
+                state.set(fn(mut next: Detail) {
+                  next.compose_open = false
+                  next.compose_text = ""
+                  next.compose_sending = false
+                  next.compose_error = ""
+                })
+                ui::EventResult::handled
+              } else {
+                ui::EventResult::ignored
+              }
+            }),
+            ui::action("issue_detail.state_picker", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              match issue_opt {
+                issue => {
+                  if model.compose_open {
+                    ()
+                  } else {
+                    let issue_id = issue.id
+                    issue_pickers::open_state_picker(
+                      api_key, issue, show_modal, close_modal, notify,
+                      fn(new_state_id: Str) {
+                        let _ = async::start(fn() {
+                          let r = issues::update_state(api_key, issue_id, new_state_id)
+                          rt.dispatch(fn(s: ui::State<Detail>) {
+                            match r {
+                              ok(_) => load_issue(api_key, identifier, rt),
+                              err(e) => notify(
+                                "Update state", e, toast::ToastVariant::error,
+                              ),
+                            }
+                          })
+                        })
+                      },
+                    )
+                  }
+                },
+                _ => (),
+              }
+              ui::EventResult::handled
+            }),
+            ui::action("issue_detail.cycle_picker", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              match issue_opt {
+                issue => {
+                  if model.compose_open {
+                    ()
+                  } else {
+                    let issue_id = issue.id
+                    issue_pickers::open_cycle_picker(
+                      api_key, issue, show_modal, close_modal, notify,
+                      fn(new_cycle_id: Str) {
+                        let _ = async::start(fn() {
+                          let r = issues::update_cycle(api_key, issue_id, new_cycle_id)
+                          rt.dispatch(fn(s: ui::State<Detail>) {
+                            match r {
+                              ok(_) => load_issue(api_key, identifier, rt),
+                              err(e) => notify(
+                                "Update cycle", e, toast::ToastVariant::error,
+                              ),
+                            }
+                          })
+                        })
+                      },
+                    )
+                  }
+                },
+                _ => (),
+              }
+              ui::EventResult::handled
+            }),
+          ],
+        ),
+        [
+          "j": "issue_detail.scroll_down",
+          "Down": "issue_detail.scroll_down",
+          "k": "issue_detail.scroll_up",
+          "Up": "issue_detail.scroll_up",
+          "d": "issue_detail.section_description",
+          "c": "issue_detail.section_comments",
+          "n": "issue_detail.compose",
+          "Ctrl+Enter": "issue_detail.submit_comment",
+          "Ctrl+m": "issue_detail.submit_comment",
+          "Ctrl+j": "issue_detail.submit_comment",
+          "s": "issue_detail.state_picker",
+          "y": "issue_detail.cycle_picker",
+        ],
+      )
+    },
+  )
+}

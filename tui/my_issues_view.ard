@@ -546,6 +546,7 @@ fn new(
   notify: fn(Str, Str, toast::ToastVariant),
   show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
   close_modal: fn(),
+  active: Bool,
 ) ui::Widget {
   ui::stateful(
     key: "my-issues-view",
@@ -593,27 +594,20 @@ fn new(
         }
       }
 
-      // reclaim_focus: true so that when a picker modal closes, this
-      // scope's auto_focus pass re-runs and snaps focus back to the
-      // board's outer ui::focus (the first focusable in the scope).
-      // Without it, focus is left nowhere after the modal subtree
-      // disposes, and the first h/j/k/l press is swallowed.
-      //
-      // This is safe to enable because:
-      //   - we wrap in ui::focus(body(...)) so reclaim has a stable
-      //     target inside the board's shortcuts/actions (events bubble
-      //     UP from there into the board's handlers);
-      //   - reclaim only fires when focusedWithin = false. While focus
-      //     is on a board card or in the modal, focusedWithin stays
-      //     true (the card) or false (the modal) and reclaim either
-      //     no-ops or correctly fires on modal close.
+      // Only the active tab participates in focus management. When
+      // the board is the visible tab, reclaim_focus: true lets us
+      // recover focus after a picker modal closes (the focused
+      // subtree is disposed) and the board's own outer ui::focus
+      // becomes the reclaim target. When the board tab is hidden
+      // (user is on inbox or an issue), both flags are false so
+      // we don't steal focus from whichever tab is showing.
       ui::shortcuts(
         ui::actions(
           ui::focus_scope(
             ui::focus(body(theme, model, on_card_click)),
             trap: false,
-            auto_focus: true,
-            reclaim_focus: true,
+            auto_focus: active,
+            reclaim_focus: active,
           ),
           [
             ui::action("board.row_down", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {

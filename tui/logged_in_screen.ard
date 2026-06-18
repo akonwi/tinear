@@ -5,6 +5,7 @@ use tinear/models/issues
 use tinear/os
 use tinear/tui/hints_bar
 use tinear/tui/inbox_view
+use tinear/tui/issue_detail_view
 use tinear/tui/modal
 use tinear/tui/my_issues_view
 use tinear/tui/toast
@@ -154,19 +155,7 @@ fn tab_bar(theme: ui::Theme, s: Model, on_tab_press: fn(Int)) ui::Widget {
   ])
 }
 
-fn placeholder_for(label: Str) ui::Widget {
-  ui::center(
-    ui::column(
-      [
-        ui::styled_text(label, attrs: ui::TextAttrs{ bold: true }),
-        ui::sized_box(0, 1, ui::text("")),
-        ui::text("(placeholder)"),
-      ],
-      main_size: ui::MainSize::min,
-      cross_align: ui::CrossAlign::center,
-    ),
-  )
-}
+
 
 // Resolves the active tab to a body widget. All bodies are mounted at
 // once via ui::indexed_stack so each tab's local state (cursor, scroll,
@@ -178,12 +167,23 @@ fn body_for(
   show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
   close_modal: fn(),
 ) ui::Widget {
+  // Each tab gets an `active` flag so only the currently-visible
+  // tab's focus_scope participates in auto_focus / reclaim. Hidden
+  // tabs stay mounted (indexed_stack keeps their state alive) but
+  // their focus_scopes no-op so they don't steal keystrokes from
+  // the visible tab.
   mut children: [ui::Widget] = [
-    inbox_view::new(api_key, on_open, notify),
-    my_issues_view::new(api_key, on_open_issue, notify, show_modal, close_modal),
+    inbox_view::new(api_key, on_open, notify, active: s.tab_index == 0),
+    my_issues_view::new(
+      api_key, on_open_issue, notify, show_modal, close_modal,
+      active: s.tab_index == 1,
+    ),
   ]
-  for label in s.issue_tabs {
-    children.push(placeholder_for(label))
+  for label, idx in s.issue_tabs {
+    children.push(issue_detail_view::new(
+      api_key, label, notify, show_modal, close_modal,
+      active: s.tab_index == idx + 2,
+    ))
   }
   ui::indexed_stack(
     s.tab_index, children, alignment: ui::Alignment::top_left,
@@ -210,10 +210,13 @@ fn hints_for(s: Model) [hints_bar::Hint] {
       hints_bar::Hint{ key: "?",  label: "search" },
     ],
     _ => [
+      hints_bar::Hint{ key: "↑↓",  label: "scroll" },
+      hints_bar::Hint{ key: "d",   label: "description" },
+      hints_bar::Hint{ key: "c",   label: "comments" },
+      hints_bar::Hint{ key: "n",   label: "new comment" },
       hints_bar::Hint{ key: "s",   label: "status" },
       hints_bar::Hint{ key: "y",   label: "cycle" },
-      hints_bar::Hint{ key: "esc", label: "close" },
-      hints_bar::Hint{ key: "o",   label: "open in browser" },
+      hints_bar::Hint{ key: "Esc", label: "close" },
     ],
   }
 }
