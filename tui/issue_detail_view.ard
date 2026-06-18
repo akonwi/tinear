@@ -648,15 +648,18 @@ fn new(
               let _ = ui::scroll_controller_scroll_by_lines(model.scroll, 1)
               ui::EventResult::handled
             }),
-            // `n` starts a new comment. Only meaningful while the
-            // Comments section is active — from Description we silently
-            // ignore so the key passes through (no-op rather than
-            // surprise compose).
+            // `n` starts a new comment. If the user is on the
+            // Description section, we switch to Comments first so
+            // the new comment shows up in context once it's posted.
+            // Both transitions happen in one state.set so the user
+            // sees a single rebuild (no flash of Comments without
+            // the compose box).
             ui::action("issue_detail.compose", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              if model.compose_open or not (model.active_section == SECTION_COMMENTS) {
+              if model.compose_open {
                 ui::EventResult::ignored
               } else {
                 state.set(fn(mut next: Detail) {
+                  next.active_section = SECTION_COMMENTS
                   next.compose_open = true
                   next.compose_error = ""
                 })
