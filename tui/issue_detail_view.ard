@@ -638,15 +638,16 @@ fn new(
       // indexed_stack, only the visible one's focus_scope should
       // auto_focus / reclaim; otherwise hidden tabs fight for focus
       // every rebuild and keystrokes route to invisible views.
-      ui::shortcuts(
-        ui::actions(
-          ui::focus_scope(
-            ui::focus(inner),
-            trap: false,
-            auto_focus: active,
-            reclaim_focus: active,
-          ),
-          [
+      //
+      // Actions list is built dynamically so we can OMIT the
+      // vaxis.dismiss handler when compose is closed. If we always
+      // registered it and just returned Ignored, dispatch would
+      // stop at our handler (closer Actions wins, even on Ignored —
+      // see vaxis-ard/docs/events-and-focus.md §8.5) and never reach
+      // logged_in_screen's vaxis.dismiss handler that closes the
+      // tab. Omitting the binding lets the intent bubble up
+      // naturally.
+      mut bindings: [ui::ActionBinding] = [
             ui::action("issue_detail.scroll_up", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
               let _ = ui::scroll_controller_scroll_by_lines(model.scroll, -1)
               ui::EventResult::handled
@@ -711,22 +712,7 @@ fn new(
                 ui::EventResult::ignored
               }
             }),
-            // While compose is open, Esc cancels compose and stops
-            // here (handled). Otherwise we ignore so logged_in_screen
-            // closes the tab.
-            ui::action("vaxis.dismiss", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              if model.compose_open {
-                state.set(fn(mut next: Detail) {
-                  next.compose_open = false
-                  next.compose_text = ""
-                  next.compose_sending = false
-                  next.compose_error = ""
-                })
-                ui::EventResult::handled
-              } else {
-                ui::EventResult::ignored
-              }
-            }),
+
             ui::action("issue_detail.state_picker", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
               match issue_opt {
                 issue => {
@@ -785,7 +771,34 @@ fn new(
               }
               ui::EventResult::handled
             }),
-          ],
+      ]
+      // Only intercept vaxis.dismiss while compose is open: cancel
+      // compose without bubbling further. When compose is closed we
+      // leave the binding off the Actions entirely so dispatch falls
+      // through to logged_in_screen's vaxis.dismiss handler (close
+      // active issue tab).
+      if model.compose_open {
+        bindings.push(
+          ui::action("vaxis.dismiss", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+            state.set(fn(mut next: Detail) {
+              next.compose_open = false
+              next.compose_text = ""
+              next.compose_sending = false
+              next.compose_error = ""
+            })
+            ui::EventResult::handled
+          }),
+        )
+      }
+      ui::shortcuts(
+        ui::actions(
+          ui::focus_scope(
+            ui::focus(inner),
+            trap: false,
+            auto_focus: active,
+            reclaim_focus: active,
+          ),
+          bindings,
         ),
         [
           "j": "issue_detail.scroll_down",
