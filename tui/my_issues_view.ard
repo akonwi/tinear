@@ -15,22 +15,36 @@ let COLUMN_WIDTH: Int = 50
 // Horizontal gap between adjacent columns.
 let COLUMN_GAP: Int = 3
 
+
+
 // Local state for the My Issues view.
 //
 // Cursor is (col, row) inside the board. Empty columns are skipped by
 // the navigation actions so the cursor never lands on a column with
 // zero issues.
 //
-// `board_scroll` controls the outer horizontal scroll so left/right
-// movement can keep the cursor's column in view; individual column
-// scrolling is handled by ListView default actions if we add it later.
+// `board_h_scroll` drives horizontal scrolling between columns via an
+// outer scroll_view(axis: horizontal). scroll_view bounds the cross
+// axis (vertical) so each column receives bounded height — unlike
+// scroll_pane, which unbounds both axes and breaks any nested
+// vertical scroller. That's the key reason we can give each column
+// its own vertical scroller below.
+//
+// `col_h_scrolls` / `col_list_scrolls` are parallel lists indexed by
+// column. Each column renders a custom_scroll_view with a pinned
+// header sliver (the column header stays put at the top) and a
+// sliver_list_builder for the cards. The list controller is what we
+// call reveal_index on when the cursor moves; the scroll controller
+// is required by custom_scroll_view but we don't drive it directly.
 struct Board {
   columns: [issues::BoardColumn],
   cursor_col: Int,
   cursor_row: Int,
   loading: Bool,
   error: Str,
-  board_scroll: ui::ScrollPaneController,
+  board_h_scroll: ui::ScrollController,
+  col_h_scrolls: [ui::ScrollController],
+  col_list_scrolls: [ui::SliverListController],
 }
 
 fn clamp(value: Int, count: Int) Int {
@@ -90,9 +104,32 @@ fn selected_issue(v: Board) issues::Issue? {
 
 // ── Async load ────────────────────────────────────────────────────────
 
+// Rebuild per-column controller lists to match the freshly-loaded
+// columns. Scroll positions reset across reloads (acceptable since a
+// reload typically invalidates the previous layout).
+fn fresh_col_h_scrolls(columns: [issues::BoardColumn]) [ui::ScrollController] {
+  mut scrolls: [ui::ScrollController] = []
+  for _ in columns {
+    scrolls.push(ui::scroll_controller())
+  }
+  scrolls
+}
+
+fn fresh_col_list_scrolls(columns: [issues::BoardColumn]) [ui::SliverListController] {
+  mut scrolls: [ui::SliverListController] = []
+  for _ in columns {
+    scrolls.push(ui::sliver_list_controller())
+  }
+  scrolls
+}
+
 fn apply_loaded(s: ui::State<Board>, columns: [issues::BoardColumn]) {
+  let h_scrolls = fresh_col_h_scrolls(columns)
+  let l_scrolls = fresh_col_list_scrolls(columns)
   s.set(fn(mut v: Board) {
     v.columns = columns
+    v.col_h_scrolls = h_scrolls
+    v.col_list_scrolls = l_scrolls
     v.error = ""
     v.loading = false
     // Snap cursor onto the first non-empty column if the current one
@@ -222,6 +259,27 @@ fn card_content(theme: ui::Theme, item: issues::Issue) ui::Widget {
 // on the card fires `on_click`. Click also moves the cursor (set up
 // by the build closure) so the visual stays in sync with the keyboard
 // cursor.
+// ── Auto-scroll ───────────────────────────────────────────────────────
+
+// Reveal the cursor card in the active column. SliverListController
+// tracks the cards' measured heights and scrolls only as much as
+// needed to bring the cursor card into view; we don't have to
+// estimate heights ourselves.
+fn scroll_cursor_into_view(v: Board) {
+  if v.cursor_col < 0 or v.cursor_col >= v.col_list_scrolls.size() {
+    ()
+  } else {
+    let col = v.columns.at(v.cursor_col)
+    if v.cursor_row < 0 or v.cursor_row >= col.issues.size() {
+      ()
+    } else {
+      let _ = ui::sliver_list_controller_reveal_index(
+        v.col_list_scrolls.at(v.cursor_col), v.cursor_row,
+      )
+    }
+  }
+}
+
 fn render_card(
   theme: ui::Theme, item: issues::Issue, selected: Bool,
   on_click: fn(ui::EventContext),
@@ -248,50 +306,104 @@ fn card_divider(theme: ui::Theme) ui::Widget {
 
 fn blank_row() ui::Widget { ui::sized_box(0, 1, ui::text("")) }
 
+// Column header (name + count). Rendered OUTSIDE the column's
+// scroll view, as a sibling above it, so it always sits at the top
+// of the column. Behaves like a sticky header without being a
+// SliverPinnedHeader — which has a subtle problem in our flow:
+// pinned slivers take scroll space and paint over the viewport top,
+// but SliverListController.RevealIndex computes scroll targets
+// against the unobscured viewport. With a pinned header above the
+// list, reveal(0) lands item 0 behind the header. Putting the
+// header outside the scroll view sidesteps that entirely.
+fn column_header(theme: ui::Theme, col: issues::BoardColumn) ui::Widget {
+  let header_text = "{col.name} ({col.issues.size().to_str()})"
+  ui::padding(
+    ui::styled_text(
+      header_text,
+      fg: theme.muted_foreground,
+      attrs: ui::TextAttrs{ bold: true },
+    ),
+    vertical: 1,
+  )
+}
+
+// One sliver-list item: a card plus the inter-card gap underneath.
+// The trailing divider is omitted for the last card so the column
+// ends flush with the card body.
+fn column_item(
+  theme: ui::Theme, col: issues::BoardColumn, row_idx: Int,
+  is_active_col: Bool, cursor_row: Int,
+  on_card_click: fn(Int, Int), col_idx: Int,
+) ui::Widget {
+  let last_idx = col.issues.size() - 1
+  let issue = col.issues.at(row_idx)
+  let card = render_card(
+    theme, issue, is_active_col and row_idx == cursor_row,
+    fn(_ctx: ui::EventContext) { on_card_click(col_idx, row_idx) },
+  )
+  if row_idx < last_idx {
+    ui::column(
+      [card, blank_row(), card_divider(theme), blank_row()],
+      main_size: ui::MainSize::min,
+      cross_align: ui::CrossAlign::stretch,
+    )
+  } else {
+    card
+  }
+}
+
 fn render_column(
   theme: ui::Theme, col: issues::BoardColumn,
   col_idx: Int, cursor_col: Int, cursor_row: Int,
+  scroll: ui::ScrollController,
+  list_scroll: ui::SliverListController,
   on_card_click: fn(Int, Int),
 ) ui::Widget {
-  let header_text = "{col.name} ({col.issues.size().to_str()})"
-  let header = ui::styled_text(
-    header_text,
-    fg: theme.muted_foreground,
-    attrs: ui::TextAttrs{ bold: true },
-  )
-
-  mut children: [ui::Widget] = [
-    ui::padding(header, vertical: 1),
-  ]
   let is_active_col = col_idx == cursor_col
-  let last_idx = col.issues.size() - 1
-  for issue, row_idx in col.issues {
-    // `for` introduces an immutable per-iteration row_idx, captured by
-    // value by the closure below — no loop-closure trap. col_idx is
-    // already a parameter (immutable) so its capture is also safe.
-    children.push(render_card(
-      theme, issue, is_active_col and row_idx == cursor_row,
-      fn(_ctx: ui::EventContext) { on_card_click(col_idx, row_idx) },
-    ))
-    if row_idx < last_idx {
-      children.push(blank_row())
-      children.push(card_divider(theme))
-      children.push(blank_row())
-    }
-  }
-  if col.issues.size() == 0 {
-    children.push(blank_row())
-    children.push(
-      ui::center(ui::styled_text("No issues", fg: theme.muted_foreground)),
-    )
+  let count = col.issues.size()
+
+  // Empty-column placeholder: no slivers needed, just show "No issues"
+  // beneath the header. Wrapped in custom_scroll_view anyway so the
+  // height/scroll behaviour matches non-empty columns (e.g. cross-
+  // align stretch in the parent row).
+  let body_sliver = match count == 0 {
+    true => ui::sliver_to_box(
+      ui::padding(
+        ui::center(
+          ui::styled_text("No issues", fg: theme.muted_foreground),
+        ),
+        top: 1,
+      ),
+    ),
+    false => ui::sliver_list_builder(
+      count: count,
+      builder: fn(_ctx: ui::BuildContext, i: Int) ui::Widget {
+        column_item(
+          theme, col, i, is_active_col, cursor_row, on_card_click, col_idx,
+        )
+      },
+      // Most cards are ~3 rows (id + title + maybe meta) plus a
+      // 3-row gap below: estimate is intentionally a bit high so
+      // reveal_index lands a bit conservatively before items are
+      // measured. Overscan keeps the area around the viewport
+      // ready so small scroll deltas don't blank-flash.
+      estimated_item_extent: maybe::some(6),
+      overscan: maybe::some(6),
+      controller: maybe::some(list_scroll),
+    ),
   }
 
   ui::sized_box(
     COLUMN_WIDTH,
     0,
     ui::column(
-      children,
-      main_size: ui::MainSize::min,
+      [
+        column_header(theme, col),
+        ui::expanded(
+          ui::custom_scroll_view(scroll, [body_sliver]),
+        ),
+      ],
+      main_size: ui::MainSize::max,
       cross_align: ui::CrossAlign::stretch,
     ),
   )
@@ -315,9 +427,14 @@ fn overflow_indicator(theme: ui::Theme, glyph: Str, show: Bool) ui::Widget {
 }
 
 // Build the row of columns plus gaps between them. The whole row is
-// wrapped in a scroll_pane (horizontal scroll) so wider boards can
+// wrapped in a single-axis horizontal scroll_view so wider boards can
 // extend off-screen, flanked by 1-col chevron indicators that hint at
 // more columns existing in each direction.
+//
+// scroll_view bounds the cross axis (vertical), so each column
+// receives the board's full height — which means the per-column
+// custom_scroll_view below has a real viewport to clip and scroll
+// within. scroll_pane would unbound both axes and break that.
 fn render_board(
   theme: ui::Theme, v: Board, on_card_click: fn(Int, Int),
 ) ui::Widget {
@@ -326,25 +443,40 @@ fn render_board(
     if idx > 0 {
       row_children.push(ui::sized_box(COLUMN_GAP, 0, ui::text("")))
     }
-    row_children.push(render_column(theme, col, idx, v.cursor_col, v.cursor_row, on_card_click))
+    // Defensive fall-backs: if controller lists drift from columns
+    // mid-rebuild (e.g. between reload mutations), create transient
+    // fresh controllers so render doesn't crash. The next steady-
+    // state rebuild after apply_loaded restores the real ones.
+    let scroll = match idx < v.col_h_scrolls.size() {
+      true => v.col_h_scrolls.at(idx),
+      false => ui::scroll_controller(),
+    }
+    let list_scroll = match idx < v.col_list_scrolls.size() {
+      true => v.col_list_scrolls.at(idx),
+      false => ui::sliver_list_controller(),
+    }
+    row_children.push(render_column(
+      theme, col, idx, v.cursor_col, v.cursor_row,
+      scroll, list_scroll, on_card_click,
+    ))
   }
-  // True "is content scrolled off?" check, read from the scroll pane's
-  // own metrics. On the very first build the controller hasn't been
-  // attached yet (zero-valued metrics), so chevrons start hidden and
-  // appear once layout has run — acceptable since there's nothing to
-  // scroll yet on frame 1 anyway.
-  let metrics = ui::scroll_pane_metrics(
-    v.board_scroll, axis: ui::ScrollAxis::horizontal,
-  )
+  // True "is content scrolled off?" check, read from the outer
+  // ScrollController's metrics. On the very first build the
+  // controller hasn't been attached yet (zero-valued metrics), so
+  // chevrons start hidden and appear once layout has run.
+  let metrics = ui::scroll_controller_metrics(v.board_h_scroll)
   let has_left = metrics.scroll_offset > 0
   let has_right = metrics.scroll_offset < metrics.max_scroll_offset
+  // cross_align: stretch so each column receives the board's full
+  // vertical extent.
   ui::row(
     [
       overflow_indicator(theme, "‹", has_left),
       ui::expanded(
-        ui::scroll_pane(
-          ui::row(row_children, cross_align: ui::CrossAlign::start),
-          controller: v.board_scroll,
+        ui::scroll_view(
+          ui::row(row_children, cross_align: ui::CrossAlign::stretch),
+          axis: ui::ScrollAxis::horizontal,
+          controller: v.board_h_scroll,
         ),
       ),
       overflow_indicator(theme, "›", has_right),
@@ -635,7 +767,9 @@ fn new(
         cursor_row: 0,
         loading: true,
         error: "",
-        board_scroll: ui::scroll_pane_controller(),
+        board_h_scroll: ui::scroll_controller(),
+        col_h_scrolls: [],
+        col_list_scrolls: [],
       }
     },
     build: fn(ctx: ui::BuildContext, state: ui::State<Board>) ui::Widget {
@@ -694,11 +828,15 @@ fn new(
           ),
           [
             ui::action("board.row_down", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              // Capture model BEFORE state.set so we can read the
+              // freshly-mutated value via state.value() afterwards
+              // and scroll the active column accordingly.
               if model.columns.size() > 0 {
                 let count = col_size(model.columns, model.cursor_col)
                 if count > 0 {
                   let next_row = clamp(model.cursor_row + 1, count)
                   state.set(fn(mut v: Board) { v.cursor_row = next_row })
+                  scroll_cursor_into_view(state.value())
                 }
               }
               ui::EventResult::handled
@@ -709,6 +847,7 @@ fn new(
                 if count > 0 {
                   let next_row = clamp(model.cursor_row - 1, count)
                   state.set(fn(mut v: Board) { v.cursor_row = next_row })
+                  scroll_cursor_into_view(state.value())
                 }
               }
               ui::EventResult::handled
@@ -721,11 +860,14 @@ fn new(
                     v.cursor_col = target
                     v.cursor_row = clamp(v.cursor_row, col_size(v.columns, target))
                   })
-                  let _ = ui::scroll_pane_scroll_to(
-                    model.board_scroll,
+                  let _ = ui::scroll_controller_scroll_to_offset(
+                    model.board_h_scroll,
                     target * (COLUMN_WIDTH + COLUMN_GAP),
-                    0,
                   )
+                  // After switching columns the new column's cursor
+                  // row may be off-screen vertically; reveal it in
+                  // the new column's sliver list.
+                  scroll_cursor_into_view(state.value())
                 }
               }
               ui::EventResult::handled
@@ -738,11 +880,11 @@ fn new(
                     v.cursor_col = target
                     v.cursor_row = clamp(v.cursor_row, col_size(v.columns, target))
                   })
-                  let _ = ui::scroll_pane_scroll_to(
-                    model.board_scroll,
+                  let _ = ui::scroll_controller_scroll_to_offset(
+                    model.board_h_scroll,
                     target * (COLUMN_WIDTH + COLUMN_GAP),
-                    0,
                   )
+                  scroll_cursor_into_view(state.value())
                 }
               }
               ui::EventResult::handled
