@@ -100,7 +100,7 @@ fn request_detail_for_cursor(
 // Errors are surfaced inline via the error_pane the body renders when
 // `view.error` is non-empty — no toast for load failures since the pane
 // itself is the dedicated UI slot for that.
-fn load_inbox(api_key: Str, state: ui::State<View>, rt: ui::Runtime<View>) {
+fn load_inbox(api_key: Str, rt: ui::Runtime<View>) {
   async::start(fn() {
     let result = inbox::load(api_key)
     rt.dispatch(fn(s: ui::State<View>) {
@@ -449,6 +449,15 @@ fn new(
   ui::stateful(
     key: "inbox-view",
     init: fn(ctx: ui::BuildContext) View {
+      // Kick the initial fetch from init. The earlier suspicion that
+      // init dispatches had a cross-module monomorphization issue
+      // turned out to be misdiagnosed: the real culprit was the
+      // widget-reconciliation pitfall (an outer widget type that
+      // changed across rebuilds caused state updates to look like
+      // no-ops). With body() pinned to a stable outer widget type,
+      // dispatch from init lands cleanly.
+      let rt = ctx.runtime<View>()
+      load_inbox(api_key, rt)
       View{
         items: [],
         cursor: 0,
@@ -467,13 +476,6 @@ fn new(
       let theme = ui::must_have_theme(ctx)
       let model = state.value()
       let rt = ctx.runtime<View>()
-
-      // Kick the initial fetch once (when items is empty + still loading)
-      // from build. This avoids the cross-module monomorphization issues
-      // we'd hit if we did it from `init` and lets `state` be in scope.
-      if model.loading and model.items.size() == 0 and model.error.is_empty() {
-        load_inbox(api_key, state, rt)
-      }
 
       ui::shortcuts(
         ui::actions(
@@ -568,7 +570,7 @@ fn new(
                 s.loading = true
                 s.error = ""
               })
-              load_inbox(api_key, state, rt)
+              load_inbox(api_key, rt)
               ui::EventResult::handled
             }),
             // Detail-pane scrolling forwarded from list-focused shortcuts.
