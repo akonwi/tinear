@@ -196,7 +196,10 @@ Single entrypoint (`main.ard`) launches the TUI. There is no `login` subcommand 
 - **`while true { ... }`** is the idiomatic infinite loop (used by `schedule_periodic`).
 - **Nullable callback gotcha**: `fn(X) Void?` is **not** a nullable function — the `?` binds to the return type. For a nullable callback, omit the return type: `on_pressed: fn(EventContext)?`.
 - **Generic struct definitions** (e.g. `struct Box<$T> { ... }`) are tricky in the current parser. If a stateful needs to vary by a type parameter from the parent, keep the state struct concrete and have the parent close over its own typed runtime in a callback (see how `tui/compose_view` exposes `refresh_comments: fn()` instead of being generic over Detail's state type).
-- **Direct Go imports** (Ard 0.25+) via `use go:pkg` are supported for new FFI. Tinear's existing `os.ard` + `ffi/host.go` still uses the older `extern fn ... = "tinear.Symbol"` + companion file pattern, which is still supported — either style is fine. If you add new Go-backed functionality, prefer `use go:` so there's no separate Go file to keep in sync.
+- **Direct Go imports** (Ard 0.25+) via `use go:pkg` are supported but have two limitations that bit a migration attempt on `os.ard`:
+  - **Variadic Go functions aren't callable.** `exec::Command(name, arg ...string)` errors with "variadic direct Go calls are not supported yet," and there's no slice-passing workaround. Most of `os/exec` is variadic.
+  - **String constants aren't bindable as values.** `runtime::GOOS` errors with "not an exported typed integer enum-like constant" — only typed integer enum-like constants come through. Workaround for OS detection is env-var (`COMSPEC` for Windows) plus tool availability (`exec::LookPath` to disambiguate Linux/macOS), which works but loses fidelity vs the build-time `runtime.GOOS` tag.
+  Result: `os.ard` + `ffi/host.go` stays on the older `extern fn ... = "tinear.Symbol"` + companion file pattern. Prefer `use go:` for new FFI when the Go API is non-variadic and you don't need bare string constants; otherwise fall back to the extern + companion file.
 - **`async::start` returns a `Fiber`**. Discard it with `let _ = async::start(...)` when the surrounding expression's expected return type is `Void`.
 
 ## vaxis-ard companion docs
