@@ -3,8 +3,10 @@ use vaxis/ui
 use tinear/models/inbox
 use tinear/models/issues
 use tinear/os
+use ard/async
 use ard/maybe
 
+use tinear/models/cache
 use tinear/tui/hints_bar
 use tinear/tui/inbox_view
 use tinear/tui/issue_detail_view
@@ -253,16 +255,45 @@ fn new(
   ui::stateful(
     key: "logged-in",
     init: fn(_ctx: ui::BuildContext) Model {
-      Model{
-        tab_index: 0,
-        issue_tabs: [],
+      // Hydrate from the on-disk cache so the user returns to
+      // whatever they had open last session. Missing / unreadable /
+      // version-mismatched cache falls back to the default layout.
+      match cache::load_logged_in() {
+        cached => Model{
+          tab_index: cached.tab_index,
+          issue_tabs: cached.issue_tabs,
+        },
+        _ => Model{
+          tab_index: 0,
+          issue_tabs: [],
+        },
       }
     },
     build: fn(ctx: ui::BuildContext, state: ui::State<Model>) ui::Widget {
       let theme = ui::must_have_theme(ctx)
       let model = state.value()
+      // Persist the current logged-in slice to the on-disk cache.
+      // Wrapped in async::start so disk I/O doesn't block the UI;
+      // errors are swallowed because cache persistence is best-effort
+      // — a failed save shouldn't break the session.
+      let persist = fn() {
+        let snap = state.value()
+        let _ = async::start(fn() {
+          let _ = cache::save_logged_in(cache::LoggedInCache{
+            tab_index: snap.tab_index,
+            issue_tabs: snap.issue_tabs,
+          })
+        })
+      }
+      // Helper that wraps state.set and persists after the mutation.
+      // Use this in place of state.set for any Model change that
+      // touches tab_index or issue_tabs.
+      let set_and_persist = fn(updater: fn(mut Model)) {
+        state.set(updater)
+        persist()
+      }
       let on_tab_press = fn(idx: Int) {
-        state.set(fn(mut s: Model) { s.tab_index = idx })
+        set_and_persist(fn(mut s: Model) { s.tab_index = idx })
       }
       // Open an inbox item. Routing:
       //   issue/comment/mention notifications -> promote target_id to a
@@ -275,7 +306,7 @@ fn new(
       //     in the browser; otherwise no-op.
       let on_open = fn(item: inbox::Item) {
         if item.notification_type.starts_with("issue") {
-          state.set(fn(mut s: Model) { s = open_issue_tab(s, item.target_id) })
+          set_and_persist(fn(mut s: Model) { s = open_issue_tab(s, item.target_id) })
         } else {
           if not item.url.is_empty() {
             let _ = os::open_url(item.url)
@@ -285,7 +316,7 @@ fn new(
       // From the My Issues board, Enter on a card promotes the issue
       // to a dynamic tab. Same shell helper as the inbox uses.
       let on_open_issue = fn(issue: issues::Issue) {
-        state.set(fn(mut s: Model) { s = open_issue_tab(s, issue.identifier) })
+        set_and_persist(fn(mut s: Model) { s = open_issue_tab(s, issue.identifier) })
       }
       // Tab / Shift+Tab / Escape are already mapped to NextFocusIntent,
       // PreviousFocusIntent and DismissIntent by the app-level Shortcuts that
@@ -303,17 +334,17 @@ fn new(
           ),
           [
             ui::action("vaxis.next-focus", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              state.set(fn(mut s: Model) { s.tab_index = cycle_next(s) })
+              set_and_persist(fn(mut s: Model) { s.tab_index = cycle_next(s) })
               ui::EventResult::handled
             }),
             ui::action("vaxis.previous-focus", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              state.set(fn(mut s: Model) { s.tab_index = cycle_prev(s) })
+              set_and_persist(fn(mut s: Model) { s.tab_index = cycle_prev(s) })
               ui::EventResult::handled
             }),
             ui::action("vaxis.dismiss", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
               match selected_is_issue_tab(model) {
                 true => {
-                  state.set(fn(mut s: Model) { s = close_current_issue_tab(s) })
+                  set_and_persist(fn(mut s: Model) { s = close_current_issue_tab(s) })
                   ui::EventResult::handled
                 },
                 false => ui::EventResult::ignored,
@@ -334,7 +365,7 @@ fn new(
               if modal_open {
                 ui::EventResult::ignored
               } else {
-                state.set(fn(mut s: Model) { s.tab_index = 0 })
+                set_and_persist(fn(mut s: Model) { s.tab_index = 0 })
                 ui::EventResult::handled
               }
             }),
@@ -342,7 +373,7 @@ fn new(
               if modal_open {
                 ui::EventResult::ignored
               } else {
-                state.set(fn(mut s: Model) { s.tab_index = 1 })
+                set_and_persist(fn(mut s: Model) { s.tab_index = 1 })
                 ui::EventResult::handled
               }
             }),
@@ -351,7 +382,7 @@ fn new(
                 ui::EventResult::ignored
               } else {
                 let on_open_search_result = fn(issue: issues::Issue) {
-                  state.set(fn(mut s: Model) {
+                  set_and_persist(fn(mut s: Model) {
                     s = open_issue_tab(s, issue.identifier)
                   })
                   close_modal()
