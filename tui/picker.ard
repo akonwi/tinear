@@ -1,24 +1,48 @@
 use ard/maybe
+use vaxis/ui
 
+use tinear/tui/hints_bar
 use tinear/tui/modal
-use tinear/tui/ui
+
+// A reusable single-select picker presented in a modal. Each call to
+// `new(props)` returns a builder closure suitable for handing to the
+// app-level `show_modal` callback wired in `main.ard`.
+//
+// Behaviour:
+//   - up / down (or j / k) move the highlighted option
+//   - Enter (or Space) calls `on_confirm` with the picked Option and
+//     dismisses the modal
+//   - Esc dismisses the modal without confirming (handled by the modal
+//     frame, which catches the app-level DismissIntent)
+//   - clicking an option = confirm + dismiss
+//   - the initial cursor lands on whichever option has `current: true`,
+//     or 0 if none / id mismatch
+//
+// The picker owns a small local `PickerState` (just the cursor) inside
+// a `ui::stateful` so its position survives modal-builder rebuilds
+// (the builder is invoked on every AppState change, e.g. a toast
+// arriving).
 
 struct Option {
+  // Stable identifier (e.g. state id, cycle id). Passed back to the
+  // caller via on_confirm so they can dispatch the mutation.
   id: Str,
   label: Str,
+  // true marks the option as the current selection — the picker shows
+  // a "(current)" suffix and initialises the cursor here.
   current: Bool,
 }
 
 struct Props {
   title: Str,
   options: [Option],
-  inititial_id: Str,
+  // Optional fixed width. When none, the modal hugs content; for
+  // pickers a 40-50 col width usually feels right.
   width: Int?,
-  on_confirm: fn(ui::EventContext, Option),
-  on_dismiss: fn(ui::EventContext),
+  on_confirm: fn(Option),
 }
 
-struct CursorState {
+struct PickerState {
   cursor: Int,
 }
 
@@ -32,107 +56,135 @@ fn clamp_cursor(cursor: Int, count: Int) Int {
 }
 
 fn initial_cursor(props: Props) Int {
-  mut cursor = 0
+  mut found = 0
   for option, idx in props.options {
-    if option.id == props.inititial_id {
-      cursor = idx
+    if option.current {
+      found = idx
     }
   }
-  clamp_cursor(cursor, props.options.size())
+  clamp_cursor(found, props.options.size())
 }
 
-private fn view(props: Props, cursor: Int) ui::Widget {
-  let selected_cursor = clamp_cursor(cursor, props.options.size())
+// One row per option. The cursor-here option uses list_tile's Selected
+// styling (theme.primary bg); the "(current)" suffix marks the option
+// the data already considers selected. Clicking an option fires the
+// confirm + close sequence (same as Enter).
+fn render_options(
+  theme: ui::Theme,
+  props: Props,
+  cursor: Int,
+  on_pick: fn(Int),
+) ui::Widget {
   mut rows: [ui::Widget] = []
   for option, idx in props.options {
-    let cursor_mark = match idx == selected_cursor {
-      true => "▸",
-      false => " ",
+    let row_idx = idx
+    let title_text = match option.current {
+      true => "{option.label}   (current)",
+      false => option.label,
     }
-    let suffix = match option.current {
-      true => "  (current)",
-      false => "",
-    }
-    rows.push(ui::text(" {cursor_mark} {option.label}{suffix}"))
+    rows.push(ui::list_tile(
+      title: ui::styled_text(title_text, fg: theme.foreground),
+      selected: idx == cursor,
+      on_pressed: fn(_ctx: ui::EventContext) { on_pick(row_idx) },
+    ))
   }
-  ui::column_stretch(rows)
+  ui::column(
+    rows,
+    main_size: ui::MainSize::min,
+    cross_align: ui::CrossAlign::stretch,
+  )
 }
 
-fn footer() ui::Widget {
-  ui::text("↑↓ select  ↵ confirm  Esc cancel")
+fn picker_hints() [hints_bar::Hint] {
+  [
+    hints_bar::Hint{ key: "↑↓", label: "select" },
+    hints_bar::Hint{ key: "↵",  label: "confirm" },
+    hints_bar::Hint{ key: "Esc", label: "cancel" },
+  ]
 }
 
-fn selected_at(props: Props, cursor: Int) Option? {
-  match props.options.size() == 0 {
-    true => maybe::none(),
-    false => maybe::some(props.options.at(clamp_cursor(cursor, props.options.size()))),
-  }
-}
-
-fn new(props: Props) ui::Widget {
+// Body widget (everything between the title divider and the footer
+// divider of the modal frame). Lives in its own stateful so the cursor
+// position survives across modal-builder rebuilds.
+fn picker_body(props: Props, close: fn()) ui::Widget {
   ui::stateful(
-    key: props.title,
-    init: fn(_ctx: ui::BuildContext) CursorState {
-      CursorState{cursor: initial_cursor(props)}
+    key: "picker:{props.title}",
+    init: fn(_ctx: ui::BuildContext) PickerState {
+      PickerState{ cursor: initial_cursor(props) }
     },
-    build: fn(_ctx: ui::BuildContext, state: ui::State<CursorState>) ui::Widget {
+    build: fn(ctx: ui::BuildContext, state: ui::State<PickerState>) ui::Widget {
+      let theme = ui::must_have_theme(ctx)
       let model = state.value()
       let cursor = clamp_cursor(model.cursor, props.options.size())
-      let on_confirm = props.on_confirm
-      let on_dismiss = props.on_dismiss
-      ui::actions(
-        child: ui::shortcuts(
-          child: modal::dialog(
-            title: props.title,
-            child: view(props, cursor),
-            footer: footer(),
-            width: props.width.or(50),
-            on_dismiss: on_dismiss,
-          ),
-          bindings: [
-            "Up": "picker.previous",
-            "k": "picker.previous",
-            "Down": "picker.next",
-            "j": "picker.next",
-            "Enter": "picker.confirm",
-            "Space": "picker.confirm",
+
+      // Confirm and pick helpers. Both end the picker.
+      let confirm_at = fn(idx: Int) {
+        let safe = clamp_cursor(idx, props.options.size())
+        if props.options.size() > 0 {
+          props.on_confirm(props.options.at(safe))
+        }
+        close()
+      }
+
+      // Outer ui::focus absorbs the modal frame's auto_focus so it
+      // doesn't land on option[0]'s list_tile (which would paint
+      // theme.SurfaceHovered on top of and competing with the
+      // cursor's Selected styling on a different row). The outer
+      // focus has no visual treatment of its own; the cursor
+      // option is the only highlighted row on open.
+      ui::shortcuts(
+        ui::actions(
+          ui::focus(render_options(theme, props, cursor, confirm_at)),
+          [
+            ui::action(
+              "picker.next",
+              fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+                let next = clamp_cursor(cursor + 1, props.options.size())
+                state.set(fn(mut s: PickerState) { s.cursor = next })
+                ui::EventResult::handled
+              },
+            ),
+            ui::action(
+              "picker.prev",
+              fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+                let prev = clamp_cursor(cursor - 1, props.options.size())
+                state.set(fn(mut s: PickerState) { s.cursor = prev })
+                ui::EventResult::handled
+              },
+            ),
+            ui::action(
+              "picker.confirm",
+              fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+                confirm_at(cursor)
+                ui::EventResult::handled
+              },
+            ),
           ],
         ),
-        bindings: [
-          ui::action(
-            "picker.previous",
-            fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              state.set(
-                fn(mut next: CursorState) {
-                  next.cursor = clamp_cursor(model.cursor - 1, props.options.size())
-                },
-              )
-              ui::EventResult::handled
-            },
-          ),
-          ui::action(
-            "picker.next",
-            fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              state.set(
-                fn(mut next: CursorState) {
-                  next.cursor = clamp_cursor(model.cursor + 1, props.options.size())
-                },
-              )
-              ui::EventResult::handled
-            },
-          ),
-          ui::action(
-            "picker.confirm",
-            fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              match selected_at(props, model.cursor) {
-                option => on_confirm(ctx, option),
-                _ => (),
-              }
-              ui::EventResult::handled
-            },
-          ),
+        [
+          "j": "picker.next",
+          "Down": "picker.next",
+          "k": "picker.prev",
+          "Up": "picker.prev",
+          "Enter": "picker.confirm",
+          "Space": "picker.confirm",
         ],
       )
     },
   )
+}
+
+// Returns a modal builder. Hand the result to `show_modal` so the
+// app root layers it over the rest of the UI.
+fn new(props: Props) fn(ui::Theme, fn()) ui::Widget {
+  fn(theme: ui::Theme, close: fn()) ui::Widget {
+    modal::show_modal(
+      theme: theme,
+      title: props.title,
+      child: picker_body(props, close),
+      footer: hints_bar::row(theme, picker_hints()),
+      width: props.width,
+      on_dismiss: fn(_ctx: ui::EventContext) { close() },
+    )
+  }
 }

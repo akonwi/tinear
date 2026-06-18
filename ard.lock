@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "root": "root",
+  "packages": [
+    {
+      "id": "root",
+      "name": "tinear",
+      "path": "."
+    }
+  ]
+}

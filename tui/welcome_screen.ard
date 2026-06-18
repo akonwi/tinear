@@ -1,43 +1,95 @@
-use tinear/tui/ui
+use vaxis/ui
+
+use tinear/config
+use tinear/linear/client
+
+struct State {
+  draft_api_key: Str,
+  has_error: Bool,
+}
+
+// Validate the API key against Linear and, on success, persist it
+// to the on-disk config. Returns Void!Str so callers can branch on
+// ok / err without caring about the viewer payload.
+//
+// This used to live in commands/login.ard as part of a CLI verb
+// (ard run main.ard login) that no longer exists. The welcome
+// screen is now the only login surface.
+fn validate_and_save(api_key: Str) Void!Str {
+  let validate_query = "query \{ viewer \{ id \} \}"
+  match client::graphql(api_key, validate_query) {
+    ok(_) => {
+      let _ = try config::write(api_key)
+      Result::ok(())
+    },
+    err(e) => Result::err("Invalid API key: {e}"),
+  }
+}
 
 fn logo_lines() [ui::Widget] {
   [
-    ui::text("▀█▀ ▀ █▀█ █▀▀ ▄▀█ █▀█", style: ui::style(bold: true)),
-    ui::text(" █  █ █ █ ██▄ █▀█ █▀▄", style: ui::style(bold: true)),
+    ui::styled_text("▀█▀ ▀ █▀█ █▀▀ ▄▀█ █▀█", attrs: ui::TextAttrs{ bold: true }),
+    ui::styled_text(" █  █ █ █ ██▄ █▀█ █▀▄", attrs: ui::TextAttrs{ bold: true }),
   ]
 }
 
-fn new(api_key: Str, has_error: Bool, on_changed: fn(Str), on_submit: fn(Str)) ui::Widget {
-  mut children = logo_lines()
-  children.push(ui::box(height: 2))
-  children.push(ui::text("Enter your Linear API key"))
-  children.push(ui::box(height: 1))
-  children.push(
-    ui::text_field(
-      value: api_key,
-      placeholder: "Paste Linear API key",
-      min_width: 48,
-      obscure: false,
-      on_changed: fn(_event_ctx: ui::EventContext, value: Str) {
-        on_changed(value)
-      },
-      on_submitted: fn(_event_ctx: ui::EventContext, value: Str) {
-        on_submit(value)
-      },
-    ),
-  )
-  children.push(ui::box(height: 1))
-  children.push(
-    ui::button(
-      "Login",
-      fn(_event_ctx: ui::EventContext) {
-        on_submit(api_key)
-      },
-    ),
-  )
-  if has_error {
-    children.push(ui::box(height: 1))
-    children.push(ui::text("Invalid API token"))
+fn spacer(height: Int) ui::Widget {
+  ui::sized_box(0, height, ui::text(""))
+}
+
+fn submit_login(api_key: Str, state: ui::State<State>, on_login_success: fn(Str)) {
+  match api_key.is_empty() {
+    true => state.set(fn(mut s: State) { s.has_error = true }),
+    false => match validate_and_save(api_key) {
+      ok(_) => on_login_success(api_key),
+      err(_) => state.set(fn(mut s: State) { s.has_error = true }),
+    },
   }
-  ui::center(ui::padding_all(1, ui::column_min(children)))
+}
+
+fn form(theme: ui::Theme, model: State, state: ui::State<State>, on_login_success: fn(Str)) ui::Widget {
+  mut children = logo_lines()
+  children.push(spacer(2))
+  children.push(ui::text("Enter your Linear API key"))
+  children.push(spacer(1))
+  children.push(ui::text_field(
+    value: model.draft_api_key,
+    on_changed: fn(_ctx: ui::EventContext, value: Str) {
+      state.set(fn(mut s: State) {
+        s.draft_api_key = value
+        s.has_error = false
+      })
+    },
+    placeholder: "Paste Linear API key",
+    min_width: 48,
+    on_submitted: fn(_ctx: ui::EventContext, value: Str) {
+      submit_login(value, state, on_login_success)
+    },
+  ))
+  children.push(spacer(1))
+  children.push(ui::button("Login", fn(_ctx: ui::EventContext) {
+    submit_login(model.draft_api_key, state, on_login_success)
+  }))
+  if model.has_error {
+    children.push(spacer(1))
+    children.push(ui::styled_text("Invalid API token", fg: theme.danger_text))
+  }
+  ui::column(
+    children,
+    main_size: ui::MainSize::min,
+    cross_align: ui::CrossAlign::center,
+  )
+}
+
+fn new(on_login_success: fn(Str)) ui::Widget {
+  ui::stateful(
+    key: "welcome",
+    init: fn(_ctx: ui::BuildContext) State {
+      State{ draft_api_key: "", has_error: false }
+    },
+    build: fn(ctx: ui::BuildContext, state: ui::State<State>) ui::Widget {
+      let theme = ui::must_have_theme(ctx)
+      form(theme, state.value(), state, on_login_success)
+    },
+  )
 }

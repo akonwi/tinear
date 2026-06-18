@@ -1,0 +1,59 @@
+use vaxis/ui
+
+// A keyboard hint to surface to the user.
+//
+// `key`   is the key (or chord) that triggers the action, e.g. "Tab",
+//         "↑↓", "?", "Ctrl+c".
+// `label` is the human-readable description, e.g. "switch", "select",
+//         "open". May be empty when the key glyph is self-explanatory
+//         (e.g. "↑↓" alone).
+struct Hint {
+  key: Str,
+  label: Str,
+}
+
+// Reusable footer hints bar.
+//
+// Renders a top border (themed `theme.border` over `theme.background`)
+// followed by a row of hints. Each hint renders its `key` in
+// `theme.foreground` and its `label` in `theme.muted_foreground`, with
+// 3 spaces between adjacent hints.
+//
+// The bar owns its top border so the composing column doesn't need a
+// separate divider widget between the body and the hints.
+//
+// Example:
+//   hints_bar::new(theme, [
+//     hints_bar::Hint{ key: "Tab", label: "switch" },
+//     hints_bar::Hint{ key: "↑↓",  label: "select" },
+//     hints_bar::Hint{ key: "↵",   label: "open" },
+//   ])
+fn render_hint(theme: ui::Theme, hint: Hint) ui::Widget {
+  match hint.label.is_empty() {
+    true => ui::styled_text(hint.key, fg: theme.foreground),
+    false => ui::rich_text([
+      ui::span(hint.key, fg: theme.foreground),
+      ui::span(" " + hint.label, fg: theme.muted_foreground),
+    ]),
+  }
+}
+
+// Bare hints row, no top border. Used inside containers (modal frames,
+// etc.) that already supply their own divider above the footer.
+fn row(theme: ui::Theme, items: [Hint]) ui::Widget {
+  mut children: [ui::Widget] = []
+  for hint, idx in items {
+    if idx > 0 {
+      children.push(ui::styled_text("   ", fg: theme.muted_foreground))
+    }
+    children.push(render_hint(theme, hint))
+  }
+  ui::row(children)
+}
+
+fn new(theme: ui::Theme, items: [Hint]) ui::Widget {
+  ui::column([
+    ui::divider(fg: theme.border, bg: theme.background),
+    row(theme, items),
+  ])
+}

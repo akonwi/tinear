@@ -2,6 +2,11 @@
 
 Architecture Decision Records (ADRs) and project documentation.
 
+## Reference
+
+- [features.md](features.md) — feature reference for the TUI: startup, the
+  logged-in shell, inbox/board/issue-detail flows, modals, persistence.
+
 ## ADRs
 
 [Architecture Decision Records](adrs/) capture important decisions about

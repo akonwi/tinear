@@ -1,16 +1,40 @@
 use ard/async
-use ard/decode
-use ard/duration
 use ard/maybe
+use vaxis/ui
 
-use tinear/models/cache
 use tinear/models/inbox
-use tinear/os
-use tinear/tui/hints
-use tinear/tui/modal
-use tinear/tui/state
+use tinear/tui/refresh
 use tinear/tui/text
-use tinear/tui/ui
+use tinear/tui/toast
+
+// Local state for the Inbox view.
+//
+// `list_scroll` is created once in `init` and stored here so the list's
+// scroll position survives rebuilds. Same for `detail_scroll`.
+//
+// Detail-pane fields:
+//   detail_request_id  the notification id we currently want to display
+//                      (set when cursor moves to a new item)
+//   detail_loaded_id   the notification id of the loaded detail (cache key)
+//   detail             the loaded data, when present
+//   detail_loading     true while a fetch is in flight for detail_request_id
+//   detail_error       last detail-load error message (cleared on success)
+struct View {
+  items: [inbox::Item],
+  cursor: Int,
+  loading: Bool,
+  error: Str,
+  list_scroll: ui::ScrollPaneController,
+  // Detail pane uses a ScrollController (single-axis) instead of a
+  // ScrollPaneController (both axes) so its child gets a bounded cross-axis
+  // width, which is what makes soft_wrap actually wrap.
+  detail_scroll: ui::ScrollController,
+  detail_request_id: Str,
+  detail_loaded_id: Str,
+  detail: inbox::Detail?,
+  detail_loading: Bool,
+  detail_error: Str,
+}
 
 fn clamp_cursor(cursor: Int, count: Int) Int {
   match {
@@ -21,751 +45,577 @@ fn clamp_cursor(cursor: Int, count: Int) Int {
   }
 }
 
-fn row_text(value: Str, selected: Bool) ui::Widget {
-  match selected {
-    true => ui::text(value, style: ui::style(reverse: true)),
-    false => ui::text(value),
-  }
-}
+// ── Async work ────────────────────────────────────────────────────────
 
-fn row_line(value: Str, selected: Bool) ui::Widget {
-  match selected {
-    true => ui::box(ui::text(value), style: ui::style(reverse: true)),
-    false => ui::text(value),
-  }
-}
-
-fn render_item(item: inbox::Item, selected: Bool) ui::Widget {
-  let children = [
-    ui::box(row_text(item.target_id, selected), width: 10, height: 1),
-    row_text(" ", selected),
-    row_text(item.actor_name, selected),
-    row_text(" ", selected),
-    row_text(item.type_label, selected),
-    row_text("  ", selected),
-    ui::expanded(row_line(item.title, selected)),
-  ]
-  match selected {
-    true => ui::row(children: children, style: ui::style(reverse: true)),
-    false => ui::row(children),
-  }
-}
-
-fn render_rows(items: [inbox::Item], cursor: Int) ui::Widget {
-  mut rows: [ui::Widget] = []
-  for item, idx in items {
-    rows.push(render_item(item, idx == cursor))
-  }
-  ui::focusable(ui::column_stretch(rows))
-}
-
-fn field_string(data: Dynamic, name: Str, fallback: Str) Str {
-  match decode::run(data, decode::field(name, decode::string)) {
-    ok(v) => v,
-    err(_) => fallback,
-  }
-}
-
-fn nullable_string(data: Dynamic, name: Str, fallback: Str) Str {
-  match decode::run(data, decode::field(name, decode::nullable(decode::string))) {
-    ok(v) => {
-      match v {
-        s => s,
-        _ => fallback,
-      }
-    },
-    err(_) => fallback,
-  }
-}
-
-fn optional_dynamic(data: Dynamic, name: Str) Dynamic? {
-  match decode::run(data, decode::field(name, decode::dynamic)) {
-    ok(value) => match decode::is_void(value) {
-      true => maybe::none(),
-      false => maybe::some(value),
-    },
-    err(_) => maybe::none(),
-  }
-}
-
-fn user_display_name(user: Dynamic) Str {
-  let display_name = decode::run(
-    user,
-    decode::nullable(decode::field("displayName", decode::string)),
-  ).expect("optional user.displayName invalid")
-  match display_name {
-    value => match value.is_empty() {
-      true => decode::run(user, decode::field("name", decode::string)).expect("Missing user.name"),
-      false => value,
-    },
-    _ => decode::run(user, decode::field("name", decode::string)).expect("Missing user.name"),
-  }
-}
-
-fn optional_name(data: Dynamic, name: Str) Str {
-  match optional_dynamic(data, name) {
-    obj => decode::run(obj, decode::field("name", decode::string)).expect("Missing name"),
-    _ => "—",
-  }
-}
-
-fn optional_user_name(data: Dynamic, name: Str) Str {
-  match optional_dynamic(data, name) {
-    obj => user_display_name(obj),
-    _ => "—",
-  }
-}
-
-fn is_pr_type(n_type: Str) Bool {
-  n_type.starts_with("pullRequest")
-}
-
-fn is_issue_comment_type(n_type: Str) Bool {
-  n_type == "issueNewComment" or n_type == "issueCommentMention" or n_type == "issueCommentReaction"
-}
-
-fn is_pr_comment_type(n_type: Str) Bool {
-  n_type == "pullRequestComment" or n_type == "pullRequestCommented" or n_type == "pullRequestCommentMention"
-}
-
-fn relevant_url(notif: Dynamic) Str {
-  let n_type = field_string(notif, "type", "")
-  if is_pr_type(n_type) {
-    let pr_url = match optional_dynamic(notif, "pullRequest") {
-      pr => field_string(pr, "url", ""),
-      _ => "",
-    }
-    if is_pr_comment_type(n_type) {
-      let cid = nullable_string(notif, "pullRequestCommentId", "")
-      match pr_url.is_empty() {
-        true => "",
-        false => {
-          match cid.is_empty() {
-            true => pr_url,
-            false => "{pr_url}#issuecomment-{cid}",
-          }
-        },
-      }
-    } else {
-      pr_url
-    }
-  } else {
-    match optional_dynamic(notif, "issue") {
-      issue => field_string(issue, "url", ""),
-      _ => nullable_string(notif, "url", ""),
-    }
-  }
-}
-
-fn status_transition(notif: Dynamic) Str {
-  let issue_obj = optional_dynamic(notif, "issue")
-  let empty: [Dynamic] = []
-  let entries = match issue_obj {
-    iss => {
-      match decode::run(iss, decode::path(["history", "nodes"], decode::list(decode::dynamic))) {
-        ok(nodes) => nodes,
-        err(_) => empty,
-      }
-    },
-    _ => empty,
-  }
-  mut from_name = ""
-  mut to_name = ""
-  for entry in entries {
-    if from_name.is_empty() {
-      let f = match optional_dynamic(entry, "fromState") {
-        v => field_string(v, "name", ""),
-        _ => "",
-      }
-      let t = match optional_dynamic(entry, "toState") {
-        v => field_string(v, "name", ""),
-        _ => "",
-      }
-      if not f.is_empty() and not t.is_empty() {
-        from_name = f
-        to_name = t
-      }
-    }
-  }
-  match from_name.is_empty() {
-    true => "(no transition recorded)",
-    false => "{from_name} → {to_name}",
-  }
-}
-
-fn issue_update_text(notif: Dynamic, n_type: Str) Str {
-  if is_issue_comment_type(n_type) {
-    match optional_dynamic(notif, "comment") {
-      c => {
-        let author = optional_user_name(c, "user")
-        let created = text::format_date(field_string(c, "createdAt", ""))
-        let body = field_string(c, "body", "(comment body unavailable)")
-        "Comment\n{author} · {created}\n\n{body}"
-      },
-      _ => "Comment\n(comment body unavailable)",
-    }
-  } else if n_type == "issueStatusChanged" {
-    "Status change\n{status_transition(notif)}"
-  } else {
-    match optional_dynamic(notif, "issue") {
-      issue => {
-        let desc = nullable_string(issue, "description", "")
-        match desc.is_empty() {
-          true => "Latest event\n{field_string(notif, "type", n_type)}",
-          false => "Description\n{desc}",
-        }
-      },
-      _ => "Latest event\n{n_type}",
-    }
-  }
-}
-
-fn issue_detail_text(item: inbox::Item, notif: Dynamic) Str {
-  let n_type = field_string(notif, "type", item.notification_type)
-  let actor = optional_user_name(notif, "actor")
-  let created = text::format_date(nullable_string(notif, "createdAt", ""))
-  match optional_dynamic(notif, "issue") {
-    issue => {
-      let status = optional_name(issue, "state")
-      let team = optional_name(issue, "team")
-      let project = optional_name(issue, "project")
-      let assignee = optional_user_name(issue, "assignee")
-      let priority = match decode::run(issue, decode::field("priority", decode::nullable(decode::int))) {
-        ok(p) => state::priority_label(p),
-        err(_) => "—",
-      }
-      "{item.target_id} — {item.title}\n\nStatus: {status}\nTeam: {team}\nProject: {project}\nAssignee: {assignee}\nPriority: {priority}\n\nUpdate\n{actor} {item.type_label} · {created}\n\n{issue_update_text(notif, n_type)}"
-    },
-    _ => "{item.target_id} — {item.title}\n\nUpdate\n{actor} {item.type_label} · {created}",
-  }
-}
-
-fn pr_detail_text(item: inbox::Item, notif: Dynamic) Str {
-  let n_type = field_string(notif, "type", item.notification_type)
-  let actor = optional_user_name(notif, "actor")
-  let created = text::format_date(nullable_string(notif, "createdAt", ""))
-  match optional_dynamic(notif, "pullRequest") {
-    pr => {
-      let status = field_string(pr, "status", "—")
-      let source = field_string(pr, "sourceBranch", "—")
-      let target = field_string(pr, "targetBranch", "—")
-      let author = optional_user_name(pr, "creator")
-      let opened = text::format_date(field_string(pr, "openedAt", ""))
-      let update = match is_pr_comment_type(n_type) {
-        true => {
-          "Comment\n{actor} · {created}\n\n{nullable_string(notif, "subtitle", "(comment body unavailable)")}"
-        },
-        false => "Update\n{actor} {item.type_label} · {created}",
-      }
-      "Status: {status}\nBranch: {source} → {target}\nAuthor: {author}\nOpened: {opened}\n\n{update}"
-    },
-    _ => "Update\n{actor} {item.type_label} · {created}",
-  }
-}
-
-fn detail_text(item: inbox::Item, detail: Dynamic) Str {
-  match is_pr_type(item.notification_type) {
-    true => pr_detail_text(item, detail),
-    false => issue_detail_text(item, detail),
-  }
-}
-
-fn detail_body(item: inbox::Item, loading_detail: Bool, detail_error: Str, detail: Dynamic?) ui::Widget {
-  let header = match is_pr_type(item.notification_type) {
-    true => "",
-    false => "{item.target_id} — {item.title}\n\n",
-  }
-  if loading_detail {
-    ui::text("{header}Loading detail…")
-  } else if not detail_error.is_empty() {
-    ui::text("{header}Unable to load detail\n{detail_error}")
-  } else {
-    match detail {
-      d => ui::text(detail_text(item, d)),
-      _ => ui::text("{item.target_id} — {item.title}\n\nNo detail loaded."),
-    }
-  }
-}
-
-fn detail_title(item: inbox::Item) Str {
-  match is_pr_type(item.notification_type) {
-    true => "{item.target_id} — {item.title}",
-    false => item.target_id,
-  }
-}
-
-fn detail_footer() ui::Widget {
-  hints::bar(["o open", "⌫ delete", "Esc close"])
-}
-
-fn detail_modal(
-  item: inbox::Item,
-  loading_detail: Bool,
-  detail_error: Str,
-  detail: Dynamic?,
-  on_dismiss: fn(ui::EventContext),
-) ui::Widget {
-  modal::dialog(
-    title: detail_title(item),
-    child: ui::column_stretch(
-      [
-        detail_body(item: item, loading_detail: loading_detail, detail_error: detail_error, detail: detail),
-        ui::box(width: 1, height: 1),
-      ],
-    ),
-    footer: detail_footer(),
-    width: 72,
-    on_dismiss: on_dismiss,
-  )
-}
-
-fn content(
-  items: [inbox::Item],
-  loading: Bool,
-  error: Str,
-  cursor: Int,
-  detail_open: Bool,
-  loading_detail: Bool,
-  detail_error: Str,
-  detail: Dynamic?,
-  on_detail_dismiss: fn(ui::EventContext),
-) ui::Widget {
-  if loading {
-    ui::text("Loading inbox…")
-  } else if not error.is_empty() {
-    ui::text("Unable to load inbox", style: ui::style(bold: true))
-  } else if items.size() == 0 {
-    ui::center(ui::text("Inbox empty"))
-  } else if detail_open {
-    let item = items.at(cursor)
-    ui::overlay(
-      child: render_rows(items, cursor),
-      overlay: detail_modal(
-        item: item,
-        loading_detail: loading_detail,
-        detail_error: detail_error,
-        detail: detail,
-        on_dismiss: on_detail_dismiss,
-      ),
-      position: ui::OverlayPosition::center,
-      trap_focus: true,
-      auto_focus: true,
-    )
-  } else {
-    render_rows(items, cursor)
-  }
-}
-
-fn item_id_at(items: [inbox::Item], index: Int) Str {
-  match index >= 0 and index < items.size() {
-    true => items.at(index).notification_id,
-    false => "",
-  }
-}
-
-fn cursor_for_id(items: [inbox::Item], previous_id: Str, fallback: Int) Int {
-  mut found = -1
-  if not previous_id.is_empty() {
-    for item, idx in items {
-      if item.notification_id == previous_id {
-        found = idx
-      }
-    }
-  }
-  match found >= 0 {
-    true => found,
-    false => clamp_cursor(fallback, items.size()),
-  }
-}
-
-fn has_item_id(items: [inbox::Item], id: Str) Bool {
-  mut found = false
-  if not id.is_empty() {
-    for item in items {
-      if item.notification_id == id {
-        found = true
-      }
-    }
-  }
-  found
-}
-
-fn without_item_id(items: [inbox::Item], id: Str) [inbox::Item] {
-  mut kept: [inbox::Item] = []
-  for item in items {
-    if not (item.notification_id == id) {
-      kept.push(item)
-    }
-  }
-  kept
-}
-
-fn cache_from_state(state: InboxUiState) cache::InboxCache {
-  cache::InboxCache{items: state.items, cursor: state.cursor}
-}
-
-fn save_cache(state: InboxUiState) {
-  let _ = cache::save_inbox(cache_from_state(state))
-}
-
-fn apply_refreshed_items(
-  mut state: InboxUiState,
-  result: [inbox::Item]!Str,
-  preserve_id: Str,
-  fallback_cursor: Int,
-  silent: Bool,
-) InboxUiState {
-  match result {
-    ok(items) => {
-      state.items = items
-      state.cursor = cursor_for_id(items, preserve_id, fallback_cursor)
-      if state.detail_open and not has_item_id(items, preserve_id) {
-        state.detail_open = false
-        state.detail_loading = false
-        state.detail_error = ""
-        state.detail = maybe::none()
-      }
-      state.error = ""
-      save_cache(state)
-    },
-    err(e) => {
-      if not silent {
-        state.error = e
-      }
-    },
-  }
-  state.loaded = true
-  state.loading = false
-  state
-}
-
-fn start_background_refresh(api_key: Str, rt: ui::Runtime<InboxUiState>) {
-  async::start(
-    fn() {
-      while {
-        async::sleep(duration::from_minutes(5))
-        let result = inbox::load(api_key)
-        match result {
-          ok(_) => (),
-          err(e) => {
-            ui::show_toast_runtime(
-              rt,
-              "Unable to refresh inbox",
-              maybe::some(e),
-              ui::ToastVariant::error,
-              maybe::none(),
-            )
-          },
-        }
-        rt.dispatch(
-          fn(state: ui::State<InboxUiState>) {
-            let current = state.value()
-            let preserve_id = item_id_at(current.items, current.cursor)
-            state.set(
-              fn(mut next: InboxUiState) {
-                next = apply_refreshed_items(next, result, preserve_id, current.cursor, true)
-              },
-            )
-          },
-        )
-      }
-    },
-  )
-}
-
-struct InboxUiState {
-  items: [inbox::Item],
-  cursor: Int,
-  loading: Bool,
-  loaded: Bool,
-  error: Str,
-  detail_open: Bool,
-  detail_id: Str,
-  detail_loading: Bool,
-  detail_error: Str,
-  detail: Dynamic?,
-}
-
-fn initial_state() InboxUiState {
-  let no_detail: Dynamic? = maybe::none()
-  match cache::load_inbox() {
-    cached => InboxUiState{
-      items: cached.items,
-      cursor: clamp_cursor(cached.cursor, cached.items.size()),
-      loading: cached.items.size() == 0,
-      loaded: cached.items.size() > 0,
-      error: "",
-      detail_open: false,
-      detail_id: "",
-      detail_loading: false,
-      detail_error: "",
-      detail: no_detail,
-    },
-    _ => InboxUiState{
-      items: [],
-      cursor: 0,
-      loading: true,
-      loaded: false,
-      error: "",
-      detail_open: false,
-      detail_id: "",
-      detail_loading: false,
-      detail_error: "",
-      detail: no_detail,
-    },
-  }
-}
-
-fn new(api_key: Str) ui::Widget {
-  ui::stateful(
-    key: "inbox",
-    init: fn(ctx: ui::BuildContext) InboxUiState {
-      let initial = initial_state()
-      let has_cached_data = initial.loaded
-      let rt = ctx.runtime<InboxUiState>()
-      async::start(
-        fn() {
-          let result = inbox::load(api_key)
-          rt.dispatch(
-            fn(state: ui::State<InboxUiState>) {
-              let current = state.value()
-              let preserve_id = item_id_at(current.items, current.cursor)
-              state.set(
-                fn(mut loaded: InboxUiState) {
-                  loaded = apply_refreshed_items(loaded, result, preserve_id, current.cursor, has_cached_data)
-                },
-              )
+// Background detail fetch. Late results are discarded if the user has
+// since moved to a different item (detail_request_id no longer matches).
+// Errors are surfaced inline in the detail pane (no toast — the pane
+// itself is the dedicated slot for that failure mode).
+fn fetch_detail(api_key: Str, target_id: Str, rt: ui::Runtime<View>) {
+  async::start(fn() {
+    let result = inbox::load_detail(api_key, target_id)
+    rt.dispatch(fn(state: ui::State<View>) {
+      state.set(fn(mut s: View) {
+        if s.detail_request_id == target_id {
+          match result {
+            ok(d) => {
+              s.detail = maybe::some(d)
+              s.detail_loaded_id = target_id
+              s.detail_loading = false
+              s.detail_error = ""
             },
-          )
-        },
-      )
-      start_background_refresh(api_key, rt)
-      initial
+            err(e) => {
+              s.detail_loading = false
+              s.detail_error = e
+            },
+          }
+        }
+      })
+    })
+  })
+}
+
+// Request the detail for whatever item the cursor is currently on, if it
+// differs from what's already loaded or in-flight. Safe to call from any
+// action handler.
+fn request_detail_for_cursor(
+  api_key: Str, state: ui::State<View>, rt: ui::Runtime<View>,
+) {
+  let s = state.value()
+  if s.items.size() > 0 {
+    let target_id = s.items.at(s.cursor).notification_id
+    let already_requested = s.detail_request_id == target_id
+    let already_loaded = s.detail_loaded_id == target_id
+    if not target_id.is_empty() and not already_requested and not already_loaded {
+      state.set(fn(mut x: View) {
+        x.detail_request_id = target_id
+        x.detail_loading = true
+        x.detail_error = ""
+        x.detail = maybe::none()
+      })
+      fetch_detail(api_key, target_id, rt)
+    }
+  }
+}
+
+// Errors are surfaced inline via the error_pane the body renders when
+// `view.error` is non-empty — no toast for load failures since the pane
+// itself is the dedicated UI slot for that.
+fn load_inbox(api_key: Str, rt: ui::Runtime<View>) {
+  async::start(fn() {
+    let result = inbox::load(api_key)
+    rt.dispatch(fn(s: ui::State<View>) {
+      s.set(fn(mut v: View) {
+        match result {
+          ok(items) => {
+            v.items = items
+            v.error = ""
+            v.cursor = clamp_cursor(v.cursor, items.size())
+          },
+          err(e) => { v.error = e },
+        }
+        v.loading = false
+      })
+      // After the inbox lands, kick off a detail fetch for whatever item
+      // ends up under the cursor (cursor 0 on first load).
+      request_detail_for_cursor(api_key, s, rt)
+    })
+  })
+}
+
+// ── List rendering ────────────────────────────────────────────────────
+
+// A single inbox row. Two lines per tile:
+//   line 1 (title):    issue title, ellipsis-truncated to pane width
+//   line 2 (subtitle): actor name + action (e.g. "alice commented")
+//
+// list_tile arranges title + subtitle in a vertical Flex internally.
+fn render_row(theme: ui::Theme, item: inbox::Item, selected: Bool) ui::Widget {
+  let title = ui::rich_text(
+    [ui::span(item.title, fg: theme.foreground)],
+    overflow: ui::TextOverflow::ellipsis,
+    max_lines: 1,
+  )
+  let subtitle = ui::styled_text(
+    "{item.actor_name} {item.type_label}",
+    fg: theme.muted_foreground,
+  )
+  ui::list_tile(title: title, subtitle: subtitle, selected: selected)
+}
+
+fn list_rows(theme: ui::Theme, model: View) [ui::Widget] {
+  mut rows: [ui::Widget] = []
+  for item, idx in model.items {
+    rows.push(render_row(theme, item, idx == model.cursor))
+  }
+  rows
+}
+
+// Width of the list pane (left side) in the split. Fixed at 36 cols for
+// v1; future versions can make this responsive once we expose terminal
+// size from the runtime.
+let LIST_PANE_WIDTH: Int = 36
+
+fn list_pane(theme: ui::Theme, model: View) ui::Widget {
+  // scroll_pane lays its child out with unbounded width AND height (so
+  // the child can be larger than the pane and scroll). That unbounded
+  // width means the row inside each list_tile has no flex space to
+  // hand to its `expanded(actor)` cell — the row collapses to its
+  // intrinsic content width and the selected-row highlight ends up
+  // only as wide as the text, not the pane.
+  //
+  // We pin the column's width with an inner sized_box so the
+  // list_tiles get full-pane width and the highlight spans the whole
+  // row. main_size: min keeps the column the height of its rows so
+  // they sit at the top instead of stretching vertically.
+  ui::scroll_pane(
+    ui::sized_box(
+      LIST_PANE_WIDTH,
+      0,
+      ui::column(
+        list_rows(theme, model),
+        main_size: ui::MainSize::min,
+        cross_align: ui::CrossAlign::stretch,
+      ),
+    ),
+    controller: model.list_scroll,
+  )
+}
+
+// ── Detail rendering ──────────────────────────────────────────────────
+
+// Header reminds the reader WHY they got the notification: who acted,
+// what they did, and which item it's about. This is the context that
+// gets lost if we lead with the full issue title.
+fn detail_header(theme: ui::Theme, item: inbox::Item, d: inbox::Detail) ui::Widget {
+  let context_line = "{item.actor_name} {item.type_label}"
+  let id_label = match d.team_key.is_empty() {
+    false => "{d.identifier} · {d.team_key}",
+    true => d.identifier,
+  }
+  ui::column(
+    [
+      ui::styled_text(context_line, fg: theme.accent_text, attrs: ui::TextAttrs{ bold: true }),
+      ui::styled_text(id_label, fg: theme.muted_foreground),
+      ui::sized_box(0, 1, ui::text("")),
+      ui::rich_text([ui::span(d.title, fg: theme.foreground, attrs: ui::TextAttrs{ bold: true })], soft_wrap: true),
+    ],
+    main_size: ui::MainSize::min,
+    cross_align: ui::CrossAlign::start,
+  )
+}
+
+fn priority_label(p: Int?) Str {
+  match p {
+    n => match n {
+      0 => "No priority",
+      1 => "Urgent",
+      2 => "High",
+      3 => "Medium",
+      4 => "Low",
+      _ => "Priority {n.to_str()}",
     },
-    build: fn(_ctx: ui::BuildContext, state: ui::State<InboxUiState>) ui::Widget {
+    _ => "—",
+  }
+}
+
+fn meta_row(theme: ui::Theme, label: Str, value: Str) ui::Widget {
+  ui::row([
+    ui::sized_box(12, 1, ui::styled_text(label, fg: theme.muted_foreground)),
+    ui::expanded(ui::styled_text(value, fg: theme.foreground)),
+  ])
+}
+
+// Compact metadata: just status and assignee. Keeping this short means
+// the description (the thing the user actually wants to read) lands on
+// screen without a scroll.
+fn detail_meta(theme: ui::Theme, d: inbox::Detail) ui::Widget {
+  ui::column(
+    [
+      meta_row(theme, "Status", d.state_name),
+      meta_row(theme, "Assignee", d.assignee_name),
+    ],
+    main_size: ui::MainSize::min,
+    cross_align: ui::CrossAlign::stretch,
+  )
+}
+
+fn section_divider(theme: ui::Theme, label: Str) ui::Widget {
+  ui::column(
+    [
+      ui::sized_box(0, 1, ui::text("")),
+      ui::styled_text(label, fg: theme.muted_foreground, attrs: ui::TextAttrs{ bold: true }),
+      ui::sized_box(0, 1, ui::text("")),
+    ],
+    main_size: ui::MainSize::min,
+    cross_align: ui::CrossAlign::start,
+  )
+}
+
+fn detail_description(theme: ui::Theme, body: Str) ui::Widget {
+  match body.is_empty() {
+    true => ui::styled_text("(no description)", fg: theme.muted_foreground),
+    false => ui::rich_text([ui::span(body, fg: theme.foreground)], soft_wrap: true),
+  }
+}
+
+fn render_comment(theme: ui::Theme, c: inbox::DetailComment) ui::Widget {
+  let header = match c.created_at.is_empty() {
+    false => "{c.author} · {c.created_at}",
+    true => c.author,
+  }
+  ui::column(
+    [
+      ui::styled_text(header, fg: theme.muted_foreground),
+      ui::rich_text([ui::span(c.body, fg: theme.foreground)], soft_wrap: true),
+      ui::sized_box(0, 1, ui::text("")),
+    ],
+    main_size: ui::MainSize::min,
+    cross_align: ui::CrossAlign::start,
+  )
+}
+
+fn detail_comments(theme: ui::Theme, comments: [inbox::DetailComment]) [ui::Widget] {
+  match comments.size() == 0 {
+    true => [],
+    false => {
+      mut children: [ui::Widget] = [section_divider(theme, "Comments")]
+      for c in comments {
+        children.push(render_comment(theme, c))
+      }
+      children
+    },
+  }
+}
+
+fn render_history(theme: ui::Theme, h: inbox::DetailHistory) ui::Widget {
+  let label = match h.from_state.is_empty() {
+    false => "{h.from_state} → {h.to_state}",
+    true => h.to_state,
+  }
+  let line = match h.created_at.is_empty() {
+    false => "{label} · {h.created_at}",
+    true => label,
+  }
+  ui::styled_text(line, fg: theme.muted_foreground)
+}
+
+fn detail_history(theme: ui::Theme, history: [inbox::DetailHistory]) [ui::Widget] {
+  match history.size() == 0 {
+    true => [],
+    false => {
+      mut children: [ui::Widget] = [section_divider(theme, "History")]
+      for h in history {
+        children.push(render_history(theme, h))
+      }
+      children
+    },
+  }
+}
+
+fn render_detail(
+  theme: ui::Theme, item: inbox::Item, d: inbox::Detail, scroll: ui::ScrollController,
+) ui::Widget {
+  // Layout order: notification context, identifier, issue title, compact
+  // metadata, then the *thing that triggered the notification* (the
+  // specific comment/mention if present, else the issue description).
+  // For comment/mention notifications the user wants to see THAT comment
+  // immediately, not scroll past the whole issue body to find it.
+  mut children: [ui::Widget] = [
+    detail_header(theme, item, d),
+    section_divider(theme, "Details"),
+    detail_meta(theme, d),
+  ]
+  match d.triggering_comment {
+    c => {
+      children.push(section_divider(theme, "Comment"))
+      children.push(render_comment(theme, c))
+    },
+    _ => {
+      children.push(section_divider(theme, "Description"))
+      children.push(detail_description(theme, d.description))
+    },
+  }
+  if d.comments.size() > 0 {
+    children.push(ui::sized_box(0, 1, ui::text("")))
+    children.push(ui::styled_text(
+      "{d.comments.size().to_str()} comments in thread — press Enter for the full issue",
+      fg: theme.muted_foreground,
+    ))
+  }
+  // scroll_view (single-axis) keeps the child's cross-axis (width)
+  // bounded so soft_wrap can actually wrap title and comment text.
+  // scroll_pane would unbound both axes and the wrapped text would
+  // render on a single very long line.
+  ui::scroll_view(
+    ui::column(children, main_size: ui::MainSize::min, cross_align: ui::CrossAlign::stretch),
+    controller: scroll,
+  )
+}
+
+fn detail_pane(theme: ui::Theme, model: View) ui::Widget {
+  if model.detail_loading {
+    ui::center(ui::styled_text("Loading detail…", fg: theme.muted_foreground))
+  } else if not model.detail_error.is_empty() {
+    ui::center(
+      ui::column(
+        [
+          ui::styled_text("Failed to load detail", fg: theme.danger_text),
+          ui::sized_box(0, 1, ui::text("")),
+          ui::rich_text([ui::span(model.detail_error, fg: theme.muted_foreground)], soft_wrap: true),
+        ],
+        main_size: ui::MainSize::min,
+        cross_align: ui::CrossAlign::center,
+      ),
+    )
+  } else if model.items.size() > 0 {
+    let item = model.items.at(model.cursor)
+    match model.detail {
+      d => render_detail(theme, item, d, model.detail_scroll),
+      _ => ui::center(ui::styled_text("Select a notification", fg: theme.muted_foreground)),
+    }
+  } else {
+    ui::center(ui::styled_text("Select a notification", fg: theme.muted_foreground))
+  }
+}
+
+// ── Split body ────────────────────────────────────────────────────────
+
+fn render_split(theme: ui::Theme, model: View) ui::Widget {
+  let separator = ui::sized_box(
+    1,
+    0,
+    ui::decorated_box(
+      ui::text(""),
+      bg: theme.background,
+      border: ui::Borders{ left: true },
+      border_fg: theme.border,
+      border_bg: theme.background,
+    ),
+  )
+  // cross_align: stretch is critical here. ui::row defaults to
+  // CrossAlign::center, which would loose-constrain each child's vertical
+  // size, size them to their intrinsic content, and centre them in the
+  // row — leaving the list and detail floating in the middle of the
+  // body. We want both panes tall.
+  ui::row(
+    [
+      ui::sized_box(LIST_PANE_WIDTH, 0, list_pane(theme, model)),
+      separator,
+      ui::expanded(ui::padding(detail_pane(theme, model), horizontal: 1)),
+    ],
+    cross_align: ui::CrossAlign::stretch,
+  )
+}
+
+fn error_pane(theme: ui::Theme, err: Str) ui::Widget {
+  ui::center(
+    ui::column(
+      [
+        ui::styled_text(err, fg: theme.danger_text),
+        ui::sized_box(0, 1, ui::text("")),
+        ui::styled_text("press r to retry", fg: theme.muted_foreground),
+      ],
+      main_size: ui::MainSize::min,
+      cross_align: ui::CrossAlign::center,
+    ),
+  )
+}
+
+// All body branches return a `column` so the outermost widget type at the
+// build's body slot never changes between rebuilds — see
+// `docs/widget-reconciliation.md` in vaxis-ard for context.
+fn body(theme: ui::Theme, model: View) ui::Widget {
+  match {
+    model.loading => ui::column([
+      ui::expanded(ui::center(ui::text("Loading inbox…"))),
+    ]),
+    not model.error.is_empty() => ui::column([
+      ui::expanded(error_pane(theme, model.error)),
+    ]),
+    model.items.size() == 0 => ui::column([
+      ui::expanded(ui::center(ui::styled_text("No notifications", fg: theme.muted_foreground))),
+    ]),
+    _ => ui::column([ui::expanded(render_split(theme, model))]),
+  }
+}
+
+// ── Entry point ───────────────────────────────────────────────────────
+
+fn new(
+  api_key: Str,
+  on_open: fn(inbox::Item),
+  notify: fn(Str, Str, toast::ToastVariant),
+  active: Bool,
+) ui::Widget {
+  ui::stateful(
+    key: "inbox-view",
+    init: fn(ctx: ui::BuildContext) View {
+      // Kick the initial fetch from init. The earlier suspicion that
+      // init dispatches had a cross-module monomorphization issue
+      // turned out to be misdiagnosed: the real culprit was the
+      // widget-reconciliation pitfall (an outer widget type that
+      // changed across rebuilds caused state updates to look like
+      // no-ops). With body() pinned to a stable outer widget type,
+      // dispatch from init lands cleanly.
+      let rt = ctx.runtime<View>()
+      load_inbox(api_key, rt)
+      View{
+        items: [],
+        cursor: 0,
+        loading: true,
+        error: "",
+        list_scroll: ui::scroll_pane_controller(),
+        detail_scroll: ui::scroll_controller(),
+        detail_request_id: "",
+        detail_loaded_id: "",
+        detail: maybe::none(),
+        detail_loading: false,
+        detail_error: "",
+      }
+    },
+    build: fn(ctx: ui::BuildContext, state: ui::State<View>) ui::Widget {
+      let theme = ui::must_have_theme(ctx)
       let model = state.value()
-      let cursor = clamp_cursor(model.cursor, model.items.size())
-      ui::actions(
-        child: ui::shortcuts(
-          child: ui::focusable_key(
-            "tab.inbox",
-            content(
-              items: model.items,
-              loading: model.loading,
-              error: model.error,
-              cursor: cursor,
-              detail_open: model.detail_open,
-              loading_detail: model.detail_loading,
-              detail_error: model.detail_error,
-              detail: model.detail,
-              on_detail_dismiss: fn(ctx: ui::EventContext) {
-                state.set(
-                  fn(mut next: InboxUiState) {
-                    next.detail_open = false
-                    next.detail_loading = false
-                    next.detail_error = ""
-                    next.detail = maybe::none()
-                  },
-                )
-              },
-            ),
+      let rt = ctx.runtime<View>()
+
+      // Only the active tab's focus_scope participates in auto_focus
+      // and reclaim. Hidden tabs (kept mounted by indexed_stack) must
+      // not pull focus onto themselves, or keystrokes would route to
+      // a tab the user can't see.
+      ui::shortcuts(
+        ui::actions(
+          ui::focus_scope(
+            ui::focus(body(theme, model)),
+            trap: false,
+            auto_focus: active,
+            reclaim_focus: active,
           ),
-          bindings: [
-            "Up": "inbox.previous",
-            "k": "inbox.previous",
-            "Down": "inbox.next",
-            "j": "inbox.next",
-            "Enter": "inbox.open_detail",
-            "\r": "inbox.open_detail",
-            "\n": "inbox.open_detail",
-            "Ctrl+m": "inbox.open_detail",
-            "Escape": "inbox.close_detail",
-            "Esc": "inbox.close_detail",
-            "o": "inbox.open_browser",
-            "BackSpace": "inbox.archive_detail",
-            "r": "inbox.refresh",
+          [
+            ui::action("inbox.next", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              let next_cursor = clamp_cursor(model.cursor + 1, model.items.size())
+              state.set(fn(mut s: View) { s.cursor = next_cursor })
+              let _ = ui::scroll_pane_scroll_to(model.list_scroll, 0, next_cursor)
+              let _ = ui::scroll_controller_scroll_to_start(model.detail_scroll)
+              request_detail_for_cursor(api_key, state, rt)
+              ui::EventResult::handled
+            }),
+            ui::action("inbox.prev", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              let next_cursor = clamp_cursor(model.cursor - 1, model.items.size())
+              state.set(fn(mut s: View) { s.cursor = next_cursor })
+              let _ = ui::scroll_pane_scroll_to(model.list_scroll, 0, next_cursor)
+              let _ = ui::scroll_controller_scroll_to_start(model.detail_scroll)
+              request_detail_for_cursor(api_key, state, rt)
+              ui::EventResult::handled
+            }),
+            ui::action("inbox.open", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              if model.cursor < model.items.size() {
+                on_open(model.items.at(model.cursor))
+              }
+              ui::EventResult::handled
+            }),
+            ui::action("inbox.delete", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              if model.cursor < model.items.size() {
+                let item = model.items.at(model.cursor)
+                let id = item.notification_id
+                let key = api_key
+                // Fire-and-forget archive; on failure surface a toast.
+                // A failed archive will also reappear on the next manual
+                // refresh since we removed it locally.
+                async::start(fn() {
+                  match inbox::archive(key, id) {
+                    ok(_) => (),
+                    err(e) => notify(
+                      "Couldn't archive notification",
+                      e,
+                      toast::ToastVariant::error,
+                    ),
+                  }
+                })
+                // Batch every post-delete mutation into ONE state.set so
+                // the optimistic update is a single rebuild: drop the
+                // row, clamp the cursor, and update the detail-pane
+                // tracking fields based on the new cursor target.
+                state.set(fn(mut s: View) {
+                  mut remaining: [inbox::Item] = []
+                  for it, idx in s.items {
+                    if not (idx == model.cursor) {
+                      remaining.push(it)
+                    }
+                  }
+                  s.items = remaining
+                  s.cursor = clamp_cursor(model.cursor, remaining.size())
+                  if remaining.size() == 0 {
+                    s.detail = maybe::none()
+                    s.detail_loaded_id = ""
+                    s.detail_request_id = ""
+                    s.detail_loading = false
+                    s.detail_error = ""
+                  } else {
+                    let new_target = remaining.at(s.cursor).notification_id
+                    if not (s.detail_loaded_id == new_target) {
+                      s.detail = maybe::none()
+                      s.detail_request_id = new_target
+                      s.detail_loading = true
+                      s.detail_error = ""
+                    }
+                  }
+                })
+                // After the single state mutation, kick off a fetch for
+                // the new cursor target if that detail isn't already
+                // cached.
+                let after = state.value()
+                let needs_fetch = after.items.size() > 0 and after.detail_loading and not after.detail_request_id.is_empty()
+                if needs_fetch {
+                  fetch_detail(api_key, after.detail_request_id, rt)
+                }
+              }
+              ui::EventResult::handled
+            }),
+            ui::action("inbox.refresh", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              state.set(fn(mut s: View) {
+                s.loading = true
+                s.error = ""
+              })
+              load_inbox(api_key, rt)
+              ui::EventResult::handled
+            }),
+            // Detail-pane scrolling forwarded from list-focused shortcuts.
+            ui::action("inbox.detail.line_down", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              let _ = ui::scroll_controller_scroll_by_lines(model.detail_scroll, 1)
+              ui::EventResult::handled
+            }),
+            ui::action("inbox.detail.line_up", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              let _ = ui::scroll_controller_scroll_by_lines(model.detail_scroll, -1)
+              ui::EventResult::handled
+            }),
+            // Coarse page-scroll approximation: scroll by 10 rows. Once
+            // upstream exposes ScrollByPages on ScrollController we can
+            // make this a real page.
+            ui::action("inbox.detail.page_down", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              let _ = ui::scroll_controller_scroll_by_lines(model.detail_scroll, 10)
+              ui::EventResult::handled
+            }),
+            ui::action("inbox.detail.page_up", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              let _ = ui::scroll_controller_scroll_by_lines(model.detail_scroll, -10)
+              ui::EventResult::handled
+            }),
           ],
         ),
-        bindings: [
-          ui::action(
-            "inbox.previous",
-            fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              if not model.detail_open {
-                state.set(
-                  fn(mut next: InboxUiState) {
-                    next.cursor = clamp_cursor(cursor - 1, model.items.size())
-                    save_cache(next)
-                  },
-                )
-              }
-              ui::EventResult::handled
-            },
-          ),
-          ui::action(
-            "inbox.next",
-            fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              if not model.detail_open {
-                state.set(
-                  fn(mut next: InboxUiState) {
-                    next.cursor = clamp_cursor(cursor + 1, model.items.size())
-                    save_cache(next)
-                  },
-                )
-              }
-              ui::EventResult::handled
-            },
-          ),
-          ui::action(
-            "inbox.refresh",
-            fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              if (not model.detail_open) and not model.loading {
-                state.set(
-                  fn(mut next: InboxUiState) {
-                    next.loading = true
-                  },
-                )
-                ui::dispatch_after(
-                  ctx,
-                  16,
-                  fn() {
-                    let current = state.value()
-                    let preserve_id = item_id_at(current.items, current.cursor)
-                    state.set(
-                      fn(mut loaded: InboxUiState) {
-                        loaded = apply_refreshed_items(loaded, inbox::load(api_key), preserve_id, current.cursor, false)
-                      },
-                    )
-                  },
-                )
-              }
-              ui::EventResult::handled
-            },
-          ),
-          ui::action(
-            "inbox.open_detail",
-            fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              if (not model.detail_open) and model.items.size() > 0 {
-                let selected = model.items.at(cursor)
-                let target_id = selected.notification_id
-                state.set(
-                  fn(mut next: InboxUiState) {
-                    next.detail_id = target_id
-                    next.detail_error = ""
-                    next.detail = maybe::none()
-                    next.detail_loading = true
-                    next.detail_open = true
-                  },
-                )
-                ui::dispatch_after(
-                  ctx,
-                  16,
-                  fn() {
-                    let current = state.value()
-                    if current.detail_id == target_id {
-                      state.set(
-                        fn(mut loaded: InboxUiState) {
-                          match inbox::load_detail(api_key, target_id) {
-                            ok(d) => {
-                              loaded.detail = maybe::some(d)
-                              loaded.detail_error = ""
-                            },
-                            err(e) => {
-                              loaded.detail = maybe::none()
-                              loaded.detail_error = e
-                            },
-                          }
-                          loaded.detail_loading = false
-                        },
-                      )
-                    }
-                  },
-                )
-              }
-              ui::EventResult::handled
-            },
-          ),
-          ui::action(
-            "inbox.open_browser",
-            fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              if model.detail_open {
-                match model.detail {
-                  d => {
-                    let target = relevant_url(d)
-                    if not target.is_empty() {
-                      let _ = os::open_url(target)
-                    }
-                  },
-                  _ => (),
-                }
-              }
-              ui::EventResult::handled
-            },
-          ),
-          ui::action(
-            "inbox.archive_detail",
-            fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              if model.items.size() > 0 {
-                let selected = model.items.at(cursor)
-                match inbox::archive(api_key, selected.notification_id) {
-                  ok(_) => {
-                    state.set(
-                      fn(mut adjusted: InboxUiState) {
-                        if model.detail_open {
-                          adjusted.detail_open = false
-                          adjusted.detail_loading = false
-                          adjusted.detail_error = ""
-                          adjusted.detail = maybe::none()
-                        }
-                        match inbox::load(api_key) {
-                          ok(updated_items) => {
-                            adjusted.items = updated_items
-                            adjusted.error = ""
-                            adjusted.cursor = clamp_cursor(cursor, updated_items.size())
-                            save_cache(adjusted)
-                          },
-                          err(e) => {
-                            adjusted.items = without_item_id(adjusted.items, selected.notification_id)
-                            adjusted.cursor = clamp_cursor(cursor, adjusted.items.size())
-                            adjusted.error = e
-                            save_cache(adjusted)
-                          },
-                        }
-                        adjusted.loaded = true
-                        adjusted.loading = false
-                        adjusted.cursor = clamp_cursor(cursor, adjusted.items.size())
-                      },
-                    )
-                  },
-                  err(e) => {
-                    state.set(
-                      fn(mut next: InboxUiState) {
-                        if model.detail_open {
-                          next.detail_error = e
-                        } else {
-                          next.error = e
-                        }
-                      },
-                    )
-                  },
-                }
-              }
-              ui::EventResult::handled
-            },
-          ),
-          ui::action(
-            "inbox.close_detail",
-            fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              state.set(
-                fn(mut next: InboxUiState) {
-                  next.detail_open = false
-                  next.detail_loading = false
-                  next.detail_error = ""
-                  next.detail = maybe::none()
-                },
-              )
-              ui::EventResult::handled
-            },
-          ),
+        [
+          "j": "inbox.next",
+          "Down": "inbox.next",
+          "k": "inbox.prev",
+          "Up": "inbox.prev",
+          "Enter": "inbox.open",
+          "Backspace": "inbox.delete",
+          "r": "inbox.refresh",
+          "l": "inbox.detail.line_down",
+          "Right": "inbox.detail.line_down",
+          "h": "inbox.detail.line_up",
+          "Left": "inbox.detail.line_up",
+          "Space": "inbox.detail.page_down",
+          "Shift+Space": "inbox.detail.page_up",
         ],
       )
     },

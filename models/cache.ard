@@ -3,61 +3,46 @@ use ard/json
 use ard/maybe
 
 use tinear/config
-use tinear/models/inbox
-use tinear/models/issues
+
+// On-disk cache of UI state we want to survive across app launches.
+// Currently scoped to the logged-in shell's tab layout so the user
+// reopens to whatever they last had visible (active tab + the list
+// of issue tabs they had open).
+//
+// Issue tabs are stored as identifiers (e.g. "CCA-1234"), not full
+// Issue records: when the tab mounts on restore, the issue detail
+// view fetches the issue itself, so we'd just be persisting stale
+// metadata if we cached the full struct.
 
 fn version() Int { 1 }
 
 struct LoggedInCache {
-  tab: Str,
-  issue_tabs: [issues::Issue],
-}
-
-struct InboxCache {
-  items: [inbox::Item],
-  cursor: Int,
-}
-
-struct MyIssuesCache {
-  columns: [issues::BoardColumn],
-  col: Int,
-  row: Int,
-  scroll: Int,
+  tab_index: Int,
+  issue_tabs: [Str],
 }
 
 struct DataCache {
   version: Int,
   logged_in: LoggedInCache,
-  inbox: InboxCache,
-  my_issues: MyIssuesCache,
 }
 
 fn empty_logged_in() LoggedInCache {
-  LoggedInCache{tab: "Inbox", issue_tabs: []}
-}
-
-fn empty_inbox() InboxCache {
-  InboxCache{items: [], cursor: 0}
-}
-
-fn empty_my_issues() MyIssuesCache {
-  MyIssuesCache{columns: [], col: 0, row: 0, scroll: 0}
+  let empty: [Str] = []
+  LoggedInCache{ tab_index: 0, issue_tabs: empty }
 }
 
 fn empty() DataCache {
-  DataCache{
-    version: version(),
-    logged_in: empty_logged_in(),
-    inbox: empty_inbox(),
-    my_issues: empty_my_issues(),
-  }
+  DataCache{ version: version(), logged_in: empty_logged_in() }
 }
 
-fn get_data_path() Str!Str {
+fn data_path() Str!Str {
   let dir = try config::get_config_dir()
   Result::ok("{dir}/data.json")
 }
 
+// Schema-version-aware decode. Anything that doesn't match the
+// current version is treated as no cache — better to start fresh
+// than to load incompatible data.
 fn decode(content: Str) DataCache? {
   match json::parse<DataCache>(content) {
     ok(cache) => match cache.version == version() {
@@ -75,7 +60,7 @@ fn encode(cache: DataCache) Str!Str {
 }
 
 fn load() DataCache? {
-  match get_data_path() {
+  match data_path() {
     ok(path) => {
       match fs::read(path) {
         ok(content) => decode(content),
@@ -86,27 +71,13 @@ fn load() DataCache? {
   }
 }
 
-fn current_for_update() DataCache!Str {
-  let path = try get_data_path()
-  if not fs::exists(path) {
-    Result::ok(empty())
-  } else {
-    let content = try fs::read(path)
-    match decode(content) {
-      cache => Result::ok(cache),
-      _ => Result::err("Invalid data cache"),
-    }
-  }
-}
-
 fn save(cache: DataCache) Void!Str {
   let dir = try config::get_config_dir()
   if not fs::exists(dir) {
     try fs::create_dir(dir)
   }
-
   let content = try encode(cache)
-  let path = try get_data_path()
+  let path = try data_path()
   try fs::write(path, content)
   Result::ok(())
 }
@@ -118,34 +89,14 @@ fn load_logged_in() LoggedInCache? {
   }
 }
 
-fn load_inbox() InboxCache? {
-  match load() {
-    cache => maybe::some(cache.inbox),
-    _ => maybe::none(),
-  }
-}
-
-fn load_my_issues() MyIssuesCache? {
-  match load() {
-    cache => maybe::some(cache.my_issues),
-    _ => maybe::none(),
-  }
-}
-
+// Persist just the logged-in slice. We don't currently have any
+// other slices in the cache, but the wrapper keeps the door open
+// for inbox / board state without breaking the file format.
 fn save_logged_in(logged_in: LoggedInCache) Void!Str {
-  mut cache = try current_for_update()
+  mut cache = match load() {
+    existing => existing,
+    _ => empty(),
+  }
   cache.logged_in = logged_in
-  save(cache)
-}
-
-fn save_inbox(inbox: InboxCache) Void!Str {
-  mut cache = try current_for_update()
-  cache.inbox = inbox
-  save(cache)
-}
-
-fn save_my_issues(my_issues: MyIssuesCache) Void!Str {
-  mut cache = try current_for_update()
-  cache.my_issues = my_issues
   save(cache)
 }

@@ -1,659 +1,415 @@
+use vaxis/ui
+
+use tinear/models/inbox
+use tinear/models/issues
+use tinear/os
+use ard/async
 use ard/maybe
 
 use tinear/models/cache
-use tinear/models/issues
-use tinear/tui/hints
+use tinear/tui/hints_bar
 use tinear/tui/inbox_view
 use tinear/tui/issue_detail_view
-use tinear/tui/issue_picker
+use tinear/tui/modal
 use tinear/tui/my_issues_view
-use tinear/tui/picker
 use tinear/tui/search_view
-use tinear/tui/ui
+use tinear/tui/toast
 
-type ActivePickerOption = picker::Props?
-
-fn state_picker_target() Str {
-  "state"
-}
-fn cycle_picker_target() Str {
-  "cycle"
-}
-
-struct LoggedInUiState {
-  tab: Str,
-  issue_tabs: [issues::Issue],
-  active_picker: ActivePickerOption,
-  search_open: Bool,
-}
-
-fn selected_tab(model: LoggedInUiState) Str {
-  match model.tab {
-    "" => "Inbox",
-    _ => model.tab,
-  }
+// Minimal shell for the logged-in view.
+//
+// Two permanent tabs (Inbox, My Issues) plus zero or more dynamic issue
+// detail tabs. Tab math treats them as one flat list:
+//   index 0       -> Inbox
+//   index 1       -> My Issues
+//   index 2..n+1  -> issue_tabs[i - 2]
+//
+// For this first pass:
+// - tab bodies are placeholders
+// - no cache, no overlays, no real Linear data
+// - two dummy issue tabs are seeded so tab math is exercised
+struct Model {
+  tab_index: Int,
+  issue_tabs: [Str],
 }
 
-fn is_valid_tab(tab: Str, issue_tabs: [issues::Issue]) Bool {
-  if tab == "Inbox" or tab == "My Issues" or tab.is_empty() {
-    true
-  } else {
-    mut found = false
-    for issue in issue_tabs {
-      if issue.identifier == tab {
-        found = true
-      }
-    }
-    found
-  }
-}
+fn total_tabs(s: Model) Int { 2 + s.issue_tabs.size() }
 
-fn normalize_tab(tab: Str, issue_tabs: [issues::Issue]) Str {
-  match is_valid_tab(tab, issue_tabs) {
-    true => match tab.is_empty() {
-      true => "Inbox",
-      false => tab,
-    },
-    false => "Inbox",
-  }
-}
-
-fn cache_from_model(model: LoggedInUiState) cache::LoggedInCache {
-  cache::LoggedInCache{tab: normalize_tab(selected_tab(model), model.issue_tabs), issue_tabs: model.issue_tabs}
-}
-
-fn save_cache(model: LoggedInUiState) {
-  let _ = cache::save_logged_in(cache_from_model(model))
-}
-
-fn initial_state() LoggedInUiState {
-  match cache::load_logged_in() {
-    cached => LoggedInUiState{
-      tab: normalize_tab(cached.tab, cached.issue_tabs),
-      issue_tabs: cached.issue_tabs,
-      active_picker: maybe::none(),
-      search_open: false,
-    },
-    _ => LoggedInUiState{
-      tab: "Inbox",
-      issue_tabs: [],
-      active_picker: maybe::none(),
-      search_open: false,
-    },
-  }
-}
-
-fn with_tab(model: LoggedInUiState, tab: Str) LoggedInUiState {
-  mut next = model
-  next.tab = tab
-  next
-}
-
-fn tab_count(model: LoggedInUiState) Int {
-  2 + model.issue_tabs.size()
-}
-
-fn tab_label_at(model: LoggedInUiState, index: Int) Str {
-  match index {
+fn tab_label_at(s: Model, i: Int) Str {
+  match i {
     0 => "Inbox",
     1 => "My Issues",
     _ => {
-      let issue_idx = index - 2
-      match issue_idx >= 0 and issue_idx < model.issue_tabs.size() {
-        true => model.issue_tabs.at(issue_idx).identifier,
-        false => "Inbox",
+      let issue_idx = i - 2
+      match issue_idx >= 0 and issue_idx < s.issue_tabs.size() {
+        true => s.issue_tabs.at(issue_idx),
+        false => "?",
       }
     },
   }
 }
 
-fn tab_index(model: LoggedInUiState, tab: Str) Int {
-  mut found = 0
-  if tab == "My Issues" {
-    found = 1
-  } else {
-    for issue, idx in model.issue_tabs {
-      if issue.identifier == tab {
-        found = idx + 2
+fn cycle_next(s: Model) Int {
+  let n = total_tabs(s)
+  match s.tab_index + 1 >= n {
+    true => 0,
+    false => s.tab_index + 1,
+  }
+}
+
+fn cycle_prev(s: Model) Int {
+  match s.tab_index <= 0 {
+    true => total_tabs(s) - 1,
+    false => s.tab_index - 1,
+  }
+}
+
+fn selected_is_issue_tab(s: Model) Bool { s.tab_index >= 2 }
+
+fn close_current_issue_tab(s: Model) Model {
+  mut next = s
+  let issue_idx = s.tab_index - 2
+  if issue_idx >= 0 and issue_idx < s.issue_tabs.size() {
+    mut remaining: [Str] = []
+    for label, idx in s.issue_tabs {
+      if not (idx == issue_idx) {
+        remaining.push(label)
       }
     }
+    next.issue_tabs = remaining
+    next.tab_index = 1
   }
-  found
+  next
 }
 
-fn next_tab(model: LoggedInUiState) Str {
-  let count = tab_count(model)
-  let current = tab_index(model, selected_tab(model))
-  let next = match current + 1 >= count {
-    true => 0,
-    false => current + 1,
+// Open `identifier` as an issue tab. If it's already in `issue_tabs`,
+// just switch to it; otherwise append a new tab and select it. Used by
+// the inbox's Enter action to surface a notification's issue.
+fn open_issue_tab(s: Model, identifier: Str) Model {
+  mut existing_idx = -1
+  for tab, i in s.issue_tabs {
+    if tab == identifier {
+      existing_idx = i
+    }
   }
-  tab_label_at(model, next)
+  mut next = s
+  if existing_idx >= 0 {
+    next.tab_index = 2 + existing_idx
+  } else {
+    mut new_tabs: [Str] = []
+    for tab in s.issue_tabs {
+      new_tabs.push(tab)
+    }
+    new_tabs.push(identifier)
+    next.issue_tabs = new_tabs
+    next.tab_index = 2 + new_tabs.size() - 1
+  }
+  next
 }
 
-fn previous_tab(model: LoggedInUiState) Str {
-  let count = tab_count(model)
-  let current = tab_index(model, selected_tab(model))
-  let previous = match current == 0 {
-    true => count - 1,
-    false => current - 1,
-  }
-  tab_label_at(model, previous)
-}
+// ── Rendering ─────────────────────────────────────────────────────────
 
-fn tab_label(label: Str, selected: Bool) ui::Widget {
+// Tab chip. Mirrors the theming used by upstream ListTile:
+//
+//   selected   => fg theme.foreground on bg theme.primary  (same as ListTile.Selected)
+//   unselected => fg theme.muted_foreground, transparent bg
+//
+// ClickAffordance::none suppresses the default underline vaxis/ui adds
+// to clickable Text; the bg fill is the visual affordance for tabs.
+fn tab_chip(theme: ui::Theme, label: Str, selected: Bool, on_press: fn(ui::EventContext)) ui::Widget {
   let padded = " {label} "
   match selected {
-    true => ui::text(padded, style: ui::style(reverse: true)),
-    false => ui::text(padded),
+    true => ui::styled_text(
+      padded,
+      fg: theme.foreground,
+      bg: theme.primary,
+      on_pressed: on_press,
+      click_affordance: ui::ClickAffordance::none,
+    ),
+    false => ui::styled_text(
+      padded,
+      fg: theme.muted_foreground,
+      on_pressed: on_press,
+      click_affordance: ui::ClickAffordance::none,
+    ),
   }
 }
 
-fn tab_bar(model: LoggedInUiState) ui::Widget {
-  let tab = selected_tab(model)
-  mut children = [
-    tab_label("Inbox", tab == "Inbox"),
-    ui::divider(style: ui::style(foreground: "border"), vertical: true),
-    tab_label("My Issues", tab == "My Issues"),
-  ]
-  for issue in model.issue_tabs {
-    children.push(ui::divider(style: ui::style(foreground: "border"), vertical: true))
-    children.push(tab_label(issue.identifier, tab == issue.identifier))
-  }
-  ui::row(children)
-}
-
-fn focus_tab(model: LoggedInUiState, tab: Str) {
-  match tab {
-    "My Issues" => ui::request_focus("tab.my_issues"),
-    "Inbox" => ui::request_focus("tab.inbox"),
-    _ => {
-      for issue in model.issue_tabs {
-        if issue.identifier == tab {
-          ui::request_focus("tab.issue.{issue.id}")
-        }
+// Tab bar widget. Owns its own bottom border so the composing column
+// doesn't need to space anything around it.
+fn tab_bar(theme: ui::Theme, s: Model, on_tab_press: fn(Int)) ui::Widget {
+  mut chips: [ui::Widget] = []
+  let n = total_tabs(s)
+  if n > 0 {
+    for i in 0..n - 1 {
+      if i > 0 {
+        chips.push(ui::styled_text("│", fg: theme.border))
       }
-    },
-  }
-}
-
-fn selected_issue_tab_index(model: LoggedInUiState) Int? {
-  let selected = selected_tab(model)
-  mut found: Int? = maybe::none()
-  for issue, idx in model.issue_tabs {
-    if issue.identifier == selected {
-      found = maybe::some(idx)
+      // `for` binds an immutable per-iteration `i`, captured by value
+      // by the closure below — no loop-closure trap.
+      chips.push(tab_chip(
+        theme,
+        tab_label_at(s, i),
+        i == s.tab_index,
+        fn(_ctx: ui::EventContext) { on_tab_press(i) },
+      ))
     }
   }
-  found
+  ui::column([
+    ui::row(chips),
+    ui::divider(fg: theme.border, bg: theme.background),
+  ])
 }
 
-fn body(
-  api_key: Str,
-  model: LoggedInUiState,
-  inbox: ui::Widget,
-  my_issues: ui::Widget,
-  on_state: fn(issues::Issue),
-  on_cycle: fn(issues::Issue),
+
+
+// Resolves the active tab to a body widget. All bodies are mounted at
+// once via ui::indexed_stack so each tab's local state (cursor, scroll,
+// fetched data) survives switching tabs — only the visible tab paints.
+fn body_for(
+  api_key: Str, s: Model,
+  on_open: fn(inbox::Item), on_open_issue: fn(issues::Issue),
+  notify: fn(Str, Str, toast::ToastVariant),
+  show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
+  close_modal: fn(),
 ) ui::Widget {
-  mut children = [inbox, my_issues]
-  for issue in model.issue_tabs {
-    children.push(issue_detail_view::new(api_key, issue, on_state, on_cycle))
+  // Each tab gets an `active` flag so only the currently-visible
+  // tab's focus_scope participates in auto_focus / reclaim. Hidden
+  // tabs stay mounted (indexed_stack keeps their state alive) but
+  // their focus_scopes no-op so they don't steal keystrokes from
+  // the visible tab.
+  mut children: [ui::Widget] = [
+    inbox_view::new(api_key, on_open, notify, active: s.tab_index == 0),
+    my_issues_view::new(
+      api_key, on_open_issue, notify, show_modal, close_modal,
+      active: s.tab_index == 1,
+    ),
+  ]
+  for label, idx in s.issue_tabs {
+    children.push(issue_detail_view::new(
+      api_key, label, notify, show_modal, close_modal,
+      active: s.tab_index == idx + 2,
+    ))
   }
-  ui::indexed_stack(tab_index(model, selected_tab(model)), children)
+  ui::indexed_stack(
+    s.tab_index, children, alignment: ui::Alignment::top_left,
+  )
 }
 
-fn footer(model: LoggedInUiState) ui::Widget {
-  match selected_tab(model) {
-    "My Issues" => hints::bar(["↑↓", "← →", "↵ open", "s status", "y cycle", "r refresh", "? search"]),
-    "Inbox" => hints::bar(["Tab switch", "↑↓ select", "⌫ delete", "r refresh", "↵ open", "? search"]),
-    _ => issue_detail_view::footer(),
+fn hints_for(s: Model) [hints_bar::Hint] {
+  match {
+    s.tab_index == 0 => [
+      hints_bar::Hint{ key: "Tab", label: "switch" },
+      hints_bar::Hint{ key: "↑↓",  label: "select" },
+      hints_bar::Hint{ key: "⌫",   label: "delete" },
+      hints_bar::Hint{ key: "r",   label: "refresh" },
+      hints_bar::Hint{ key: "↵",   label: "open" },
+      hints_bar::Hint{ key: "?",   label: "search" },
+    ],
+    s.tab_index == 1 => [
+      hints_bar::Hint{ key: "↑↓", label: "" },
+      hints_bar::Hint{ key: "←→", label: "" },
+      hints_bar::Hint{ key: "↵",  label: "open" },
+      hints_bar::Hint{ key: "s",  label: "status" },
+      hints_bar::Hint{ key: "y",  label: "cycle" },
+      hints_bar::Hint{ key: "r",  label: "refresh" },
+      hints_bar::Hint{ key: "?",  label: "search" },
+    ],
+    _ => [
+      hints_bar::Hint{ key: "↑↓",  label: "scroll" },
+      hints_bar::Hint{ key: "d",   label: "description" },
+      hints_bar::Hint{ key: "c",   label: "comments" },
+      hints_bar::Hint{ key: "n",   label: "new comment" },
+      hints_bar::Hint{ key: "s",   label: "status" },
+      hints_bar::Hint{ key: "y",   label: "cycle" },
+      hints_bar::Hint{ key: "Esc", label: "close" },
+    ],
   }
 }
 
-fn screen_separator() ui::Widget {
-  ui::divider(style: ui::style(foreground: "border"))
-}
-
-fn screen_content(
-  api_key: Str,
-  model: LoggedInUiState,
-  inbox: ui::Widget,
-  my_issues: ui::Widget,
-  on_state: fn(issues::Issue),
-  on_cycle: fn(issues::Issue),
+fn screen(
+  theme: ui::Theme, s: Model, api_key: Str,
+  on_tab_press: fn(Int),
+  on_open: fn(inbox::Item), on_open_issue: fn(issues::Issue),
+  notify: fn(Str, Str, toast::ToastVariant),
+  show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
+  close_modal: fn(),
 ) ui::Widget {
-  ui::column_stretch(
+  ui::column(
     [
-      tab_bar(model),
-      screen_separator(),
-      ui::expanded(body(api_key, model, inbox, my_issues, on_state, on_cycle)),
-      screen_separator(),
-      footer(model),
+      tab_bar(theme, s, on_tab_press),
+      ui::expanded(body_for(api_key, s, on_open, on_open_issue, notify, show_modal, close_modal)),
+      hints_bar::new(theme, hints_for(s)),
     ],
   )
 }
 
-fn content(
+// ── Entry point ───────────────────────────────────────────────────────
+
+fn new(
   api_key: Str,
-  model: LoggedInUiState,
-  inbox: ui::Widget,
-  my_issues: ui::Widget,
-  on_state: fn(issues::Issue),
-  on_cycle: fn(issues::Issue),
-  search: ui::Widget,
+  notify: fn(Str, Str, toast::ToastVariant),
+  show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
+  close_modal: fn(),
+  modal_open: Bool,
 ) ui::Widget {
-  let base = screen_content(api_key, model, inbox, my_issues, on_state, on_cycle)
-  let picker_open = model.active_picker.is_some()
-  let picker_overlay = match model.active_picker {
-    active => picker::new(active),
-    _ => ui::box(),
-  }
-  let with_picker = ui::overlay(
-    child: base,
-    overlay: picker_overlay,
-    position: ui::OverlayPosition::center,
-    trap_focus: picker_open,
-    auto_focus: picker_open,
-  )
-  let search_overlay = match model.search_open {
-    true => search,
-    false => ui::box(),
-  }
-  ui::overlay(
-    child: with_picker,
-    overlay: search_overlay,
-    position: ui::OverlayPosition::center,
-    trap_focus: model.search_open,
-    auto_focus: model.search_open,
-  )
-}
-
-fn open_issue(model: LoggedInUiState, issue: issues::Issue) LoggedInUiState {
-  mut next = model
-  mut found = false
-  for existing in next.issue_tabs {
-    if existing.id == issue.id {
-      found = true
-    }
-  }
-  if not found {
-    mut tabs = next.issue_tabs
-    tabs.push(issue)
-    next.issue_tabs = tabs
-  }
-  next.tab = issue.identifier
-  next
-}
-
-fn selected_tab_is_issue(model: LoggedInUiState) Bool {
-  let selected = selected_tab(model)
-  mut found = false
-  for issue in model.issue_tabs {
-    if issue.identifier == selected {
-      found = true
-    }
-  }
-  found
-}
-
-fn close_selected_issue(model: LoggedInUiState) LoggedInUiState {
-  mut next = model
-  let selected = selected_tab(model)
-  mut remaining: [issues::Issue] = []
-  mut closed = false
-  for issue in model.issue_tabs {
-    if issue.identifier == selected {
-      closed = true
-    } else {
-      remaining.push(issue)
-    }
-  }
-  if closed {
-    next.issue_tabs = remaining
-    next.tab = "My Issues"
-  }
-  next
-}
-
-fn replace_issue(model: LoggedInUiState, updated: issues::Issue) LoggedInUiState {
-  mut next = model
-  mut tabs: [issues::Issue] = []
-  for issue in model.issue_tabs {
-    if issue.id == updated.id {
-      tabs.push(updated)
-    } else {
-      tabs.push(issue)
-    }
-  }
-  next.issue_tabs = tabs
-  next.tab = updated.identifier
-  next
-}
-
-fn focus_selected_after_rebuild(ctx: ui::EventContext, model: LoggedInUiState) {
-  ui::dispatch_after(
-    ctx,
-    0,
-    fn() {
-      focus_tab(model, selected_tab(model))
-    },
-  )
-}
-
-fn confirm_active_picker(
-  api_key: Str,
-  target: Str,
-  issue_id: Str,
-  option: picker::Option,
-  model: LoggedInUiState,
-  state: ui::State<LoggedInUiState>,
-  ctx: ui::EventContext,
-) {
-  if option.current {
-    state.set(
-      fn(mut next: LoggedInUiState) {
-        next.active_picker = maybe::none()
-      },
-    )
-    focus_selected_after_rebuild(ctx, model)
-  } else {
-    let result = match target == state_picker_target() {
-      true => issues::update_state(api_key, issue_id, option.id),
-      false => issues::update_cycle(api_key, issue_id, option.id),
-    }
-    match result {
-      ok(_) => {
-        mut next_model = model
-        state.set(
-          fn(mut next: LoggedInUiState) {
-            next.active_picker = maybe::none()
-            match issues::load_issue(api_key, issue_id) {
-              ok(updated) => {
-                next = replace_issue(next, updated)
-                next_model = next
-                save_cache(next)
-              },
-              err(_) => { next_model = next },
-            }
-          },
-        )
-        focus_selected_after_rebuild(ctx, next_model)
-      },
-      err(_) => (),
-    }
-  }
-}
-
-fn open_state_picker(api_key: Str, issue: issues::Issue, model: LoggedInUiState, state: ui::State<LoggedInUiState>) LoggedInUiState {
-  mut next = model
-  match issue_picker::state_props(
-    api_key,
-    issue,
-    fn(ctx: ui::EventContext, option: picker::Option) {
-      confirm_active_picker(api_key, state_picker_target(), issue.id, option, model, state, ctx)
-    },
-    fn(ctx: ui::EventContext) {
-      state.set(fn(mut updated: LoggedInUiState) { updated.active_picker = maybe::none() })
-      focus_selected_after_rebuild(ctx, model)
-    },
-  ) {
-    ok(props) => { next.active_picker = maybe::some(props) },
-    err(_) => (),
-  }
-  next
-}
-
-fn open_cycle_picker(api_key: Str, issue: issues::Issue, model: LoggedInUiState, state: ui::State<LoggedInUiState>) LoggedInUiState {
-  mut next = model
-  match issue_picker::cycle_props(
-    api_key,
-    issue,
-    fn(ctx: ui::EventContext, option: picker::Option) {
-      confirm_active_picker(api_key, cycle_picker_target(), issue.id, option, model, state, ctx)
-    },
-    fn(ctx: ui::EventContext) {
-      state.set(fn(mut updated: LoggedInUiState) { updated.active_picker = maybe::none() })
-      focus_selected_after_rebuild(ctx, model)
-    },
-  ) {
-    ok(props) => { next.active_picker = maybe::some(props) },
-    err(_) => (),
-  }
-  next
-}
-
-fn new(api_key: Str) ui::Widget {
-  let inbox = inbox_view::new(api_key)
   ui::stateful(
     key: "logged-in",
-    init: fn(_ctx: ui::BuildContext) LoggedInUiState {
-      initial_state()
+    init: fn(_ctx: ui::BuildContext) Model {
+      // Hydrate from the on-disk cache so the user returns to
+      // whatever they had open last session. Missing / unreadable /
+      // version-mismatched cache falls back to the default layout.
+      match cache::load_logged_in() {
+        cached => Model{
+          tab_index: cached.tab_index,
+          issue_tabs: cached.issue_tabs,
+        },
+        _ => Model{
+          tab_index: 0,
+          issue_tabs: [],
+        },
+      }
     },
-    build: fn(_ctx: ui::BuildContext, state: ui::State<LoggedInUiState>) ui::Widget {
+    build: fn(ctx: ui::BuildContext, state: ui::State<Model>) ui::Widget {
+      let theme = ui::must_have_theme(ctx)
       let model = state.value()
-      let my_issues = my_issues_view::new(
-        api_key,
-        fn(ctx: ui::EventContext, issue: issues::Issue) {
-          let next_model = open_issue(model, issue)
-          state.set(
-            fn(mut next: LoggedInUiState) {
-              next = next_model
-              save_cache(next)
-            },
-          )
-          ui::dispatch_after(
-            ctx,
-            0,
-            fn() {
-              focus_tab(next_model, next_model.tab)
-            },
-          )
-        },
-      )
-      let search = search_view::new(
-        api_key,
-        fn(ctx: ui::EventContext, issue: issues::Issue) {
-          let next_model = open_issue(model, issue)
-          state.set(fn(mut next: LoggedInUiState) {
-            next = next_model
-            next.search_open = false
-            save_cache(next)
+      // Persist the current logged-in slice to the on-disk cache.
+      // Wrapped in async::start so disk I/O doesn't block the UI;
+      // errors are swallowed because cache persistence is best-effort
+      // — a failed save shouldn't break the session.
+      let persist = fn() {
+        let snap = state.value()
+        let _ = async::start(fn() {
+          let _ = cache::save_logged_in(cache::LoggedInCache{
+            tab_index: snap.tab_index,
+            issue_tabs: snap.issue_tabs,
           })
-          ui::dispatch_after(ctx, 0, fn() {
-            focus_tab(next_model, next_model.tab)
-          })
-        },
-        fn(ctx: ui::EventContext) {
-          state.set(fn(mut next: LoggedInUiState) {
-            next.search_open = false
-          })
-          focus_selected_after_rebuild(ctx, model)
-        },
-      )
-      ui::actions(
-        child: ui::shortcuts(
-          child: content(
-            api_key: api_key,
-            model: model,
-            inbox: inbox,
-            my_issues: my_issues,
-            on_state: fn(issue: issues::Issue) {
-              let next_model = open_state_picker(api_key, issue, model, state)
-              state.set(
-                fn(mut next: LoggedInUiState) {
-                  next = next_model
-                },
-              )
-            },
-            on_cycle: fn(issue: issues::Issue) {
-              let next_model = open_cycle_picker(api_key, issue, model, state)
-              state.set(
-                fn(mut next: LoggedInUiState) {
-                  next = next_model
-                },
-              )
-            },
-            search: search,
+        })
+      }
+      // Helper that wraps state.set and persists after the mutation.
+      // Use this in place of state.set for any Model change that
+      // touches tab_index or issue_tabs.
+      let set_and_persist = fn(updater: fn(mut Model)) {
+        state.set(updater)
+        persist()
+      }
+      let on_tab_press = fn(idx: Int) {
+        set_and_persist(fn(mut s: Model) { s.tab_index = idx })
+      }
+      // Open an inbox item. Routing:
+      //   issue/comment/mention notifications -> promote target_id to a
+      //     new (or existing) tab in issue_tabs and select it
+      //   PR notifications -> launch notification.url in the system
+      //     browser. The URL is Linear's deep-link to the specific
+      //     comment/mention activity, so it lands the user in the right
+      //     spot in Linear's review UI.
+      //   project / other notifications -> if a url is present, open it
+      //     in the browser; otherwise no-op.
+      let on_open = fn(item: inbox::Item) {
+        if item.notification_type.starts_with("issue") {
+          set_and_persist(fn(mut s: Model) { s = open_issue_tab(s, item.target_id) })
+        } else {
+          if not item.url.is_empty() {
+            let _ = os::open_url(item.url)
+          }
+        }
+      }
+      // From the My Issues board, Enter on a card promotes the issue
+      // to a dynamic tab. Same shell helper as the inbox uses.
+      let on_open_issue = fn(issue: issues::Issue) {
+        set_and_persist(fn(mut s: Model) { s = open_issue_tab(s, issue.identifier) })
+      }
+      // Tab / Shift+Tab / Escape are already mapped to NextFocusIntent,
+      // PreviousFocusIntent and DismissIntent by the app-level Shortcuts that
+      // wraps every vaxis/ui root. We can't override those keys from an inner
+      // Shortcuts because the outer one consumes them during capture phase.
+      // Instead we install handlers for those upstream intents in our Actions.
+      // Invoke walks UP from the focused widget and finds our handler before
+      // it reaches the app-level Actions, so we win.
+      ui::shortcuts(
+        ui::actions(
+          ui::focus_scope(
+            ui::focus(screen(theme, model, api_key, on_tab_press, on_open, on_open_issue, notify, show_modal, close_modal)),
+            trap: false,
+            auto_focus: true,
           ),
-          bindings: [
-            "Tab": "tabs.next",
-            "Shift+Tab": "tabs.previous",
-            "1": "tabs.inbox",
-            "2": "tabs.my_issues",
-            "?": "global.search",
-            "Escape": "tabs.escape",
-            "Esc": "tabs.escape",
-            "Up": "detail_picker.previous",
-            "k": "detail_picker.previous",
-            "Down": "detail_picker.next",
-            "j": "detail_picker.next",
-            "Enter": "detail_picker.confirm",
-            "Space": "detail_picker.confirm",
-          ],
-        ),
-        bindings: [
-          ui::action(
-            "global.search",
-            fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              if model.active_picker.is_some() {
+          [
+            ui::action("vaxis.next-focus", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              set_and_persist(fn(mut s: Model) { s.tab_index = cycle_next(s) })
+              ui::EventResult::handled
+            }),
+            ui::action("vaxis.previous-focus", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              set_and_persist(fn(mut s: Model) { s.tab_index = cycle_prev(s) })
+              ui::EventResult::handled
+            }),
+            ui::action("vaxis.dismiss", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              match selected_is_issue_tab(model) {
+                true => {
+                  set_and_persist(fn(mut s: Model) { s = close_current_issue_tab(s) })
+                  ui::EventResult::handled
+                },
+                false => ui::EventResult::ignored,
+              }
+            }),
+            // Tab switches and global.search are gated on modal_open
+            // so their bound keys (1 / 2 / ?) can flow through to the
+            // text_field inside the search modal as typed characters.
+            //
+            // Mechanism: Shortcuts dispatches in the capture phase
+            // before the focused element's target phase. If the
+            // bound action returns Ignored, Shortcuts returns Ignored
+            // and event dispatch keeps going — eventually reaching
+            // text_field's target phase. Returning Handled would
+            // consume the key instead and the text_field would never
+            // see it. (See vaxis-ard/docs/events-and-focus.md §4.)
+            ui::action("tabs.inbox", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              if modal_open {
                 ui::EventResult::ignored
               } else {
-                state.set(fn(mut next: LoggedInUiState) {
-                  next.search_open = true
+                set_and_persist(fn(mut s: Model) { s.tab_index = 0 })
+                ui::EventResult::handled
+              }
+            }),
+            ui::action("tabs.my_issues", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              if modal_open {
+                ui::EventResult::ignored
+              } else {
+                set_and_persist(fn(mut s: Model) { s.tab_index = 1 })
+                ui::EventResult::handled
+              }
+            }),
+            ui::action("global.search", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              if modal_open {
+                ui::EventResult::ignored
+              } else {
+                let on_open_search_result = fn(issue: issues::Issue) {
+                  set_and_persist(fn(mut s: Model) {
+                    s = open_issue_tab(s, issue.identifier)
+                  })
+                  close_modal()
+                }
+                show_modal(fn(theme_inner: ui::Theme, close: fn()) ui::Widget {
+                  modal::show_modal(
+                    theme: theme_inner,
+                    title: "Search",
+                    child: search_view::new(api_key, on_open_search_result),
+                    footer: hints_bar::row(theme_inner, [
+                      hints_bar::Hint{ key: "↑↓",  label: "select" },
+                      hints_bar::Hint{ key: "↵",   label: "open" },
+                      hints_bar::Hint{ key: "Esc", label: "close" },
+                    ]),
+                    width: maybe::some(60),
+                    on_dismiss: fn(_ctx: ui::EventContext) { close() },
+                  )
                 })
                 ui::EventResult::handled
               }
-            },
-          ),
-          ui::action(
-            "tabs.next",
-            fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              let next = next_tab(model)
-              state.set(
-                fn(mut updated: LoggedInUiState) {
-                  updated.tab = next
-                  save_cache(updated)
-                },
-              )
-              ui::dispatch_after(
-                _ctx,
-                0,
-                fn() {
-                  focus_tab(model, next)
-                },
-              )
-              ui::EventResult::handled
-            },
-          ),
-          ui::action(
-            "tabs.previous",
-            fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              let previous = previous_tab(model)
-              state.set(
-                fn(mut updated: LoggedInUiState) {
-                  updated.tab = previous
-                  save_cache(updated)
-                },
-              )
-              ui::dispatch_after(
-                _ctx,
-                0,
-                fn() {
-                  focus_tab(model, previous)
-                },
-              )
-              ui::EventResult::handled
-            },
-          ),
-          ui::action(
-            "tabs.inbox",
-            fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              state.set(
-                fn(mut next: LoggedInUiState) {
-                  next.tab = "Inbox"
-                  save_cache(next)
-                },
-              )
-              ui::dispatch_after(
-                _ctx,
-                0,
-                fn() {
-                  focus_tab(model, "Inbox")
-                },
-              )
-              ui::EventResult::handled
-            },
-          ),
-          ui::action(
-            "tabs.my_issues",
-            fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              state.set(
-                fn(mut next: LoggedInUiState) {
-                  next.tab = "My Issues"
-                  save_cache(next)
-                },
-              )
-              ui::dispatch_after(
-                _ctx,
-                0,
-                fn() {
-                  focus_tab(model, "My Issues")
-                },
-              )
-              ui::EventResult::handled
-            },
-          ),
-          ui::action(
-            "tabs.escape",
-            fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              if model.active_picker.is_some() {
-                state.set(
-                  fn(mut next: LoggedInUiState) {
-                    next.active_picker = maybe::none()
-                  },
-                )
-                focus_selected_after_rebuild(_ctx, model)
-                ui::EventResult::handled
-              } else if selected_tab_is_issue(model) {
-                let next_model = close_selected_issue(model)
-                state.set(
-                  fn(mut next: LoggedInUiState) {
-                    next = next_model
-                    save_cache(next)
-                  },
-                )
-                ui::dispatch_after(
-                  _ctx,
-                  0,
-                  fn() {
-                    focus_tab(next_model, selected_tab(next_model))
-                  },
-                )
-                ui::EventResult::handled
-              } else {
-                ui::EventResult::ignored
-              }
-            },
-          ),
-          ui::action(
-            "detail_picker.previous",
-            fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              ui::EventResult::ignored
-            },
-          ),
-          ui::action(
-            "detail_picker.next",
-            fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              ui::EventResult::ignored
-            },
-          ),
-          ui::action(
-            "detail_picker.confirm",
-            fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              ui::EventResult::ignored
-            },
-          ),
+            }),
+          ],
+        ),
+        [
+          "1": "tabs.inbox",
+          "2": "tabs.my_issues",
+          "?": "global.search",
         ],
       )
     },
