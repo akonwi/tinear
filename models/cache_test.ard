@@ -1,16 +1,7 @@
-use ard/decode
 use ard/json
 use ard/testing
 
 use tinear/models/cache
-use tinear/models/issues
-
-fn test_issue(id: Str, identifier: Str) issues::Issue {
-  let raw = decode::from_json(
-    "\{\"id\":\"{id}\",\"identifier\":\"{identifier}\",\"title\":\"Fix token refresh\",\"description\":null,\"priority\":2,\"state\":\{\"id\":\"state-1\",\"name\":\"In Progress\",\"type\":\"started\",\"position\":1.0\},\"team\":\{\"id\":\"team-1\",\"name\":\"Core\",\"key\":\"AKO\"\},\"project\":null,\"assignee\":null,\"cycle\":null\}",
-  ).expect("parse test issue")
-  issues::decode_issue(raw)
-}
 
 test fn test_cache_decode_ignores_corrupt_json() Void!Str {
   match cache::decode("not json") {
@@ -23,8 +14,6 @@ test fn test_cache_decode_ignores_unknown_version() Void!Str {
   let content = json::encode(cache::DataCache{
     version: 999,
     logged_in: cache::empty_logged_in(),
-    inbox: cache::empty_inbox(),
-    my_issues: cache::empty_my_issues(),
   }).expect("encode cache")
 
   match cache::decode(content) {
@@ -33,22 +22,32 @@ test fn test_cache_decode_ignores_unknown_version() Void!Str {
   }
 }
 
-test fn test_cache_round_trips_typed_state() Void!Str {
-  let issue = test_issue("issue-1", "AKO-123")
+test fn test_cache_round_trips_logged_in_state() Void!Str {
+  let tabs: [Str] = ["CCA-123", "RND-456"]
   let original = cache::DataCache{
     version: cache::version(),
-    logged_in: cache::LoggedInCache{tab: "AKO-123", issue_tabs: [issue]},
-    inbox: cache::InboxCache{items: [], cursor: 0},
-    my_issues: cache::MyIssuesCache{columns: [issues::BoardColumn{name: "Started", state_type: "started", position: 1.0, issues: [issue]}], col: 0, row: 0, scroll: 0},
+    logged_in: cache::LoggedInCache{ tab_index: 2, issue_tabs: tabs },
   }
   let content = try cache::encode(original)
 
   match cache::decode(content) {
     restored => {
-      try testing::assert(restored.logged_in.tab == "AKO-123", "selected tab should round trip")
-      try testing::assert(restored.logged_in.issue_tabs.size() == 1, "issue tabs should round trip")
-      try testing::assert(restored.my_issues.columns.size() == 1, "columns should round trip")
-      testing::assert(restored.my_issues.columns.at(0).issues.at(0).identifier == "AKO-123", "issue identifiers should round trip")
+      try testing::assert(
+        restored.logged_in.tab_index == 2,
+        "active tab index should round trip",
+      )
+      try testing::assert(
+        restored.logged_in.issue_tabs.size() == 2,
+        "issue tab list size should round trip",
+      )
+      try testing::assert(
+        restored.logged_in.issue_tabs.at(0) == "CCA-123",
+        "first issue tab identifier should round trip",
+      )
+      testing::assert(
+        restored.logged_in.issue_tabs.at(1) == "RND-456",
+        "second issue tab identifier should round trip",
+      )
     },
     _ => testing::assert(false, "valid cache should decode"),
   }
