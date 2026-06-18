@@ -264,42 +264,29 @@ fn section_tabs(
 
 // Wrap a text body across lines at `width` columns and render as a
 // stretched column of styled_text rows.
-fn wrapped_text(theme: ui::Theme, value: Str, width: Int) ui::Widget {
-  mut rows: [ui::Widget] = []
-  for line in text::wrap_text(value, width) {
-    rows.push(ui::styled_text(line, fg: theme.foreground))
-  }
-  if rows.size() == 0 {
-    rows.push(ui::text(""))
-  }
-  ui::column(
-    rows, main_size: ui::MainSize::min, cross_align: ui::CrossAlign::stretch,
+// Soft-wrap a string to whatever cross-axis extent the parent gives
+// us. rich_text uses upstream's TextPainter, which handles wrapping
+// on word boundaries with the available width — no need to compute
+// a width up front or watch the viewport.
+fn wrapped_text(theme: ui::Theme, value: Str) ui::Widget {
+  ui::rich_text(
+    [ui::span(value, fg: theme.foreground)],
+    soft_wrap: true,
   )
 }
 
-fn description_body_widget(theme: ui::Theme, issue: issues::Issue, body_width: Int) ui::Widget {
+fn description_body_widget(theme: ui::Theme, issue: issues::Issue) ui::Widget {
   match issue.description {
     desc => match desc.is_empty() {
       true => ui::styled_text("(no description)", fg: theme.muted_foreground),
-      false => wrapped_text(theme, desc, body_width),
+      false => wrapped_text(theme, desc),
     },
     _ => ui::styled_text("(no description)", fg: theme.muted_foreground),
   }
 }
 
-fn repeat(ch: Str, count: Int) Str {
-  mut out = ""
-  if count > 0 {
-    for _ in 0..count - 1 {
-      out =+ ch
-    }
-  }
-  out
-}
-
 fn comment_card(
-  theme: ui::Theme, comment: issues::Comment,
-  body_width: Int, is_last: Bool,
+  theme: ui::Theme, comment: issues::Comment, is_last: Bool,
 ) ui::Widget {
   mut children: [ui::Widget] = [
     ui::row(
@@ -316,11 +303,16 @@ fn comment_card(
         ),
       ],
     ),
-    wrapped_text(theme, comment.body, body_width),
+    wrapped_text(theme, comment.body),
   ]
   if not is_last {
+    // Separator stretches to whatever width the parent column gives us,
+    // so it scales with the viewport instead of being a hardcoded length.
     children.push(
-      ui::styled_text(repeat("\u2508", body_width), fg: theme.border),
+      ui::padding(
+        ui::divider(fg: theme.border, bg: theme.background),
+        vertical: 1,
+      ),
     )
   }
   ui::column(
@@ -332,7 +324,7 @@ fn comment_card(
 
 fn comments_body(
   theme: ui::Theme,
-  comments: [issues::Comment], loading: Bool, error: Str, body_width: Int,
+  comments: [issues::Comment], loading: Bool, error: Str,
 ) ui::Widget {
   match {
     loading => ui::styled_text("Loading comments\u2026", fg: theme.muted_foreground),
@@ -346,7 +338,7 @@ fn comments_body(
       mut rows: [ui::Widget] = []
       let last_idx = comments.size() - 1
       for c, idx in comments {
-        rows.push(comment_card(theme, c, body_width, idx == last_idx))
+        rows.push(comment_card(theme, c, idx == last_idx))
       }
       ui::column(
         rows,
@@ -362,14 +354,13 @@ fn comments_body(
 // stable across section switches — the conditional content changes
 // one level deeper, which reconciliation handles cleanly.
 fn active_body(
-  theme: ui::Theme, issue: issues::Issue, model: Detail, body_width: Int,
+  theme: ui::Theme, issue: issues::Issue, model: Detail,
 ) ui::Widget {
   let inner = match model.active_section == SECTION_COMMENTS {
     true => comments_body(
-      theme, model.comments, model.comments_loading,
-      model.comments_error, body_width,
+      theme, model.comments, model.comments_loading, model.comments_error,
     ),
-    false => description_body_widget(theme, issue, body_width),
+    false => description_body_widget(theme, issue),
   }
   ui::padding(
     ui::column(
@@ -413,12 +404,6 @@ fn loaded_layout(
   theme: ui::Theme, issue: issues::Issue,
   model: Detail, state: ui::State<Detail>,
 ) ui::Widget {
-  // Description / comments wrap at approximately viewport-width minus
-  // our 2 cols of horizontal padding. We don't measure the live
-  // viewport here; assume the standard layout gives the detail tab
-  // most of the terminal width. 80 - 4 padding cols = ~76; a static
-  // value still wraps acceptably across common widths.
-  let body_width = 76
   ui::column(
     [
       ui::padding(metadata_header(theme, issue), horizontal: 1),
@@ -426,7 +411,7 @@ fn loaded_layout(
       ui::padding(section_tabs(theme, model, state), horizontal: 1),
       ui::expanded(
         ui::scroll_view(
-          active_body(theme, issue, model, body_width),
+          active_body(theme, issue, model),
           axis: ui::ScrollAxis::vertical,
           controller: model.scroll,
         ),
