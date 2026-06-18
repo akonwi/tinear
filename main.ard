@@ -89,7 +89,10 @@ fn body(ctx: ui::BuildContext, state: ui::State<AppState>) ui::Widget {
     })
   }
   let content = match model.has_auth() {
-    true => logged_in_screen::new(model.api_key, notify, show_modal, close_modal),
+    true => logged_in_screen::new(
+      model.api_key, notify, show_modal, close_modal,
+      modal_open: model.current_modal.is_some(),
+    ),
     false => welcome_screen::new(fn(api_key: Str) {
       state.set(fn(mut s: AppState) { s.api_key = api_key })
     }),

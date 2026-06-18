@@ -3,11 +3,14 @@ use vaxis/ui
 use tinear/models/inbox
 use tinear/models/issues
 use tinear/os
+use ard/maybe
+
 use tinear/tui/hints_bar
 use tinear/tui/inbox_view
 use tinear/tui/issue_detail_view
 use tinear/tui/modal
 use tinear/tui/my_issues_view
+use tinear/tui/search_view
 use tinear/tui/toast
 
 // Minimal shell for the logged-in view.
@@ -245,6 +248,7 @@ fn new(
   notify: fn(Str, Str, toast::ToastVariant),
   show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
   close_modal: fn(),
+  modal_open: Bool,
 ) ui::Widget {
   ui::stateful(
     key: "logged-in",
@@ -315,19 +319,66 @@ fn new(
                 false => ui::EventResult::ignored,
               }
             }),
+            // Tab switches and global.search are gated on modal_open
+            // so their bound keys (1 / 2 / ?) can flow through to the
+            // text_field inside the search modal as typed characters.
+            //
+            // Mechanism: Shortcuts dispatches in the capture phase
+            // before the focused element's target phase. If the
+            // bound action returns Ignored, Shortcuts returns Ignored
+            // and event dispatch keeps going — eventually reaching
+            // text_field's target phase. Returning Handled would
+            // consume the key instead and the text_field would never
+            // see it. (See vaxis-ard/docs/events-and-focus.md §4.)
             ui::action("tabs.inbox", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              state.set(fn(mut s: Model) { s.tab_index = 0 })
-              ui::EventResult::handled
+              if modal_open {
+                ui::EventResult::ignored
+              } else {
+                state.set(fn(mut s: Model) { s.tab_index = 0 })
+                ui::EventResult::handled
+              }
             }),
             ui::action("tabs.my_issues", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              state.set(fn(mut s: Model) { s.tab_index = 1 })
-              ui::EventResult::handled
+              if modal_open {
+                ui::EventResult::ignored
+              } else {
+                state.set(fn(mut s: Model) { s.tab_index = 1 })
+                ui::EventResult::handled
+              }
+            }),
+            ui::action("global.search", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+              if modal_open {
+                ui::EventResult::ignored
+              } else {
+                let on_open_search_result = fn(issue: issues::Issue) {
+                  state.set(fn(mut s: Model) {
+                    s = open_issue_tab(s, issue.identifier)
+                  })
+                  close_modal()
+                }
+                show_modal(fn(theme_inner: ui::Theme, close: fn()) ui::Widget {
+                  modal::show_modal(
+                    theme: theme_inner,
+                    title: "Search",
+                    child: search_view::new(api_key, on_open_search_result),
+                    footer: hints_bar::row(theme_inner, [
+                      hints_bar::Hint{ key: "↑↓",  label: "select" },
+                      hints_bar::Hint{ key: "↵",   label: "open" },
+                      hints_bar::Hint{ key: "Esc", label: "close" },
+                    ]),
+                    width: maybe::some(60),
+                    on_dismiss: fn(_ctx: ui::EventContext) { close() },
+                  )
+                })
+                ui::EventResult::handled
+              }
             }),
           ],
         ),
         [
           "1": "tabs.inbox",
           "2": "tabs.my_issues",
+          "?": "global.search",
         ],
       )
     },
