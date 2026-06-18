@@ -186,7 +186,6 @@ Single entrypoint (`main.ard`) launches the TUI. There is no `login` subcommand 
 - **No `return` keyword** — last expression is the return value. Use `try` for Result propagation.
 - **Functions must be defined before use** within a file. Cross-file order doesn't matter.
 - **`and` / `not`** instead of `&&` / `!`.
-- **No `!=`**. Use `not (a == b)`.
 - **`Void!Str`** uses `Result::ok(())` for the Ok variant.
 - **`{ ... }` in `match`** must be followed by a newline — no inline `match x { a => b, _ => c }`.
 - **String interpolation** with `{var}`; literal braces need `\{` / `\}`.
@@ -197,6 +196,7 @@ Single entrypoint (`main.ard`) launches the TUI. There is no `login` subcommand 
 - **`while true { ... }`** is the idiomatic infinite loop (used by `schedule_periodic`).
 - **Nullable callback gotcha**: `fn(X) Void?` is **not** a nullable function — the `?` binds to the return type. For a nullable callback, omit the return type: `on_pressed: fn(EventContext)?`.
 - **Generic struct definitions** (e.g. `struct Box<$T> { ... }`) are tricky in the current parser. If a stateful needs to vary by a type parameter from the parent, keep the state struct concrete and have the parent close over its own typed runtime in a callback (see how `tui/compose_view` exposes `refresh_comments: fn()` instead of being generic over Detail's state type).
+- **Direct Go imports** (Ard 0.25+) via `use go:pkg` are supported for new FFI. Tinear's existing `os.ard` + `ffi/host.go` still uses the older `extern fn ... = "tinear.Symbol"` + companion file pattern, which is still supported — either style is fine. If you add new Go-backed functionality, prefer `use go:` so there's no separate Go file to keep in sync.
 - **`async::start` returns a `Fiber`**. Discard it with `let _ = async::start(...)` when the surrounding expression's expected return type is `Void`.
 
 ## vaxis-ard companion docs
