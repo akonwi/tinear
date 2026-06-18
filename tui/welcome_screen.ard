@@ -1,10 +1,29 @@
 use vaxis/ui
 
-use tinear/commands/login
+use tinear/config
+use tinear/linear/client
 
 struct State {
   draft_api_key: Str,
   has_error: Bool,
+}
+
+// Validate the API key against Linear and, on success, persist it
+// to the on-disk config. Returns Void!Str so callers can branch on
+// ok / err without caring about the viewer payload.
+//
+// This used to live in commands/login.ard as part of a CLI verb
+// (ard run main.ard login) that no longer exists. The welcome
+// screen is now the only login surface.
+fn validate_and_save(api_key: Str) Void!Str {
+  let validate_query = "query \{ viewer \{ id \} \}"
+  match client::graphql(api_key, validate_query) {
+    ok(_) => {
+      let _ = try config::write(api_key)
+      Result::ok(())
+    },
+    err(e) => Result::err("Invalid API key: {e}"),
+  }
 }
 
 fn logo_lines() [ui::Widget] {
@@ -21,7 +40,7 @@ fn spacer(height: Int) ui::Widget {
 fn submit_login(api_key: Str, state: ui::State<State>, on_login_success: fn(Str)) {
   match api_key.is_empty() {
     true => state.set(fn(mut s: State) { s.has_error = true }),
-    false => match login::login(api_key) {
+    false => match validate_and_save(api_key) {
       ok(_) => on_login_success(api_key),
       err(_) => state.set(fn(mut s: State) { s.has_error = true }),
     },

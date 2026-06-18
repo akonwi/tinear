@@ -24,7 +24,6 @@ ard test                         # run unit tests under models/ and tui/
 | `main.ard` | App entrypoint: AppState (`api_key`, toasts, `current_modal`), `show_modal`/`close_modal` callbacks, overlay slot wiring. Routes to `welcome_screen` if no API key, else `logged_in_screen`. |
 | `config.ard` | Read/write `~/.tinear/config` and `$LINEAR_API_KEY`; resolve `~/.tinear` as the config directory. |
 | `linear/client.ard` | Shared GraphQL client (`graphql(api_key, query)`). |
-| `commands/login.ard` | API-key validation + save. Called by the welcome screen, not as a CLI verb. |
 | `os.ard` + `ffi/host.go` | Tinear-local FFI for `open_url` (macOS/Linux/Windows). The only Go FFI tinear owns. |
 | `models/*.ard` | Stateless fetch/decode/mutation modules for `inbox`, `issues`, and the persisted `cache`. |
 | `tui/*.ard` | TUI implementation, split by concern. See *Active TUI Architecture*. |
@@ -39,7 +38,7 @@ framework code; prefer adding to vaxis-ard if a primitive is missing.
 
 | File | Purpose |
 |------|---------|
-| `tui/welcome_screen.ard` | Auth screen for unauthenticated users. Calls `commands/login::login` to validate and save the key. |
+| `tui/welcome_screen.ard` | Auth screen for unauthenticated users. Validates the API key against Linear's `viewer` query and persists it via `config::write`. |
 | `tui/logged_in_screen.ard` | Tab shell. Owns the `Model` (tab_index, issue_tabs), tab bar, `ui::indexed_stack` body, hints bar. Hydrates from `models/cache` on init; persists via a `set_and_persist` helper around tab/issue-tab mutations. |
 | `tui/inbox_view.ard` | Inbox list + detail pane. Owns its own 5-minute background refresh with cursor-by-id preservation. |
 | `tui/my_issues_view.ard` | Kanban board. Per-column `custom_scroll_view` + `sliver_list_builder` + `SliverListController.reveal_index` for auto-scroll. Horizontal outer scroll via `scroll_view(axis: horizontal)`. Same background-refresh pattern. |
@@ -180,7 +179,7 @@ Run with `ard test`. If we add widget tests later, wire them through
 
 ## Auth and CLI surface
 
-Single entrypoint (`main.ard`) launches the TUI. There is no `login` subcommand any more; auth happens in the welcome screen, which delegates to `commands/login::login`. To bootstrap without the TUI, set `$LINEAR_API_KEY` or hand-edit `~/.tinear/config`.
+Single entrypoint (`main.ard`) launches the TUI. There is no `login` subcommand any more; auth happens in the welcome screen, which validates the key against Linear's `viewer` query and writes it to `~/.tinear/config`. To bootstrap without the TUI, set `$LINEAR_API_KEY` or hand-edit `~/.tinear/config`.
 
 ## Ard Language Notes
 
