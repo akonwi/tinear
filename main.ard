@@ -180,19 +180,17 @@ fn root() ui::Widget {
 }
 
 fn main() Void {
-  // Force dark theme regardless of what the terminal reports via
-  // DCS 996. Ghostty (and macOS Terminal.app) answer based on the
-  // macOS system appearance (NSAppearance) rather than the actual
-  // background color of the active theme — so with macOS in Light
-  // mode but the terminal configured dark, those terminals tell
-  // vaxis "light" and our app would render the light theme over a
-  // dark background.
+  // Pass no theme set so vaxis builds the theme from the terminal's
+  // own colors at startup:
+  //   - OSC 10 / 11 — actual foreground and background
+  //   - OSC 4    — the 8 ANSI palette colors (0–7)
+  // Then vaxis derives a full Theme + Palette from those, and picks
+  // Light vs Dark by comparing the luminance of bg vs fg — NOT by
+  // the DCS 996 response, which some terminals (Ghostty, macOS
+  // Terminal.app) answer based on macOS NSAppearance rather than
+  // their actual background color.
   //
-  // Building a ThemeSet whose Light slot is the dark theme means
-  // both LightMode and DarkMode terminal responses resolve to dark.
-  // If we ever want a real "light theme" mode, expose a config
-  // toggle and pick the ThemeSet at startup based on that.
-  let dark = ui::theme_dark()
-  let always_dark = ui::theme_set(light: dark, dark: dark)
-  ui::run(root(), always_dark)
+  // The app re-queries on ColorThemeUpdate events too, so live
+  // theme changes in the terminal are picked up.
+  ui::run(root(), maybe::none())
 }
