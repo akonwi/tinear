@@ -175,7 +175,10 @@ fn root() ui::Widget {
         }),
       ],
     ),
-    ["Ctrl+c": "tinear.quit"],
+    // Quit on Ctrl+Q. Ctrl+C is intentionally left free so vaxis's
+    // SelectionArea (wrapping the inbox detail pane and issue
+    // detail body) can claim it for copy-selection-to-clipboard.
+    ["Ctrl+q": "tinear.quit"],
   )
 }
 

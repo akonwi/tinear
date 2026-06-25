@@ -402,7 +402,14 @@ fn render_split(theme: ui::Theme, model: View) ui::Widget {
     [
       ui::sized_box(LIST_PANE_WIDTH, 0, list_pane(theme, model)),
       separator,
-      ui::expanded(ui::padding(detail_pane(theme, model), horizontal: 1)),
+      // selection_area: mouse-drag selection, double/triple-click
+      // word/line, Ctrl+C copy via OSC 52. (Quit is on Ctrl+Q so
+      // Ctrl+C isn't preempted.)
+      ui::expanded(
+        ui::selection_area(
+          ui::padding(detail_pane(theme, model), horizontal: 1),
+        ),
+      ),
     ],
     cross_align: ui::CrossAlign::stretch,
   )

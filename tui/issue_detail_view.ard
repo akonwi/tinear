@@ -451,11 +451,17 @@ fn loaded_layout(
       ui::padding(metadata_header(theme, issue), horizontal: 1),
       ui::divider(fg: theme.border, bg: theme.background),
       ui::padding(section_tabs(theme, model, state), horizontal: 1),
+      // selection_area enables mouse-drag selection across the
+      // description and comment bodies. Double/triple-click selects
+      // word/line; Ctrl+C copies via OSC 52. (Quit is on Ctrl+Q
+      // so we don't preempt that copy binding.)
       ui::expanded(
-        ui::scroll_view(
-          active_body(theme, issue, model),
-          axis: ui::ScrollAxis::vertical,
-          controller: model.scroll,
+        ui::selection_area(
+          ui::scroll_view(
+            active_body(theme, issue, model),
+            axis: ui::ScrollAxis::vertical,
+            controller: model.scroll,
+          ),
         ),
       ),
     ],
