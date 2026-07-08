@@ -1,0 +1,323 @@
+use ard/async
+use ard/maybe
+use go:go.rockorager.dev/vaxis/ui
+use go:time
+use go:tinear/ffi
+
+use tinear/models/issues
+use tinear/tui/text as text
+
+// Search modal body. Owns a stateful Search and renders the TextField
+// + results list. Up / Down / Enter are handled by an inner Shortcuts
+// that intercepts during the capture phase before the TextField's
+// target phase consumes them.
+//
+// The caller wraps this widget in `modal::show_modal(...)` (frame,
+// title, footer, on_dismiss) and threads it through `show_modal`.
+
+struct Search {
+  query: Str,
+  results: [issues::Issue],
+  cursor: Int,
+  loading: Bool,
+  error: Str,
+  // True once we've issued at least one search for the current query.
+  // Distinguishes "user hasn't typed anything yet" from "user searched
+  // but no results came back."
+  searched: Bool,
+  // Bumped on every keystroke. Pending searches check that the
+  // generation still matches before applying their result, so
+  // out-of-order responses from stale queries can't overwrite the
+  // current results.
+  generation: Int,
+  // Outer scroll for the results sliver.
+  scroll: mut ui::ScrollController,
+  // Drives RevealIndex on cursor changes.
+  list_scroll: mut ui::SliverListController,
+}
+
+fn clamp_cursor(cursor: Int, count: Int) Int {
+  match {
+    count <= 0 => 0,
+    cursor < 0 => 0,
+    cursor >= count => count - 1,
+    _ => cursor,
+  }
+}
+
+fn selected_issue(model: Search) issues::Issue? {
+  match model.results.size() == 0 {
+    true => maybe::none(),
+    false => maybe::some(
+      model.results.at(clamp_cursor(model.cursor, model.results.size())).expect("clamped"),
+    ),
+  }
+}
+
+// ── Debounced search ─────────────────────────────────────────────────
+
+// Schedule a search for `query` tagged with `generation`. After 300ms
+// of quiet, the fiber checks that the current state still matches
+// (same generation, same trimmed query, non-empty). If yes, it fires
+// the actual API call; another generation check guards applying the
+// result so a long-running request from an older query can't
+// overwrite newer results.
+fn start_search(c: mut ffi::StateCtx, api_key: Str, query: Str, generation: Int) {
+  async::start(fn() {
+    time::Sleep(ffi::Millis(300))
+    let trimmed = query.trim()
+    ffi::Dispatch(c, fn() {
+      let current = ffi::StateValue<Search>(c)
+      let still_current = current.generation == generation and current.query.trim() == trimmed and not trimmed.is_empty()
+      if still_current {
+        async::start(fn() {
+          let result = issues::search(api_key, trimmed)
+          ffi::Dispatch(c, fn() {
+            let current2 = ffi::StateValue<Search>(c)
+            if current2.generation == generation and current2.query.trim() == trimmed {
+              let next = ffi::StateRef<Search>(c)
+              match result {
+                ok(results) => {
+                  next.results = results
+                  next.cursor = 0
+                  next.error = ""
+                },
+                err(e) => {
+                  let empty: [issues::Issue] = []
+                  next.results = empty
+                  next.cursor = 0
+                  next.error = e
+                },
+              }
+              next.loading = false
+              next.searched = true
+              ffi::MarkDirty(c)
+            }
+          })
+        })
+      }
+    })
+  })
+}
+
+// ── Result rows ──────────────────────────────────────────────────────
+
+// Single row: identifier (10 cols) | title (flex, clipped with
+// ellipsis) | state name (12 cols). ListTile.Selected gives the cursor
+// row its theme.Primary chrome.
+fn result_row(theme: ui::Theme, issue: issues::Issue, selected: Bool, on_press: fn(ui::EventContext)) ui::Widget {
+  let state_name = text::truncate_with_ellipsis(issue.state_name, 12)
+  mut row_children: [ui::Widget] = [
+    ui::SizedBox{
+      Width: 10,
+      Height: 1,
+      Child: ui::Text{Value: issue.identifier, Style: ui::Style{Foreground: theme.Foreground, Attribute: ui::AttrBold}},
+    },
+    ui::SizedBox{Width: 2, Height: 1},
+    // RichText with overflow ellipsis truncates to whatever width
+    // Expanded actually gives the title, instead of relying on a
+    // hard-coded byte budget that has to match the layout.
+    ui::Expanded(ui::RichText{
+      Spans: [ui::TextSpan{Text: issue.title, Style: ui::Style{Foreground: theme.Foreground}}],
+      Overflow: ui::TextOverflowEllipsis,
+      MaxLines: 1,
+    }),
+    ui::SizedBox{Width: 2, Height: 1},
+    ui::SizedBox{
+      Width: 12,
+      Height: 1,
+      Child: ui::Text{Value: state_name, Style: ui::Style{Foreground: theme.MutedForeground}},
+    },
+  ]
+  ui::ListTile{
+    Title: ui::Flex{Axis: ui::Horizontal, Children: row_children},
+    Selected: selected,
+    OnPressed: on_press,
+  }
+}
+
+fn empty_placeholder(theme: ui::Theme, message: Str) ui::Widget {
+  ui::Center(ui::Text{Value: message, Style: ui::Style{Foreground: theme.MutedForeground}})
+}
+
+// Body that swaps between loading / error / empty / typing prompt /
+// results.
+fn results_body(theme: ui::Theme, model: Search, on_pick: fn(Int)) ui::Widget {
+  match {
+    model.loading => empty_placeholder(theme, "Searching…"),
+    not model.error.is_empty() => ui::Center(
+      ui::Text{Value: "Unable to search: {model.error}", Style: ui::Style{Foreground: theme.DangerText}},
+    ),
+    model.query.trim().is_empty() => empty_placeholder(theme, "Type to search across issues"),
+    model.searched and model.results.size() == 0 => empty_placeholder(theme, "No issues found"),
+    _ => ui::CustomScrollView{
+      Controller: model.scroll,
+      Slivers: [
+        ui::SliverListBuilder{
+          Controller: model.list_scroll,
+          Count: model.results.size(),
+          ItemExtent: 1,
+          Overscan: 4,
+          Builder: fn(ctx: ui::BuildContext, i: Int) ui::Widget {
+            result_row(
+              theme,
+              model.results.at(i).expect("builder index in range"),
+              i == model.cursor,
+              fn(ev: ui::EventContext) { on_pick(i) },
+            )
+          },
+        },
+      ],
+    },
+  }
+}
+
+// ── Body ─────────────────────────────────────────────────────────────
+
+fn on_query_changed(c: mut ffi::StateCtx, api_key: Str, value: Str) {
+  let trimmed = value.trim()
+  let next = ffi::StateRef<Search>(c)
+  let generation = next.generation + 1
+  let empty: [issues::Issue] = []
+  next.query = value
+  next.generation = generation
+  next.results = empty
+  next.cursor = 0
+  next.error = ""
+  if trimmed.is_empty() {
+    next.loading = false
+    next.searched = false
+  } else {
+    next.loading = true
+  }
+  ffi::MarkDirty(c)
+  if not trimmed.is_empty() {
+    start_search(c, api_key, value, generation)
+  }
+}
+
+fn body(c: mut ffi::StateCtx, api_key: Str, theme: ui::Theme, model: Search, on_open: fn(issues::Issue)) ui::Widget {
+  let on_pick = fn(idx: Int) {
+    // Click handler: move cursor to the picked row and open it (same
+    // UX as the picker option click).
+    let safe = clamp_cursor(idx, model.results.size())
+    if model.results.size() > 0 {
+      let next = ffi::StateRef<Search>(c)
+      next.cursor = safe
+      ffi::MarkDirty(c)
+      on_open(model.results.at(safe).expect("clamped"))
+    }
+  }
+  mut children: [ui::Widget] = [
+    // Search input. FocusScope(AutoFocus) so the modal frame's
+    // auto-focus lands here on first open. TextField handles its own
+    // internal events; we don't trap Tab.
+    ui::FocusScope{
+      AutoFocus: true,
+      Child: ui::TextField{
+        Value: model.query,
+        Placeholder: "Search issues…",
+        // TextField renders at exactly MinWidth, so set it to the
+        // modal's content width (60 − 2 cols of horizontal padding)
+        // to make the field fill the row.
+        MinWidth: 58,
+        OnChanged: fn(ev: ui::EventContext, value: Str) {
+          on_query_changed(c, api_key, value)
+        },
+      },
+    },
+    // Divider blends with the modal surface, not the app background.
+    // modal::show_modal uses theme.Surface as its fill so any in-modal
+    // widget that paints its own background has to match.
+    ui::Divider{Style: ui::Style{Foreground: theme.Border, Background: theme.Surface}},
+    // Fixed-height results region. The CustomScrollView inside needs a
+    // bounded extent to clip and scroll; 8 rows matches main.
+    ui::SizedBox{Height: 8, Child: results_body(theme, model, on_pick)},
+  ]
+  ui::Flex{
+    Axis: ui::Vertical,
+    MainAxisSize: ui::MainAxisSizeMin,
+    CrossAxisAlignment: ui::CrossAxisStretch,
+    Children: children,
+  }
+}
+
+// ── Public widget ────────────────────────────────────────────────────
+
+// Returns the search modal body. Caller wraps in
+// modal::show_modal(title, child: this, footer, on_dismiss).
+//
+// on_open is invoked with the chosen issue when the user presses Enter
+// (or clicks a row). Typical implementation: open the issue as a new
+// tab and close the modal.
+fn new(api_key: Str, on_open: fn(issues::Issue)) ui::Widget {
+  ffi::Stateful{
+    Init: fn() Any {
+      let empty: [issues::Issue] = []
+      mut scroll = ui::ScrollController{}
+      mut list_scroll = ui::SliverListController{}
+      Search{
+        query: "",
+        results: empty,
+        cursor: 0,
+        loading: false,
+        error: "",
+        searched: false,
+        generation: 0,
+        scroll: mut scroll,
+        list_scroll: mut list_scroll,
+      }
+    },
+    Build: fn(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
+      let theme = ui::MustDepend<ui::Theme>(ctx)
+      let model = ffi::StateValue<Search>(c)
+
+      let move_cursor = fn(delta: Int) {
+        let current = ffi::StateValue<Search>(c)
+        let count = current.results.size()
+        if count > 0 {
+          let next_cursor = clamp_cursor(current.cursor + delta, count)
+          let next = ffi::StateRef<Search>(c)
+          next.cursor = next_cursor
+          ffi::MarkDirty(c)
+          current.list_scroll.RevealIndex(next_cursor)
+        }
+      }
+
+      // Up / Down / Enter intercepted during the capture phase before
+      // TextField's target phase consumes them. Other keys (typing)
+      // aren't bound here, so they pass through to the field
+      // naturally.
+      ui::Shortcuts{
+        Bindings: [
+          "Up": ffi::Intent("search.prev"),
+          "Down": ffi::Intent("search.next"),
+          "Enter": ffi::Intent("search.open"),
+        ],
+        Child: ui::Actions{
+          Bindings: [
+            "search.prev": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+              move_cursor(-1)
+              ui::EventHandled
+            },
+            "search.next": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+              move_cursor(1)
+              ui::EventHandled
+            },
+            "search.open": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+              let current = ffi::StateValue<Search>(c)
+              if not current.loading {
+                match selected_issue(current) {
+                  issue => on_open(issue),
+                  _ => {},
+                }
+              }
+              ui::EventHandled
+            },
+          ],
+          Child: body(c, api_key, theme, model, on_open),
+        },
+      }
+    },
+  }
+}

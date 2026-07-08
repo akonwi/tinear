@@ -1,4 +1,5 @@
 use ard/async
+use ard/maybe
 use go:go.rockorager.dev/vaxis/ui
 use go:tinear/ffi
 
@@ -9,7 +10,10 @@ use tinear/os
 use tinear/tui/hints_bar
 use tinear/tui/inbox_view
 use tinear/tui/issue_detail_view
+use tinear/tui/modal
 use tinear/tui/my_issues_view
+use tinear/tui/search_view
+use tinear/tui/toast
 
 // Shell for the logged-in view.
 //
@@ -206,13 +210,21 @@ fn open_inbox_item(c: mut ffi::StateCtx, item: inbox::Item) {
 // Resolves the active tab to a body widget. All bodies are mounted at
 // once via IndexedStack so each tab's local state survives switching
 // tabs — only the visible tab paints.
-fn body_for(c: mut ffi::StateCtx, api_key: Str, s: Model) ui::Widget {
+fn body_for(
+  c: mut ffi::StateCtx, api_key: Str, s: Model,
+  notify: fn(Str, Str, toast::ToastVariant),
+  show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
+  close_modal: fn(),
+) ui::Widget {
+  // The inbox reports failures only; adapt to the error variant here.
+  let notify_error = fn(title: Str, description: Str) {
+    notify(title, description, toast::ToastVariant::error)
+  }
   mut children: [ui::Widget] = [
     inbox_view::new(
       api_key,
       fn(item: inbox::Item) { open_inbox_item(c, item) },
-      // Toasts return with their slice; drop notifications for now.
-      fn(title: Str, description: Str) {},
+      notify_error,
       s.tab_index == 0,
     ),
     my_issues_view::new(
@@ -222,7 +234,9 @@ fn body_for(c: mut ffi::StateCtx, api_key: Str, s: Model) ui::Widget {
       fn(issue: issues::Issue) {
         replace_model(c, open_issue_tab(ffi::StateValue<Model>(c), issue.identifier))
       },
-      fn(title: Str, description: Str) {},
+      notify,
+      show_modal,
+      close_modal,
       s.tab_index == 1,
     ),
   ]
@@ -230,7 +244,9 @@ fn body_for(c: mut ffi::StateCtx, api_key: Str, s: Model) ui::Widget {
     children.push(issue_detail_view::new(
       api_key,
       label,
-      fn(title: Str, description: Str) {},
+      notify,
+      show_modal,
+      close_modal,
       s.tab_index == idx + 2,
     ))
   }
@@ -272,10 +288,15 @@ fn hints_for(s: Model) [hints_bar::Hint] {
   }
 }
 
-fn screen(c: mut ffi::StateCtx, theme: ui::Theme, s: Model, api_key: Str) ui::Widget {
+fn screen(
+  c: mut ffi::StateCtx, theme: ui::Theme, s: Model, api_key: Str,
+  notify: fn(Str, Str, toast::ToastVariant),
+  show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
+  close_modal: fn(),
+) ui::Widget {
   mut children: [ui::Widget] = [
     tab_bar(c, theme, s),
-    ui::Expanded(body_for(c, api_key, s)),
+    ui::Expanded(body_for(c, api_key, s, notify, show_modal, close_modal)),
     hints_bar::new(theme, hints_for(s)),
   ]
   ui::Flex{Axis: ui::Vertical, Children: children}
@@ -283,7 +304,13 @@ fn screen(c: mut ffi::StateCtx, theme: ui::Theme, s: Model, api_key: Str) ui::Wi
 
 // ── Entry point ───────────────────────────────────────────────────────
 
-fn build(c: mut ffi::StateCtx, ctx: ui::BuildContext, api_key: Str) ui::Widget {
+fn build(
+  c: mut ffi::StateCtx, ctx: ui::BuildContext, api_key: Str,
+  notify: fn(Str, Str, toast::ToastVariant),
+  show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
+  close_modal: fn(),
+  modal_open: Bool,
+) ui::Widget {
   let theme = ui::MustDepend<ui::Theme>(ctx)
   let model = ffi::StateValue<Model>(c)
   // Tab / Shift+Tab / Escape are already mapped to NextFocusIntent,
@@ -313,29 +340,77 @@ fn build(c: mut ffi::StateCtx, ctx: ui::BuildContext, api_key: Str) ui::Widget {
           false => ui::EventIgnored,
         }
       },
+      // Tab switches are gated on modal_open so their bound keys
+      // (1 / 2) can flow through to text fields inside modals as
+      // typed characters: Shortcuts dispatch in the capture phase,
+      // and returning Ignored lets the event continue to the focused
+      // element's target phase.
       "tabs.inbox": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
-        select_tab(c, 0)
-        ui::EventHandled
+        match modal_open {
+          true => ui::EventIgnored,
+          false => {
+            select_tab(c, 0)
+            ui::EventHandled
+          },
+        }
       },
       "tabs.my_issues": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
-        select_tab(c, 1)
-        ui::EventHandled
+        match modal_open {
+          true => ui::EventIgnored,
+          false => {
+            select_tab(c, 1)
+            ui::EventHandled
+          },
+        }
+      },
+      "global.search": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        match modal_open {
+          true => ui::EventIgnored,
+          false => {
+            let on_open_search_result = fn(issue: issues::Issue) {
+              replace_model(c, open_issue_tab(ffi::StateValue<Model>(c), issue.identifier))
+              close_modal()
+            }
+            show_modal(fn(theme_inner: ui::Theme, close: fn()) ui::Widget {
+              modal::show_modal(
+                theme_inner,
+                "Search",
+                search_view::new(api_key, on_open_search_result),
+                hints_bar::row(theme_inner, [
+                  hints_bar::Hint{key: "↑↓", label: "select"},
+                  hints_bar::Hint{key: "↵", label: "open"},
+                  hints_bar::Hint{key: "Esc", label: "close"},
+                ]),
+                maybe::some(60),
+                fn(ev2: ui::EventContext) { close() },
+              )
+            })
+            ui::EventHandled
+          },
+        }
       },
     ],
     Child: ui::Shortcuts{
       Bindings: [
         "1": ffi::Intent("tabs.inbox"),
         "2": ffi::Intent("tabs.my_issues"),
+        "?": ffi::Intent("global.search"),
       ],
       Child: ui::FocusScope{
         AutoFocus: true,
-        Child: screen(c, theme, model, api_key),
+        Child: screen(c, theme, model, api_key, notify, show_modal, close_modal),
       },
     },
   }
 }
 
-fn new(api_key: Str) ui::Widget {
+fn new(
+  api_key: Str,
+  notify: fn(Str, Str, toast::ToastVariant),
+  show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
+  close_modal: fn(),
+  modal_open: Bool,
+) ui::Widget {
   ffi::Stateful{
     Init: fn() Any {
       // Hydrate from the on-disk cache so the user returns to
@@ -353,7 +428,7 @@ fn new(api_key: Str) ui::Widget {
       }
     },
     Build: fn(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
-      build(c, ctx, api_key)
+      build(c, ctx, api_key, notify, show_modal, close_modal, modal_open)
     },
   }
 }

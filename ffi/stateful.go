@@ -87,6 +87,9 @@ type Stateful struct {
 	// Animate, when true, creates a StateBase-owned AnimationController the
 	// runner ticks before each frame; reachable from Ard via ffi.Animation.
 	Animate bool
+	// AnimateMs overrides the animation duration (milliseconds) and switches
+	// the curve to linear. Zero keeps the 1200ms EaseInOut default.
+	AnimateMs int
 }
 
 func (w Stateful) CreateState() ui.State { return &statefulState{} }
@@ -104,7 +107,11 @@ type statefulState struct {
 func (s *statefulState) InitState() {
 	w := s.StateBase.Widget().(Stateful)
 	if w.Animate {
-		s.anim = s.NewAnimation(ui.AnimationOptions{Duration: 1200 * time.Millisecond, Curve: ui.EaseInOut})
+		options := ui.AnimationOptions{Duration: 1200 * time.Millisecond, Curve: ui.EaseInOut}
+		if w.AnimateMs > 0 {
+			options = ui.AnimationOptions{Duration: time.Duration(w.AnimateMs) * time.Millisecond, Curve: ui.Linear}
+		}
+		s.anim = s.NewAnimation(options)
 	}
 	if w.OnTick == nil {
 		return

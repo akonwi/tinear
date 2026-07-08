@@ -4,7 +4,9 @@ use go:go.rockorager.dev/vaxis/ui
 use go:tinear/ffi
 
 use tinear/models/issues
+use tinear/tui/issue_pickers
 use tinear/tui/refresh
+use tinear/tui/toast
 
 // Width of one board column.
 let COLUMN_WIDTH: Int = 50
@@ -145,7 +147,7 @@ fn apply_loaded(c: mut ffi::StateCtx, columns: [issues::BoardColumn]) {
   ffi::MarkDirty(c)
 }
 
-fn load_board(c: mut ffi::StateCtx, api_key: Str, notify: fn(Str, Str)) {
+fn load_board(c: mut ffi::StateCtx, api_key: Str, notify: fn(Str, Str, toast::ToastVariant)) {
   async::start(fn() {
     let result = issues::load(api_key)
     ffi::Dispatch(c, fn() {
@@ -156,7 +158,7 @@ fn load_board(c: mut ffi::StateCtx, api_key: Str, notify: fn(Str, Str)) {
           v.error = e
           v.loading = false
           ffi::MarkDirty(c)
-          notify("My Issues", "Failed to load: {e}")
+          notify("My Issues", "Failed to load: {e}", toast::ToastVariant::error)
         },
       }
     })
@@ -169,7 +171,7 @@ fn load_board(c: mut ffi::StateCtx, api_key: Str, notify: fn(Str, Str)) {
 // different column (status changed externally) the cursor follows; if
 // it disappeared, fall back to clamping the previous (col, row)
 // indices.
-fn refresh_board(c: mut ffi::StateCtx, api_key: Str, notify: fn(Str, Str)) {
+fn refresh_board(c: mut ffi::StateCtx, api_key: Str, notify: fn(Str, Str, toast::ToastVariant)) {
   async::start(fn() {
     let result = issues::load(api_key)
     match result {
@@ -206,7 +208,7 @@ fn refresh_board(c: mut ffi::StateCtx, api_key: Str, notify: fn(Str, Str)) {
         })
       },
       err(e) => {
-        notify("My Issues refresh", e)
+        notify("My Issues refresh", e, toast::ToastVariant::error)
       },
     }
   })
@@ -555,12 +557,38 @@ fn move_col(c: mut ffi::StateCtx, forward: Bool) {
   }
 }
 
+// On state/cycle confirm in the pickers below, we want to refresh the
+// board so the moved card appears in its new column. Helper takes the
+// mutator and dispatches it on a background fiber, then triggers a
+// board reload (or surfaces the error via toast).
+fn run_issue_mutation(
+  c: mut ffi::StateCtx,
+  api_key: Str,
+  notify: fn(Str, Str, toast::ToastVariant),
+  failure_title: Str,
+  mutate: fn() Void!Str,
+) {
+  async::start(fn() {
+    let r = mutate()
+    ffi::Dispatch(c, fn() {
+      match r {
+        ok(_) => load_board(c, api_key, notify),
+        err(e) => notify(failure_title, e, toast::ToastVariant::error),
+      }
+    })
+  })
+}
+
 // ── Entry point ───────────────────────────────────────────────────────
 
 fn build(
   c: mut ffi::StateCtx, ctx: ui::BuildContext,
   api_key: Str,
-  on_open_issue: fn(issues::Issue), notify: fn(Str, Str), active: Bool,
+  on_open_issue: fn(issues::Issue),
+  notify: fn(Str, Str, toast::ToastVariant),
+  show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
+  close_modal: fn(),
+  active: Bool,
 ) ui::Widget {
   let theme = ui::MustDepend<ui::Theme>(ctx)
   let model = ffi::StateValue<Board>(c)
@@ -615,6 +643,40 @@ fn build(
         load_board(c, api_key, notify)
         ui::EventHandled
       },
+      "board.state_picker": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        match selected_issue(ffi::StateValue<Board>(c)) {
+          issue => {
+            let issue_id = issue.id
+            issue_pickers::open_state_picker(
+              api_key, issue, show_modal, close_modal, notify,
+              fn(new_state_id: Str) {
+                run_issue_mutation(c, api_key, notify, "Update state", fn() Void!Str {
+                  issues::update_state(api_key, issue_id, new_state_id)
+                })
+              },
+            )
+          },
+          _ => {},
+        }
+        ui::EventHandled
+      },
+      "board.cycle_picker": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        match selected_issue(ffi::StateValue<Board>(c)) {
+          issue => {
+            let issue_id = issue.id
+            issue_pickers::open_cycle_picker(
+              api_key, issue, show_modal, close_modal, notify,
+              fn(new_cycle_id: Str) {
+                run_issue_mutation(c, api_key, notify, "Update cycle", fn() Void!Str {
+                  issues::update_cycle(api_key, issue_id, new_cycle_id)
+                })
+              },
+            )
+          },
+          _ => {},
+        }
+        ui::EventHandled
+      },
     ],
     Child: ui::Shortcuts{
       Bindings: [
@@ -628,6 +690,8 @@ fn build(
         "Left": ffi::Intent("board.col_prev"),
         "Enter": ffi::Intent("board.open"),
         "r": ffi::Intent("board.refresh"),
+        "s": ffi::Intent("board.state_picker"),
+        "y": ffi::Intent("board.cycle_picker"),
       ],
       Child: ui::FocusScope{
         AutoFocus: active,
@@ -640,7 +704,11 @@ fn build(
 
 fn new(
   api_key: Str,
-  on_open_issue: fn(issues::Issue), notify: fn(Str, Str), active: Bool,
+  on_open_issue: fn(issues::Issue),
+  notify: fn(Str, Str, toast::ToastVariant),
+  show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
+  close_modal: fn(),
+  active: Bool,
 ) ui::Widget {
   ffi::Stateful{
     Init: fn() Any {
@@ -668,7 +736,7 @@ fn new(
           refresh_board(c, api_key, notify)
         })
       }
-      build(c, ctx, api_key, on_open_issue, notify, active)
+      build(c, ctx, api_key, on_open_issue, notify, show_modal, close_modal, active)
     },
   }
 }

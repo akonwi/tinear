@@ -1,0 +1,181 @@
+use ard/maybe
+use go:go.rockorager.dev/vaxis/ui
+use go:tinear/ffi
+
+use tinear/tui/hints_bar
+use tinear/tui/modal
+
+// A reusable single-select picker presented in a modal. Each call to
+// `new(props)` returns a builder closure suitable for handing to the
+// app-level `show_modal` callback wired in `main.ard`.
+//
+// Behaviour:
+//   - up / down (or j / k) move the highlighted option
+//   - Enter (or Space) calls `on_confirm` with the picked Option and
+//     dismisses the modal
+//   - Esc dismisses the modal without confirming (handled by the modal
+//     frame, which catches the app-level DismissIntent)
+//   - clicking an option = confirm + dismiss
+//   - the initial cursor lands on whichever option has `current: true`,
+//     or 0 if none / id mismatch
+//
+// The picker owns a small local `PickerState` (just the cursor) inside
+// its own Stateful so the position survives modal-builder rebuilds
+// (the builder is invoked on every AppState change, e.g. a toast
+// arriving).
+
+struct Option {
+  // Stable identifier (e.g. state id, cycle id). Passed back to the
+  // caller via on_confirm so they can dispatch the mutation.
+  id: Str,
+  label: Str,
+  // true marks the option as the current selection — the picker shows
+  // a "(current)" suffix and initialises the cursor here.
+  current: Bool,
+}
+
+struct Props {
+  title: Str,
+  options: [Option],
+  // Optional fixed width. When none, the modal hugs content; for
+  // pickers a 40-50 col width usually feels right.
+  width: Int?,
+  on_confirm: fn(Option),
+}
+
+struct PickerState {
+  cursor: Int,
+}
+
+fn clamp_cursor(cursor: Int, count: Int) Int {
+  match {
+    count <= 0 => 0,
+    cursor < 0 => 0,
+    cursor >= count => count - 1,
+    _ => cursor,
+  }
+}
+
+fn initial_cursor(props: Props) Int {
+  mut found = 0
+  for option, idx in props.options {
+    if option.current {
+      found = idx
+    }
+  }
+  clamp_cursor(found, props.options.size())
+}
+
+// One row per option. The cursor-here option uses ListTile's Selected
+// styling (theme.Primary bg); the "(current)" suffix marks the option
+// the data already considers selected. Clicking an option fires the
+// confirm + close sequence (same as Enter).
+fn render_options(theme: ui::Theme, props: Props, cursor: Int, on_pick: fn(Int)) ui::Widget {
+  mut rows: [ui::Widget] = []
+  for option, idx in props.options {
+    let row_idx = idx
+    let title_text = match option.current {
+      true => "{option.label}   (current)",
+      false => option.label,
+    }
+    rows.push(ui::ListTile{
+      Title: ui::Text{Value: title_text, Style: ui::Style{Foreground: theme.Foreground}},
+      Selected: idx == cursor,
+      OnPressed: fn(ev: ui::EventContext) { on_pick(row_idx) },
+    })
+  }
+  ui::Flex{
+    Axis: ui::Vertical,
+    MainAxisSize: ui::MainAxisSizeMin,
+    CrossAxisAlignment: ui::CrossAxisStretch,
+    Children: rows,
+  }
+}
+
+fn picker_hints() [hints_bar::Hint] {
+  [
+    hints_bar::Hint{key: "↑↓", label: "select"},
+    hints_bar::Hint{key: "↵", label: "confirm"},
+    hints_bar::Hint{key: "Esc", label: "cancel"},
+  ]
+}
+
+fn move_cursor(c: mut ffi::StateCtx, count: Int, delta: Int) {
+  let s = ffi::StateRef<PickerState>(c)
+  s.cursor = clamp_cursor(s.cursor + delta, count)
+  ffi::MarkDirty(c)
+}
+
+// Body widget (everything between the title divider and the footer
+// divider of the modal frame). Lives in its own Stateful so the cursor
+// position survives across modal-builder rebuilds.
+fn picker_body(props: Props, close: fn()) ui::Widget {
+  ffi::Stateful{
+    Init: fn() Any {
+      PickerState{cursor: initial_cursor(props)}
+    },
+    Build: fn(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
+      let theme = ui::MustDepend<ui::Theme>(ctx)
+      let cursor = clamp_cursor(ffi::StateValue<PickerState>(c).cursor, props.options.size())
+
+      // Confirm and pick helpers. Both end the picker.
+      let confirm_at = fn(idx: Int) {
+        let safe = clamp_cursor(idx, props.options.size())
+        if props.options.size() > 0 {
+          props.on_confirm(props.options.at(safe).expect("clamped"))
+        }
+        close()
+      }
+
+      // Outer Focus absorbs the modal frame's AutoFocus so it doesn't
+      // land on option[0]'s ListTile (which would paint SurfaceHovered
+      // on top of and competing with the cursor's Selected styling on
+      // a different row). The outer focus has no visual treatment of
+      // its own; the cursor option is the only highlighted row on
+      // open.
+      mut focus_node = ui::FocusNode{}
+      ui::Actions{
+        Bindings: [
+          "picker.next": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+            move_cursor(c, props.options.size(), 1)
+            ui::EventHandled
+          },
+          "picker.prev": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+            move_cursor(c, props.options.size(), -1)
+            ui::EventHandled
+          },
+          "picker.confirm": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+            confirm_at(ffi::StateValue<PickerState>(c).cursor)
+            ui::EventHandled
+          },
+        ],
+        Child: ui::Shortcuts{
+          Bindings: [
+            "j": ffi::Intent("picker.next"),
+            "Down": ffi::Intent("picker.next"),
+            "k": ffi::Intent("picker.prev"),
+            "Up": ffi::Intent("picker.prev"),
+            "Enter": ffi::Intent("picker.confirm"),
+            "Space": ffi::Intent("picker.confirm"),
+          ],
+          Child: ui::Focus(mut focus_node, render_options(theme, props, cursor, confirm_at)),
+        },
+      }
+    },
+  }
+}
+
+// Returns a modal builder. Hand the result to `show_modal` so the app
+// root layers it over the rest of the UI.
+fn new(props: Props) fn(ui::Theme, fn()) ui::Widget {
+  fn(theme: ui::Theme, close: fn()) ui::Widget {
+    modal::show_modal(
+      theme,
+      props.title,
+      picker_body(props, close),
+      hints_bar::row(theme, picker_hints()),
+      props.width,
+      fn(ev: ui::EventContext) { close() },
+    )
+  }
+}

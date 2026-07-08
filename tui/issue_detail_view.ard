@@ -4,9 +4,14 @@ use go:go.rockorager.dev/vaxis/ui
 use go:tinear/ffi
 
 use tinear/models/issues
+use tinear/tui/compose_view
+use tinear/tui/hints_bar
+use tinear/tui/issue_pickers
+use tinear/tui/modal
 use tinear/tui/refresh
 use tinear/tui/state
 use tinear/tui/text as text
+use tinear/tui/toast
 
 // Issue detail tab.
 //
@@ -91,10 +96,32 @@ fn load_comments(c: mut ffi::StateCtx, api_key: Str, identifier: Str) {
   })
 }
 
+// Dispatched by the compose modal after a successful create_comment.
+// We re-fetch comments and scroll to the end so the new comment is
+// visible. The fetch stays on a background fiber so the modal can
+// close immediately.
+fn refresh_comments_after_post(c: mut ffi::StateCtx, api_key: Str, identifier: Str) {
+  async::start(fn() {
+    let refreshed = issues::load_comments(api_key, identifier)
+    ffi::Dispatch(c, fn() {
+      let v = ffi::StateRef<Detail>(c)
+      match refreshed {
+        ok(comments) => {
+          v.comments = comments
+          v.comments_error = ""
+        },
+        err(e) => { v.comments_error = e },
+      }
+      v.scroll.ScrollToEnd()
+      ffi::MarkDirty(c)
+    })
+  })
+}
+
 // Silent refresh of both the issue and its comments. Used by the
 // background refresh loop. Errors surface as toasts but don't touch
 // the existing data — the user keeps the last good snapshot.
-fn refresh_detail(c: mut ffi::StateCtx, api_key: Str, identifier: Str, notify: fn(Str, Str)) {
+fn refresh_detail(c: mut ffi::StateCtx, api_key: Str, identifier: Str, notify: fn(Str, Str, toast::ToastVariant)) {
   async::start(fn() {
     let issue_result = issues::load_issue(api_key, identifier)
     match issue_result {
@@ -107,7 +134,7 @@ fn refresh_detail(c: mut ffi::StateCtx, api_key: Str, identifier: Str, notify: f
         })
       },
       err(e) => {
-        notify("Issue refresh", e)
+        notify("Issue refresh", e, toast::ToastVariant::error)
       },
     }
   })
@@ -123,7 +150,7 @@ fn refresh_detail(c: mut ffi::StateCtx, api_key: Str, identifier: Str, notify: f
         })
       },
       err(e) => {
-        notify("Comments refresh", e)
+        notify("Comments refresh", e, toast::ToastVariant::error)
       },
     }
   })
@@ -392,7 +419,11 @@ fn error_placeholder(theme: ui::Theme, identifier: Str, error: Str) ui::Widget {
 
 fn build(
   c: mut ffi::StateCtx, ctx: ui::BuildContext,
-  api_key: Str, identifier: Str, active: Bool,
+  api_key: Str, identifier: Str,
+  notify: fn(Str, Str, toast::ToastVariant),
+  show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
+  close_modal: fn(),
+  active: Bool,
 ) ui::Widget {
   let theme = ui::MustDepend<ui::Theme>(ctx)
   let model = ffi::StateValue<Detail>(c)
@@ -446,6 +477,81 @@ fn build(
           },
         }
       },
+      // `n` opens the compose modal. If the user is on the Description
+      // section we also switch to Comments first so the freshly-posted
+      // comment will show up in context once we re-render.
+      "issue_detail.compose": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        match ffi::StateValue<Detail>(c).issue {
+          issue => {
+            switch_section(c, SECTION_COMMENTS)
+            model.scroll.ScrollToEnd()
+            let refresh_cb = fn() {
+              refresh_comments_after_post(c, api_key, identifier)
+            }
+            show_modal(fn(theme_inner: ui::Theme, close: fn()) ui::Widget {
+              modal::show_modal(
+                theme_inner,
+                "New comment — {issue.identifier}",
+                compose_view::new(api_key, issue, refresh_cb, close),
+                hints_bar::row(theme_inner, [
+                  hints_bar::Hint{key: "Ctrl+↵", label: "send"},
+                  hints_bar::Hint{key: "Esc", label: "cancel"},
+                ]),
+                maybe::some(70),
+                fn(ev2: ui::EventContext) { close() },
+              )
+            })
+          },
+          _ => {},
+        }
+        ui::EventHandled
+      },
+      "issue_detail.state_picker": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        match ffi::StateValue<Detail>(c).issue {
+          issue => {
+            let issue_id = issue.id
+            issue_pickers::open_state_picker(
+              api_key, issue, show_modal, close_modal, notify,
+              fn(new_state_id: Str) {
+                async::start(fn() {
+                  let r = issues::update_state(api_key, issue_id, new_state_id)
+                  ffi::Dispatch(c, fn() {
+                    match r {
+                      ok(_) => load_issue(c, api_key, identifier),
+                      err(e) => notify("Update state", e, toast::ToastVariant::error),
+                    }
+                  })
+                })
+              },
+            )
+          },
+          _ => {},
+        }
+        ui::EventHandled
+      },
+      "issue_detail.cycle_picker": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        match ffi::StateValue<Detail>(c).issue {
+          issue => {
+            let issue_id = issue.id
+            issue_pickers::open_cycle_picker(
+              api_key, issue, show_modal, close_modal, notify,
+              fn(new_cycle_id: Str) {
+                async::start(fn() {
+                  let r = issues::update_cycle(api_key, issue_id, new_cycle_id)
+                  ffi::Dispatch(c, fn() {
+                    match r {
+                      ok(_) => load_issue(c, api_key, identifier),
+                      err(e) => notify("Update cycle", e, toast::ToastVariant::error),
+                    }
+                  })
+                })
+              },
+            )
+          },
+          _ => {},
+        }
+        ui::EventHandled
+      },
     ],
     Child: ui::Shortcuts{
       Bindings: [
@@ -455,6 +561,9 @@ fn build(
         "Up": ffi::Intent("issue_detail.scroll_up"),
         "d": ffi::Intent("issue_detail.section_description"),
         "c": ffi::Intent("issue_detail.section_comments"),
+        "n": ffi::Intent("issue_detail.compose"),
+        "s": ffi::Intent("issue_detail.state_picker"),
+        "y": ffi::Intent("issue_detail.cycle_picker"),
       ],
       Child: ui::FocusScope{
         AutoFocus: active,
@@ -465,7 +574,13 @@ fn build(
   }
 }
 
-fn new(api_key: Str, identifier: Str, notify: fn(Str, Str), active: Bool) ui::Widget {
+fn new(
+  api_key: Str, identifier: Str,
+  notify: fn(Str, Str, toast::ToastVariant),
+  show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
+  close_modal: fn(),
+  active: Bool,
+) ui::Widget {
   ffi::Stateful{
     Init: fn() Any {
       mut scroll = ui::ScrollController{}
@@ -496,7 +611,7 @@ fn new(api_key: Str, identifier: Str, notify: fn(Str, Str), active: Bool) ui::Wi
           refresh_detail(c, api_key, identifier, notify)
         })
       }
-      build(c, ctx, api_key, identifier, active)
+      build(c, ctx, api_key, identifier, notify, show_modal, close_modal, active)
     },
   }
 }
