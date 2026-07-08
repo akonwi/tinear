@@ -1,4 +1,4 @@
-use ard/decode
+use tinear/decode
 use ard/testing
 
 use tinear/models/issues

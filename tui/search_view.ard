@@ -1,5 +1,6 @@
 use ard/async
-use ard/duration
+use go:time
+use go:tinear/ffi
 use ard/maybe
 use vaxis/ui
 
@@ -65,7 +66,7 @@ fn start_search(
   api_key: Str, query: Str, generation: Int, rt: ui::Runtime<Search>,
 ) {
   let _ = async::start(fn() {
-    async::sleep(duration::from_millis(300))
+    time::Sleep(ffi::Millis(300))
     let trimmed = query.trim()
     rt.dispatch(fn(s: ui::State<Search>) {
       let current = s.value()

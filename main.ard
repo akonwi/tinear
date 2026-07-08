@@ -1,5 +1,6 @@
 use ard/async
-use ard/duration
+use go:time
+use go:tinear/ffi
 use ard/maybe
 use vaxis/ui
 
@@ -49,7 +50,7 @@ fn dispatch_toast(
     // async::start returns a Fiber; discard it so the dispatch
     // callback's return type stays Void.
     let _ = async::start(fn() {
-      async::sleep(duration::from_millis(ttl_ms))
+      time::Sleep(ffi::Millis(ttl_ms))
       rt.dispatch(fn(state: ui::State<AppState>) {
         state.set(fn(mut s: AppState) {
           mut remaining: [toast::Toast] = []

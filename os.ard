@@ -1,8 +1,9 @@
-// OS-level utilities not provided by ard/stdlib. Each `extern fn` here
-// pairs with a Go function in `ffi/host.go` named after the unqualified
-// part of the FFI symbol (e.g. `tinear.OpenURL` → `ffi.OpenURL`).
+// OS-level utilities backed by tinear's Go FFI package (ffi/host.go).
+use go:tinear/ffi
 
 // Launch the system's default handler for the given URL (browser for
 // http(s), file viewer for file paths, etc.). Returns immediately; does
 // not wait for the launched process to exit.
-extern fn open_url(url: Str) Void!Str = "tinear.OpenURL"
+fn open_url(url: Str) Void!Str {
+  ffi::OpenURL(url)
+}

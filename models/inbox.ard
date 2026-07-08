@@ -1,5 +1,4 @@
-use ard/decode
-use ard/dynamic
+use tinear/decode
 use ard/maybe
 
 use tinear/linear/client
@@ -61,7 +60,7 @@ struct IdTitle {
   title: Str,
 }
 
-fn optional_nested_str(data: Dynamic, name: Str, nested: Str, fallback: Str) Str {
+fn optional_nested_str(data: Any, name: Str, nested: Str, fallback: Str) Str {
   match decode::run(data, decode::path([name, nested], decode::nullable(decode::string))) {
     ok(value) => match value {
       v => v,
@@ -71,14 +70,14 @@ fn optional_nested_str(data: Dynamic, name: Str, nested: Str, fallback: Str) Str
   }
 }
 
-fn optional_nested_int(data: Dynamic, name: Str, nested: Str) Int? {
+fn optional_nested_int(data: Any, name: Str, nested: Str) Int? {
   match decode::run(data, decode::path([name, nested], decode::nullable(decode::int))) {
     ok(value) => value,
     err(_) => maybe::none(),
   }
 }
 
-fn user_display_name_at(data: Dynamic, name: Str) Str {
+fn user_display_name_at(data: Any, name: Str) Str {
   let display_name = optional_nested_str(data, name, "displayName", "")
   match display_name.is_empty() {
     true => optional_nested_str(data, name, "name", "—"),
@@ -86,7 +85,7 @@ fn user_display_name_at(data: Dynamic, name: Str) Str {
   }
 }
 
-private fn dynamic_id_and_title(notif: Dynamic, n_type: Str) IdTitle {
+private fn dynamic_id_and_title(notif: Any, n_type: Str) IdTitle {
   match is_pr_type(n_type) {
     true => {
       let number = optional_nested_int(notif, "pullRequest", "number")
@@ -105,7 +104,7 @@ private fn dynamic_id_and_title(notif: Dynamic, n_type: Str) IdTitle {
   }
 }
 
-fn decode_item(notif: Dynamic) Item {
+fn decode_item(notif: Any) Item {
   let notification_id = decode::run(notif, decode::field("id", decode::string)).expect("Missing notification id")
   let n_type = decode::run(notif, decode::field("type", decode::string)).expect("Missing notification type")
   let type_label = format_type(n_type)
@@ -134,20 +133,20 @@ fn decode_item(notif: Dynamic) Item {
   }
 }
 
-fn fetch_inbox(api_key: Str) [Dynamic]!Str {
+fn fetch_inbox(api_key: Str) [Any]!Str {
   let query = "query \{ notifications(first: 50) \{ nodes \{ id type createdAt title subtitle url ... on IssueNotification \{ comment \{ id body createdAt user \{ name displayName \} \} issue \{ id identifier title description priority state \{ name \} team \{ name key \} project \{ name \} assignee \{ name displayName \} comments(first: 30) \{ nodes \{ id body createdAt user \{ name displayName \} \} \} history(first: 10) \{ nodes \{ id createdAt fromState \{ name \} toState \{ name \} \} \} \} \} ... on PullRequestNotification \{ pullRequestCommentId pullRequest \{ id number title url status sourceBranch targetBranch openedAt creator \{ name displayName \} \} \} actor \{ id name displayName \} \} \} \}"
   let data = try client::graphql(api_key, query)
   let nodes = decode::run(
     data,
-    decode::path(["notifications", "nodes"], decode::list(decode::dynamic)),
+    decode::path(["notifications", "nodes"], decode::list(decode::any)),
   ).expect("Missing notifications nodes")
   Result::ok(nodes)
 }
 
-fn fetch_notification_detail(api_key: Str, notification_id: Str) Dynamic!Str {
+fn fetch_notification_detail(api_key: Str, notification_id: Str) Any!Str {
   let query = "query \{ notification(id: \"{notification_id}\") \{ id type createdAt title subtitle url ... on IssueNotification \{ comment \{ id body createdAt user \{ name displayName \} \} issue \{ id identifier title url description priority state \{ name \} team \{ name key \} project \{ name \} assignee \{ name displayName \} comments(first: 30) \{ nodes \{ id body createdAt user \{ name displayName \} \} \} history(first: 10) \{ nodes \{ id createdAt fromState \{ name \} toState \{ name \} \} \} \} \} ... on PullRequestNotification \{ pullRequestCommentId pullRequest \{ id number title url status sourceBranch targetBranch openedAt creator \{ name displayName \} \} \} actor \{ id name displayName \} \} \}"
   let data = try client::graphql(api_key, query)
-  let notification = decode::run(data, decode::field("notification", decode::dynamic)).expect("Missing notification")
+  let notification = decode::run(data, decode::field("notification", decode::any)).expect("Missing notification")
   Result::ok(notification)
 }
 
@@ -214,7 +213,7 @@ struct Detail {
 // error or null. We chain `decode::field` instead of using `decode::path`
 // because passing a `[Str]` variable to `decode::path` doesn't auto-convert
 // to `[PathSegment]` (only inline list literals are special-cased).
-fn path_str1(data: Dynamic, k: Str, fallback: Str) Str {
+fn path_str1(data: Any, k: Str, fallback: Str) Str {
   match decode::run(data, decode::field(k, decode::nullable(decode::string))) {
     ok(value) => match value {
       v => v,
@@ -224,7 +223,7 @@ fn path_str1(data: Dynamic, k: Str, fallback: Str) Str {
   }
 }
 
-fn path_str2(data: Dynamic, k1: Str, k2: Str, fallback: Str) Str {
+fn path_str2(data: Any, k1: Str, k2: Str, fallback: Str) Str {
   match decode::run(data, decode::field(k1, decode::field(k2, decode::nullable(decode::string)))) {
     ok(value) => match value {
       v => v,
@@ -234,7 +233,7 @@ fn path_str2(data: Dynamic, k1: Str, k2: Str, fallback: Str) Str {
   }
 }
 
-fn path_str3(data: Dynamic, k1: Str, k2: Str, k3: Str, fallback: Str) Str {
+fn path_str3(data: Any, k1: Str, k2: Str, k3: Str, fallback: Str) Str {
   match decode::run(data, decode::field(k1, decode::field(k2, decode::field(k3, decode::nullable(decode::string))))) {
     ok(value) => match value {
       v => v,
@@ -244,29 +243,29 @@ fn path_str3(data: Dynamic, k1: Str, k2: Str, k3: Str, fallback: Str) Str {
   }
 }
 
-fn path_dynamic1(data: Dynamic, k: Str) Dynamic {
-  match decode::run(data, decode::field(k, decode::dynamic)) {
+fn path_dynamic1(data: Any, k: Str) Any {
+  match decode::run(data, decode::field(k, decode::any)) {
     ok(d) => d,
-    err(_) => dynamic::from_str("{}"),
+    err(_) => "\{\}",
   }
 }
 
-fn path_dynamic2(data: Dynamic, k1: Str, k2: Str) Dynamic {
-  match decode::run(data, decode::field(k1, decode::field(k2, decode::dynamic))) {
+fn path_dynamic2(data: Any, k1: Str, k2: Str) Any {
+  match decode::run(data, decode::field(k1, decode::field(k2, decode::any))) {
     ok(d) => d,
-    err(_) => dynamic::from_str("{}"),
+    err(_) => "\{\}",
   }
 }
 
 // Read a list at a 3-deep path (e.g. issue.comments.nodes).
-fn path_list3(data: Dynamic, k1: Str, k2: Str, k3: Str) [Dynamic] {
-  match decode::run(data, decode::field(k1, decode::field(k2, decode::field(k3, decode::list(decode::dynamic))))) {
+fn path_list3(data: Any, k1: Str, k2: Str, k3: Str) [Any] {
+  match decode::run(data, decode::field(k1, decode::field(k2, decode::field(k3, decode::list(decode::any))))) {
     ok(list) => list,
     err(_) => [],
   }
 }
 
-fn decode_user_display(data: Dynamic) Str {
+fn decode_user_display(data: Any) Str {
   let display = path_str1(data, "displayName", "")
   match display.is_empty() {
     false => display,
@@ -274,7 +273,7 @@ fn decode_user_display(data: Dynamic) Str {
   }
 }
 
-fn decode_detail_comment(raw: Dynamic) DetailComment {
+fn decode_detail_comment(raw: Any) DetailComment {
   DetailComment{
     author: decode_user_display(path_dynamic1(raw, "user")),
     created_at: path_str1(raw, "createdAt", ""),
@@ -282,7 +281,7 @@ fn decode_detail_comment(raw: Dynamic) DetailComment {
   }
 }
 
-fn decode_detail_history(raw: Dynamic) DetailHistory {
+fn decode_detail_history(raw: Any) DetailHistory {
   DetailHistory{
     from_state: path_str2(raw, "fromState", "name", ""),
     to_state: path_str2(raw, "toState", "name", ""),
@@ -298,7 +297,7 @@ fn decode_detail_history(raw: Dynamic) DetailHistory {
 // pullRequestCommentId we surface this subtitle as a synthetic
 // DetailComment so the detail pane shows a Comment section instead of
 // falling through to the (always empty) PR description.
-fn decode_pr_detail(notif: Dynamic) Detail {
+fn decode_pr_detail(notif: Any) Detail {
   let number = optional_nested_int(notif, "pullRequest", "number")
   let identifier = match number {
     n => "PR #{n.to_str()}",
@@ -335,8 +334,8 @@ fn decode_pr_detail(notif: Dynamic) Detail {
 // Decode notification.comment (the specific comment that triggered the
 // notification) into a DetailComment, or none if the notification has no
 // comment field.
-fn decode_triggering_comment(notif: Dynamic) DetailComment? {
-  match decode::run(notif, decode::field("comment", decode::nullable(decode::dynamic))) {
+fn decode_triggering_comment(notif: Any) DetailComment? {
+  match decode::run(notif, decode::field("comment", decode::nullable(decode::any))) {
     ok(value) => match value {
       raw => maybe::some(decode_detail_comment(raw)),
       _ => maybe::none(),
@@ -345,7 +344,7 @@ fn decode_triggering_comment(notif: Dynamic) DetailComment? {
   }
 }
 
-fn decode_issue_detail(notif: Dynamic) Detail {
+fn decode_issue_detail(notif: Any) Detail {
   mut comments: [DetailComment] = []
   for raw in path_list3(notif, "issue", "comments", "nodes") {
     comments.push(decode_detail_comment(raw))
@@ -372,7 +371,7 @@ fn decode_issue_detail(notif: Dynamic) Detail {
   }
 }
 
-fn decode_detail(notif: Dynamic) Detail {
+fn decode_detail(notif: Any) Detail {
   let n_type = decode::run(notif, decode::field("type", decode::string)).expect("Missing notification type")
   match is_pr_type(n_type) {
     true => decode_pr_detail(notif),

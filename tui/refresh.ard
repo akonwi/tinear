@@ -1,5 +1,6 @@
 use ard/async
-use ard/duration
+use go:time
+use go:tinear/ffi
 
 // Schedules `action` to run every `interval_ms` milliseconds on a
 // background fiber, indefinitely. The first invocation happens AFTER
@@ -17,7 +18,7 @@ use ard/duration
 fn schedule_periodic(interval_ms: Int, action: fn()) {
   let _ = async::start(fn() {
     while true {
-      async::sleep(duration::from_millis(interval_ms))
+      time::Sleep(ffi::Millis(interval_ms))
       action()
     }
   })
