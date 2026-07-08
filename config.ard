@@ -1,6 +1,5 @@
 use go:encoding/json
 use go:os
-use go:tinear/ffi
 
 use tinear/decode
 
@@ -67,7 +66,7 @@ fn load() Config!Str {
       match os::ReadFile(config_path) {
         ok(bytes) => {
           mut copy = bytes
-          parse(ffi::StrFromBytes(copy))
+          parse(Str::from(copy))
         },
         err(_) => Result::ok(Config{api_key: ""}),
       }

@@ -1,6 +1,5 @@
 use tinear/decode
 use go:encoding/json
-use go:tinear/ffi
 use ard/maybe
 
 use tinear/linear/client
@@ -316,7 +315,7 @@ fn update_cycle(api_key: Str, issue_id: Str, cycle_id: Str) Void!Str {
 
 fn create_comment(api_key: Str, issue_id: Str, body: Str) Void!Str {
   mut body_bytes = json::Marshal(body).expect("encode body")
-  let body_json = ffi::StrFromBytes(body_bytes)
+  let body_json = Str::from(body_bytes)
   let mutation = "mutation \{ commentCreate(input: \{ issueId: \"{issue_id}\", body: {body_json} \}) \{ success \} \}"
   let data = try client::graphql(api_key, mutation)
   let success = decode::run(
@@ -386,7 +385,7 @@ fn fetch_single_issue(api_key: Str, issue_id: Str) Any!Str {
 
 fn fetch_issue_search(api_key: Str, term: Str) [Any]!Str {
   mut q_bytes = json::Marshal(term).expect("encode search query")
-  let q = ffi::StrFromBytes(q_bytes)
+  let q = Str::from(q_bytes)
   let query = "query \{ searchIssues(term: {q}, first: 20) \{ nodes \{ {issue_fields()} \} \} \}"
   let data = try client::graphql(api_key, query)
   let nodes = decode::run(

@@ -108,8 +108,7 @@ fn selected_issue(v: Board) issues::Issue? {
 fn fresh_col_h_scrolls(columns: [issues::BoardColumn]) [mut ui::ScrollController] {
   mut scrolls: [mut ui::ScrollController] = []
   for _ in columns {
-    mut ctrl = ui::ScrollController{}
-    scrolls.push(mut ctrl)
+    scrolls.push(mut ui::ScrollController{})
   }
   scrolls
 }
@@ -117,8 +116,7 @@ fn fresh_col_h_scrolls(columns: [issues::BoardColumn]) [mut ui::ScrollController
 fn fresh_col_list_scrolls(columns: [issues::BoardColumn]) [mut ui::SliverListController] {
   mut scrolls: [mut ui::SliverListController] = []
   for _ in columns {
-    mut ctrl = ui::SliverListController{}
-    scrolls.push(mut ctrl)
+    scrolls.push(mut ui::SliverListController{})
   }
   scrolls
 }

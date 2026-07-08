@@ -1,6 +1,5 @@
 use ard/testing
 use go:encoding/json
-use go:tinear/ffi
 
 use tinear/models/cache
 
@@ -16,7 +15,7 @@ test fn test_cache_decode_ignores_unknown_version() Void!Str {
     version: 999,
     logged_in: cache::empty_logged_in(),
   }).expect("encode cache")
-  let content = ffi::StrFromBytes(encoded)
+  let content = Str::from(encoded)
 
   match cache::decode(content) {
     _cache => testing::assert(false, "unknown cache version should be ignored"),

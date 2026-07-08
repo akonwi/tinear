@@ -64,7 +64,7 @@ fn selected_issue(model: Search) issues::Issue? {
 // overwrite newer results.
 fn start_search(c: mut ffi::StateCtx, api_key: Str, query: Str, generation: Int) {
   async::start(fn() {
-    time::Sleep(ffi::Millis(300))
+    time::Sleep(300 * time::Millisecond)
     let trimmed = query.trim()
     ffi::Dispatch(c, fn() {
       let current = ffi::StateValue<Search>(c)

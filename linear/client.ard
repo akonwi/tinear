@@ -3,7 +3,6 @@ use go:io
 use go:net/http
 use go:strings
 use go:time
-use go:tinear/ffi
 
 use tinear/decode
 
@@ -21,7 +20,7 @@ private fn post(api_key: Str, body: Str) Str!Str {
   defer res.Body.Close()
 
   mut bytes = try io::ReadAll(res.Body)
-  let text = ffi::StrFromBytes(bytes)
+  let text = Str::from(bytes)
 
   match res.StatusCode >= 200 and res.StatusCode < 300 {
     true => Result::ok(text),
@@ -36,7 +35,7 @@ private fn extract_data(res_body: Str) Any!Str {
   match decode::run(parsed, decode::field("errors", decode::any)) {
     ok(errs) => {
       mut encoded = json::Marshal(errs).expect("encode errors")
-      Result::err("GraphQL error: {ffi::StrFromBytes(encoded)}")
+      Result::err("GraphQL error: {Str::from(encoded)}")
     },
     err(_) => {
       match decode::run(parsed, decode::field("data", decode::any)) {
@@ -54,5 +53,5 @@ fn send_query(api_key: Str, body: Str) Any!Str {
 
 fn graphql(api_key: Str, query: Str) Any!Str {
   mut encoded = json::Marshal(["query": query]).expect("encode body")
-  send_query(api_key, ffi::StrFromBytes(encoded))
+  send_query(api_key, Str::from(encoded))
 }

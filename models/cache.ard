@@ -1,7 +1,6 @@
 use ard/maybe
 use go:encoding/json
 use go:os
-use go:tinear/ffi
 
 use tinear/config
 use tinear/decode
@@ -82,7 +81,7 @@ fn encode(cache: DataCache) Str!Str {
   mut normalized = cache
   normalized.version = version()
   mut bytes = try json::Marshal(normalized)
-  Result::ok(ffi::StrFromBytes(bytes))
+  Result::ok(Str::from(bytes))
 }
 
 fn load() DataCache? {
@@ -91,7 +90,7 @@ fn load() DataCache? {
       match os::ReadFile(path) {
         ok(bytes) => {
           mut copy = bytes
-          decode(ffi::StrFromBytes(copy))
+          decode(Str::from(copy))
         },
         err(_) => maybe::none(),
       }

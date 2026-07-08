@@ -51,7 +51,7 @@ fn dispatch_toast(c: mut ffi::StateCtx, title: Str, description: Str, variant: t
       s.toasts = next_toasts
     })
     async::start(fn() {
-      time::Sleep(ffi::Millis(ttl_ms))
+      time::Sleep(time::Duration::from(ttl_ms) * time::Millisecond)
       ffi::Dispatch(c, fn() {
         ffi::Update<AppState>(c, fn(s: mut AppState) {
           mut remaining: [toast::Toast] = []
