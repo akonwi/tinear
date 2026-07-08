@@ -8,6 +8,7 @@ use tinear/models/issues
 use tinear/os
 use tinear/tui/hints_bar
 use tinear/tui/inbox_view
+use tinear/tui/issue_detail_view
 use tinear/tui/my_issues_view
 
 // Shell for the logged-in view.
@@ -183,11 +184,6 @@ fn tab_bar(c: mut ffi::StateCtx, theme: ui::Theme, s: Model) ui::Widget {
   ui::Flex{Axis: ui::Vertical, MainAxisSize: ui::MainAxisSizeMin, Children: children}
 }
 
-// Placeholder tab body until the real views are rebuilt.
-fn placeholder(label: Str) ui::Widget {
-  ui::Center(ui::Text{Value: "{label} — coming back soon"})
-}
-
 // Open an inbox item. Routing:
 //   issue/comment/mention notifications -> promote target_id to a
 //     new (or existing) tab in issue_tabs and select it
@@ -230,8 +226,13 @@ fn body_for(c: mut ffi::StateCtx, api_key: Str, s: Model) ui::Widget {
       s.tab_index == 1,
     ),
   ]
-  for label in s.issue_tabs {
-    children.push(placeholder(label))
+  for label, idx in s.issue_tabs {
+    children.push(issue_detail_view::new(
+      api_key,
+      label,
+      fn(title: Str, description: Str) {},
+      s.tab_index == idx + 2,
+    ))
   }
   ui::IndexedStack{
     Index: s.tab_index,
