@@ -1,200 +1,72 @@
-use ard/async
-use go:time
+use go:go.rockorager.dev/vaxis/ui
 use go:tinear/ffi
-use ard/maybe
-use vaxis/ui
 
 use tinear/config
-use tinear/tui/logged_in_screen
-use tinear/tui/modal
-use tinear/tui/toast
 use tinear/tui/welcome_screen
-
-let DEFAULT_TOAST_TTL_MS: Int = 5000
 
 struct AppState {
   api_key: Str,
-  toasts: [toast::Toast],
-  next_toast_id: Int,
-  // Currently-presented modal, if any. Setting to some / none drives
-  // the overlay slot in the app root.
-  current_modal: modal::ModalDef?,
 }
 
 impl AppState {
   fn has_auth() Bool { not self.api_key.is_empty() }
 }
 
-// Append a new toast and schedule its removal once the TTL elapses. Safe
-// to call from event handlers (rt.dispatch lands the state mutation on
-// the UI thread) and from background fibers.
-fn dispatch_toast(
-  rt: ui::Runtime<AppState>,
-  title: Str, description: Str, variant: toast::ToastVariant, ttl_ms: Int,
-) {
-  rt.dispatch(fn(state: ui::State<AppState>) {
-    let toast_id = state.value().next_toast_id + 1
-    state.set(fn(mut s: AppState) {
-      s.next_toast_id = toast_id
-      mut next_toasts: [toast::Toast] = []
-      for t in s.toasts { next_toasts.push(t) }
-      next_toasts.push(toast::Toast{
-        id: toast_id,
-        title: title,
-        description: description,
-        variant: variant,
-        ttl_ms: ttl_ms,
-      })
-      s.toasts = next_toasts
-    })
-    // async::start returns a Fiber; discard it so the dispatch
-    // callback's return type stays Void.
-    let _ = async::start(fn() {
-      time::Sleep(ffi::Millis(ttl_ms))
-      rt.dispatch(fn(state: ui::State<AppState>) {
-        state.set(fn(mut s: AppState) {
-          mut remaining: [toast::Toast] = []
-          for t in s.toasts {
-            if not (t.id == toast_id) {
-              remaining.push(t)
-            }
-          }
-          s.toasts = remaining
-        })
-      })
-    })
-  })
+fn set_api_key(c: mut ffi::StateCtx, api_key: Str) {
+  let state = ffi::StateRef<AppState>(c)
+  state.api_key = api_key
+  ffi::MarkDirty(c)
 }
 
-fn body(ctx: ui::BuildContext, state: ui::State<AppState>) ui::Widget {
-  let theme = ui::must_have_theme(ctx)
-  let model = state.value()
-  let rt = ctx.runtime<AppState>()
-  let notify = fn(title: Str, description: Str, variant: toast::ToastVariant) {
-    dispatch_toast(rt, title, description, variant, DEFAULT_TOAST_TTL_MS)
-  }
-  // Modal lifecycle helpers. close_modal clears the slot; show_modal
-  // installs a builder. Both are runtime-safe (rt.dispatch lands the
-  // state mutation on the UI thread) so callers can invoke them from
-  // event handlers or background fibers.
-  let close_modal = fn() {
-    rt.dispatch(fn(s: ui::State<AppState>) {
-      s.set(fn(mut v: AppState) { v.current_modal = maybe::none() })
-    })
-  }
-  let show_modal = fn(builder: fn(ui::Theme, fn()) ui::Widget) {
-    rt.dispatch(fn(s: ui::State<AppState>) {
-      s.set(fn(mut v: AppState) {
-        v.current_modal = maybe::some(modal::ModalDef{ build: builder })
-      })
-    })
-  }
+// Placeholder for the logged-in shell until that slice is rebuilt.
+fn logged_in_placeholder() ui::Widget {
+  ui::Text{Value: "Logged in. The shell returns in the next slice."}
+}
+
+fn body(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
+  let theme = ui::MustDepend<ui::Theme>(ctx)
+  let model = ffi::StateValue<AppState>(c)
   let content = match model.has_auth() {
-    true => logged_in_screen::new(
-      model.api_key, notify, show_modal, close_modal,
-      modal_open: model.current_modal.is_some(),
-    ),
+    true => logged_in_placeholder(),
     false => welcome_screen::new(fn(api_key: Str) {
-      state.set(fn(mut s: AppState) { s.api_key = api_key })
+      set_api_key(c, api_key)
     }),
   }
-  let centered = ui::center(ui::padding(content, horizontal: 1))
-  // Toast overlay rides above the screen content, anchored bottom-right
-  // with 1 col of padding from the right edge and 2 rows from the bottom
-  // (above the hint bar). modal: false so it doesn't trap focus.
-  //
-  // The widget type at this slot must be STABLE across rebuilds:
-  // if it flips between `centered` and `overlay(centered, ...)` when
-  // toasts.size() crosses 0, the framework treats it as a different
-  // widget type and unmounts the entire subtree underneath — including
-  // logged_in_screen and inbox_view, which would force the inbox to
-  // re-fetch on every toast appear/disappear. Always use overlay; pass
-  // an empty entries list when there's nothing to layer.
-  mut entries: [ui::OverlayEntry] = []
-  if model.toasts.size() > 0 {
-    entries.push(ui::overlay_entry(
-      ui::padding(
-        toast::render_stack(theme, model.toasts),
-        right: 1, bottom: 2,
-      ),
-      modal: false,
-      align_x: 1,
-      align_y: 1,
-    ))
-  }
-  // Modal entry. modal: true centres the entry (align 0, 0) and
-  // signals overlay's hit-test routing to swallow events for content
-  // beneath the modal, so the body view stops responding to keys and
-  // clicks while the modal is presented. The modal's own focus_scope
-  // (inside show_modal) handles the focus trap.
-  match model.current_modal {
-    def => {
-      entries.push(ui::overlay_entry(
-        def.build(theme, close_modal),
-        modal: true,
-        align_x: 0,
-        align_y: 0,
-      ))
-    },
-    _ => {},
-  }
-  let layered = ui::overlay(centered, entries)
-  ui::decorated_box(
-    layered,
-    fg: theme.foreground,
-    bg: theme.background,
+  let centered = ui::Center(ui::Padding(ui::Symmetric(0, 1), content))
+  ui::DecoratedBox(
+    ui::Decoration{Style: ui::Style{Foreground: theme.Foreground, Background: theme.Background}},
+    centered,
   )
 }
 
 fn root() ui::Widget {
-  ui::shortcuts(
-    ui::actions(
-      ui::stateful(
-        key: "tinear",
-        init: fn(_ctx: ui::BuildContext) AppState {
+  ui::Actions{
+    Bindings: [
+      "tinear.quit": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        ev.Quit()
+        ui::EventHandled
+      },
+    ],
+    // Quit on Ctrl+Q. Ctrl+C is intentionally left free so vaxis's
+    // SelectionArea can claim it for copy-selection-to-clipboard when
+    // the detail panes return.
+    Child: ui::Shortcuts{
+      Bindings: ["Ctrl+q": ffi::Intent("tinear.quit")],
+      Child: ffi::Stateful{
+        Init: fn() Any {
           match config::load() {
-            ok(cfg) => AppState{
-              api_key: cfg.api_key,
-              toasts: [],
-              next_toast_id: 0,
-              current_modal: maybe::none(),
-            },
-            err(_) => AppState{
-              api_key: "",
-              toasts: [],
-              next_toast_id: 0,
-              current_modal: maybe::none(),
-            },
+            ok(cfg) => AppState{api_key: cfg.api_key},
+            err(_) => AppState{api_key: ""},
           }
         },
-        build: body,
-      ),
-      [
-        ui::action("tinear.quit", fn(ctx: ui::EventContext, _intent: Str) ui::EventResult {
-          ui::quit(ctx)
-          ui::EventResult::handled
-        }),
-      ],
-    ),
-    // Quit on Ctrl+Q. Ctrl+C is intentionally left free so vaxis's
-    // SelectionArea (wrapping the inbox detail pane and issue
-    // detail body) can claim it for copy-selection-to-clipboard.
-    ["Ctrl+q": "tinear.quit"],
-  )
+        Build: body,
+      },
+    },
+  }
 }
 
-fn main() Void {
-  // Pass no theme set so vaxis builds the theme from the terminal's
-  // own colors at startup:
-  //   - OSC 10 / 11 — actual foreground and background
-  //   - OSC 4    — the 8 ANSI palette colors (0–7)
-  // Then vaxis derives a full Theme + Palette from those, and picks
-  // Light vs Dark by comparing the luminance of bg vs fg — NOT by
-  // the DCS 996 response, which some terminals (Ghostty, macOS
-  // Terminal.app) answer based on macOS NSAppearance rather than
-  // their actual background color.
-  //
-  // The app re-queries on ColorThemeUpdate events too, so live
-  // theme changes in the terminal are picked up.
-  ui::run(root(), maybe::none())
+fn main() {
+  // No explicit theme: vaxis derives one from the terminal's own
+  // colors (OSC 10/11 foreground and background, OSC 4 palette).
+  ui::Run(root()).expect("Failed to start UI")
 }

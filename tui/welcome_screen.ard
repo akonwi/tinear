@@ -1,4 +1,5 @@
-use vaxis/ui
+use go:go.rockorager.dev/vaxis/ui
+use go:tinear/ffi
 
 use tinear/config
 use tinear/linear/client
@@ -11,10 +12,6 @@ struct State {
 // Validate the API key against Linear and, on success, persist it
 // to the on-disk config. Returns Void!Str so callers can branch on
 // ok / err without caring about the viewer payload.
-//
-// This used to live in commands/login.ard as part of a CLI verb
-// (ard run main.ard login) that no longer exists. The welcome
-// screen is now the only login surface.
 fn validate_and_save(api_key: Str) Void!Str {
   let validate_query = "query \{ viewer \{ id \} \}"
   match client::graphql(api_key, validate_query) {
@@ -26,70 +23,88 @@ fn validate_and_save(api_key: Str) Void!Str {
   }
 }
 
+fn bold() ui::Style {
+  ui::Style{Attribute: ui::AttrBold}
+}
+
 fn logo_lines() [ui::Widget] {
-  [
-    ui::styled_text("▀█▀ ▀ █▀█ █▀▀ ▄▀█ █▀█", attrs: ui::TextAttrs{ bold: true }),
-    ui::styled_text(" █  █ █ █ ██▄ █▀█ █▀▄", attrs: ui::TextAttrs{ bold: true }),
+  mut lines: [ui::Widget] = [
+    ui::Text{Value: "▀█▀ ▀ █▀█ █▀▀ ▄▀█ █▀█", Style: bold()},
+    ui::Text{Value: " █  █ █ █ ██▄ █▀█ █▀▄", Style: bold()},
   ]
+  lines
 }
 
 fn spacer(height: Int) ui::Widget {
-  ui::sized_box(0, height, ui::text(""))
+  ui::SizedBox{Height: height}
 }
 
-fn submit_login(api_key: Str, state: ui::State<State>, on_login_success: fn(Str)) {
+fn set_draft(c: mut ffi::StateCtx, value: Str) {
+  let state = ffi::StateRef<State>(c)
+  state.draft_api_key = value
+  state.has_error = false
+  ffi::MarkDirty(c)
+}
+
+fn set_error(c: mut ffi::StateCtx) {
+  let state = ffi::StateRef<State>(c)
+  state.has_error = true
+  ffi::MarkDirty(c)
+}
+
+fn submit_login(c: mut ffi::StateCtx, api_key: Str, on_login_success: fn(Str)) {
   match api_key.is_empty() {
-    true => state.set(fn(mut s: State) { s.has_error = true }),
+    true => set_error(c),
     false => match validate_and_save(api_key) {
       ok(_) => on_login_success(api_key),
-      err(_) => state.set(fn(mut s: State) { s.has_error = true }),
+      err(_) => set_error(c),
     },
   }
 }
 
-fn form(theme: ui::Theme, model: State, state: ui::State<State>, on_login_success: fn(Str)) ui::Widget {
+fn form(c: mut ffi::StateCtx, theme: ui::Theme, model: State, on_login_success: fn(Str)) ui::Widget {
   mut children = logo_lines()
   children.push(spacer(2))
-  children.push(ui::text("Enter your Linear API key"))
+  children.push(ui::Text{Value: "Enter your Linear API key"})
   children.push(spacer(1))
-  children.push(ui::text_field(
-    value: model.draft_api_key,
-    on_changed: fn(_ctx: ui::EventContext, value: Str) {
-      state.set(fn(mut s: State) {
-        s.draft_api_key = value
-        s.has_error = false
-      })
+  children.push(ui::TextField{
+    Value: model.draft_api_key,
+    Placeholder: "Paste Linear API key",
+    MinWidth: 48,
+    OnChanged: fn(ev: ui::EventContext, value: Str) {
+      set_draft(c, value)
     },
-    placeholder: "Paste Linear API key",
-    min_width: 48,
-    on_submitted: fn(_ctx: ui::EventContext, value: Str) {
-      submit_login(value, state, on_login_success)
+    OnSubmitted: fn(ev: ui::EventContext, value: Str) {
+      submit_login(c, value, on_login_success)
     },
-  ))
+  })
   children.push(spacer(1))
-  children.push(ui::button("Login", fn(_ctx: ui::EventContext) {
-    submit_login(model.draft_api_key, state, on_login_success)
-  }))
+  children.push(ui::Button{
+    Label: "Login",
+    OnPressed: fn(ev: ui::EventContext) {
+      submit_login(c, ffi::StateValue<State>(c).draft_api_key, on_login_success)
+    },
+  })
   if model.has_error {
     children.push(spacer(1))
-    children.push(ui::styled_text("Invalid API token", fg: theme.danger_text))
+    children.push(ui::Text{Value: "Invalid API token", Style: ui::Style{Foreground: theme.DangerText}})
   }
-  ui::column(
-    children,
-    main_size: ui::MainSize::min,
-    cross_align: ui::CrossAlign::center,
-  )
+  ui::Flex{
+    Axis: ui::Vertical,
+    MainAxisSize: ui::MainAxisSizeMin,
+    CrossAxisAlignment: ui::CrossAxisCenter,
+    Children: children,
+  }
 }
 
 fn new(on_login_success: fn(Str)) ui::Widget {
-  ui::stateful(
-    key: "welcome",
-    init: fn(_ctx: ui::BuildContext) State {
-      State{ draft_api_key: "", has_error: false }
+  ffi::Stateful{
+    Init: fn() Any {
+      State{draft_api_key: "", has_error: false}
     },
-    build: fn(ctx: ui::BuildContext, state: ui::State<State>) ui::Widget {
-      let theme = ui::must_have_theme(ctx)
-      form(theme, state.value(), state, on_login_success)
+    Build: fn(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
+      let theme = ui::MustDepend<ui::Theme>(ctx)
+      form(c, theme, ffi::StateValue<State>(c), on_login_success)
     },
-  )
+  }
 }
