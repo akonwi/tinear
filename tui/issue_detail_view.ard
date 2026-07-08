@@ -382,22 +382,24 @@ fn loaded_layout(c: mut ffi::StateCtx, theme: ui::Theme, issue: issues::Issue, m
     ui::Padding(ui::Symmetric(1, 0), metadata_header(theme, issue)),
     divider(theme),
     ui::Padding(ui::Symmetric(1, 0), section_tabs(c, theme, model)),
-    // SelectionArea enables mouse-drag selection across the
-    // description and comment bodies. Double/triple-click selects
-    // word/line; Ctrl+C copies via OSC 52. (Quit is on Ctrl+Q so we
-    // don't preempt that copy binding.)
-    ui::Expanded(ui::SelectionArea{
-      Child: ui::ScrollView{
-        Controller: model.scroll,
-        Child: active_body(theme, issue, model),
-      },
+    ui::Expanded(ui::ScrollView{
+      Controller: model.scroll,
+      Child: active_body(theme, issue, model),
     }),
   ]
-  ui::Flex{
+  let content = ui::Flex{
     Axis: ui::Vertical,
     CrossAxisAlignment: ui::CrossAxisStretch,
     Children: children,
   }
+  // One SelectionArea wraps the whole tab so mouse-drag selection spans
+  // the sticky header (id, title, field grid) and the scrollable body
+  // alike. Interactive children (the section tab chips) still click:
+  // clickable Text fires OnPressed at the target phase and returns
+  // Handled before the ancestor SelectionArea sees the press in the
+  // bubble phase. Cmd+C (Super+c) copies whatever is selected; the app
+  // root binds Ctrl+C to quit.
+  ui::SelectionArea{Child: content}
 }
 
 fn loading_placeholder(theme: ui::Theme, identifier: Str) ui::Widget {
