@@ -54,21 +54,21 @@ fn fetch_detail(c: mut ffi::StateCtx, api_key: Str, target_id: Str) {
   async::start(fn() {
     let result = inbox::load_detail(api_key, target_id)
     ffi::Dispatch(c, fn() {
-      let s = ffi::StateRef<View>(c)
-      if s.detail_request_id == target_id {
-        match result {
-          ok(d) => {
-            s.detail = maybe::some(d)
-            s.detail_loaded_id = target_id
-            s.detail_loading = false
-            s.detail_error = ""
-          },
-          err(e) => {
-            s.detail_loading = false
-            s.detail_error = e
-          },
-        }
-        ffi::MarkDirty(c)
+      if ffi::StateValue<View>(c).detail_request_id == target_id {
+        ffi::Update<View>(c, fn(s: mut View) {
+          match result {
+            ok(d) => {
+              s.detail = maybe::some(d)
+              s.detail_loaded_id = target_id
+              s.detail_loading = false
+              s.detail_error = ""
+            },
+            err(e) => {
+              s.detail_loading = false
+              s.detail_error = e
+            },
+          }
+        })
       }
     })
   })
@@ -84,12 +84,12 @@ fn request_detail_for_cursor(c: mut ffi::StateCtx, api_key: Str) {
     let already_requested = s.detail_request_id == target_id
     let already_loaded = s.detail_loaded_id == target_id
     if not target_id.is_empty() and not already_requested and not already_loaded {
-      let live = ffi::StateRef<View>(c)
-      live.detail_request_id = target_id
-      live.detail_loading = true
-      live.detail_error = ""
-      live.detail = maybe::none()
-      ffi::MarkDirty(c)
+      ffi::Update<View>(c, fn(live: mut View) {
+        live.detail_request_id = target_id
+        live.detail_loading = true
+        live.detail_error = ""
+        live.detail = maybe::none()
+      })
       fetch_detail(c, api_key, target_id)
     }
   }
@@ -102,17 +102,17 @@ fn load_inbox(c: mut ffi::StateCtx, api_key: Str) {
   async::start(fn() {
     let result = inbox::load(api_key)
     ffi::Dispatch(c, fn() {
-      let s = ffi::StateRef<View>(c)
-      match result {
-        ok(items) => {
-          s.items = items
-          s.error = ""
-          s.cursor = clamp_cursor(s.cursor, items.size())
-        },
-        err(e) => { s.error = e },
-      }
-      s.loading = false
-      ffi::MarkDirty(c)
+      ffi::Update<View>(c, fn(s: mut View) {
+        match result {
+          ok(items) => {
+            s.items = items
+            s.error = ""
+            s.cursor = clamp_cursor(s.cursor, items.size())
+          },
+          err(e) => { s.error = e },
+        }
+        s.loading = false
+      })
       // After the inbox lands, kick off a detail fetch for whatever item
       // ends up under the cursor (cursor 0 on first load).
       request_detail_for_cursor(c, api_key)
@@ -404,12 +404,12 @@ fn body(theme: ui::Theme, model: View) ui::Widget {
 // ── Actions ───────────────────────────────────────────────────────────
 
 fn move_cursor(c: mut ffi::StateCtx, api_key: Str, delta: Int) {
-  let s = ffi::StateRef<View>(c)
-  let next_cursor = clamp_cursor(s.cursor + delta, s.items.size())
-  s.cursor = next_cursor
-  s.list_scroll.ScrollTo(0, next_cursor)
-  s.detail_scroll.ScrollToStart()
-  ffi::MarkDirty(c)
+  ffi::Update<View>(c, fn(s: mut View) {
+    let next_cursor = clamp_cursor(s.cursor + delta, s.items.size())
+    s.cursor = next_cursor
+    s.list_scroll.ScrollTo(0, next_cursor)
+    s.detail_scroll.ScrollToStart()
+  })
   request_detail_for_cursor(c, api_key)
 }
 
@@ -430,31 +430,31 @@ fn delete_current(c: mut ffi::StateCtx, api_key: Str, notify: fn(Str, Str)) {
     // Batch every post-delete mutation into one pass so the optimistic
     // update is a single rebuild: drop the row, clamp the cursor, and
     // update the detail-pane tracking fields for the new cursor target.
-    let s = ffi::StateRef<View>(c)
-    mut remaining: [inbox::Item] = []
-    for it, idx in before.items {
-      if not (idx == before.cursor) {
-        remaining.push(it)
+    ffi::Update<View>(c, fn(s: mut View) {
+      mut remaining: [inbox::Item] = []
+      for it, idx in before.items {
+        if not (idx == before.cursor) {
+          remaining.push(it)
+        }
       }
-    }
-    s.items = remaining
-    s.cursor = clamp_cursor(before.cursor, remaining.size())
-    if remaining.size() == 0 {
-      s.detail = maybe::none()
-      s.detail_loaded_id = ""
-      s.detail_request_id = ""
-      s.detail_loading = false
-      s.detail_error = ""
-    } else {
-      let new_target = remaining.at(s.cursor).expect("clamped").notification_id
-      if not (s.detail_loaded_id == new_target) {
+      s.items = remaining
+      s.cursor = clamp_cursor(before.cursor, remaining.size())
+      if remaining.size() == 0 {
         s.detail = maybe::none()
-        s.detail_request_id = new_target
-        s.detail_loading = true
+        s.detail_loaded_id = ""
+        s.detail_request_id = ""
+        s.detail_loading = false
         s.detail_error = ""
+      } else {
+        let new_target = remaining.at(s.cursor).expect("clamped").notification_id
+        if not (s.detail_loaded_id == new_target) {
+          s.detail = maybe::none()
+          s.detail_request_id = new_target
+          s.detail_loading = true
+          s.detail_error = ""
+        }
       }
-    }
-    ffi::MarkDirty(c)
+    })
     // After the single state mutation, kick off a fetch for the new
     // cursor target if that detail isn't already cached.
     let after = ffi::StateValue<View>(c)
@@ -500,10 +500,10 @@ fn build(
         ui::EventHandled
       },
       "inbox.refresh": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
-        let s = ffi::StateRef<View>(c)
-        s.loading = true
-        s.error = ""
-        ffi::MarkDirty(c)
+        ffi::Update<View>(c, fn(s: mut View) {
+          s.loading = true
+          s.error = ""
+        })
         load_inbox(c, api_key)
         ui::EventHandled
       },

@@ -101,9 +101,9 @@ fn picker_hints() [hints_bar::Hint] {
 }
 
 fn move_cursor(c: mut ffi::StateCtx, count: Int, delta: Int) {
-  let s = ffi::StateRef<PickerState>(c)
-  s.cursor = clamp_cursor(s.cursor + delta, count)
-  ffi::MarkDirty(c)
+  ffi::Update<PickerState>(c, fn(s: mut PickerState) {
+    s.cursor = clamp_cursor(s.cursor + delta, count)
+  })
 }
 
 // Body widget (everything between the title divider and the footer

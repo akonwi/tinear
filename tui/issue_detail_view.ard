@@ -64,16 +64,16 @@ fn load_issue(c: mut ffi::StateCtx, api_key: Str, identifier: Str) {
   async::start(fn() {
     let result = issues::load_issue(api_key, identifier)
     ffi::Dispatch(c, fn() {
-      let v = ffi::StateRef<Detail>(c)
-      match result {
-        ok(issue) => {
-          v.issue = maybe::some(issue)
-          v.issue_error = ""
-        },
-        err(e) => { v.issue_error = e },
-      }
-      v.issue_loading = false
-      ffi::MarkDirty(c)
+      ffi::Update<Detail>(c, fn(v: mut Detail) {
+        match result {
+          ok(issue) => {
+            v.issue = maybe::some(issue)
+            v.issue_error = ""
+          },
+          err(e) => { v.issue_error = e },
+        }
+        v.issue_loading = false
+      })
     })
   })
 }
@@ -82,16 +82,16 @@ fn load_comments(c: mut ffi::StateCtx, api_key: Str, identifier: Str) {
   async::start(fn() {
     let result = issues::load_comments(api_key, identifier)
     ffi::Dispatch(c, fn() {
-      let v = ffi::StateRef<Detail>(c)
-      match result {
-        ok(comments) => {
-          v.comments = comments
-          v.comments_error = ""
-        },
-        err(e) => { v.comments_error = e },
-      }
-      v.comments_loading = false
-      ffi::MarkDirty(c)
+      ffi::Update<Detail>(c, fn(v: mut Detail) {
+        match result {
+          ok(comments) => {
+            v.comments = comments
+            v.comments_error = ""
+          },
+          err(e) => { v.comments_error = e },
+        }
+        v.comments_loading = false
+      })
     })
   })
 }
@@ -104,16 +104,16 @@ fn refresh_comments_after_post(c: mut ffi::StateCtx, api_key: Str, identifier: S
   async::start(fn() {
     let refreshed = issues::load_comments(api_key, identifier)
     ffi::Dispatch(c, fn() {
-      let v = ffi::StateRef<Detail>(c)
-      match refreshed {
-        ok(comments) => {
-          v.comments = comments
-          v.comments_error = ""
-        },
-        err(e) => { v.comments_error = e },
-      }
-      v.scroll.ScrollToEnd()
-      ffi::MarkDirty(c)
+      ffi::Update<Detail>(c, fn(v: mut Detail) {
+        match refreshed {
+          ok(comments) => {
+            v.comments = comments
+            v.comments_error = ""
+          },
+          err(e) => { v.comments_error = e },
+        }
+        v.scroll.ScrollToEnd()
+      })
     })
   })
 }
@@ -127,10 +127,10 @@ fn refresh_detail(c: mut ffi::StateCtx, api_key: Str, identifier: Str, notify: f
     match issue_result {
       ok(issue) => {
         ffi::Dispatch(c, fn() {
-          let v = ffi::StateRef<Detail>(c)
-          v.issue = maybe::some(issue)
-          v.issue_error = ""
-          ffi::MarkDirty(c)
+          ffi::Update<Detail>(c, fn(v: mut Detail) {
+            v.issue = maybe::some(issue)
+            v.issue_error = ""
+          })
         })
       },
       err(e) => {
@@ -143,10 +143,10 @@ fn refresh_detail(c: mut ffi::StateCtx, api_key: Str, identifier: Str, notify: f
     match comments_result {
       ok(comments) => {
         ffi::Dispatch(c, fn() {
-          let v = ffi::StateRef<Detail>(c)
-          v.comments = comments
-          v.comments_error = ""
-          ffi::MarkDirty(c)
+          ffi::Update<Detail>(c, fn(v: mut Detail) {
+            v.comments = comments
+            v.comments_error = ""
+          })
         })
       },
       err(e) => {
@@ -269,13 +269,13 @@ fn section_tab(theme: ui::Theme, label: Str, active: Bool, on_press: fn(ui::Even
 }
 
 fn switch_section(c: mut ffi::StateCtx, target: Int) {
-  let v = ffi::StateRef<Detail>(c)
-  if not (v.active_section == target) {
-    v.active_section = target
-    // Reset scroll so the new section starts at the top — the previous
-    // section's offset would otherwise be applied to unrelated content.
-    v.scroll.ScrollToStart()
-    ffi::MarkDirty(c)
+  if not (ffi::StateValue<Detail>(c).active_section == target) {
+    ffi::Update<Detail>(c, fn(v: mut Detail) {
+      v.active_section = target
+      // Reset scroll so the new section starts at the top — the previous
+      // section's offset would otherwise be applied to unrelated content.
+      v.scroll.ScrollToStart()
+    })
   }
 }
 

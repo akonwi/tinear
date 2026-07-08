@@ -120,17 +120,17 @@ fn persist(c: mut ffi::StateCtx) {
 }
 
 fn select_tab(c: mut ffi::StateCtx, idx: Int) {
-  let state = ffi::StateRef<Model>(c)
-  state.tab_index = idx
-  ffi::MarkDirty(c)
+  ffi::Update<Model>(c, fn(s: mut Model) {
+    s.tab_index = idx
+  })
   persist(c)
 }
 
 fn replace_model(c: mut ffi::StateCtx, next: Model) {
-  let state = ffi::StateRef<Model>(c)
-  state.tab_index = next.tab_index
-  state.issue_tabs = next.issue_tabs
-  ffi::MarkDirty(c)
+  ffi::Update<Model>(c, fn(s: mut Model) {
+    s.tab_index = next.tab_index
+    s.issue_tabs = next.issue_tabs
+  })
   persist(c)
 }
 

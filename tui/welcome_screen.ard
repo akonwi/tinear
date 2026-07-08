@@ -40,16 +40,16 @@ fn spacer(height: Int) ui::Widget {
 }
 
 fn set_draft(c: mut ffi::StateCtx, value: Str) {
-  let state = ffi::StateRef<State>(c)
-  state.draft_api_key = value
-  state.has_error = false
-  ffi::MarkDirty(c)
+  ffi::Update<State>(c, fn(s: mut State) {
+    s.draft_api_key = value
+    s.has_error = false
+  })
 }
 
 fn set_error(c: mut ffi::StateCtx) {
-  let state = ffi::StateRef<State>(c)
-  state.has_error = true
-  ffi::MarkDirty(c)
+  ffi::Update<State>(c, fn(s: mut State) {
+    s.has_error = true
+  })
 }
 
 fn submit_login(c: mut ffi::StateCtx, api_key: Str, on_login_success: fn(Str)) {

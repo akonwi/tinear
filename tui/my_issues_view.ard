@@ -124,27 +124,27 @@ fn fresh_col_list_scrolls(columns: [issues::BoardColumn]) [mut ui::SliverListCon
 }
 
 fn apply_loaded(c: mut ffi::StateCtx, columns: [issues::BoardColumn]) {
-  let v = ffi::StateRef<Board>(c)
-  v.columns = columns
-  v.col_h_scrolls = fresh_col_h_scrolls(columns)
-  v.col_list_scrolls = fresh_col_list_scrolls(columns)
-  v.error = ""
-  v.loading = false
-  // Snap cursor onto the first non-empty column if the current one is
-  // gone or empty.
-  let first = next_non_empty(columns, 0)
-  if first < 0 {
-    v.cursor_col = 0
-    v.cursor_row = 0
-  } else {
-    if v.cursor_col >= columns.size() or col_size(columns, v.cursor_col) == 0 {
-      v.cursor_col = first
+  ffi::Update<Board>(c, fn(v: mut Board) {
+    v.columns = columns
+    v.col_h_scrolls = fresh_col_h_scrolls(columns)
+    v.col_list_scrolls = fresh_col_list_scrolls(columns)
+    v.error = ""
+    v.loading = false
+    // Snap cursor onto the first non-empty column if the current one is
+    // gone or empty.
+    let first = next_non_empty(columns, 0)
+    if first < 0 {
+      v.cursor_col = 0
       v.cursor_row = 0
     } else {
-      v.cursor_row = clamp(v.cursor_row, col_size(columns, v.cursor_col))
+      if v.cursor_col >= columns.size() or col_size(columns, v.cursor_col) == 0 {
+        v.cursor_col = first
+        v.cursor_row = 0
+      } else {
+        v.cursor_row = clamp(v.cursor_row, col_size(columns, v.cursor_col))
+      }
     }
-  }
-  ffi::MarkDirty(c)
+  })
 }
 
 fn load_board(c: mut ffi::StateCtx, api_key: Str, notify: fn(Str, Str, toast::ToastVariant)) {
@@ -154,10 +154,10 @@ fn load_board(c: mut ffi::StateCtx, api_key: Str, notify: fn(Str, Str, toast::To
       match result {
         ok(columns) => apply_loaded(c, columns),
         err(e) => {
-          let v = ffi::StateRef<Board>(c)
-          v.error = e
-          v.loading = false
-          ffi::MarkDirty(c)
+          ffi::Update<Board>(c, fn(v: mut Board) {
+            v.error = e
+            v.loading = false
+          })
           notify("My Issues", "Failed to load: {e}", toast::ToastVariant::error)
         },
       }
@@ -177,34 +177,34 @@ fn refresh_board(c: mut ffi::StateCtx, api_key: Str, notify: fn(Str, Str, toast:
     match result {
       ok(columns) => {
         ffi::Dispatch(c, fn() {
-          let v = ffi::StateRef<Board>(c)
-          // Capture the id at the cursor before swapping columns.
-          mut preserve_id = ""
-          if v.cursor_col >= 0 and v.cursor_col < v.columns.size() {
-            let col = v.columns.at(v.cursor_col).expect("bounds checked")
-            if v.cursor_row >= 0 and v.cursor_row < col.issues.size() {
-              preserve_id = col.issues.at(v.cursor_row).expect("bounds checked").id
+          ffi::Update<Board>(c, fn(v: mut Board) {
+            // Capture the id at the cursor before swapping columns.
+            mut preserve_id = ""
+            if v.cursor_col >= 0 and v.cursor_col < v.columns.size() {
+              let col = v.columns.at(v.cursor_col).expect("bounds checked")
+              if v.cursor_row >= 0 and v.cursor_row < col.issues.size() {
+                preserve_id = col.issues.at(v.cursor_row).expect("bounds checked").id
+              }
             }
-          }
-          v.columns = columns
-          v.error = ""
-          // Re-locate the previously-selected issue. Default to
-          // clamped previous indices if not found.
-          mut new_col = clamp(v.cursor_col, columns.size())
-          mut new_row = clamp(v.cursor_row, col_size(columns, new_col))
-          if not preserve_id.is_empty() {
-            for col, c_idx in columns {
-              for issue, r_idx in col.issues {
-                if issue.id == preserve_id {
-                  new_col = c_idx
-                  new_row = r_idx
+            v.columns = columns
+            v.error = ""
+            // Re-locate the previously-selected issue. Default to
+            // clamped previous indices if not found.
+            mut new_col = clamp(v.cursor_col, columns.size())
+            mut new_row = clamp(v.cursor_row, col_size(columns, new_col))
+            if not preserve_id.is_empty() {
+              for col, c_idx in columns {
+                for issue, r_idx in col.issues {
+                  if issue.id == preserve_id {
+                    new_col = c_idx
+                    new_row = r_idx
+                  }
                 }
               }
             }
-          }
-          v.cursor_col = new_col
-          v.cursor_row = new_row
-          ffi::MarkDirty(c)
+            v.cursor_col = new_col
+            v.cursor_row = new_row
+          })
         })
       },
       err(e) => {
@@ -527,34 +527,34 @@ fn body(theme: ui::Theme, v: Board, on_card_click: fn(Int, Int)) ui::Widget {
 // ── Actions ───────────────────────────────────────────────────────────
 
 fn move_row(c: mut ffi::StateCtx, delta: Int) {
-  let v = ffi::StateRef<Board>(c)
-  if v.columns.size() > 0 {
-    let count = col_size(v.columns, v.cursor_col)
-    if count > 0 {
-      v.cursor_row = clamp(v.cursor_row + delta, count)
-      ffi::MarkDirty(c)
-      scroll_cursor_into_view(ffi::StateValue<Board>(c))
+  ffi::Update<Board>(c, fn(v: mut Board) {
+    if v.columns.size() > 0 {
+      let count = col_size(v.columns, v.cursor_col)
+      if count > 0 {
+        v.cursor_row = clamp(v.cursor_row + delta, count)
+      }
     }
-  }
+  })
+  scroll_cursor_into_view(ffi::StateValue<Board>(c))
 }
 
 fn move_col(c: mut ffi::StateCtx, forward: Bool) {
-  let v = ffi::StateRef<Board>(c)
-  if v.columns.size() > 0 {
-    let target = match forward {
-      true => next_non_empty(v.columns, v.cursor_col + 1),
-      false => prev_non_empty(v.columns, v.cursor_col - 1),
+  ffi::Update<Board>(c, fn(v: mut Board) {
+    if v.columns.size() > 0 {
+      let target = match forward {
+        true => next_non_empty(v.columns, v.cursor_col + 1),
+        false => prev_non_empty(v.columns, v.cursor_col - 1),
+      }
+      if target >= 0 {
+        v.cursor_col = target
+        v.cursor_row = clamp(v.cursor_row, col_size(v.columns, target))
+        v.board_h_scroll.ScrollToOffset(target * (COLUMN_WIDTH + COLUMN_GAP))
+      }
     }
-    if target >= 0 {
-      v.cursor_col = target
-      v.cursor_row = clamp(v.cursor_row, col_size(v.columns, target))
-      v.board_h_scroll.ScrollToOffset(target * (COLUMN_WIDTH + COLUMN_GAP))
-      ffi::MarkDirty(c)
-      // After switching columns the new column's cursor row may be
-      // off-screen vertically; reveal it in the new column's list.
-      scroll_cursor_into_view(ffi::StateValue<Board>(c))
-    }
-  }
+  })
+  // After switching columns the new column's cursor row may be off-screen
+  // vertically; reveal it in the new column's list.
+  scroll_cursor_into_view(ffi::StateValue<Board>(c))
 }
 
 // On state/cycle confirm in the pickers below, we want to refresh the
@@ -596,10 +596,10 @@ fn build(
   // Click handler: select the card AND open the issue (same as moving
   // the cursor and pressing Enter).
   let on_card_click = fn(col: Int, row: Int) {
-    let v = ffi::StateRef<Board>(c)
-    v.cursor_col = col
-    v.cursor_row = row
-    ffi::MarkDirty(c)
+    ffi::Update<Board>(c, fn(v: mut Board) {
+      v.cursor_col = col
+      v.cursor_row = row
+    })
     if col < model.columns.size() {
       let column = model.columns.at(col).expect("click from current build")
       if row < column.issues.size() {
@@ -636,10 +636,10 @@ fn build(
         ui::EventHandled
       },
       "board.refresh": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
-        let v = ffi::StateRef<Board>(c)
-        v.loading = true
-        v.error = ""
-        ffi::MarkDirty(c)
+        ffi::Update<Board>(c, fn(v: mut Board) {
+          v.loading = true
+          v.error = ""
+        })
         load_board(c, api_key, notify)
         ui::EventHandled
       },

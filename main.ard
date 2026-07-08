@@ -26,9 +26,9 @@ impl AppState {
 }
 
 fn set_api_key(c: mut ffi::StateCtx, api_key: Str) {
-  let state = ffi::StateRef<AppState>(c)
-  state.api_key = api_key
-  ffi::MarkDirty(c)
+  ffi::Update<AppState>(c, fn(s: mut AppState) {
+    s.api_key = api_key
+  })
 }
 
 // Append a new toast and schedule its removal once the TTL elapses.
@@ -36,32 +36,32 @@ fn set_api_key(c: mut ffi::StateCtx, api_key: Str) {
 // (ffi::Dispatch lands the state mutation on the UI thread).
 fn dispatch_toast(c: mut ffi::StateCtx, title: Str, description: Str, variant: toast::ToastVariant, ttl_ms: Int) {
   ffi::Dispatch(c, fn() {
-    let state = ffi::StateRef<AppState>(c)
-    let toast_id = state.next_toast_id + 1
-    state.next_toast_id = toast_id
-    mut next_toasts: [toast::Toast] = []
-    for t in state.toasts { next_toasts.push(t) }
-    next_toasts.push(toast::Toast{
-      id: toast_id,
-      title: title,
-      description: description,
-      variant: variant,
-      ttl_ms: ttl_ms,
+    let toast_id = ffi::StateValue<AppState>(c).next_toast_id + 1
+    ffi::Update<AppState>(c, fn(s: mut AppState) {
+      s.next_toast_id = toast_id
+      mut next_toasts: [toast::Toast] = []
+      for t in s.toasts { next_toasts.push(t) }
+      next_toasts.push(toast::Toast{
+        id: toast_id,
+        title: title,
+        description: description,
+        variant: variant,
+        ttl_ms: ttl_ms,
+      })
+      s.toasts = next_toasts
     })
-    state.toasts = next_toasts
-    ffi::MarkDirty(c)
     async::start(fn() {
       time::Sleep(ffi::Millis(ttl_ms))
       ffi::Dispatch(c, fn() {
-        let s = ffi::StateRef<AppState>(c)
-        mut remaining: [toast::Toast] = []
-        for t in s.toasts {
-          if not (t.id == toast_id) {
-            remaining.push(t)
+        ffi::Update<AppState>(c, fn(s: mut AppState) {
+          mut remaining: [toast::Toast] = []
+          for t in s.toasts {
+            if not (t.id == toast_id) {
+              remaining.push(t)
+            }
           }
-        }
-        s.toasts = remaining
-        ffi::MarkDirty(c)
+          s.toasts = remaining
+        })
       })
     })
   })
@@ -73,17 +73,17 @@ fn dispatch_toast(c: mut ffi::StateCtx, title: Str, description: Str, variant: t
 // event handlers or background fibers.
 fn close_modal(c: mut ffi::StateCtx) {
   ffi::Dispatch(c, fn() {
-    let state = ffi::StateRef<AppState>(c)
-    state.current_modal = maybe::none()
-    ffi::MarkDirty(c)
+    ffi::Update<AppState>(c, fn(s: mut AppState) {
+      s.current_modal = maybe::none()
+    })
   })
 }
 
 fn show_modal(c: mut ffi::StateCtx, builder: fn(ui::Theme, fn()) ui::Widget) {
   ffi::Dispatch(c, fn() {
-    let state = ffi::StateRef<AppState>(c)
-    state.current_modal = maybe::some(modal::ModalDef{build: builder})
-    ffi::MarkDirty(c)
+    ffi::Update<AppState>(c, fn(s: mut AppState) {
+      s.current_modal = maybe::some(modal::ModalDef{build: builder})
+    })
   })
 }
 

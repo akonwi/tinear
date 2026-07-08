@@ -38,10 +38,10 @@ fn submit(
   if trimmed.is_empty() {
     {}
   } else {
-    let s = ffi::StateRef<Compose>(c)
-    s.sending = true
-    s.error = ""
-    ffi::MarkDirty(c)
+    ffi::Update<Compose>(c, fn(s: mut Compose) {
+      s.sending = true
+      s.error = ""
+    })
     async::start(fn() {
       let result = issues::create_comment(api_key, issue.id, trimmed)
       match result {
@@ -54,10 +54,10 @@ fn submit(
         },
         err(e) => {
           ffi::Dispatch(c, fn() {
-            let next = ffi::StateRef<Compose>(c)
-            next.sending = false
-            next.error = e
-            ffi::MarkDirty(c)
+            ffi::Update<Compose>(c, fn(s: mut Compose) {
+              s.sending = false
+              s.error = e
+            })
           })
         },
       }
@@ -113,10 +113,10 @@ fn new(api_key: Str, issue: issues::Issue, refresh_comments: fn(), close: fn()) 
             MinHeight: 6,
             SoftWrap: true,
             OnChanged: fn(ev: ui::EventContext, value: Str) {
-              let next = ffi::StateRef<Compose>(c)
-              next.text = value
-              next.error = ""
-              ffi::MarkDirty(c)
+              ffi::Update<Compose>(c, fn(s: mut Compose) {
+                s.text = value
+                s.error = ""
+              })
             },
           },
         },

@@ -67,6 +67,13 @@ func StateRef[T any](c *StateCtx) *T {
 	return p
 }
 
+// Update runs mutate against the live *T state pointer, then schedules a
+// rebuild. React-like callback ergonomics with a live pointer (not a copy).
+func Update[T any](c *StateCtx, mutate func(*T)) {
+	mutate(StateRef[T](c))
+	MarkDirty(c)
+}
+
 // MarkDirty schedules a rebuild after in-place state mutation.
 func MarkDirty(c *StateCtx) {
 	if c.markNeedsBuild != nil {

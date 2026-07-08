@@ -43,7 +43,7 @@ compiler gaps. Keep it minimal; prefer direct `use go:` calls.
 
 | File | Contents |
 |------|----------|
-| `ffi/stateful.go` | `Stateful` widget (owns the `ui.StateBase` struct embedding Ard can't do), `StateCtx`, generic `StateRef[T]`/`StateValue[T]`, `MarkDirty`, `Dispatch` (posts onto the UI thread), optional `OnTick`, and the per-widget `Animate`/`AnimateMs` animation controller. |
+| `ffi/stateful.go` | `Stateful` widget (owns the `ui.StateBase` struct embedding Ard can't do), `StateCtx`, generic `Update[T]` (mutate live state + rebuild), `StateRef[T]`/`StateValue[T]`, `MarkDirty`, `Dispatch` (posts onto the UI thread), optional `OnTick`, and the per-widget `Animate`/`AnimateMs` animation controller. |
 | `ffi/intents.go` | `Intent(t)` — wraps a string as a `ui.Intent` (Ard can't implement a Go interface method on a string newtype). |
 | `ffi/host.go` | `OpenURL` (platform browser launch), plus stopgaps: `StrFromBytes` (ard#283) and `Millis` (ard#284). Delete each when its upstream issue lands. |
 
@@ -56,7 +56,7 @@ smallest possible shim to `ffi/`.
 | File | Purpose |
 |------|---------|
 | `tui/welcome_screen.ard` | Auth screen for unauthenticated users. Validates the API key against Linear's `viewer` query and persists it via `config::write`. |
-| `tui/logged_in_screen.ard` | Tab shell. Owns the `Model` (tab_index, issue_tabs), tab bar, `IndexedStack` body, hints bar, and the `?` global-search modal. Hydrates from `models/cache` on first build; persists via `select_tab`/`replace_model` (mutate + `MarkDirty` + async persist). |
+| `tui/logged_in_screen.ard` | Tab shell. Owns the `Model` (tab_index, issue_tabs), tab bar, `IndexedStack` body, hints bar, and the `?` global-search modal. Hydrates from `models/cache` on first build; persists via `select_tab`/`replace_model` (`ffi::Update` + async persist). |
 | `tui/inbox_view.ard` | Inbox list + detail pane split. Optimistic delete, detail fetch keyed by cursor with stale-result discard. |
 | `tui/my_issues_view.ard` | Kanban board. Per-column `CustomScrollView` + `SliverListBuilder` + `SliverListController.RevealIndex` for auto-scroll. Horizontal outer `ScrollView`, metric-driven overflow chevrons. 5-minute silent refresh preserving cursor by issue id. |
 | `tui/issue_detail_view.ard` | Issue detail tab. Sticky header (id, title, field grid), Description / Comments section tabs, scrollable body, compose modal entry (`n`), picker entry points (`s`/`y`), background refresh of both issue and comments. |
@@ -149,34 +149,42 @@ fn new(api_key: Str) ui::Widget {
 
 Rules:
 
-- `ffi::StateRef<T>(c)` returns a **live `mut T`** into the persistent
-  state: mutate fields in place, then call `ffi::MarkDirty(c)` to schedule a
-  rebuild. `ffi::StateValue<T>(c)` reads a snapshot for rendering.
+- **Mutate state with `ffi::Update<State>(c, fn(s: mut State) { ... })`.** The
+  callback receives the **live `mut State`** (a pointer into persistent
+  storage, not a copy), mutates fields in place, and the rebuild is scheduled
+  for you — you can't forget `MarkDirty`. Spell the callback param
+  `fn(s: mut State)` (mut in the type), never `fn(mut s: State)`.
+- `ffi::StateValue<T>(c)` reads a snapshot for rendering or for a guard read
+  before an `Update`.
+- The raw `ffi::StateRef<T>(c)` (live `mut T`) + `ffi::MarkDirty(c)` are still
+  available, but `Update` is the API for anything that changes what renders.
+  The one place `StateRef` is used directly is the first-build `started`
+  bookkeeping flag, which deliberately does **not** rebuild.
 - **Initial fetches happen on first build behind a `started` guard** (the
   shim's StateCtx doesn't exist during `Init`).
 - Background work must re-enter the UI thread via `ffi::Dispatch` before
-  touching state:
+  touching state; `Update` goes inside the dispatch:
 
   ```ard
   async::start(fn() {
     let result = load()
     ffi::Dispatch(c, fn() {
-      let s = ffi::StateRef<View>(c)
-      match result {
-        ok(items) => { s.items = items, s.error = "" },
-        err(e) => { s.error = e },
-      }
-      s.loading = false
-      ffi::MarkDirty(c)
+      ffi::Update<View>(c, fn(s: mut View) {
+        match result {
+          ok(items) => { s.items = items, s.error = "" },
+          err(e) => { s.error = e },
+        }
+        s.loading = false
+      })
     })
   })
   ```
 
+- Work that must happen *after* the mutation (a follow-up fetch, a scroll
+  reveal read from `StateValue`, `persist`) goes after the `Update` call, not
+  inside the callback.
 - `show_modal` / `close_modal` / `notify` from `main.ard` are dispatch-safe:
   callable from event handlers and background fibers alike.
-- StateRef mutations are visible immediately (it's a live pointer), so
-  read-back after mutation needs no ceremony; see `select_tab`/`persist` in
-  `tui/logged_in_screen.ard`.
 
 ### Periodic background work
 

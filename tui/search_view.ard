@@ -75,23 +75,23 @@ fn start_search(c: mut ffi::StateCtx, api_key: Str, query: Str, generation: Int)
           ffi::Dispatch(c, fn() {
             let current2 = ffi::StateValue<Search>(c)
             if current2.generation == generation and current2.query.trim() == trimmed {
-              let next = ffi::StateRef<Search>(c)
-              match result {
-                ok(results) => {
-                  next.results = results
-                  next.cursor = 0
-                  next.error = ""
-                },
-                err(e) => {
-                  let empty: [issues::Issue] = []
-                  next.results = empty
-                  next.cursor = 0
-                  next.error = e
-                },
-              }
-              next.loading = false
-              next.searched = true
-              ffi::MarkDirty(c)
+              ffi::Update<Search>(c, fn(next: mut Search) {
+                match result {
+                  ok(results) => {
+                    next.results = results
+                    next.cursor = 0
+                    next.error = ""
+                  },
+                  err(e) => {
+                    let empty: [issues::Issue] = []
+                    next.results = empty
+                    next.cursor = 0
+                    next.error = e
+                  },
+                }
+                next.loading = false
+                next.searched = true
+              })
             }
           })
         })
@@ -176,21 +176,21 @@ fn results_body(theme: ui::Theme, model: Search, on_pick: fn(Int)) ui::Widget {
 
 fn on_query_changed(c: mut ffi::StateCtx, api_key: Str, value: Str) {
   let trimmed = value.trim()
-  let next = ffi::StateRef<Search>(c)
-  let generation = next.generation + 1
-  let empty: [issues::Issue] = []
-  next.query = value
-  next.generation = generation
-  next.results = empty
-  next.cursor = 0
-  next.error = ""
-  if trimmed.is_empty() {
-    next.loading = false
-    next.searched = false
-  } else {
-    next.loading = true
-  }
-  ffi::MarkDirty(c)
+  let generation = ffi::StateValue<Search>(c).generation + 1
+  ffi::Update<Search>(c, fn(next: mut Search) {
+    let empty: [issues::Issue] = []
+    next.query = value
+    next.generation = generation
+    next.results = empty
+    next.cursor = 0
+    next.error = ""
+    if trimmed.is_empty() {
+      next.loading = false
+      next.searched = false
+    } else {
+      next.loading = true
+    }
+  })
   if not trimmed.is_empty() {
     start_search(c, api_key, value, generation)
   }
@@ -202,9 +202,9 @@ fn body(c: mut ffi::StateCtx, api_key: Str, theme: ui::Theme, model: Search, on_
     // UX as the picker option click).
     let safe = clamp_cursor(idx, model.results.size())
     if model.results.size() > 0 {
-      let next = ffi::StateRef<Search>(c)
-      next.cursor = safe
-      ffi::MarkDirty(c)
+      ffi::Update<Search>(c, fn(next: mut Search) {
+        next.cursor = safe
+      })
       on_open(model.results.at(safe).expect("clamped"))
     }
   }
@@ -277,9 +277,9 @@ fn new(api_key: Str, on_open: fn(issues::Issue)) ui::Widget {
         let count = current.results.size()
         if count > 0 {
           let next_cursor = clamp_cursor(current.cursor + delta, count)
-          let next = ffi::StateRef<Search>(c)
-          next.cursor = next_cursor
-          ffi::MarkDirty(c)
+          ffi::Update<Search>(c, fn(next: mut Search) {
+            next.cursor = next_cursor
+          })
           current.list_scroll.RevealIndex(next_cursor)
         }
       }
