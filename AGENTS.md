@@ -8,149 +8,191 @@ CLI for [Linear](https://linear.app/) built with [Ard](https://ard.run). One
 binary, one entrypoint, runs the interactive TUI; auth is handled inside the
 TUI via the welcome screen rather than a separate `login` subcommand.
 
+The UI is built **directly against the Go
+[vaxis/ui](https://git.sr.ht/~rockorager/vaxis) widget framework** via Ard's
+direct Go interop (`use go:go.rockorager.dev/vaxis/ui`). There is no binding
+layer: widgets are Go struct literals, theme fields are Go fields, and the
+only Go code tinear owns is the small shim package under `ffi/`.
+
 ## Build, Run, Test
 
 ```bash
 ard check main.ard               # type-check the entrypoint and everything it transitively touches
 ard build main.ard --out tinear  # build the binary (gitignored)
 ard run main.ard                 # build + run in one step
-ard test                         # run unit tests under models/ and tui/
+ard test                         # run all unit tests
 ```
 
 ## Project Layout
 
 | Path | Purpose |
 |------|---------|
-| `main.ard` | App entrypoint: AppState (`api_key`, toasts, `current_modal`), `show_modal`/`close_modal` callbacks, overlay slot wiring. Routes to `welcome_screen` if no API key, else `logged_in_screen`. |
-| `config.ard` | Read/write `~/.tinear/config` and `$LINEAR_API_KEY`; resolve `~/.tinear` as the config directory. |
-| `linear/client.ard` | Shared GraphQL client (`graphql(api_key, query)`). |
-| `os.ard` + `ffi/host.go` | Tinear-local FFI for `open_url` (macOS/Linux/Windows). The only Go FFI tinear owns. |
+| `main.ard` | App entrypoint: AppState (`api_key`, toasts, `current_modal`), dispatch-safe `show_modal`/`close_modal`/`notify`, always-mounted overlay. Routes to `welcome_screen` if no API key, else `logged_in_screen`. Ctrl+C quits; Super+c (Cmd+C, where the terminal forwards it) invokes the copy-selection intent so the detail-pane SelectionArea copies the active selection. |
+| `config.ard` | Read/write `~/.tinear/config.json` and `$LINEAR_API_KEY` via `go:os` + `go:encoding/json`. |
+| `decode.ard` | Composable JSON decoding over opaque `Any`: `from_json`, `run`, primitives, `nullable`/`list`/`field`/`path` combinators with path-carrying errors. |
+| `linear/client.ard` | Shared GraphQL client (`graphql(api_key, query)`) over `go:net/http` with a 30s client timeout and GraphQL-error extraction. |
+| `os.ard` | `open_url` wrapper over `ffi::OpenURL`. |
+| `ffi/*.go` | Tinear's Go shim package, imported as `use go:tinear/ffi`. See *The ffi shim*. |
 | `models/*.ard` | Stateless fetch/decode/mutation modules for `inbox`, `issues`, and the persisted `cache`. |
 | `tui/*.ard` | TUI implementation, split by concern. See *Active TUI Architecture*. |
-| `ard.toml` | Points the `vaxis` dependency at `../vaxis-ard` (sister repo). |
 
-vaxis/ui primitives are imported from external **[vaxis-ard](https://github.com/akonwi/vaxis-ard)** (Ard binding around `git.sr.ht/~rockorager/vaxis/ui`). Tinear used to keep a local copy under `tui/ui.ard` and a Go FFI under `ffi/`; both are gone. Tricky lessons live in **`vaxis-ard/docs/`** (events/focus, widget reconciliation) and should be the first read when something keyboard- or focus-related misbehaves.
+## The ffi shim
+
+`ffi/` holds only what Ard cannot express, plus stopgaps for tracked
+compiler gaps. Keep it minimal; prefer direct `use go:` calls.
+
+| File | Contents |
+|------|----------|
+| `ffi/stateful.go` | `Stateful` widget (owns the `ui.StateBase` struct embedding Ard can't do), `StateCtx`, generic `Update[T]` (mutate live state + rebuild), `StateRef[T]`/`StateValue[T]`, `MarkDirty`, `Dispatch` (posts onto the UI thread), optional `OnTick`, and the per-widget `Animate`/`AnimateMs` animation controller. |
+| `ffi/intents.go` | `Intent(t)` — wraps a string as a `ui.Intent` (Ard can't implement a Go interface method on a string newtype). |
+| `ffi/host.go` | `OpenURL` (platform browser launch), plus stopgaps: `StrFromBytes` (ard#283) and `Millis` (ard#284). Delete each when its upstream issue lands. |
 
 ## Active TUI Architecture
 
-vaxis/ui primitives plus thin Ard composition. Do not reintroduce app-local
-framework code; prefer adding to vaxis-ard if a primitive is missing.
+Direct vaxis/ui composition plus thin Ard modules. Do not reintroduce a
+binding/framework layer; if something is genuinely inexpressible, add the
+smallest possible shim to `ffi/`.
 
 | File | Purpose |
 |------|---------|
 | `tui/welcome_screen.ard` | Auth screen for unauthenticated users. Validates the API key against Linear's `viewer` query and persists it via `config::write`. |
-| `tui/logged_in_screen.ard` | Tab shell. Owns the `Model` (tab_index, issue_tabs), tab bar, `ui::indexed_stack` body, hints bar. Hydrates from `models/cache` on init; persists via a `set_and_persist` helper around tab/issue-tab mutations. |
-| `tui/inbox_view.ard` | Inbox list + detail pane. Owns its own 5-minute background refresh with cursor-by-id preservation. |
-| `tui/my_issues_view.ard` | Kanban board. Per-column `custom_scroll_view` + `sliver_list_builder` + `SliverListController.reveal_index` for auto-scroll. Horizontal outer scroll via `scroll_view(axis: horizontal)`. Same background-refresh pattern. |
-| `tui/issue_detail_view.ard` | Issue detail tab. Sticky header (id, title, field grid), Description / Comments section tabs, scrollable body, compose modal entry, picker entry points, background refresh of both issue and comments. |
-| `tui/search_view.ard` | Debounced global search modal body. Up/Down/Enter intercepted at the modal level so the text_field doesn't swallow them. |
-| `tui/compose_view.ard` | Comment-compose modal body. `text_area` + capture-phase shortcuts for `Ctrl+Enter`. |
+| `tui/logged_in_screen.ard` | Tab shell. Owns the `Model` (tab_index, issue_tabs), tab bar, `IndexedStack` body, hints bar, and the `?` global-search modal. Hydrates from `models/cache` on first build; persists via `select_tab`/`replace_model` (`ffi::Update` + async persist). |
+| `tui/inbox_view.ard` | Inbox list + detail pane split. Optimistic delete, detail fetch keyed by cursor with stale-result discard. |
+| `tui/my_issues_view.ard` | Kanban board. Per-column `CustomScrollView` + `SliverListBuilder` + `SliverListController.RevealIndex` for auto-scroll. Horizontal outer `ScrollView`, metric-driven overflow chevrons. 5-minute silent refresh preserving cursor by issue id. |
+| `tui/issue_detail_view.ard` | Issue detail tab. Sticky header (id, title, field grid), Description / Comments section tabs, scrollable body, compose modal entry (`n`), picker entry points (`s`/`y`), background refresh of both issue and comments. |
+| `tui/search_view.ard` | Debounced (300ms, generation-guarded) global search modal body. Up/Down/Enter intercepted at the modal level so the TextField doesn't swallow them. |
+| `tui/compose_view.ard` | Comment-compose modal body. `TextArea` + capture-phase shortcuts for `Ctrl+Enter`/`Ctrl+m`/`Ctrl+j`. |
 | `tui/picker.ard` | Reusable single-select picker (state/cycle pickers, etc.). |
 | `tui/issue_pickers.ard` | State/cycle picker builders for an issue. Take a caller-supplied `on_change(new_id)` so each surface can choose what to refresh after the mutation. |
-| `tui/modal.ard` | `show_modal(theme, title, child, footer, width, on_dismiss)` frame. Does **not** wrap `child` in `ui::focus`; the body must bring its own focusable so events bubble through the body's `shortcuts`/`actions` before hitting the frame. |
+| `tui/modal.ard` | `show_modal(theme, title, child, footer, width, on_dismiss)` frame. Does **not** wrap `child` in a focusable; the body must bring its own so events bubble through the body's `Shortcuts`/`Actions` before hitting the frame. |
 | `tui/refresh.ard` | `schedule_periodic(interval_ms, action)` — spawns one fiber per caller. Process-lived, no cancellation yet. |
-| `tui/toast.ard` | Animated toast overlay. Variants (info / warning / error / success). Owned by `AppState`. |
+| `tui/toast.ard` | Animated toast overlay. Variants (info / success / error). Data owned by `AppState`; each toast owns an `AnimationController` over its TTL. |
 | `tui/hints_bar.ard` | Footer hints. `new` adds a top divider; `row` is the bare row for embedding under a divider the caller already supplies (e.g. modal frames). |
 | `tui/state.ard` | Workflow / priority helpers (rank, glyph, label). |
 | `tui/text.ard` | Byte- and display-width string helpers. |
 
 ## vaxis/ui Best Practices
 
-- Prefer native vaxis/ui composition (`ui::row`, `ui::column`, `ui::scroll_view`, `ui::custom_scroll_view`, `ui::list_tile`, `ui::actions`, `ui::shortcuts`, etc.) over app-specific rendering abstractions. If a primitive is missing, extend vaxis-ard.
-- Keep Ard bindings (in vaxis-ard) thin: translate Ard nullable/default arguments into the FFI shape, expose typed handles (`ui::BuildContext`, `ui::Runtime`, `ui::State`, `ui::EventContext`).
+- Compose Go widgets directly: `ui::Flex{...}`, `ui::Text{...}`,
+  `ui::ListTile{...}`, `ui::ScrollView{...}`, `ui::Actions{...}`,
+  `ui::Shortcuts{...}`, etc. Constructor helpers (`ui::Center`,
+  `ui::Padding`, `ui::Expanded`, `ui::DecoratedBox`, `ui::BorderAll`) are
+  plain Go functions.
+- **`ui::Widget` is Go `any`**, so a widget-list literal needs an explicit
+  annotation to box element-wise: `mut children: [ui::Widget] = [...]`.
+- **`ui::Symmetric(horizontal, vertical)`** — horizontal first. Getting this
+  backwards silently breaks layouts (it did during the port).
+- **TextField/TextArea size themselves from `MinWidth`** — wrapping in an
+  outer `SizedBox` does not grow the editable region.
+- Scroll/list controllers are Go pointer types held as `mut ui::X` fields:
+  create with `mut ctrl = ui::ScrollController{}` then store `mut ctrl`
+  (direct `mut ui::X{}` literals are blocked on ard#285).
 - Separate keybindings from behavior:
-  - `ui::shortcuts` maps keys to intent names.
-  - `ui::actions` maps intent names to handlers with `ui::action(...)`.
-  - The intent name shows up in profiles, error messages, and tests — name them after the *behaviour* (`board.row_down`, `issue_detail.compose`), not the key.
-- `vaxis-ard/docs/events-and-focus.md` is the source of truth for event flow.
-  Two pitfalls that bit tinear and are documented there:
-  - **Inner `Shortcuts` can't rebind `Tab` / `Shift+Tab` / `Escape`.** Install handlers for the upstream intents (`vaxis.next-focus`, `vaxis.previous-focus`, `vaxis.dismiss`) in your `Actions` instead.
-  - **Conditional `Actions` handlers can't "forward" with `Ignored`.** Once an `Actions` widget has a binding for an intent, dispatch stops there — `Ignored` does not bubble to outer Actions. If you want the outer handler to run sometimes, *omit the binding* (build the bindings list dynamically with `mut bindings`).
+  - `ui::Shortcuts{Bindings: ["j": ffi::Intent("board.row_down")], ...}`
+    maps keys to intents (Str literals widen into `ui::IntentType` keys).
+  - `ui::Actions{Bindings: ["board.row_down": fn(ev, intent) {...}], ...}`
+    maps intents to handlers.
+  - Name intents after the *behaviour* (`board.row_down`,
+    `issue_detail.compose`), not the key.
+- **Inner `Shortcuts` can't rebind `Tab` / `Shift+Tab` / `Escape`.** Install
+  handlers for the upstream intents (`vaxis.next-focus`,
+  `vaxis.previous-focus`, `vaxis.dismiss`) in your `Actions` instead.
+- **Conditional `Actions` handlers can't "forward" with `Ignored`** to outer
+  Actions — dispatch stops at the first binding. But returning `Ignored`
+  from a capture-phase `Shortcuts` action DOES let the event continue to the
+  focused element's target phase; that's how `1`/`2`/`?` type into modal
+  text fields when `modal_open` is true.
 - Focus management with multiple mounted tab views:
-  - `indexed_stack` keeps every child mounted. Their `focus_scope`s all rebuild
-    on every cascade.
-  - If you give the hidden tabs `auto_focus: true` / `reclaim_focus: true`, they
-    will fight for focus on every rebuild and the last-rebuilt sibling wins.
-  - **Plumb an `active: Bool` from the parent and pass it as both `auto_focus`
-    and `reclaim_focus`.** Only the visible tab participates in focus
-    management. This is the pattern in `inbox_view`, `my_issues_view`,
-    `issue_detail_view`.
+  - `IndexedStack` keeps every child mounted; hidden tabs must not pull
+    focus. **Plumb an `active: Bool` from the shell and pass it as both
+    `AutoFocus` and `ReclaimFocus`** on the tab's `FocusScope`. This is the
+    pattern in `inbox_view`, `my_issues_view`, `issue_detail_view`.
 - Modals via the `tui/modal::show_modal` frame:
-  - Caller's `child` must include a focusable. The frame deliberately does
-    not wrap it in `ui::focus` because that would put the focusable above the
-    body's `shortcuts`/`actions` and events would bubble past them.
-  - For keys that the text input would otherwise swallow (Up/Down/Enter on the
-    search modal, Ctrl+Enter on compose), bind them via the modal-level
-    `ui::shortcuts` — Shortcuts dispatch in the capture phase, so it intercepts
-    before the focused element's target phase.
-- When a modal is open, the app-level shortcuts at `logged_in_screen` gate their actions on a `modal_open: Bool` plumbed from `main.ard` (`AppState.current_modal.is_some()`). Returning `Ignored` from those actions lets the keystroke continue through to the modal's text input. See `vaxis-ard/docs/events-and-focus.md §4` for why this works.
-- Widget reconciliation pitfall (`vaxis-ard/docs/widget-reconciliation.md`):
-  switching the outer widget type at a build slot between rebuilds (e.g.
-  `ui::center(...)` while loading and `ui::column(...)` once loaded) silently
-  drops the new tree. Wrap the conditional in a stable outer widget type so
-  the slot's type never changes; let the conditional content live one level
-  deeper.
+  - Caller's `child` must include a focusable (a `ui::Focus(mut node, ...)`
+    wrapper, a `ListTile` with `OnPressed`, a text input, ...). The frame
+    deliberately does not add one.
+  - For keys a text input would otherwise swallow (Up/Down/Enter in search,
+    Ctrl+Enter in compose), bind them via the modal body's `Shortcuts` —
+    capture phase intercepts before the focused element's target phase.
+- Widget reconciliation pitfall: switching the outer widget type at a build
+  slot between rebuilds (e.g. `ui::Center(...)` while loading and a Flex
+  once loaded) can drop the new tree. Wrap the conditional in a stable outer
+  widget type; let the conditional content live one level deeper.
 
 ## State and Async Patterns
 
-Widget-local UI data lives in typed `ui::State` values. Stateless model modules perform fetch/decode/mutation; views store the results in state.
-
-Use `ui::stateful(init: ..., build: ..., key: ...)`:
+Widget-local UI data lives in a plain Ard struct stored in the shim's
+`StateCtx`. Stateless model modules perform fetch/decode/mutation; views
+store the results in state.
 
 ```ard
-ui::stateful(
-  key: "my-widget",
-  init: fn(ctx: ui::BuildContext) MyState {
-    let rt = ctx.runtime<MyState>()
-    load(api_key, rt)
-    MyState{ loading: true, items: [], error: "" }
-  },
-  build: fn(ctx: ui::BuildContext, state: ui::State<MyState>) ui::Widget {
-    let model = state.value()
-    ...
-  },
-)
+fn new(api_key: Str) ui::Widget {
+  ffi::Stateful{
+    Init: fn() Any {
+      View{started: false, items: [], loading: true, error: ""}
+    },
+    Build: fn(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
+      // First-build kick: StateCtx is created lazily, so Init cannot
+      // reach it. `started` makes this once-only across rebuilds.
+      let s = ffi::StateRef<View>(c)
+      if not s.started {
+        s.started = true
+        load(c, api_key)
+      }
+      let theme = ui::MustDepend<ui::Theme>(ctx)
+      let model = ffi::StateValue<View>(c)
+      ...
+    },
+  }
+}
 ```
 
 Rules:
 
-- Initial fetches go in `init`. There was a prior cargo-cult workaround that
-  moved them into `build`; the real issue was the widget-reconciliation
-  pitfall, not init-time dispatch. See the `init` comment in
-  `tui/inbox_view.ard`.
-- Background work must re-enter the UI runtime before mutating UI state:
+- **Mutate state with `ffi::Update<State>(c, fn(s: mut State) { ... })`.** The
+  callback receives the **live `mut State`** (a pointer into persistent
+  storage, not a copy), mutates fields in place, and the rebuild is scheduled
+  for you — you can't forget `MarkDirty`. Spell the callback param
+  `fn(s: mut State)` (mut in the type), never `fn(mut s: State)`.
+- `ffi::StateValue<T>(c)` reads a snapshot for rendering or for a guard read
+  before an `Update`.
+- The raw `ffi::StateRef<T>(c)` (live `mut T`) + `ffi::MarkDirty(c)` are still
+  available, but `Update` is the API for anything that changes what renders.
+  The one place `StateRef` is used directly is the first-build `started`
+  bookkeeping flag, which deliberately does **not** rebuild.
+- **Initial fetches happen on first build behind a `started` guard** (the
+  shim's StateCtx doesn't exist during `Init`).
+- Background work must re-enter the UI thread via `ffi::Dispatch` before
+  touching state; `Update` goes inside the dispatch:
 
   ```ard
-  let _ = async::start(fn() {
+  async::start(fn() {
     let result = load()
-    rt.dispatch(fn(s: ui::State<MyState>) {
-      s.set(fn(mut next: MyState) {
+    ffi::Dispatch(c, fn() {
+      ffi::Update<View>(c, fn(s: mut View) {
         match result {
-          ok(items) => { next.items = items; next.error = "" },
-          err(e)    => { next.error = e },
+          ok(items) => { s.items = items, s.error = "" },
+          err(e) => { s.error = e },
         }
-        next.loading = false
+        s.loading = false
       })
     })
   })
   ```
 
-- Prefer typed handles (`ui::State<MyState>`, `ui::Runtime<MyState>`) and read
-  with `state.value()` / `s.value()` for immutable rendering snapshots.
-- Use stable `key:` values for statefuls that must survive reordering or tab
-  switching.
-- `state.set(mut)` is synchronous (updates the cached value before returning),
-  so `state.value()` immediately after returns the new value. Useful for
-  post-mutation persistence helpers like `set_and_persist` in
-  `tui/logged_in_screen.ard`.
+- Work that must happen *after* the mutation (a follow-up fetch, a scroll
+  reveal read from `StateValue`, `persist`) goes after the `Update` call, not
+  inside the callback.
+- `show_modal` / `close_modal` / `notify` from `main.ard` are dispatch-safe:
+  callable from event handlers and background fibers alike.
 
 ### Periodic background work
 
 `tui/refresh::schedule_periodic(interval_ms, action)` spawns a fiber that
-sleeps then runs `action` forever. Used by inbox, my-issues, and each issue
-detail tab for the 5-minute auto-refresh. Fibers are process-lived and not
-cancellable yet — `rt.dispatch` against a disposed state is a safe no-op per
-the FFI, so closed tabs continue polling until app exit (wasteful but harmless).
+sleeps then runs `action` forever. Used by my-issues and each issue detail
+tab for the 5-minute auto-refresh. Fibers are process-lived and not
+cancellable yet — `ffi::Dispatch` against a disposed widget is a safe no-op,
+so closed tabs continue polling until app exit (wasteful but harmless).
 
 ## Testing
 
@@ -158,53 +200,54 @@ Currently no widget tests — testing is pure unit coverage:
 
 | Test file | Covers |
 |-----------|--------|
+| `decode_test.ard` | JSON decode combinators: scalars, lists, nullable, path walking, error paths. |
 | `models/cache_test.ard` | Versioned cache round-trip + invalid-input handling. |
 | `models/issues_test.ard` | Mojibake normalization in issue/comment decode. |
+| `tui/logged_in_screen_test.ard` | Tab math: cycling, open/close issue tabs, labels. |
 | `tui/state_test.ard` | Priority + workflow-state-type ordering helpers. |
 | `tui/text_test.ard` | Display-width truncation. |
 
-Run with `ard test`. If we add widget tests later, wire them through
-`vaxis-ard`'s uitest helpers; we no longer ship a tinear-local test binding.
+Run with `ard test`.
 
 ## Code Style
 
-- Name functions for UI intent (`issue_card`, `refresh_inbox`, `open_state_picker`) over mechanics.
-- Use named arguments when calling a function with three or more arguments.
+- Name functions for UI intent (`issue_card`, `refresh_board`, `open_state_picker`) over mechanics.
+- Use named arguments when calling a function with three or more arguments (Go struct literals use their field names instead).
 - Model modules own fetch / decode / mutation. TUI modules own presentation and state wiring.
-- Keep errors user-facing. `main()` returns `Void`; surface failures via toasts or panics with a clear message.
+- Keep errors user-facing: surface failures via toasts (`notify`) or inline error panes; `main()` panics with a clear message only for startup failure.
 - Linear auth header is `Authorization: <raw key>` — no `Bearer` prefix.
-- Use `models/inbox::optional_field` (and `models/issues` helpers) for nullable nested JSON fields; GraphQL inline fragments often omit them entirely.
+- Use `tinear/decode`'s `nullable`/`path` combinators (and the `models/*` helpers built on them) for nullable nested JSON fields; GraphQL inline fragments often omit them entirely.
 - Use display-width-aware text helpers (`tui/text`) when fitting strings into fixed terminal cells. Byte-based helpers are ASCII-only.
-- Auto-refresh handlers should be **silent** (no `loading = true` flash) and **preserve cursor by id** (look up the previously-cursored entity's id after the swap and snap to its new index). See `refresh_inbox` / `refresh_board` for the pattern.
+- Auto-refresh handlers should be **silent** (no `loading = true` flash) and **preserve cursor by id** (look up the previously-cursored entity's id after the swap and snap to its new index). See `refresh_board` in `tui/my_issues_view.ard`.
 
 ## Auth and CLI surface
 
-Single entrypoint (`main.ard`) launches the TUI. There is no `login` subcommand any more; auth happens in the welcome screen, which validates the key against Linear's `viewer` query and writes it to `~/.tinear/config`. To bootstrap without the TUI, set `$LINEAR_API_KEY` or hand-edit `~/.tinear/config`.
+Single entrypoint (`main.ard`) launches the TUI. Auth happens in the welcome
+screen, which validates the key against Linear's `viewer` query and writes it
+to `~/.tinear/config.json`. To bootstrap without the TUI, set
+`$LINEAR_API_KEY` or hand-edit the config file.
 
 ## Ard Language Notes
 
 - **No `return` keyword** — last expression is the return value. Use `try` for Result propagation.
-- **Functions must be defined before use** within a file. Cross-file order doesn't matter.
 - **`and` / `not`** instead of `&&` / `!`.
 - **`Void!Str`** uses `Result::ok(())` for the Ok variant.
-- **`{ ... }` in `match`** must be followed by a newline — no inline `match x { a => b, _ => c }`.
 - **String interpolation** with `{var}`; literal braces need `\{` / `\}`.
-- **`use ard/list as List`** to access `List::drop()`.
-- **Mutating methods** with `fn mut name() { self.field = v }`. Methods can mutate fields when the receiver is `mut`.
-- **`mut` doesn't propagate through match/for bindings** — `mut x = ...; for item in xs { item.field = v }` doesn't compile. Hoist a copy:
-  `mut t = xs.at(i); t.field = v; xs.set(i, t)`.
-- **`while true { ... }`** is the idiomatic infinite loop (used by `schedule_periodic`).
-- **Nullable callback gotcha**: `fn(X) Void?` is **not** a nullable function — the `?` binds to the return type. For a nullable callback, omit the return type: `on_pressed: fn(EventContext)?`.
-- **Generic struct definitions** (e.g. `struct Box<$T> { ... }`) are tricky in the current parser. If a stateful needs to vary by a type parameter from the parent, keep the state struct concrete and have the parent close over its own typed runtime in a callback (see how `tui/compose_view` exposes `refresh_comments: fn()` instead of being generic over Detail's state type).
-- **Direct Go imports** (Ard 0.25+) via `use go:pkg` are supported but have two limitations that bit a migration attempt on `os.ard`:
-  - **Variadic Go functions aren't callable.** `exec::Command(name, arg ...string)` errors with "variadic direct Go calls are not supported yet," and there's no slice-passing workaround. Most of `os/exec` is variadic.
-  - **String constants aren't bindable as values.** `runtime::GOOS` errors with "not an exported typed integer enum-like constant" — only typed integer enum-like constants come through. Workaround for OS detection is env-var (`COMSPEC` for Windows) plus tool availability (`exec::LookPath` to disambiguate Linux/macOS), which works but loses fidelity vs the build-time `runtime.GOOS` tag.
-  Result: `os.ard` + `ffi/host.go` stays on the older `extern fn ... = "tinear.Symbol"` + companion file pattern. Prefer `use go:` for new FFI when the Go API is non-variadic and you don't need bare string constants; otherwise fall back to the extern + companion file.
-- **`async::start` returns a `Fiber`**. Discard it with `let _ = async::start(...)` when the surrounding expression's expected return type is `Void`.
+- **Mutating methods** with `fn mut name() { self.field = v }`; callable only on mutable receivers.
+- **`mut <expr>` creates a mutable reference** (ADR 0045): `mut ctrl` aliases a mut binding; reads of a `mut T` variable deref (copy). Two current parser limits: `mut pkg::Type{}` doesn't parse (ard#285 — bind first, then `mut binding`) and `mut x` can't be a block's final expression (parses as a declaration).
+- **Match arms must unify types.** Arms returning different foreign widget types need an explicit annotation on the binding (`let w: ui::Widget = match ...`).
+- **`.at(i)` returns `T?`** on lists — `.expect("bounds checked")` after an explicit bounds check. Map access is `.get(key)` returning `V?`; removal is `.delete(key)`.
+- **JSON numbers arrive as `Float64`** through `Any`; `decode::int` does the integrality check.
+- **Go slice params/results are `mut [Byte]`-shaped**: pass a `mut` binding (`mut bytes = text.bytes()`), and bind results with `mut`.
+- **Avoid `try expr -> e { Result::err(...) }`** until ard#282 lands — catch blocks producing `Result` values miscompile under the `(T, error)` ABI. Use `.map_err(named_fn)` + plain `try`, or an explicit `match`.
+- **Cross-module generic helpers must be public** (second half of ard#282): private generics instantiated from another module emit empty bodies.
+- **`async::start` returns `Void`** — no discard needed. Fibers must re-enter the UI thread via `ffi::Dispatch` before touching widget state.
+- **Direct Go variadics** accept at most one trailing argument (the variadic element); calls needing multiple variadic values go through a shim.
 
-## vaxis-ard companion docs
+## Upstream references
 
-Read these before debugging anything keyboard- or focus-related:
-
-- `vaxis-ard/docs/events-and-focus.md` — event dispatch (capture / target / bubble), Shortcuts/Actions semantics, focus_scope with `auto_focus` / `reclaim_focus`, conditional-handler / Ignored pitfall.
-- `vaxis-ard/docs/widget-reconciliation.md` — the "state updates but the screen doesn't" trap, plus the sibling FFI bug where `uiStatefulState` cached the widget at `CreateState` and never refreshed parent-supplied params (fixed; explained as a misdiagnosis-prone class of bugs).
+- The vaxis/ui Go source is the authoritative widget API reference (fields,
+  constants, controller methods). Read it before guessing a widget's shape.
+- Compiler issues tracked from this port: ard#282 (try-catch Result ABI +
+  private cross-module generics), ard#283 (`Str::from_bytes`), ard#284
+  (Int → sized-scalar conversions), ard#285 (`mut pkg::Type{}` parse).

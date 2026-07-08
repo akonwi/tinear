@@ -1,12 +1,13 @@
-use vaxis
-use vaxis/ui
+use go:go.rockorager.dev/vaxis/ui
+use go:tinear/ffi
 
 // Transient overlay notifications.
 //
-// The data live in AppState (caller-owned: list of Toast + a monotonically
-// increasing id counter). This module renders the list and animates each
-// entry. Adding/removing toasts is the caller's responsibility; see
-// `main.ard` for the `notify` helper that wraps the lifecycle.
+// The data live in AppState (caller-owned: list of Toast + a
+// monotonically increasing id counter). This module renders the list
+// and animates each entry. Adding/removing toasts is the caller's
+// responsibility; see `main.ard` for the `notify` helper that wraps
+// the lifecycle.
 
 enum ToastVariant {
   info,
@@ -22,26 +23,20 @@ struct Toast {
   ttl_ms: Int,
 }
 
-struct ViewState {
-  anim: ui::AnimationController,
-}
-
 // ── Helpers ───────────────────────────────────────────────────────────
 
-fn variant_color(theme: ui::Theme, v: ToastVariant) vaxis::Color {
+fn variant_color(theme: ui::Theme, v: ToastVariant) ui::Color {
   match v {
-    ToastVariant::info => theme.primary,
-    ToastVariant::success => theme.success,
-    ToastVariant::error => theme.danger,
+    ToastVariant::info => theme.Primary,
+    ToastVariant::success => theme.Success,
+    ToastVariant::error => theme.Danger,
   }
 }
 
 // Approximate the toast's natural rendered width. The exact size at
-// layout time is unknown to us at build time (Ard has no text-width
-// measurement primitive bound), so we estimate from the underlying
-// string lengths. The actual content lays out inside this estimate
-// when reveal_width == this value: borders (2) + horizontal padding
-// (2 * 2) + the wider of title or description.
+// layout time is unknown at build time, so we estimate from the
+// underlying string lengths: borders (2) + horizontal padding (2 * 2)
+// + the wider of title or description.
 fn natural_width(toast: Toast) Int {
   let title_w = toast.title.size()
   let desc_w = toast.description.size()
@@ -52,21 +47,20 @@ fn natural_width(toast: Toast) Int {
   content_w + 6
 }
 
-// Map animation progress (0..1, linear over the toast's full TTL) to the
-// VISIBLE width of the outer container. The toast itself stays at its
-// natural size; we wrap it in a sized_box whose width animates
+// Map animation progress (0..1, linear over the toast's full TTL) to
+// the VISIBLE width of the outer container. The toast itself stays at
+// its natural size; we wrap it in a SizedBox whose width animates
 // 0 → natural → 0, with the toast right-aligned inside. As width grows
 // during slide-in, the toast appears to unfurl from the right edge.
-fn reveal_width(progress: Float, max_width: Int) Int {
-  let slide_phase = Float::from_int(5) / Float::from_int(100)  // 0.05
-  let one = Float::from_int(1)
-  let max_w = Float::from_int(max_width)
+fn reveal_width(progress: Float64, max_width: Int) Int {
+  let slide_phase = 0.05
+  let max_w = max_width.to_f64()
   if progress < slide_phase {
     let t = progress / slide_phase
-    ui::float_to_int(t * max_w)
-  } else if progress > one - slide_phase {
-    let t = (one - progress) / slide_phase
-    ui::float_to_int(t * max_w)
+    (t * max_w).to_int()
+  } else if progress > 1.0 - slide_phase {
+    let t = (1.0 - progress) / slide_phase
+    (t * max_w).to_int()
   } else {
     max_width
   }
@@ -76,88 +70,81 @@ fn reveal_width(progress: Float, max_width: Int) Int {
 
 // Build the visible cell rectangle: title + optional dim description
 // inside a bordered box. The border is colored per variant — it's the
-// only variant signal, so the color picks (info/primary, success,
-// error/danger) need to be visually distinct against theme.surface.
+// only variant signal.
 fn render_body(theme: ui::Theme, toast: Toast) ui::Widget {
   let border_color = variant_color(theme, toast.variant)
   mut col_children: [ui::Widget] = [
-    ui::styled_text(toast.title, fg: theme.foreground),
+    ui::Text{Value: toast.title, Style: ui::Style{Foreground: theme.Foreground}},
   ]
   if not toast.description.is_empty() {
-    col_children.push(ui::styled_text(
-      toast.description,
-      fg: theme.muted_foreground,
-      attrs: ui::TextAttrs{ dim: true },
-    ))
+    col_children.push(ui::Text{
+      Value: toast.description,
+      Style: ui::Style{Foreground: theme.MutedForeground, Attribute: ui::AttrDim},
+    })
   }
-  let body_column = ui::column(
-    col_children,
-    main_size: ui::MainSize::min,
-    cross_align: ui::CrossAlign::start,
-  )
-  // Interior padding inside the decorated_box.
-  //
-  // The minimum to keep the border from overlapping the content is
-  // `all: 1` (decorated_box sizes itself to its child and paints the
-  // border at the edges of its rect). horizontal: 2 gives the title
-  // text a little more breathing room from the left/right edges; the
-  // vertical 1 is just enough to keep the title off the border lines.
-  ui::decorated_box(
-    ui::padding(body_column, horizontal: 2, vertical: 1),
-    bg: theme.surface,
-    fg: theme.foreground,
-    border: ui::borders_all(),
-    border_fg: border_color,
-    border_bg: theme.surface,
+  let body_column = ui::Flex{
+    Axis: ui::Vertical,
+    MainAxisSize: ui::MainAxisSizeMin,
+    CrossAxisAlignment: ui::CrossAxisStart,
+    Children: col_children,
+  }
+  // Interior padding: horizontal 2 gives the title breathing room from
+  // the left/right edges; vertical 1 keeps it off the border lines.
+  ui::DecoratedBox(
+    ui::Decoration{
+      Style: ui::Style{Foreground: theme.Foreground, Background: theme.Surface},
+      Border: ui::BorderAll(ui::Style{Foreground: border_color, Background: theme.Surface}),
+    },
+    ui::Padding(ui::Symmetric(2, 1), body_column),
   )
 }
 
-// Each toast is its own stateful widget so it owns its own AnimationController.
-// The controller runs over the full ttl_ms.
+// Each toast is its own stateful widget so it owns its own
+// AnimationController running linearly over the full ttl_ms.
 //
-// Reveal animation: the toast is wrapped in a sized_box whose width
-// animates 0 → natural_width → 0 over the first/last 5% of the TTL.
-// `row(main_align: end)` right-aligns the toast inside the box so the
-// growing visible window exposes the toast from its right edge, giving
-// a "rolling out from the right" feel without needing off-screen
-// positioning (which the overlay setup can't produce).
+// Reveal animation: the toast is wrapped in a SizedBox whose width
+// animates 0 → natural_width → 0 over the first/last 5% of the TTL,
+// right-aligned so the growing window exposes the toast from its right
+// edge.
 fn render_animated(theme: ui::Theme, toast: Toast) ui::Widget {
   let max_w = natural_width(toast)
-  ui::stateful(
-    key: "toast-{toast.id.to_str()}",
-    init: fn(ctx: ui::BuildContext) ViewState {
-      let anim = ui::animation_controller(ctx, toast.ttl_ms, curve: ui::AnimationCurve::linear)
-      ui::anim_forward(anim)
-      ViewState{ anim: anim }
-    },
-    build: fn(_ctx: ui::BuildContext, state: ui::State<ViewState>) ui::Widget {
-      let progress = ui::anim_value(state.value().anim)
+  ffi::Stateful{
+    Init: fn() Any { toast },
+    Animate: true,
+    AnimateMs: toast.ttl_ms,
+    Build: fn(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
+      let anim = ffi::Animation(c)
+      anim.Forward()
+      let progress = anim.Value()
       let visible_w = reveal_width(progress, max_w)
-      ui::sized_box(
-        visible_w, 0,
-        ui::row(
-          [render_body(theme, toast)],
-          main_align: ui::MainAlign::end,
-        ),
-      )
+      mut row_children: [ui::Widget] = [render_body(theme, toast)]
+      ui::SizedBox{
+        Width: visible_w,
+        Child: ui::Flex{
+          Axis: ui::Horizontal,
+          MainAxisAlignment: ui::MainAxisEnd,
+          Children: row_children,
+        },
+      }
     },
-  )
+  }
 }
 
 // Stack of toasts, newest at the bottom. Right-aligned within the
-// overlay region so the slide animation reads as coming from the screen
-// edge.
+// overlay region so the slide animation reads as coming from the
+// screen edge.
 fn render_stack(theme: ui::Theme, toasts: [Toast]) ui::Widget {
   mut children: [ui::Widget] = []
   for t, idx in toasts {
     if idx > 0 {
-      children.push(ui::sized_box(0, 1, ui::text("")))
+      children.push(ui::SizedBox{Height: 1})
     }
     children.push(render_animated(theme, t))
   }
-  ui::column(
-    children,
-    main_size: ui::MainSize::min,
-    cross_align: ui::CrossAlign::end,
-  )
+  ui::Flex{
+    Axis: ui::Vertical,
+    MainAxisSize: ui::MainAxisSizeMin,
+    CrossAxisAlignment: ui::CrossAxisEnd,
+    Children: children,
+  }
 }

@@ -1,5 +1,6 @@
-use ard/decode
-use ard/json
+use tinear/decode
+use go:encoding/json
+use go:tinear/ffi
 use ard/maybe
 
 use tinear/linear/client
@@ -68,7 +69,7 @@ struct Issue {
   state_id: Str,
   state_name: Str,
   state_type: Str,
-  state_position: Float,
+  state_position: Float64,
   team_id: Str,
   team_name: Str,
   team_key: Str,
@@ -84,7 +85,7 @@ struct Issue {
 struct BoardColumn {
   name: Str,
   state_type: Str,
-  position: Float,
+  position: Float64,
   issues: [Issue],
 }
 
@@ -99,7 +100,7 @@ struct WorkflowState {
   id: Str,
   name: Str,
   state_type: Str,
-  position: Float,
+  position: Float64,
 }
 
 struct Cycle {
@@ -114,7 +115,7 @@ struct TeamCyclesResult {
   cycles: [Cycle],
 }
 
-fn optional_str(data: Dynamic, name: Str, fallback: Str) Str {
+fn optional_str(data: Any, name: Str, fallback: Str) Str {
   match decode::run(data, decode::field(name, decode::nullable(decode::string))) {
     ok(value) => match value {
       v => v,
@@ -124,7 +125,7 @@ fn optional_str(data: Dynamic, name: Str, fallback: Str) Str {
   }
 }
 
-fn nullable_str(data: Dynamic, name: Str) Str? {
+fn nullable_str(data: Any, name: Str) Str? {
   decode::run(
     data,
     decode::field(name, decode::nullable(decode::string)),
@@ -138,14 +139,14 @@ fn normalize_nullable_str(value: Str?) Str? {
   }
 }
 
-fn nullable_int(data: Dynamic, name: Str) Int? {
+fn nullable_int(data: Any, name: Str) Int? {
   decode::run(
     data,
     decode::field(name, decode::nullable(decode::int)),
   ).expect("nullable int field missing")
 }
 
-fn nested_str(data: Dynamic, name: Str, nested: Str, fallback: Str) Str {
+fn nested_str(data: Any, name: Str, nested: Str, fallback: Str) Str {
   match decode::run(data, decode::path([name, nested], decode::nullable(decode::string))) {
     ok(value) => match value {
       v => v,
@@ -155,7 +156,7 @@ fn nested_str(data: Dynamic, name: Str, nested: Str, fallback: Str) Str {
   }
 }
 
-fn user_display_name(user: Dynamic) Str {
+fn user_display_name(user: Any) Str {
   let display_name = decode::run(
     user,
     decode::nullable(decode::field("displayName", decode::string)),
@@ -169,7 +170,7 @@ fn user_display_name(user: Dynamic) Str {
   }
 }
 
-fn user_display_name_opt(data: Dynamic, name: Str) Str {
+fn user_display_name_opt(data: Any, name: Str) Str {
   let display_name = nested_str(data, name, "displayName", "")
   match display_name.is_empty() {
     true => nested_str(data, name, "name", "—"),
@@ -177,11 +178,11 @@ fn user_display_name_opt(data: Dynamic, name: Str) Str {
   }
 }
 
-fn cycle_id(raw: Dynamic) Str {
+fn cycle_id(raw: Any) Str {
   nested_str(raw, "cycle", "id", "")
 }
 
-fn cycle_label(raw: Dynamic) Str {
+fn cycle_label(raw: Any) Str {
   let number = match decode::run(raw, decode::path(["cycle", "number"], decode::nullable(decode::int))) {
     ok(value) => value,
     err(_) => maybe::none(),
@@ -198,9 +199,9 @@ fn cycle_label(raw: Dynamic) Str {
   }
 }
 
-fn decode_issue(raw: Dynamic) Issue {
-  let state = decode::run(raw, decode::field("state", decode::dynamic)).expect("Missing state")
-  let team = decode::run(raw, decode::field("team", decode::dynamic)).expect("Missing team")
+fn decode_issue(raw: Any) Issue {
+  let state = decode::run(raw, decode::field("state", decode::any)).expect("Missing state")
+  let team = decode::run(raw, decode::field("team", decode::any)).expect("Missing team")
   Issue{
     id: decode::run(raw, decode::field("id", decode::string)).expect("Missing issue.id"),
     identifier: decode::run(raw, decode::field("identifier", decode::string)).expect("Missing issue.identifier"),
@@ -238,8 +239,8 @@ fn decode_column(raw: state::BoardColumn) BoardColumn {
   }
 }
 
-fn decode_comment(raw: Dynamic) Comment {
-  let user = decode::run(raw, decode::field("user", decode::dynamic)).expect("Missing comment.user")
+fn decode_comment(raw: Any) Comment {
+  let user = decode::run(raw, decode::field("user", decode::any)).expect("Missing comment.user")
   Comment{
     id: decode::run(raw, decode::field("id", decode::string)).expect("Missing comment.id"),
     author: user_display_name(user),
@@ -250,7 +251,7 @@ fn decode_comment(raw: Dynamic) Comment {
   }
 }
 
-fn decode_workflow_state(raw: Dynamic) WorkflowState {
+fn decode_workflow_state(raw: Any) WorkflowState {
   WorkflowState{
     id: decode::run(raw, decode::field("id", decode::string)).expect("Missing workflow state.id"),
     name: normalize_text(
@@ -261,7 +262,7 @@ fn decode_workflow_state(raw: Dynamic) WorkflowState {
   }
 }
 
-fn decode_cycle(raw: Dynamic) Cycle {
+fn decode_cycle(raw: Any) Cycle {
   let name = decode::run(
     raw,
     decode::field("name", decode::nullable(decode::string)),
@@ -277,9 +278,9 @@ fn decode_cycle(raw: Dynamic) Cycle {
   }
 }
 
-fn fetch_viewer(api_key: Str) Dynamic!Str {
+fn fetch_viewer(api_key: Str) Any!Str {
   let data = try client::graphql(api_key, "query \{ viewer \{ id name displayName email \} \}")
-  let viewer = decode::run(data, decode::field("viewer", decode::dynamic)).expect("Missing viewer")
+  let viewer = decode::run(data, decode::field("viewer", decode::any)).expect("Missing viewer")
   Result::ok(viewer)
 }
 
@@ -288,7 +289,7 @@ fn update_state(api_key: Str, issue_id: Str, state_id: Str) Void!Str {
   let data = try client::graphql(api_key, mutation)
   let success = decode::run(
     data,
-    decode::path(["issueUpdate", "success"], decode::bool),
+    decode::path(["issueUpdate", "success"], decode::boolean),
   ).expect("Missing issueUpdate.success")
   match success {
     true => Result::ok(()),
@@ -305,7 +306,7 @@ fn update_cycle(api_key: Str, issue_id: Str, cycle_id: Str) Void!Str {
   let data = try client::graphql(api_key, mutation)
   let success = decode::run(
     data,
-    decode::path(["issueUpdate", "success"], decode::bool),
+    decode::path(["issueUpdate", "success"], decode::boolean),
   ).expect("Missing issueUpdate.success")
   match success {
     true => Result::ok(()),
@@ -314,12 +315,13 @@ fn update_cycle(api_key: Str, issue_id: Str, cycle_id: Str) Void!Str {
 }
 
 fn create_comment(api_key: Str, issue_id: Str, body: Str) Void!Str {
-  let body_json = json::encode(body).expect("encode body")
+  mut body_bytes = json::Marshal(body).expect("encode body")
+  let body_json = ffi::StrFromBytes(body_bytes)
   let mutation = "mutation \{ commentCreate(input: \{ issueId: \"{issue_id}\", body: {body_json} \}) \{ success \} \}"
   let data = try client::graphql(api_key, mutation)
   let success = decode::run(
     data,
-    decode::path(["commentCreate", "success"], decode::bool),
+    decode::path(["commentCreate", "success"], decode::boolean),
   ).expect("Missing commentCreate.success")
   match success {
     true => Result::ok(()),
@@ -327,22 +329,22 @@ fn create_comment(api_key: Str, issue_id: Str, body: Str) Void!Str {
   }
 }
 
-fn fetch_issue_comments(api_key: Str, issue_id: Str) [Dynamic]!Str {
+fn fetch_issue_comments(api_key: Str, issue_id: Str) [Any]!Str {
   let query = "query \{ issue(id: \"{issue_id}\") \{ comments(first: 50) \{ nodes \{ id body createdAt user \{ name displayName \} \} \} \} \}"
   let data = try client::graphql(api_key, query)
   let nodes = decode::run(
     data,
-    decode::path(["issue", "comments", "nodes"], decode::list(decode::dynamic)),
+    decode::path(["issue", "comments", "nodes"], decode::list(decode::any)),
   ).expect("Missing issue.comments.nodes")
   Result::ok(nodes)
 }
 
-fn fetch_team_states(api_key: Str, team_id: Str) [Dynamic]!Str {
+fn fetch_team_states(api_key: Str, team_id: Str) [Any]!Str {
   let query = "query \{ team(id: \"{team_id}\") \{ states \{ nodes \{ id name type position \} \} \} \}"
   let data = try client::graphql(api_key, query)
   let nodes = decode::run(
     data,
-    decode::path(["team", "states", "nodes"], decode::list(decode::dynamic)),
+    decode::path(["team", "states", "nodes"], decode::list(decode::any)),
   ).expect("Missing team.states.nodes")
   Result::ok(nodes)
 }
@@ -350,10 +352,10 @@ fn fetch_team_states(api_key: Str, team_id: Str) [Dynamic]!Str {
 fn fetch_team_cycles(api_key: Str, team_id: Str) TeamCyclesResult!Str {
   let query = "query \{ team(id: \"{team_id}\") \{ activeCycle \{ number \} cycles(first: 50) \{ nodes \{ id number name startsAt \} \} \} \}"
   let data = try client::graphql(api_key, query)
-  let team_obj = decode::run(data, decode::field("team", decode::dynamic)).expect("Missing team")
+  let team_obj = decode::run(data, decode::field("team", decode::any)).expect("Missing team")
   let nodes = decode::run(
     team_obj,
-    decode::path(["cycles", "nodes"], decode::list(decode::dynamic)),
+    decode::path(["cycles", "nodes"], decode::list(decode::any)),
   ).expect("Missing team.cycles.nodes")
 
   let active_number = match decode::run(
@@ -375,20 +377,21 @@ fn issue_fields() Str {
   "id identifier title description priority state \{ id name type position \} team \{ id name key \} project \{ name \} assignee \{ name displayName \} cycle \{ id number name \}"
 }
 
-fn fetch_single_issue(api_key: Str, issue_id: Str) Dynamic!Str {
+fn fetch_single_issue(api_key: Str, issue_id: Str) Any!Str {
   let query = "query \{ issue(id: \"{issue_id}\") \{ {issue_fields()} \} \}"
   let data = try client::graphql(api_key, query)
-  let issue = decode::run(data, decode::field("issue", decode::dynamic)).expect("Missing issue")
+  let issue = decode::run(data, decode::field("issue", decode::any)).expect("Missing issue")
   Result::ok(issue)
 }
 
-fn fetch_issue_search(api_key: Str, term: Str) [Dynamic]!Str {
-  let q = json::encode(term).expect("encode search query")
+fn fetch_issue_search(api_key: Str, term: Str) [Any]!Str {
+  mut q_bytes = json::Marshal(term).expect("encode search query")
+  let q = ffi::StrFromBytes(q_bytes)
   let query = "query \{ searchIssues(term: {q}, first: 20) \{ nodes \{ {issue_fields()} \} \} \}"
   let data = try client::graphql(api_key, query)
   let nodes = decode::run(
     data,
-    decode::path(["searchIssues", "nodes"], decode::list(decode::dynamic)),
+    decode::path(["searchIssues", "nodes"], decode::list(decode::any)),
   ).expect("Missing searchIssues.nodes")
   Result::ok(nodes)
 }
@@ -401,8 +404,8 @@ fn sort_columns_by_position(cols: [state::BoardColumn]) [state::BoardColumn] {
     mut result = cols
     for i in 0..n - 2 {
       for j in 0..n - 2 - i {
-        let a = result.at(j)
-        let b = result.at(j + 1)
+        let a = result.at(j).expect("bounds checked")
+        let b = result.at(j + 1).expect("bounds checked")
         let ra = state::state_type_rank(a.state_type)
         let rb = state::state_type_rank(b.state_type)
         let swap = match ra == rb {
@@ -424,14 +427,14 @@ fn fetch_board(api_key: Str, my_id: Str) [state::BoardColumn]!Str {
   let data = try client::graphql(api_key, query)
   let raw_issues = decode::run(
     data,
-    decode::path(["issues", "nodes"], decode::list(decode::dynamic)),
+    decode::path(["issues", "nodes"], decode::list(decode::any)),
   ).expect("Missing issues.nodes")
 
   mut state_names: [Str] = []
   mut state_types: [Str] = []
-  mut state_positions: [Float] = []
+  mut state_positions: [Float64] = []
   for issue in raw_issues {
-    let s = decode::run(issue, decode::field("state", decode::dynamic)).expect("Missing state")
+    let s = decode::run(issue, decode::field("state", decode::any)).expect("Missing state")
     let sname = decode::run(s, decode::field("name", decode::string)).expect("Missing state.name")
     if not state::is_hidden_state(sname) {
       mut seen = false
@@ -452,12 +455,12 @@ fn fetch_board(api_key: Str, my_id: Str) [state::BoardColumn]!Str {
 
   mut columns: [state::BoardColumn] = []
   for sname, idx in state_names {
-    let is_completed = state_types.at(idx) == "completed"
+    let is_completed = state_types.at(idx).expect("parallel list") == "completed"
     let cap = match is_completed {
       true => 10,
       false => 200,
     }
-    mut col_issues: [Dynamic] = []
+    mut col_issues: [Any] = []
     mut count = 0
     for issue in raw_issues {
       let iss_name = decode::run(
@@ -472,8 +475,8 @@ fn fetch_board(api_key: Str, my_id: Str) [state::BoardColumn]!Str {
     columns.push(
       state::BoardColumn{
         name: sname,
-        state_type: state_types.at(idx),
-        position: state_positions.at(idx),
+        state_type: state_types.at(idx).expect("parallel list"),
+        position: state_positions.at(idx).expect("parallel list"),
         issues: col_issues,
       },
     )

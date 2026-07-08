@@ -1,6 +1,6 @@
 use ard/async
-use ard/maybe
-use vaxis/ui
+use go:go.rockorager.dev/vaxis/ui
+use go:tinear/ffi
 
 use tinear/models/issues
 
@@ -12,16 +12,16 @@ use tinear/models/issues
 //   - issue            — the issue we're commenting on
 //   - refresh_comments — caller-supplied callback that refreshes
 //                        whatever list of comments the host view
-//                        renders. Already closes over the host's
-//                        runtime; we just invoke it on success.
+//                        renders. Already dispatches onto the host's
+//                        UI state; we just invoke it on success.
 //   - close            — modal-dismiss callback from show_modal,
 //                        invoked on success and from the modal
 //                        frame's on_dismiss (Esc).
 //
 // Ctrl+Enter / Ctrl+m / Ctrl+j submit. The Shortcuts wrapping the
-// body intercepts those during the capture phase so the text_area
+// body intercepts those during the capture phase so the TextArea
 // (which would otherwise consume them on the target phase) never
-// sees them. Plain Enter inserts a newline (text_area handles it).
+// sees them. Plain Enter inserts a newline (TextArea handles it).
 
 struct Compose {
   text: Str,
@@ -30,33 +30,33 @@ struct Compose {
 }
 
 fn submit(
+  c: mut ffi::StateCtx,
   api_key: Str, issue: issues::Issue, text: Str,
-  state: ui::State<Compose>, rt: ui::Runtime<Compose>,
   refresh_comments: fn(), close: fn(),
 ) {
   let trimmed = text.trim()
   if trimmed.is_empty() {
-    ()
+    {}
   } else {
-    state.set(fn(mut next: Compose) {
-      next.sending = true
-      next.error = ""
+    ffi::Update<Compose>(c, fn(s: mut Compose) {
+      s.sending = true
+      s.error = ""
     })
-    let _ = async::start(fn() {
+    async::start(fn() {
       let result = issues::create_comment(api_key, issue.id, trimmed)
       match result {
         ok(_) => {
           // Reload the host's comments, then close. refresh_comments
-          // already does its own rt.dispatch internally so it's safe
-          // to call from this background fiber.
+          // dispatches onto the host's UI state internally, so it's
+          // safe to call from this background fiber. So is close.
           refresh_comments()
           close()
         },
         err(e) => {
-          rt.dispatch(fn(s: ui::State<Compose>) {
-            s.set(fn(mut next: Compose) {
-              next.sending = false
-              next.error = e
+          ffi::Dispatch(c, fn() {
+            ffi::Update<Compose>(c, fn(s: mut Compose) {
+              s.sending = false
+              s.error = e
             })
           })
         },
@@ -67,28 +67,19 @@ fn submit(
 
 // Body widget for the modal. The caller wraps this in
 // modal::show_modal(title, child: this, footer, on_dismiss).
-fn new(
-  api_key: Str,
-  issue: issues::Issue,
-  refresh_comments: fn(),
-  close: fn(),
-) ui::Widget {
-  ui::stateful(
-    key: "compose:{issue.id}",
-    init: fn(_ctx: ui::BuildContext) Compose {
-      Compose{ text: "", sending: false, error: "" }
+fn new(api_key: Str, issue: issues::Issue, refresh_comments: fn(), close: fn()) ui::Widget {
+  ffi::Stateful{
+    Init: fn() Any {
+      Compose{text: "", sending: false, error: ""}
     },
-    build: fn(ctx: ui::BuildContext, state: ui::State<Compose>) ui::Widget {
-      let theme = ui::must_have_theme(ctx)
-      let model = state.value()
-      let rt = ctx.runtime<Compose>()
+    Build: fn(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
+      let theme = ui::MustDepend<ui::Theme>(ctx)
+      let model = ffi::StateValue<Compose>(c)
 
       let do_submit = fn() {
-        if not model.sending {
-          submit(
-            api_key, issue, model.text,
-            state, rt, refresh_comments, close,
-          )
+        let current = ffi::StateValue<Compose>(c)
+        if not current.sending {
+          submit(c, api_key, issue, current.text, refresh_comments, close)
         }
       }
 
@@ -96,65 +87,64 @@ fn new(
       // sending slot (empty when not sending) so the widget shape
       // stays stable across state transitions — avoids the
       // type-changing reconciliation pitfall.
-      let error_widget = match model.error.is_empty() {
-        true => ui::sized_box(0, 0, ui::text("")),
-        false => ui::padding(
-          ui::styled_text(
-            "\u26a0 {model.error}", fg: theme.danger_text,
-          ),
-          bottom: 1,
+      let error_widget: ui::Widget = match model.error.is_empty() {
+        true => ui::SizedBox{},
+        false => ui::Padding(
+          ui::Insets{Bottom: 1},
+          ui::Text{Value: "⚠ {model.error}", Style: ui::Style{Foreground: theme.DangerText}},
         ),
       }
-      let sending_widget = match model.sending {
-        true => ui::padding(
-          ui::styled_text("Sending\u2026", fg: theme.muted_foreground),
-          top: 1,
+      let sending_widget: ui::Widget = match model.sending {
+        true => ui::Padding(
+          ui::Insets{Top: 1},
+          ui::Text{Value: "Sending…", Style: ui::Style{Foreground: theme.MutedForeground}},
         ),
-        false => ui::sized_box(0, 0, ui::text("")),
+        false => ui::SizedBox{},
       }
 
-      let body = ui::column(
-        [
-          error_widget,
-          ui::focus_scope(
-            ui::text_area(
-              value: model.text,
-              placeholder: "Write a comment\u2026",
-              min_width: 60,
-              min_height: 6,
-              soft_wrap: true,
-              on_changed: fn(_ctx: ui::EventContext, value: Str) {
-                state.set(fn(mut next: Compose) {
-                  next.text = value
-                  next.error = ""
-                })
-              },
-            ),
-            trap: false,
-            auto_focus: true,
-          ),
-          sending_widget,
+      mut body_children: [ui::Widget] = [
+        error_widget,
+        ui::FocusScope{
+          AutoFocus: true,
+          Child: ui::TextArea{
+            Value: model.text,
+            Placeholder: "Write a comment…",
+            MinWidth: 60,
+            MinHeight: 6,
+            SoftWrap: true,
+            OnChanged: fn(ev: ui::EventContext, value: Str) {
+              ffi::Update<Compose>(c, fn(s: mut Compose) {
+                s.text = value
+                s.error = ""
+              })
+            },
+          },
+        },
+        sending_widget,
+      ]
+      let body = ui::Flex{
+        Axis: ui::Vertical,
+        MainAxisSize: ui::MainAxisSizeMin,
+        CrossAxisAlignment: ui::CrossAxisStretch,
+        Children: body_children,
+      }
+
+      ui::Shortcuts{
+        Bindings: [
+          "Ctrl+Enter": ffi::Intent("compose.submit"),
+          "Ctrl+m": ffi::Intent("compose.submit"),
+          "Ctrl+j": ffi::Intent("compose.submit"),
         ],
-        main_size: ui::MainSize::min,
-        cross_align: ui::CrossAlign::stretch,
-      )
-
-      ui::shortcuts(
-        ui::actions(
-          body,
-          [
-            ui::action("compose.submit", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
+        Child: ui::Actions{
+          Bindings: [
+            "compose.submit": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
               do_submit()
-              ui::EventResult::handled
-            }),
+              ui::EventHandled
+            },
           ],
-        ),
-        [
-          "Ctrl+Enter": "compose.submit",
-          "Ctrl+m":     "compose.submit",
-          "Ctrl+j":     "compose.submit",
-        ],
-      )
+          Child: body,
+        },
+      }
     },
-  )
+  }
 }

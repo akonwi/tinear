@@ -1,38 +1,58 @@
-use ard/decode
-use ard/dynamic
-use ard/http
-use ard/json
-use ard/maybe
+use go:encoding/json
+use go:io
+use go:net/http
+use go:strings
+use go:time
+use go:tinear/ffi
 
-fn send_query(api_key: Str, body: Str) Dynamic!Str {
-  let req = http::Request{
-    method: http::Method::Post,
-    url: "https://api.linear.app/graphql",
-    headers: ["Content-Type": "application/json", "Authorization": api_key],
-    body: maybe::some(dynamic::from_str(body)),
+use tinear/decode
+
+// Shared GraphQL client for the Linear API.
+//
+// Linear auth header is `Authorization: <raw key>` — no `Bearer` prefix.
+
+private fn post(api_key: Str, body: Str) Str!Str {
+  let req = try http::NewRequest("POST", "https://api.linear.app/graphql", strings::NewReader(body))
+  req.Header.Set("Content-Type", "application/json")
+  req.Header.Set("Authorization", api_key)
+
+  mut client = http::Client{Timeout: 30 * time::Second}
+  let res = try client.Do(req)
+  defer res.Body.Close()
+
+  mut bytes = try io::ReadAll(res.Body)
+  let text = ffi::StrFromBytes(bytes)
+
+  match res.StatusCode >= 200 and res.StatusCode < 300 {
+    true => Result::ok(text),
+    false => Result::err("HTTP {res.StatusCode}: {text}"),
   }
+}
 
-  let res = try http::send(req, 30)
+private fn extract_data(res_body: Str) Any!Str {
+  let parsed = try decode::from_json(res_body)
 
-  match res.is_ok() {
-    false => Result::err("HTTP {res.status}: {res.body}"),
-    true => {
-      let data = decode::from_json(res.body).expect("parse API response")
-      let result = decode::run(data, decode::field("data", decode::dynamic)).expect("extract data")
-
-      // Check for GraphQL errors — if "errors" field exists, report it
-      match decode::run(data, decode::field("errors", decode::dynamic)) {
-        ok(errs) => {
-          let err_str = json::encode(errs).expect("encode")
-          Result::err("GraphQL error: {err_str}")
-        },
-        err(_) => Result::ok(result),
+  // Check for GraphQL errors — if "errors" field exists, report it
+  match decode::run(parsed, decode::field("errors", decode::any)) {
+    ok(errs) => {
+      mut encoded = json::Marshal(errs).expect("encode errors")
+      Result::err("GraphQL error: {ffi::StrFromBytes(encoded)}")
+    },
+    err(_) => {
+      match decode::run(parsed, decode::field("data", decode::any)) {
+        ok(data) => Result::ok(data),
+        err(e) => Result::err("extract data: {e.to_str()}"),
       }
     },
   }
 }
 
-fn graphql(api_key: Str, query: Str) Dynamic!Str {
-  let body = json::encode(["query": query]).expect("encode body")
-  send_query(api_key, body)
+fn send_query(api_key: Str, body: Str) Any!Str {
+  let res_body = try post(api_key, body)
+  extract_data(res_body)
+}
+
+fn graphql(api_key: Str, query: Str) Any!Str {
+  mut encoded = json::Marshal(["query": query]).expect("encode body")
+  send_query(api_key, ffi::StrFromBytes(encoded))
 }

@@ -1,4 +1,4 @@
-use vaxis/ui
+use go:go.rockorager.dev/vaxis/ui
 
 // A keyboard hint to surface to the user.
 //
@@ -14,27 +14,19 @@ struct Hint {
 
 // Reusable footer hints bar.
 //
-// Renders a top border (themed `theme.border` over `theme.background`)
-// followed by a row of hints. Each hint renders its `key` in
-// `theme.foreground` and its `label` in `theme.muted_foreground`, with
-// 3 spaces between adjacent hints.
+// Renders a top border followed by a row of hints. Each hint renders
+// its `key` in `theme.Foreground` and its `label` in
+// `theme.MutedForeground`, with 3 spaces between adjacent hints.
 //
 // The bar owns its top border so the composing column doesn't need a
 // separate divider widget between the body and the hints.
-//
-// Example:
-//   hints_bar::new(theme, [
-//     hints_bar::Hint{ key: "Tab", label: "switch" },
-//     hints_bar::Hint{ key: "↑↓",  label: "select" },
-//     hints_bar::Hint{ key: "↵",   label: "open" },
-//   ])
 fn render_hint(theme: ui::Theme, hint: Hint) ui::Widget {
   match hint.label.is_empty() {
-    true => ui::styled_text(hint.key, fg: theme.foreground),
-    false => ui::rich_text([
-      ui::span(hint.key, fg: theme.foreground),
-      ui::span(" " + hint.label, fg: theme.muted_foreground),
-    ]),
+    true => ui::Text{Value: hint.key, Style: ui::Style{Foreground: theme.Foreground}},
+    false => ui::RichText{Spans: [
+      ui::TextSpan{Text: hint.key, Style: ui::Style{Foreground: theme.Foreground}},
+      ui::TextSpan{Text: " {hint.label}", Style: ui::Style{Foreground: theme.MutedForeground}},
+    ]},
   }
 }
 
@@ -44,16 +36,17 @@ fn row(theme: ui::Theme, items: [Hint]) ui::Widget {
   mut children: [ui::Widget] = []
   for hint, idx in items {
     if idx > 0 {
-      children.push(ui::styled_text("   ", fg: theme.muted_foreground))
+      children.push(ui::Text{Value: "   "})
     }
     children.push(render_hint(theme, hint))
   }
-  ui::row(children)
+  ui::Flex{Axis: ui::Horizontal, Children: children}
 }
 
 fn new(theme: ui::Theme, items: [Hint]) ui::Widget {
-  ui::column([
-    ui::divider(fg: theme.border, bg: theme.background),
+  mut children: [ui::Widget] = [
+    ui::Divider{Style: ui::Style{Foreground: theme.Border, Background: theme.Background}},
     row(theme, items),
-  ])
+  ]
+  ui::Flex{Axis: ui::Vertical, MainAxisSize: ui::MainAxisSizeMin, Children: children}
 }

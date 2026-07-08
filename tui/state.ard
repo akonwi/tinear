@@ -58,8 +58,8 @@ fn priority_glyph(p: Int?) Str {
 struct BoardColumn {
   name: Str,
   state_type: Str,
-  position: Float,
-  issues: [Dynamic],
+  position: Float64,
+  issues: [Any],
 }
 
 // Result of fetching a team's cycles. `active_cycle_number` is the number of
@@ -69,5 +69,5 @@ struct BoardColumn {
 // cycles into typed model data.
 struct TeamCyclesResult {
   active_cycle_number: Int?,
-  cycles: [Dynamic],
+  cycles: [Any],
 }

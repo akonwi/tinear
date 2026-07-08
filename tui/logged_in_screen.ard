@@ -1,12 +1,12 @@
-use vaxis/ui
+use ard/async
+use ard/maybe
+use go:go.rockorager.dev/vaxis/ui
+use go:tinear/ffi
 
+use tinear/models/cache
 use tinear/models/inbox
 use tinear/models/issues
 use tinear/os
-use ard/async
-use ard/maybe
-
-use tinear/models/cache
 use tinear/tui/hints_bar
 use tinear/tui/inbox_view
 use tinear/tui/issue_detail_view
@@ -15,7 +15,7 @@ use tinear/tui/my_issues_view
 use tinear/tui/search_view
 use tinear/tui/toast
 
-// Minimal shell for the logged-in view.
+// Shell for the logged-in view.
 //
 // Two permanent tabs (Inbox, My Issues) plus zero or more dynamic issue
 // detail tabs. Tab math treats them as one flat list:
@@ -23,10 +23,7 @@ use tinear/tui/toast
 //   index 1       -> My Issues
 //   index 2..n+1  -> issue_tabs[i - 2]
 //
-// For this first pass:
-// - tab bodies are placeholders
-// - no cache, no overlays, no real Linear data
-// - two dummy issue tabs are seeded so tab math is exercised
+// Tab bodies are placeholders until their slices are rebuilt.
 struct Model {
   tab_index: Int,
   issue_tabs: [Str],
@@ -41,7 +38,7 @@ fn tab_label_at(s: Model, i: Int) Str {
     _ => {
       let issue_idx = i - 2
       match issue_idx >= 0 and issue_idx < s.issue_tabs.size() {
-        true => s.issue_tabs.at(issue_idx),
+        true => s.issue_tabs.at(issue_idx).expect("bounds checked"),
         false => "?",
       }
     },
@@ -106,43 +103,73 @@ fn open_issue_tab(s: Model, identifier: Str) Model {
   next
 }
 
+// ── State updates ─────────────────────────────────────────────────────
+
+// Persist the current logged-in slice to the on-disk cache. Wrapped in
+// async::start so disk I/O doesn't block the UI; errors are swallowed
+// because cache persistence is best-effort — a failed save shouldn't
+// break the session.
+fn persist(c: mut ffi::StateCtx) {
+  let snap = ffi::StateValue<Model>(c)
+  async::start(fn() {
+    let _ = cache::save_logged_in(cache::LoggedInCache{
+      tab_index: snap.tab_index,
+      issue_tabs: snap.issue_tabs,
+    })
+  })
+}
+
+fn select_tab(c: mut ffi::StateCtx, idx: Int) {
+  ffi::Update<Model>(c, fn(s: mut Model) {
+    s.tab_index = idx
+  })
+  persist(c)
+}
+
+fn replace_model(c: mut ffi::StateCtx, next: Model) {
+  ffi::Update<Model>(c, fn(s: mut Model) {
+    s.tab_index = next.tab_index
+    s.issue_tabs = next.issue_tabs
+  })
+  persist(c)
+}
+
 // ── Rendering ─────────────────────────────────────────────────────────
 
 // Tab chip. Mirrors the theming used by upstream ListTile:
 //
-//   selected   => fg theme.foreground on bg theme.primary  (same as ListTile.Selected)
-//   unselected => fg theme.muted_foreground, transparent bg
+//   selected   => fg theme.Foreground on bg theme.Primary
+//   unselected => fg theme.MutedForeground, transparent bg
 //
-// ClickAffordance::none suppresses the default underline vaxis/ui adds
+// ClickAffordanceNone suppresses the default underline vaxis/ui adds
 // to clickable Text; the bg fill is the visual affordance for tabs.
 fn tab_chip(theme: ui::Theme, label: Str, selected: Bool, on_press: fn(ui::EventContext)) ui::Widget {
   let padded = " {label} "
   match selected {
-    true => ui::styled_text(
-      padded,
-      fg: theme.foreground,
-      bg: theme.primary,
-      on_pressed: on_press,
-      click_affordance: ui::ClickAffordance::none,
-    ),
-    false => ui::styled_text(
-      padded,
-      fg: theme.muted_foreground,
-      on_pressed: on_press,
-      click_affordance: ui::ClickAffordance::none,
-    ),
+    true => ui::Text{
+      Value: padded,
+      Style: ui::Style{Foreground: theme.Foreground, Background: theme.Primary},
+      OnPressed: on_press,
+      ClickAffordance: ui::ClickAffordanceNone,
+    },
+    false => ui::Text{
+      Value: padded,
+      Style: ui::Style{Foreground: theme.MutedForeground},
+      OnPressed: on_press,
+      ClickAffordance: ui::ClickAffordanceNone,
+    },
   }
 }
 
 // Tab bar widget. Owns its own bottom border so the composing column
 // doesn't need to space anything around it.
-fn tab_bar(theme: ui::Theme, s: Model, on_tab_press: fn(Int)) ui::Widget {
+fn tab_bar(c: mut ffi::StateCtx, theme: ui::Theme, s: Model) ui::Widget {
   mut chips: [ui::Widget] = []
   let n = total_tabs(s)
   if n > 0 {
     for i in 0..n - 1 {
       if i > 0 {
-        chips.push(ui::styled_text("│", fg: theme.border))
+        chips.push(ui::Text{Value: "│", Style: ui::Style{Foreground: theme.Border}})
       }
       // `for` binds an immutable per-iteration `i`, captured by value
       // by the closure below — no loop-closure trap.
@@ -150,100 +177,232 @@ fn tab_bar(theme: ui::Theme, s: Model, on_tab_press: fn(Int)) ui::Widget {
         theme,
         tab_label_at(s, i),
         i == s.tab_index,
-        fn(_ctx: ui::EventContext) { on_tab_press(i) },
+        fn(ev: ui::EventContext) { select_tab(c, i) },
       ))
     }
   }
-  ui::column([
-    ui::row(chips),
-    ui::divider(fg: theme.border, bg: theme.background),
-  ])
+  mut children: [ui::Widget] = [
+    ui::Flex{Axis: ui::Horizontal, Children: chips},
+    ui::Divider{Style: ui::Style{Foreground: theme.Border, Background: theme.Background}},
+  ]
+  ui::Flex{Axis: ui::Vertical, MainAxisSize: ui::MainAxisSizeMin, Children: children}
 }
 
-
+// Open an inbox item. Routing:
+//   issue/comment/mention notifications -> promote target_id to a
+//     new (or existing) tab in issue_tabs and select it
+//   PR notifications -> launch notification.url in the system
+//     browser. The URL is Linear's deep-link to the specific
+//     comment/mention activity, so it lands the user in the right
+//     spot in Linear's review UI.
+//   project / other notifications -> if a url is present, open it
+//     in the browser; otherwise no-op.
+fn open_inbox_item(c: mut ffi::StateCtx, item: inbox::Item) {
+  if item.notification_type.starts_with("issue") {
+    replace_model(c, open_issue_tab(ffi::StateValue<Model>(c), item.target_id))
+  } else {
+    if not item.url.is_empty() {
+      let _ = os::open_url(item.url)
+    }
+  }
+}
 
 // Resolves the active tab to a body widget. All bodies are mounted at
-// once via ui::indexed_stack so each tab's local state (cursor, scroll,
-// fetched data) survives switching tabs — only the visible tab paints.
+// once via IndexedStack so each tab's local state survives switching
+// tabs — only the visible tab paints.
 fn body_for(
-  api_key: Str, s: Model,
-  on_open: fn(inbox::Item), on_open_issue: fn(issues::Issue),
+  c: mut ffi::StateCtx, api_key: Str, s: Model,
   notify: fn(Str, Str, toast::ToastVariant),
   show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
   close_modal: fn(),
 ) ui::Widget {
-  // Each tab gets an `active` flag so only the currently-visible
-  // tab's focus_scope participates in auto_focus / reclaim. Hidden
-  // tabs stay mounted (indexed_stack keeps their state alive) but
-  // their focus_scopes no-op so they don't steal keystrokes from
-  // the visible tab.
+  // The inbox reports failures only; adapt to the error variant here.
+  let notify_error = fn(title: Str, description: Str) {
+    notify(title, description, toast::ToastVariant::error)
+  }
   mut children: [ui::Widget] = [
-    inbox_view::new(api_key, on_open, notify, active: s.tab_index == 0),
+    inbox_view::new(
+      api_key,
+      fn(item: inbox::Item) { open_inbox_item(c, item) },
+      notify_error,
+      s.tab_index == 0,
+    ),
     my_issues_view::new(
-      api_key, on_open_issue, notify, show_modal, close_modal,
-      active: s.tab_index == 1,
+      api_key,
+      // From the My Issues board, Enter on a card promotes the issue
+      // to a dynamic tab. Same shell helper as the inbox uses.
+      fn(issue: issues::Issue) {
+        replace_model(c, open_issue_tab(ffi::StateValue<Model>(c), issue.identifier))
+      },
+      notify,
+      show_modal,
+      close_modal,
+      s.tab_index == 1,
     ),
   ]
   for label, idx in s.issue_tabs {
     children.push(issue_detail_view::new(
-      api_key, label, notify, show_modal, close_modal,
-      active: s.tab_index == idx + 2,
+      api_key,
+      label,
+      notify,
+      show_modal,
+      close_modal,
+      s.tab_index == idx + 2,
     ))
   }
-  ui::indexed_stack(
-    s.tab_index, children, alignment: ui::Alignment::top_left,
-  )
+  ui::IndexedStack{
+    Index: s.tab_index,
+    Alignment: ui::TopLeft,
+    Children: children,
+  }
 }
 
 fn hints_for(s: Model) [hints_bar::Hint] {
   match {
     s.tab_index == 0 => [
-      hints_bar::Hint{ key: "Tab", label: "switch" },
-      hints_bar::Hint{ key: "↑↓",  label: "select" },
-      hints_bar::Hint{ key: "⌫",   label: "delete" },
-      hints_bar::Hint{ key: "r",   label: "refresh" },
-      hints_bar::Hint{ key: "↵",   label: "open" },
-      hints_bar::Hint{ key: "?",   label: "search" },
+      hints_bar::Hint{key: "Tab", label: "switch"},
+      hints_bar::Hint{key: "↑↓", label: "select"},
+      hints_bar::Hint{key: "⌫", label: "delete"},
+      hints_bar::Hint{key: "r", label: "refresh"},
+      hints_bar::Hint{key: "↵", label: "open"},
+      hints_bar::Hint{key: "?", label: "search"},
     ],
     s.tab_index == 1 => [
-      hints_bar::Hint{ key: "↑↓", label: "" },
-      hints_bar::Hint{ key: "←→", label: "" },
-      hints_bar::Hint{ key: "↵",  label: "open" },
-      hints_bar::Hint{ key: "s",  label: "status" },
-      hints_bar::Hint{ key: "y",  label: "cycle" },
-      hints_bar::Hint{ key: "r",  label: "refresh" },
-      hints_bar::Hint{ key: "?",  label: "search" },
+      hints_bar::Hint{key: "↑↓", label: ""},
+      hints_bar::Hint{key: "←→", label: ""},
+      hints_bar::Hint{key: "↵", label: "open"},
+      hints_bar::Hint{key: "s", label: "status"},
+      hints_bar::Hint{key: "y", label: "cycle"},
+      hints_bar::Hint{key: "r", label: "refresh"},
+      hints_bar::Hint{key: "?", label: "search"},
     ],
     _ => [
-      hints_bar::Hint{ key: "↑↓",  label: "scroll" },
-      hints_bar::Hint{ key: "d",   label: "description" },
-      hints_bar::Hint{ key: "c",   label: "comments" },
-      hints_bar::Hint{ key: "n",   label: "new comment" },
-      hints_bar::Hint{ key: "s",   label: "status" },
-      hints_bar::Hint{ key: "y",   label: "cycle" },
-      hints_bar::Hint{ key: "Esc", label: "close" },
+      hints_bar::Hint{key: "↑↓", label: "scroll"},
+      hints_bar::Hint{key: "d", label: "description"},
+      hints_bar::Hint{key: "c", label: "comments"},
+      hints_bar::Hint{key: "n", label: "new comment"},
+      hints_bar::Hint{key: "s", label: "status"},
+      hints_bar::Hint{key: "y", label: "cycle"},
+      hints_bar::Hint{key: "Esc", label: "close"},
     ],
   }
 }
 
 fn screen(
-  theme: ui::Theme, s: Model, api_key: Str,
-  on_tab_press: fn(Int),
-  on_open: fn(inbox::Item), on_open_issue: fn(issues::Issue),
+  c: mut ffi::StateCtx, theme: ui::Theme, s: Model, api_key: Str,
   notify: fn(Str, Str, toast::ToastVariant),
   show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
   close_modal: fn(),
 ) ui::Widget {
-  ui::column(
-    [
-      tab_bar(theme, s, on_tab_press),
-      ui::expanded(body_for(api_key, s, on_open, on_open_issue, notify, show_modal, close_modal)),
-      hints_bar::new(theme, hints_for(s)),
-    ],
-  )
+  mut children: [ui::Widget] = [
+    tab_bar(c, theme, s),
+    ui::Expanded(body_for(c, api_key, s, notify, show_modal, close_modal)),
+    hints_bar::new(theme, hints_for(s)),
+  ]
+  ui::Flex{Axis: ui::Vertical, Children: children}
 }
 
 // ── Entry point ───────────────────────────────────────────────────────
+
+fn build(
+  c: mut ffi::StateCtx, ctx: ui::BuildContext, api_key: Str,
+  notify: fn(Str, Str, toast::ToastVariant),
+  show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
+  close_modal: fn(),
+  modal_open: Bool,
+) ui::Widget {
+  let theme = ui::MustDepend<ui::Theme>(ctx)
+  let model = ffi::StateValue<Model>(c)
+  // Tab / Shift+Tab / Escape are already mapped to NextFocusIntent,
+  // PreviousFocusIntent and DismissIntent by the app-level Shortcuts
+  // that wraps every vaxis/ui root. We can't override those keys from
+  // an inner Shortcuts because the outer one consumes them during the
+  // capture phase. Instead we install handlers for those upstream
+  // intents in our Actions: Invoke walks UP from the focused widget
+  // and finds our handler before it reaches the app-level Actions.
+  ui::Actions{
+    Bindings: [
+      "vaxis.next-focus": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        select_tab(c, cycle_next(ffi::StateValue<Model>(c)))
+        ui::EventHandled
+      },
+      "vaxis.previous-focus": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        select_tab(c, cycle_prev(ffi::StateValue<Model>(c)))
+        ui::EventHandled
+      },
+      "vaxis.dismiss": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        let current = ffi::StateValue<Model>(c)
+        match selected_is_issue_tab(current) {
+          true => {
+            replace_model(c, close_current_issue_tab(current))
+            ui::EventHandled
+          },
+          false => ui::EventIgnored,
+        }
+      },
+      // Tab switches are gated on modal_open so their bound keys
+      // (1 / 2) can flow through to text fields inside modals as
+      // typed characters: Shortcuts dispatch in the capture phase,
+      // and returning Ignored lets the event continue to the focused
+      // element's target phase.
+      "tabs.inbox": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        match modal_open {
+          true => ui::EventIgnored,
+          false => {
+            select_tab(c, 0)
+            ui::EventHandled
+          },
+        }
+      },
+      "tabs.my_issues": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        match modal_open {
+          true => ui::EventIgnored,
+          false => {
+            select_tab(c, 1)
+            ui::EventHandled
+          },
+        }
+      },
+      "global.search": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        match modal_open {
+          true => ui::EventIgnored,
+          false => {
+            let on_open_search_result = fn(issue: issues::Issue) {
+              replace_model(c, open_issue_tab(ffi::StateValue<Model>(c), issue.identifier))
+              close_modal()
+            }
+            show_modal(fn(theme_inner: ui::Theme, close: fn()) ui::Widget {
+              modal::show_modal(
+                theme_inner,
+                "Search",
+                search_view::new(api_key, on_open_search_result),
+                hints_bar::row(theme_inner, [
+                  hints_bar::Hint{key: "↑↓", label: "select"},
+                  hints_bar::Hint{key: "↵", label: "open"},
+                  hints_bar::Hint{key: "Esc", label: "close"},
+                ]),
+                maybe::some(60),
+                fn(ev2: ui::EventContext) { close() },
+              )
+            })
+            ui::EventHandled
+          },
+        }
+      },
+    ],
+    Child: ui::Shortcuts{
+      Bindings: [
+        "1": ffi::Intent("tabs.inbox"),
+        "2": ffi::Intent("tabs.my_issues"),
+        "?": ffi::Intent("global.search"),
+      ],
+      Child: ui::FocusScope{
+        AutoFocus: true,
+        Child: screen(c, theme, model, api_key, notify, show_modal, close_modal),
+      },
+    },
+  }
+}
 
 fn new(
   api_key: Str,
@@ -252,9 +411,8 @@ fn new(
   close_modal: fn(),
   modal_open: Bool,
 ) ui::Widget {
-  ui::stateful(
-    key: "logged-in",
-    init: fn(_ctx: ui::BuildContext) Model {
+  ffi::Stateful{
+    Init: fn() Any {
       // Hydrate from the on-disk cache so the user returns to
       // whatever they had open last session. Missing / unreadable /
       // version-mismatched cache falls back to the default layout.
@@ -269,149 +427,8 @@ fn new(
         },
       }
     },
-    build: fn(ctx: ui::BuildContext, state: ui::State<Model>) ui::Widget {
-      let theme = ui::must_have_theme(ctx)
-      let model = state.value()
-      // Persist the current logged-in slice to the on-disk cache.
-      // Wrapped in async::start so disk I/O doesn't block the UI;
-      // errors are swallowed because cache persistence is best-effort
-      // — a failed save shouldn't break the session.
-      let persist = fn() {
-        let snap = state.value()
-        let _ = async::start(fn() {
-          let _ = cache::save_logged_in(cache::LoggedInCache{
-            tab_index: snap.tab_index,
-            issue_tabs: snap.issue_tabs,
-          })
-        })
-      }
-      // Helper that wraps state.set and persists after the mutation.
-      // Use this in place of state.set for any Model change that
-      // touches tab_index or issue_tabs.
-      let set_and_persist = fn(updater: fn(mut Model)) {
-        state.set(updater)
-        persist()
-      }
-      let on_tab_press = fn(idx: Int) {
-        set_and_persist(fn(mut s: Model) { s.tab_index = idx })
-      }
-      // Open an inbox item. Routing:
-      //   issue/comment/mention notifications -> promote target_id to a
-      //     new (or existing) tab in issue_tabs and select it
-      //   PR notifications -> launch notification.url in the system
-      //     browser. The URL is Linear's deep-link to the specific
-      //     comment/mention activity, so it lands the user in the right
-      //     spot in Linear's review UI.
-      //   project / other notifications -> if a url is present, open it
-      //     in the browser; otherwise no-op.
-      let on_open = fn(item: inbox::Item) {
-        if item.notification_type.starts_with("issue") {
-          set_and_persist(fn(mut s: Model) { s = open_issue_tab(s, item.target_id) })
-        } else {
-          if not item.url.is_empty() {
-            let _ = os::open_url(item.url)
-          }
-        }
-      }
-      // From the My Issues board, Enter on a card promotes the issue
-      // to a dynamic tab. Same shell helper as the inbox uses.
-      let on_open_issue = fn(issue: issues::Issue) {
-        set_and_persist(fn(mut s: Model) { s = open_issue_tab(s, issue.identifier) })
-      }
-      // Tab / Shift+Tab / Escape are already mapped to NextFocusIntent,
-      // PreviousFocusIntent and DismissIntent by the app-level Shortcuts that
-      // wraps every vaxis/ui root. We can't override those keys from an inner
-      // Shortcuts because the outer one consumes them during capture phase.
-      // Instead we install handlers for those upstream intents in our Actions.
-      // Invoke walks UP from the focused widget and finds our handler before
-      // it reaches the app-level Actions, so we win.
-      ui::shortcuts(
-        ui::actions(
-          ui::focus_scope(
-            ui::focus(screen(theme, model, api_key, on_tab_press, on_open, on_open_issue, notify, show_modal, close_modal)),
-            trap: false,
-            auto_focus: true,
-          ),
-          [
-            ui::action("vaxis.next-focus", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              set_and_persist(fn(mut s: Model) { s.tab_index = cycle_next(s) })
-              ui::EventResult::handled
-            }),
-            ui::action("vaxis.previous-focus", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              set_and_persist(fn(mut s: Model) { s.tab_index = cycle_prev(s) })
-              ui::EventResult::handled
-            }),
-            ui::action("vaxis.dismiss", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              match selected_is_issue_tab(model) {
-                true => {
-                  set_and_persist(fn(mut s: Model) { s = close_current_issue_tab(s) })
-                  ui::EventResult::handled
-                },
-                false => ui::EventResult::ignored,
-              }
-            }),
-            // Tab switches and global.search are gated on modal_open
-            // so their bound keys (1 / 2 / ?) can flow through to the
-            // text_field inside the search modal as typed characters.
-            //
-            // Mechanism: Shortcuts dispatches in the capture phase
-            // before the focused element's target phase. If the
-            // bound action returns Ignored, Shortcuts returns Ignored
-            // and event dispatch keeps going — eventually reaching
-            // text_field's target phase. Returning Handled would
-            // consume the key instead and the text_field would never
-            // see it. (See vaxis-ard/docs/events-and-focus.md §4.)
-            ui::action("tabs.inbox", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              if modal_open {
-                ui::EventResult::ignored
-              } else {
-                set_and_persist(fn(mut s: Model) { s.tab_index = 0 })
-                ui::EventResult::handled
-              }
-            }),
-            ui::action("tabs.my_issues", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              if modal_open {
-                ui::EventResult::ignored
-              } else {
-                set_and_persist(fn(mut s: Model) { s.tab_index = 1 })
-                ui::EventResult::handled
-              }
-            }),
-            ui::action("global.search", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              if modal_open {
-                ui::EventResult::ignored
-              } else {
-                let on_open_search_result = fn(issue: issues::Issue) {
-                  set_and_persist(fn(mut s: Model) {
-                    s = open_issue_tab(s, issue.identifier)
-                  })
-                  close_modal()
-                }
-                show_modal(fn(theme_inner: ui::Theme, close: fn()) ui::Widget {
-                  modal::show_modal(
-                    theme: theme_inner,
-                    title: "Search",
-                    child: search_view::new(api_key, on_open_search_result),
-                    footer: hints_bar::row(theme_inner, [
-                      hints_bar::Hint{ key: "↑↓",  label: "select" },
-                      hints_bar::Hint{ key: "↵",   label: "open" },
-                      hints_bar::Hint{ key: "Esc", label: "close" },
-                    ]),
-                    width: maybe::some(60),
-                    on_dismiss: fn(_ctx: ui::EventContext) { close() },
-                  )
-                })
-                ui::EventResult::handled
-              }
-            }),
-          ],
-        ),
-        [
-          "1": "tabs.inbox",
-          "2": "tabs.my_issues",
-          "?": "global.search",
-        ],
-      )
+    Build: fn(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
+      build(c, ctx, api_key, notify, show_modal, close_modal, modal_open)
     },
-  )
+  }
 }

@@ -6,6 +6,7 @@ package ffi
 import (
 	"os/exec"
 	goruntime "runtime"
+	"time"
 )
 
 // OpenURL launches the system's default handler for url (browser for
@@ -24,4 +25,17 @@ func OpenURL(url string) error {
 		cmd = exec.Command("xdg-open", url)
 	}
 	return cmd.Start()
+}
+
+// StrFromBytes converts raw bytes to a string. Stopgap until the language
+// provides Str::from_bytes (filed upstream); JSON marshalling returns [Byte].
+func StrFromBytes(b []byte) string {
+	return string(b)
+}
+
+// Millis converts an integer millisecond count to a time.Duration. Stopgap:
+// Ard has no runtime Int -> Int64/time.Duration conversion yet, so
+// `time::Duration(ms)` is not expressible for non-literal values.
+func Millis(ms int) time.Duration {
+	return time.Duration(ms) * time.Millisecond
 }

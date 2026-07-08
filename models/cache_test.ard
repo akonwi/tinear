@@ -1,5 +1,6 @@
-use ard/json
 use ard/testing
+use go:encoding/json
+use go:tinear/ffi
 
 use tinear/models/cache
 
@@ -11,10 +12,11 @@ test fn test_cache_decode_ignores_corrupt_json() Void!Str {
 }
 
 test fn test_cache_decode_ignores_unknown_version() Void!Str {
-  let content = json::encode(cache::DataCache{
+  mut encoded = json::Marshal(cache::DataCache{
     version: 999,
     logged_in: cache::empty_logged_in(),
   }).expect("encode cache")
+  let content = ffi::StrFromBytes(encoded)
 
   match cache::decode(content) {
     _cache => testing::assert(false, "unknown cache version should be ignored"),
@@ -41,11 +43,11 @@ test fn test_cache_round_trips_logged_in_state() Void!Str {
         "issue tab list size should round trip",
       )
       try testing::assert(
-        restored.logged_in.issue_tabs.at(0) == "CCA-123",
+        restored.logged_in.issue_tabs.at(0).expect("bounds") == "CCA-123",
         "first issue tab identifier should round trip",
       )
       testing::assert(
-        restored.logged_in.issue_tabs.at(1) == "RND-456",
+        restored.logged_in.issue_tabs.at(1).expect("bounds") == "RND-456",
         "second issue tab identifier should round trip",
       )
     },

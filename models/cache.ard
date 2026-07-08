@@ -1,8 +1,10 @@
-use ard/fs
-use ard/json
 use ard/maybe
+use go:encoding/json
+use go:os
+use go:tinear/ffi
 
 use tinear/config
+use tinear/decode
 
 // On-disk cache of UI state we want to survive across app launches.
 // Currently scoped to the logged-in shell's tab layout so the user
@@ -44,7 +46,7 @@ fn data_path() Str!Str {
 // current version is treated as no cache — better to start fresh
 // than to load incompatible data.
 fn decode(content: Str) DataCache? {
-  match json::parse<DataCache>(content) {
+  match parse(content) {
     ok(cache) => match cache.version == version() {
       true => maybe::some(cache),
       false => maybe::none(),
@@ -53,17 +55,44 @@ fn decode(content: Str) DataCache? {
   }
 }
 
+// Note: errors surface via map_err + plain try instead of `try ... -> catch`
+// to avoid a Result-ABI miscompile (ard#282).
+private fn describe(e: decode::Error) Str {
+  e.to_str()
+}
+
+private fn parse(content: Str) DataCache!Str {
+  let data = try decode::from_json(content)
+  let parsed_version = try decode::run(data, decode::field("version", decode::int)).map_err(describe)
+  let tab_index = try decode::run(
+    data,
+    decode::path(["logged_in", "tab_index"], decode::int),
+  ).map_err(describe)
+  let issue_tabs = try decode::run(
+    data,
+    decode::path(["logged_in", "issue_tabs"], decode::list(decode::string)),
+  ).map_err(describe)
+  Result::ok(DataCache{
+    version: parsed_version,
+    logged_in: LoggedInCache{tab_index: tab_index, issue_tabs: issue_tabs},
+  })
+}
+
 fn encode(cache: DataCache) Str!Str {
   mut normalized = cache
   normalized.version = version()
-  json::encode(normalized)
+  mut bytes = try json::Marshal(normalized)
+  Result::ok(ffi::StrFromBytes(bytes))
 }
 
 fn load() DataCache? {
   match data_path() {
     ok(path) => {
-      match fs::read(path) {
-        ok(content) => decode(content),
+      match os::ReadFile(path) {
+        ok(bytes) => {
+          mut copy = bytes
+          decode(ffi::StrFromBytes(copy))
+        },
         err(_) => maybe::none(),
       }
     },
@@ -73,12 +102,13 @@ fn load() DataCache? {
 
 fn save(cache: DataCache) Void!Str {
   let dir = try config::get_config_dir()
-  if not fs::exists(dir) {
-    try fs::create_dir(dir)
-  }
+  // 0o755: rwxr-xr-x. MkdirAll is a no-op when the directory exists.
+  try os::MkdirAll(dir, 493)
   let content = try encode(cache)
   let path = try data_path()
-  try fs::write(path, content)
+  mut bytes = content.bytes()
+  // 0o644: rw-r--r--
+  try os::WriteFile(path, bytes, 420)
   Result::ok(())
 }
 

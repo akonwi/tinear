@@ -1,20 +1,18 @@
 use ard/async
 use ard/maybe
-use vaxis
-use vaxis/ui
+use go:go.rockorager.dev/vaxis/ui
+use go:tinear/ffi
 
 use tinear/models/issues
 use tinear/tui/issue_pickers
 use tinear/tui/refresh
 use tinear/tui/toast
 
-// Width of one board column. Matches the main branch's value.
+// Width of one board column.
 let COLUMN_WIDTH: Int = 50
 
 // Horizontal gap between adjacent columns.
 let COLUMN_GAP: Int = 3
-
-
 
 // Local state for the My Issues view.
 //
@@ -23,27 +21,28 @@ let COLUMN_GAP: Int = 3
 // zero issues.
 //
 // `board_h_scroll` drives horizontal scrolling between columns via an
-// outer scroll_view(axis: horizontal). scroll_view bounds the cross
-// axis (vertical) so each column receives bounded height — unlike
-// scroll_pane, which unbounds both axes and breaks any nested
-// vertical scroller. That's the key reason we can give each column
-// its own vertical scroller below.
+// outer ScrollView (horizontal axis). ScrollView bounds the cross axis
+// (vertical) so each column receives bounded height — unlike
+// ScrollPane, which unbounds both axes and breaks any nested vertical
+// scroller. That's the key reason each column can have its own
+// vertical scroller below.
 //
 // `col_h_scrolls` / `col_list_scrolls` are parallel lists indexed by
-// column. Each column renders a custom_scroll_view with a pinned
-// header sliver (the column header stays put at the top) and a
-// sliver_list_builder for the cards. The list controller is what we
-// call reveal_index on when the cursor moves; the scroll controller
-// is required by custom_scroll_view but we don't drive it directly.
+// column. Each column renders a CustomScrollView whose header sits
+// outside as a sibling (see column_header) and a SliverListBuilder for
+// the cards. The list controller is what we call RevealIndex on when
+// the cursor moves; the scroll controller is required by
+// CustomScrollView but we don't drive it directly.
 struct Board {
+  started: Bool,
   columns: [issues::BoardColumn],
   cursor_col: Int,
   cursor_row: Int,
   loading: Bool,
   error: Str,
-  board_h_scroll: ui::ScrollController,
-  col_h_scrolls: [ui::ScrollController],
-  col_list_scrolls: [ui::SliverListController],
+  board_h_scroll: mut ui::ScrollController,
+  col_h_scrolls: [mut ui::ScrollController],
+  col_list_scrolls: [mut ui::SliverListController],
 }
 
 fn clamp(value: Int, count: Int) Int {
@@ -57,7 +56,7 @@ fn clamp(value: Int, count: Int) Int {
 
 fn col_size(columns: [issues::BoardColumn], idx: Int) Int {
   match idx >= 0 and idx < columns.size() {
-    true => columns.at(idx).issues.size(),
+    true => columns.at(idx).expect("bounds checked").issues.size(),
     false => 0,
   }
 }
@@ -68,7 +67,7 @@ fn next_non_empty(columns: [issues::BoardColumn], start: Int) Int {
   mut idx = start
   mut found = -1
   while idx < columns.size() {
-    if columns.at(idx).issues.size() > 0 and found < 0 {
+    if col_size(columns, idx) > 0 and found < 0 {
       found = idx
     }
     idx = idx + 1
@@ -82,7 +81,7 @@ fn prev_non_empty(columns: [issues::BoardColumn], start: Int) Int {
   mut idx = start
   mut found = -1
   while idx >= 0 {
-    if columns.at(idx).issues.size() > 0 and found < 0 {
+    if col_size(columns, idx) > 0 and found < 0 {
       found = idx
     }
     idx = idx - 1
@@ -93,9 +92,9 @@ fn prev_non_empty(columns: [issues::BoardColumn], start: Int) Int {
 fn selected_issue(v: Board) issues::Issue? {
   mut found: issues::Issue? = maybe::none()
   if v.columns.size() > 0 and v.cursor_col < v.columns.size() {
-    let col = v.columns.at(v.cursor_col)
+    let col = v.columns.at(v.cursor_col).expect("bounds checked")
     if v.cursor_row < col.issues.size() {
-      found = maybe::some(col.issues.at(v.cursor_row))
+      found = maybe::some(col.issues.at(v.cursor_row).expect("bounds checked"))
     }
   }
   found
@@ -106,59 +105,56 @@ fn selected_issue(v: Board) issues::Issue? {
 // Rebuild per-column controller lists to match the freshly-loaded
 // columns. Scroll positions reset across reloads (acceptable since a
 // reload typically invalidates the previous layout).
-fn fresh_col_h_scrolls(columns: [issues::BoardColumn]) [ui::ScrollController] {
-  mut scrolls: [ui::ScrollController] = []
+fn fresh_col_h_scrolls(columns: [issues::BoardColumn]) [mut ui::ScrollController] {
+  mut scrolls: [mut ui::ScrollController] = []
   for _ in columns {
-    scrolls.push(ui::scroll_controller())
+    mut ctrl = ui::ScrollController{}
+    scrolls.push(mut ctrl)
   }
   scrolls
 }
 
-fn fresh_col_list_scrolls(columns: [issues::BoardColumn]) [ui::SliverListController] {
-  mut scrolls: [ui::SliverListController] = []
+fn fresh_col_list_scrolls(columns: [issues::BoardColumn]) [mut ui::SliverListController] {
+  mut scrolls: [mut ui::SliverListController] = []
   for _ in columns {
-    scrolls.push(ui::sliver_list_controller())
+    mut ctrl = ui::SliverListController{}
+    scrolls.push(mut ctrl)
   }
   scrolls
 }
 
-fn apply_loaded(s: ui::State<Board>, columns: [issues::BoardColumn]) {
-  let h_scrolls = fresh_col_h_scrolls(columns)
-  let l_scrolls = fresh_col_list_scrolls(columns)
-  s.set(fn(mut v: Board) {
+fn apply_loaded(c: mut ffi::StateCtx, columns: [issues::BoardColumn]) {
+  ffi::Update<Board>(c, fn(v: mut Board) {
     v.columns = columns
-    v.col_h_scrolls = h_scrolls
-    v.col_list_scrolls = l_scrolls
+    v.col_h_scrolls = fresh_col_h_scrolls(columns)
+    v.col_list_scrolls = fresh_col_list_scrolls(columns)
     v.error = ""
     v.loading = false
-    // Snap cursor onto the first non-empty column if the current one
-    // is gone or empty.
+    // Snap cursor onto the first non-empty column if the current one is
+    // gone or empty.
     let first = next_non_empty(columns, 0)
     if first < 0 {
       v.cursor_col = 0
       v.cursor_row = 0
     } else {
-      if v.cursor_col >= columns.size() or columns.at(v.cursor_col).issues.size() == 0 {
+      if v.cursor_col >= columns.size() or col_size(columns, v.cursor_col) == 0 {
         v.cursor_col = first
         v.cursor_row = 0
       } else {
-        v.cursor_row = clamp(v.cursor_row, columns.at(v.cursor_col).issues.size())
+        v.cursor_row = clamp(v.cursor_row, col_size(columns, v.cursor_col))
       }
     }
   })
 }
 
-fn load_board(
-  api_key: Str, rt: ui::Runtime<Board>,
-  notify: fn(Str, Str, toast::ToastVariant),
-) {
+fn load_board(c: mut ffi::StateCtx, api_key: Str, notify: fn(Str, Str, toast::ToastVariant)) {
   async::start(fn() {
     let result = issues::load(api_key)
-    rt.dispatch(fn(s: ui::State<Board>) {
+    ffi::Dispatch(c, fn() {
       match result {
-        ok(columns) => apply_loaded(s, columns),
+        ok(columns) => apply_loaded(c, columns),
         err(e) => {
-          s.set(fn(mut v: Board) {
+          ffi::Update<Board>(c, fn(v: mut Board) {
             v.error = e
             v.loading = false
           })
@@ -169,28 +165,25 @@ fn load_board(
   })
 }
 
-// Background refresh. Re-fetches the board silently (no loading
-// flash, no controller reset) and tries to keep the cursor on the
-// same issue id by scanning the new columns for it. If the issue
-// moved to a different column (status changed externally) the
-// cursor follows; if it disappeared, fall back to clamping the
-// previous (col, row) indices.
-fn refresh_board(
-  api_key: Str, rt: ui::Runtime<Board>,
-  notify: fn(Str, Str, toast::ToastVariant),
-) {
-  let _ = async::start(fn() {
+// Background refresh. Re-fetches the board silently (no loading flash,
+// no controller reset) and tries to keep the cursor on the same issue
+// id by scanning the new columns for it. If the issue moved to a
+// different column (status changed externally) the cursor follows; if
+// it disappeared, fall back to clamping the previous (col, row)
+// indices.
+fn refresh_board(c: mut ffi::StateCtx, api_key: Str, notify: fn(Str, Str, toast::ToastVariant)) {
+  async::start(fn() {
     let result = issues::load(api_key)
     match result {
       ok(columns) => {
-        rt.dispatch(fn(s: ui::State<Board>) {
-          s.set(fn(mut v: Board) {
+        ffi::Dispatch(c, fn() {
+          ffi::Update<Board>(c, fn(v: mut Board) {
             // Capture the id at the cursor before swapping columns.
             mut preserve_id = ""
             if v.cursor_col >= 0 and v.cursor_col < v.columns.size() {
-              let col = v.columns.at(v.cursor_col)
+              let col = v.columns.at(v.cursor_col).expect("bounds checked")
               if v.cursor_row >= 0 and v.cursor_row < col.issues.size() {
-                preserve_id = col.issues.at(v.cursor_row).id
+                preserve_id = col.issues.at(v.cursor_row).expect("bounds checked").id
               }
             }
             v.columns = columns
@@ -239,16 +232,16 @@ fn priority_glyph(p: Int?) Str {
   }
 }
 
-fn priority_color(theme: ui::Theme, p: Int?) vaxis::Color {
+fn priority_color(theme: ui::Theme, p: Int?) ui::Color {
   match p {
     n => match n {
-      1 => theme.danger_text,
-      2 => theme.warning_text,
-      3 => theme.foreground,
-      4 => theme.muted_foreground,
-      _ => theme.foreground,
+      1 => theme.DangerText,
+      2 => theme.WarningText,
+      3 => theme.Foreground,
+      4 => theme.MutedForeground,
+      _ => theme.Foreground,
     },
-    _ => theme.foreground,
+    _ => theme.Foreground,
   }
 }
 
@@ -265,246 +258,220 @@ fn metadata_text(item: issues::Issue) Str {
   }
 }
 
-// Card body without any selection chrome. Used by render_card and
-// reused as-is for the unselected branch.
+fn min_column(children: [ui::Widget], stretch: Bool) ui::Widget {
+  match stretch {
+    true => ui::Flex{
+      Axis: ui::Vertical,
+      MainAxisSize: ui::MainAxisSizeMin,
+      CrossAxisAlignment: ui::CrossAxisStretch,
+      Children: children,
+    },
+    false => ui::Flex{
+      Axis: ui::Vertical,
+      MainAxisSize: ui::MainAxisSizeMin,
+      CrossAxisAlignment: ui::CrossAxisStart,
+      Children: children,
+    },
+  }
+}
+
+// Card body without any selection chrome.
 fn card_content(theme: ui::Theme, item: issues::Issue) ui::Widget {
   let glyph = priority_glyph(item.priority)
   let gcolor = priority_color(theme, item.priority)
-  let id_line = ui::row([
-    ui::styled_text(glyph, fg: gcolor),
-    ui::text(" "),
-    ui::styled_text(item.identifier, fg: theme.foreground, attrs: ui::TextAttrs{ bold: true }),
-  ])
-  let title = ui::rich_text(
-    [ui::span(item.title, fg: theme.foreground)],
-    overflow: ui::TextOverflow::ellipsis,
-    max_lines: 2,
-    soft_wrap: true,
-  )
+  mut id_line_children: [ui::Widget] = [
+    ui::Text{Value: glyph, Style: ui::Style{Foreground: gcolor}},
+    ui::Text{Value: " "},
+    ui::Text{Value: item.identifier, Style: ui::Style{Foreground: theme.Foreground, Attribute: ui::AttrBold}},
+  ]
+  let id_line = ui::Flex{Axis: ui::Horizontal, Children: id_line_children}
+  let title = ui::RichText{
+    Spans: [ui::TextSpan{Text: item.title, Style: ui::Style{Foreground: theme.Foreground}}],
+    Overflow: ui::TextOverflowEllipsis,
+    MaxLines: 2,
+    SoftWrap: true,
+  }
   mut indented: [ui::Widget] = [title]
   let meta = metadata_text(item)
   if not meta.is_empty() {
-    indented.push(ui::styled_text(meta, fg: theme.muted_foreground))
+    indented.push(ui::Text{Value: meta, Style: ui::Style{Foreground: theme.MutedForeground}})
   }
-  ui::column(
-    [
-      id_line,
-      // Indent title and metadata 2 more cols so they hang under the
-      // identifier text (which sits at col 2 after the glyph + space).
-      ui::padding(
-        ui::column(
-          indented,
-          main_size: ui::MainSize::min,
-          cross_align: ui::CrossAlign::stretch,
-        ),
-        left: 2,
-      ),
-    ],
-    main_size: ui::MainSize::min,
-    cross_align: ui::CrossAlign::stretch,
-  )
+  min_column([
+    id_line,
+    // Indent title and metadata 2 more cols so they hang under the
+    // identifier text (which sits at col 2 after the glyph + space).
+    ui::Padding(ui::Insets{Left: 2}, min_column(indented, true)),
+  ], true)
 }
 
-// Cards lean on list_tile's built-in Selected / Focused styling. The
-// cursor-here card renders with theme.Primary bg and a click anywhere
-// on the card fires `on_click`. Click also moves the cursor (set up
-// by the build closure) so the visual stays in sync with the keyboard
-// cursor.
-// ── Auto-scroll ───────────────────────────────────────────────────────
-
-// Reveal the cursor card in the active column. SliverListController
-// tracks the cards' measured heights and scrolls only as much as
-// needed to bring the cursor card into view; we don't have to
-// estimate heights ourselves.
-fn scroll_cursor_into_view(v: Board) {
-  if v.cursor_col < 0 or v.cursor_col >= v.col_list_scrolls.size() {
-    ()
-  } else {
-    let col = v.columns.at(v.cursor_col)
-    if v.cursor_row < 0 or v.cursor_row >= col.issues.size() {
-      ()
-    } else {
-      let _ = ui::sliver_list_controller_reveal_index(
-        v.col_list_scrolls.at(v.cursor_col), v.cursor_row,
-      )
-    }
+// Cards lean on ListTile's built-in Selected styling. The cursor-here
+// card renders with theme primary colors and a click anywhere on the
+// card fires `on_click`. Click also moves the cursor (set up by the
+// build closure) so the visual stays in sync with the keyboard cursor.
+fn render_card(theme: ui::Theme, item: issues::Issue, selected: Bool, on_click: fn(ui::EventContext)) ui::Widget {
+  ui::ListTile{
+    Title: card_content(theme, item),
+    Selected: selected,
+    OnPressed: on_click,
   }
 }
 
-fn render_card(
-  theme: ui::Theme, item: issues::Issue, selected: Bool,
-  on_click: fn(ui::EventContext),
-) ui::Widget {
-  ui::list_tile(
-    title: card_content(theme, item),
-    selected: selected,
-    on_pressed: on_click,
-  )
-}
-
-// Indented divider between cards. Inset matches list_tile's default
+// Indented divider between cards. Inset matches ListTile's default
 // Symmetric(1, 0) padding so the line tracks the card content margins.
-//
-// ui::divider paints via DrawCell (no style merge); without an explicit
-// bg the line picks up the terminal default and reads as a thick dark
-// bar over the themed bg. Pass theme.background so it blends.
+// Pass theme.Background so the line blends with the themed bg.
 fn card_divider(theme: ui::Theme) ui::Widget {
-  ui::padding(
-    ui::divider(fg: theme.border, bg: theme.background),
-    horizontal: 1,
+  ui::Padding(
+    ui::Symmetric(1, 0),
+    ui::Divider{Style: ui::Style{Foreground: theme.Border, Background: theme.Background}},
   )
 }
 
-fn blank_row() ui::Widget { ui::sized_box(0, 1, ui::text("")) }
+fn blank_row() ui::Widget { ui::SizedBox{Height: 1} }
 
-// Column header (name + count). Rendered OUTSIDE the column's
-// scroll view, as a sibling above it, so it always sits at the top
-// of the column. Behaves like a sticky header without being a
-// SliverPinnedHeader — which has a subtle problem in our flow:
-// pinned slivers take scroll space and paint over the viewport top,
-// but SliverListController.RevealIndex computes scroll targets
-// against the unobscured viewport. With a pinned header above the
-// list, reveal(0) lands item 0 behind the header. Putting the
-// header outside the scroll view sidesteps that entirely.
+// Column header (name + count). Rendered OUTSIDE the column's scroll
+// view, as a sibling above it, so it always sits at the top of the
+// column. A SliverPinnedHeader would take scroll space and paint over
+// the viewport top while RevealIndex computes against the unobscured
+// viewport — reveal(0) would land item 0 behind the header. Putting
+// the header outside sidesteps that entirely.
 fn column_header(theme: ui::Theme, col: issues::BoardColumn) ui::Widget {
-  let header_text = "{col.name} ({col.issues.size().to_str()})"
-  ui::padding(
-    ui::styled_text(
-      header_text,
-      fg: theme.muted_foreground,
-      attrs: ui::TextAttrs{ bold: true },
-    ),
-    vertical: 1,
+  let header_text = "{col.name} ({col.issues.size()})"
+  ui::Padding(
+    ui::Symmetric(0, 1),
+    ui::Text{Value: header_text, Style: ui::Style{Foreground: theme.MutedForeground, Attribute: ui::AttrBold}},
   )
 }
 
-// One sliver-list item: a card plus the inter-card gap underneath.
-// The trailing divider is omitted for the last card so the column
-// ends flush with the card body.
+// One sliver-list item: a card plus the inter-card gap underneath. The
+// trailing divider is omitted for the last card so the column ends
+// flush with the card body.
 fn column_item(
   theme: ui::Theme, col: issues::BoardColumn, row_idx: Int,
   is_active_col: Bool, cursor_row: Int,
   on_card_click: fn(Int, Int), col_idx: Int,
 ) ui::Widget {
   let last_idx = col.issues.size() - 1
-  let issue = col.issues.at(row_idx)
+  let issue = col.issues.at(row_idx).expect("builder index in range")
   let card = render_card(
     theme, issue, is_active_col and row_idx == cursor_row,
-    fn(_ctx: ui::EventContext) { on_card_click(col_idx, row_idx) },
+    fn(ev: ui::EventContext) { on_card_click(col_idx, row_idx) },
   )
   if row_idx < last_idx {
-    ui::column(
-      [card, blank_row(), card_divider(theme), blank_row()],
-      main_size: ui::MainSize::min,
-      cross_align: ui::CrossAlign::stretch,
-    )
+    min_column([card, blank_row(), card_divider(theme), blank_row()], true)
   } else {
     card
+  }
+}
+
+// ── Auto-scroll ───────────────────────────────────────────────────────
+
+// Reveal the cursor card in the active column. SliverListController
+// tracks the cards' measured heights and scrolls only as much as
+// needed to bring the cursor card into view.
+fn scroll_cursor_into_view(v: Board) {
+  if v.cursor_col >= 0 and v.cursor_col < v.col_list_scrolls.size() and v.cursor_row >= 0 and v.cursor_row < col_size(v.columns, v.cursor_col) {
+    let controller = v.col_list_scrolls.at(v.cursor_col).expect("bounds checked")
+    controller.RevealIndex(v.cursor_row)
   }
 }
 
 fn render_column(
   theme: ui::Theme, col: issues::BoardColumn,
   col_idx: Int, cursor_col: Int, cursor_row: Int,
-  scroll: ui::ScrollController,
-  list_scroll: ui::SliverListController,
+  scroll: mut ui::ScrollController,
+  list_scroll: mut ui::SliverListController,
   on_card_click: fn(Int, Int),
 ) ui::Widget {
   let is_active_col = col_idx == cursor_col
   let count = col.issues.size()
 
   // Empty-column placeholder: no slivers needed, just show "No issues"
-  // beneath the header. Wrapped in custom_scroll_view anyway so the
-  // height/scroll behaviour matches non-empty columns (e.g. cross-
-  // align stretch in the parent row).
-  let body_sliver = match count == 0 {
-    true => ui::sliver_to_box(
-      ui::padding(
-        ui::center(
-          ui::styled_text("No issues", fg: theme.muted_foreground),
-        ),
-        top: 1,
+  // beneath the header. Wrapped in CustomScrollView anyway so the
+  // height/scroll behaviour matches non-empty columns.
+  let body_sliver: ui::Widget = match count == 0 {
+    true => ui::SliverToBox{
+      Child: ui::Padding(
+        ui::Insets{Top: 1},
+        ui::Center(ui::Text{Value: "No issues", Style: ui::Style{Foreground: theme.MutedForeground}}),
       ),
-    ),
-    false => ui::sliver_list_builder(
-      count: count,
-      builder: fn(_ctx: ui::BuildContext, i: Int) ui::Widget {
-        column_item(
-          theme, col, i, is_active_col, cursor_row, on_card_click, col_idx,
-        )
+    },
+    false => ui::SliverListBuilder{
+      Controller: list_scroll,
+      Count: count,
+      Builder: fn(ctx: ui::BuildContext, i: Int) ui::Widget {
+        column_item(theme, col, i, is_active_col, cursor_row, on_card_click, col_idx)
       },
-      // Most cards are ~3 rows (id + title + maybe meta) plus a
-      // 3-row gap below: estimate is intentionally a bit high so
-      // reveal_index lands a bit conservatively before items are
-      // measured. Overscan keeps the area around the viewport
-      // ready so small scroll deltas don't blank-flash.
-      estimated_item_extent: maybe::some(6),
-      overscan: maybe::some(6),
-      controller: maybe::some(list_scroll),
-    ),
+      // Most cards are ~3 rows (id + title + maybe meta) plus a 3-row
+      // gap below: the estimate is intentionally a bit high so
+      // RevealIndex lands conservatively before items are measured.
+      // Overscan keeps the area around the viewport ready so small
+      // scroll deltas don't blank-flash.
+      EstimatedItemExtent: 6,
+      Overscan: 6,
+    },
   }
 
-  ui::sized_box(
-    COLUMN_WIDTH,
-    0,
-    ui::column(
-      [
-        column_header(theme, col),
-        ui::expanded(
-          ui::custom_scroll_view(scroll, [body_sliver]),
-        ),
-      ],
-      main_size: ui::MainSize::max,
-      cross_align: ui::CrossAlign::stretch,
-    ),
-  )
+  mut column_children: [ui::Widget] = [
+    column_header(theme, col),
+    ui::Expanded(ui::CustomScrollView{
+      Controller: scroll,
+      Slivers: [body_sliver],
+    }),
+  ]
+  ui::SizedBox{
+    Width: COLUMN_WIDTH,
+    Child: ui::Flex{
+      Axis: ui::Vertical,
+      CrossAxisAlignment: ui::CrossAxisStretch,
+      Children: column_children,
+    },
+  }
 }
 
 // Overflow indicator: 1-col chevron pinned to the top of the board
 // area. We always reserve a 1-col slot on each side so the layout
 // doesn't shift when the indicator appears/disappears.
-//
-// `show` controls whether the glyph is visible. The cross-align: start
-// alignment keeps the chevron next to the column headers vertically.
 fn overflow_indicator(theme: ui::Theme, glyph: Str, show: Bool) ui::Widget {
   let content = match show {
-    true => ui::styled_text(glyph, fg: theme.muted_foreground),
-    false => ui::text(" "),
+    true => ui::Text{Value: glyph, Style: ui::Style{Foreground: theme.MutedForeground}},
+    false => ui::Text{Value: " "},
   }
-  ui::sized_box(
-    1, 0,
-    ui::padding(content, vertical: 1),
-  )
+  ui::SizedBox{
+    Width: 1,
+    Child: ui::Padding(ui::Symmetric(0, 1), content),
+  }
 }
 
 // Build the row of columns plus gaps between them. The whole row is
-// wrapped in a single-axis horizontal scroll_view so wider boards can
+// wrapped in a single-axis horizontal ScrollView so wider boards can
 // extend off-screen, flanked by 1-col chevron indicators that hint at
 // more columns existing in each direction.
 //
-// scroll_view bounds the cross axis (vertical), so each column
-// receives the board's full height — which means the per-column
-// custom_scroll_view below has a real viewport to clip and scroll
-// within. scroll_pane would unbound both axes and break that.
-fn render_board(
-  theme: ui::Theme, v: Board, on_card_click: fn(Int, Int),
-) ui::Widget {
+// ScrollView bounds the cross axis (vertical), so each column receives
+// the board's full height — which means the per-column CustomScrollView
+// below has a real viewport to clip and scroll within.
+fn render_board(theme: ui::Theme, v: Board, on_card_click: fn(Int, Int)) ui::Widget {
   mut row_children: [ui::Widget] = []
+  // Shared transient fallbacks; see the drift note below. Declared out
+  // here because `mut x` can't be a block's final expression (it parses
+  // as a variable declaration).
+  mut h_fallback = ui::ScrollController{}
+  mut list_fallback = ui::SliverListController{}
   for col, idx in v.columns {
     if idx > 0 {
-      row_children.push(ui::sized_box(COLUMN_GAP, 0, ui::text("")))
+      row_children.push(ui::SizedBox{Width: COLUMN_GAP})
     }
     // Defensive fall-backs: if controller lists drift from columns
     // mid-rebuild (e.g. between reload mutations), create transient
-    // fresh controllers so render doesn't crash. The next steady-
-    // state rebuild after apply_loaded restores the real ones.
+    // fresh controllers so render doesn't crash. The next steady-state
+    // rebuild after apply_loaded restores the real ones.
     let scroll = match idx < v.col_h_scrolls.size() {
-      true => v.col_h_scrolls.at(idx),
-      false => ui::scroll_controller(),
+      true => v.col_h_scrolls.at(idx).expect("bounds checked"),
+      false => mut h_fallback,
     }
     let list_scroll = match idx < v.col_list_scrolls.size() {
-      true => v.col_list_scrolls.at(idx),
-      false => ui::sliver_list_controller(),
+      true => v.col_list_scrolls.at(idx).expect("bounds checked"),
+      false => mut list_fallback,
     }
     row_children.push(render_column(
       theme, col, idx, v.cursor_col, v.cursor_row,
@@ -512,85 +479,227 @@ fn render_board(
     ))
   }
   // True "is content scrolled off?" check, read from the outer
-  // ScrollController's metrics. On the very first build the
-  // controller hasn't been attached yet (zero-valued metrics), so
-  // chevrons start hidden and appear once layout has run.
-  let metrics = ui::scroll_controller_metrics(v.board_h_scroll)
-  let has_left = metrics.scroll_offset > 0
-  let has_right = metrics.scroll_offset < metrics.max_scroll_offset
-  // cross_align: stretch so each column receives the board's full
-  // vertical extent.
-  ui::row(
-    [
-      overflow_indicator(theme, "‹", has_left),
-      ui::expanded(
-        ui::scroll_view(
-          ui::row(row_children, cross_align: ui::CrossAlign::stretch),
-          axis: ui::ScrollAxis::horizontal,
-          controller: v.board_h_scroll,
-        ),
-      ),
-      overflow_indicator(theme, "›", has_right),
-    ],
-    cross_align: ui::CrossAlign::stretch,
-  )
-}
-
-fn body(theme: ui::Theme, v: Board, on_card_click: fn(Int, Int)) ui::Widget {
-  match {
-    v.loading => ui::column([
-      ui::expanded(ui::center(ui::text("Loading issues…"))),
-    ]),
-    not v.error.is_empty() => ui::column([
-      ui::expanded(
-        ui::center(
-          ui::column(
-            [
-              ui::styled_text(v.error, fg: theme.danger_text),
-              ui::sized_box(0, 1, ui::text("")),
-              ui::styled_text("press r to retry", fg: theme.muted_foreground),
-            ],
-            main_size: ui::MainSize::min,
-            cross_align: ui::CrossAlign::center,
-          ),
-        ),
-      ),
-    ]),
-    v.columns.size() == 0 => ui::column([
-      ui::expanded(
-        ui::center(
-          ui::styled_text("No issues assigned to you", fg: theme.muted_foreground),
-        ),
-      ),
-    ]),
-    _ => ui::column([ui::expanded(render_board(theme, v, on_card_click))]),
+  // ScrollController's metrics. On the very first build the controller
+  // hasn't been attached yet (zero-valued metrics), so chevrons start
+  // hidden and appear once layout has run.
+  let metrics = v.board_h_scroll.Metrics()
+  let has_left = metrics.ScrollOffset > 0
+  let has_right = metrics.ScrollOffset < metrics.MaxScrollOffset
+  // CrossAxisStretch so each column receives the board's full vertical
+  // extent.
+  mut outer_children: [ui::Widget] = [
+    overflow_indicator(theme, "‹", has_left),
+    ui::Expanded(ui::ScrollView{
+      Axis: ui::ScrollHorizontal,
+      Controller: v.board_h_scroll,
+      Child: ui::Flex{
+        Axis: ui::Horizontal,
+        CrossAxisAlignment: ui::CrossAxisStretch,
+        Children: row_children,
+      },
+    }),
+    overflow_indicator(theme, "›", has_right),
+  ]
+  ui::Flex{
+    Axis: ui::Horizontal,
+    CrossAxisAlignment: ui::CrossAxisStretch,
+    Children: outer_children,
   }
 }
 
-// ── Entry point ───────────────────────────────────────────────────────
+fn body(theme: ui::Theme, v: Board, on_card_click: fn(Int, Int)) ui::Widget {
+  let inner = match {
+    v.loading => ui::Center(ui::Text{Value: "Loading issues…"}),
+    not v.error.is_empty() => ui::Center(min_column([
+      ui::Text{Value: v.error, Style: ui::Style{Foreground: theme.DangerText}},
+      blank_row(),
+      ui::Text{Value: "press r to retry", Style: ui::Style{Foreground: theme.MutedForeground}},
+    ], false)),
+    v.columns.size() == 0 => ui::Center(
+      ui::Text{Value: "No issues assigned to you", Style: ui::Style{Foreground: theme.MutedForeground}},
+    ),
+    _ => render_board(theme, v, on_card_click),
+  }
+  mut children: [ui::Widget] = [ui::Expanded(inner)]
+  ui::Flex{Axis: ui::Vertical, Children: children}
+}
+
+// ── Actions ───────────────────────────────────────────────────────────
+
+fn move_row(c: mut ffi::StateCtx, delta: Int) {
+  ffi::Update<Board>(c, fn(v: mut Board) {
+    if v.columns.size() > 0 {
+      let count = col_size(v.columns, v.cursor_col)
+      if count > 0 {
+        v.cursor_row = clamp(v.cursor_row + delta, count)
+      }
+    }
+  })
+  scroll_cursor_into_view(ffi::StateValue<Board>(c))
+}
+
+fn move_col(c: mut ffi::StateCtx, forward: Bool) {
+  ffi::Update<Board>(c, fn(v: mut Board) {
+    if v.columns.size() > 0 {
+      let target = match forward {
+        true => next_non_empty(v.columns, v.cursor_col + 1),
+        false => prev_non_empty(v.columns, v.cursor_col - 1),
+      }
+      if target >= 0 {
+        v.cursor_col = target
+        v.cursor_row = clamp(v.cursor_row, col_size(v.columns, target))
+        v.board_h_scroll.ScrollToOffset(target * (COLUMN_WIDTH + COLUMN_GAP))
+      }
+    }
+  })
+  // After switching columns the new column's cursor row may be off-screen
+  // vertically; reveal it in the new column's list.
+  scroll_cursor_into_view(ffi::StateValue<Board>(c))
+}
 
 // On state/cycle confirm in the pickers below, we want to refresh the
 // board so the moved card appears in its new column. Helper takes the
 // mutator and dispatches it on a background fiber, then triggers a
 // board reload (or surfaces the error via toast).
 fn run_issue_mutation(
+  c: mut ffi::StateCtx,
   api_key: Str,
-  rt: ui::Runtime<Board>,
   notify: fn(Str, Str, toast::ToastVariant),
   failure_title: Str,
   mutate: fn() Void!Str,
 ) {
-  // async::start returns a Fiber; discard so the outer closure's
-  // return type stays Void.
-  let _ = async::start(fn() {
+  async::start(fn() {
     let r = mutate()
-    rt.dispatch(fn(s: ui::State<Board>) {
+    ffi::Dispatch(c, fn() {
       match r {
-        ok(_) => load_board(api_key, rt, notify),
+        ok(_) => load_board(c, api_key, notify),
         err(e) => notify(failure_title, e, toast::ToastVariant::error),
       }
     })
   })
+}
+
+// ── Entry point ───────────────────────────────────────────────────────
+
+fn build(
+  c: mut ffi::StateCtx, ctx: ui::BuildContext,
+  api_key: Str,
+  on_open_issue: fn(issues::Issue),
+  notify: fn(Str, Str, toast::ToastVariant),
+  show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
+  close_modal: fn(),
+  active: Bool,
+) ui::Widget {
+  let theme = ui::MustDepend<ui::Theme>(ctx)
+  let model = ffi::StateValue<Board>(c)
+
+  // Click handler: select the card AND open the issue (same as moving
+  // the cursor and pressing Enter).
+  let on_card_click = fn(col: Int, row: Int) {
+    ffi::Update<Board>(c, fn(v: mut Board) {
+      v.cursor_col = col
+      v.cursor_row = row
+    })
+    if col < model.columns.size() {
+      let column = model.columns.at(col).expect("click from current build")
+      if row < column.issues.size() {
+        on_open_issue(column.issues.at(row).expect("click from current build"))
+      }
+    }
+  }
+
+  // Only the active tab participates in focus management (see the
+  // shell's IndexedStack note).
+  ui::Actions{
+    Bindings: [
+      "board.row_down": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        move_row(c, 1)
+        ui::EventHandled
+      },
+      "board.row_up": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        move_row(c, -1)
+        ui::EventHandled
+      },
+      "board.col_next": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        move_col(c, true)
+        ui::EventHandled
+      },
+      "board.col_prev": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        move_col(c, false)
+        ui::EventHandled
+      },
+      "board.open": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        match selected_issue(ffi::StateValue<Board>(c)) {
+          issue => on_open_issue(issue),
+          _ => {},
+        }
+        ui::EventHandled
+      },
+      "board.refresh": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        ffi::Update<Board>(c, fn(v: mut Board) {
+          v.loading = true
+          v.error = ""
+        })
+        load_board(c, api_key, notify)
+        ui::EventHandled
+      },
+      "board.state_picker": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        match selected_issue(ffi::StateValue<Board>(c)) {
+          issue => {
+            let issue_id = issue.id
+            issue_pickers::open_state_picker(
+              api_key, issue, show_modal, close_modal, notify,
+              fn(new_state_id: Str) {
+                run_issue_mutation(c, api_key, notify, "Update state", fn() Void!Str {
+                  issues::update_state(api_key, issue_id, new_state_id)
+                })
+              },
+            )
+          },
+          _ => {},
+        }
+        ui::EventHandled
+      },
+      "board.cycle_picker": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        match selected_issue(ffi::StateValue<Board>(c)) {
+          issue => {
+            let issue_id = issue.id
+            issue_pickers::open_cycle_picker(
+              api_key, issue, show_modal, close_modal, notify,
+              fn(new_cycle_id: Str) {
+                run_issue_mutation(c, api_key, notify, "Update cycle", fn() Void!Str {
+                  issues::update_cycle(api_key, issue_id, new_cycle_id)
+                })
+              },
+            )
+          },
+          _ => {},
+        }
+        ui::EventHandled
+      },
+    ],
+    Child: ui::Shortcuts{
+      Bindings: [
+        "j": ffi::Intent("board.row_down"),
+        "Down": ffi::Intent("board.row_down"),
+        "k": ffi::Intent("board.row_up"),
+        "Up": ffi::Intent("board.row_up"),
+        "l": ffi::Intent("board.col_next"),
+        "Right": ffi::Intent("board.col_next"),
+        "h": ffi::Intent("board.col_prev"),
+        "Left": ffi::Intent("board.col_prev"),
+        "Enter": ffi::Intent("board.open"),
+        "r": ffi::Intent("board.refresh"),
+        "s": ffi::Intent("board.state_picker"),
+        "y": ffi::Intent("board.cycle_picker"),
+      ],
+      Child: ui::FocusScope{
+        AutoFocus: active,
+        ReclaimFocus: active,
+        Child: body(theme, model, on_card_click),
+      },
+    },
+  }
 }
 
 fn new(
@@ -601,207 +710,33 @@ fn new(
   close_modal: fn(),
   active: Bool,
 ) ui::Widget {
-  ui::stateful(
-    key: "my-issues-view",
-    init: fn(ctx: ui::BuildContext) Board {
-      // Kick the initial fetch from init. (See inbox_view's note:
-      // the earlier workaround of fetching from build was a
-      // misdiagnosis of the widget-reconciliation pitfall, not a
-      // real problem with dispatching from init.)
-      let rt = ctx.runtime<Board>()
-      load_board(api_key, rt, notify)
-      // Background refresh every 5 minutes. See refresh::schedule_periodic
-      // docs for the lifecycle caveat.
-      refresh::schedule_periodic(5 * 60 * 1000, fn() {
-        refresh_board(api_key, rt, notify)
-      })
+  ffi::Stateful{
+    Init: fn() Any {
+      mut board_h_scroll = ui::ScrollController{}
       Board{
+        started: false,
         columns: [],
         cursor_col: 0,
         cursor_row: 0,
         loading: true,
         error: "",
-        board_h_scroll: ui::scroll_controller(),
+        board_h_scroll: mut board_h_scroll,
         col_h_scrolls: [],
         col_list_scrolls: [],
       }
     },
-    build: fn(ctx: ui::BuildContext, state: ui::State<Board>) ui::Widget {
-      let theme = ui::must_have_theme(ctx)
-      let model = state.value()
-      let rt = ctx.runtime<Board>()
-
-      // Click handler: select the card AND open the issue (same as
-      // moving the cursor with j/k/h/l and then pressing Enter). We
-      // can read the Issue out of `model` here because the click only
-      // fires from the most recent build, so the (col, row) indices
-      // are valid for `model.columns` even though `state.set` above
-      // hasn't taken effect yet (state.set is queued for next frame;
-      // the in-scope model is still the previous snapshot, with the
-      // same columns array).
-      let on_card_click = fn(col: Int, row: Int) {
-        state.set(fn(mut v: Board) {
-          v.cursor_col = col
-          v.cursor_row = row
+    Build: fn(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
+      // First-build kick: initial fetch plus the 5-minute background
+      // refresh (silent, cursor-by-id preservation).
+      let s = ffi::StateRef<Board>(c)
+      if not s.started {
+        s.started = true
+        load_board(c, api_key, notify)
+        refresh::schedule_periodic(5 * 60 * 1000, fn() {
+          refresh_board(c, api_key, notify)
         })
-        if col < model.columns.size() {
-          let column = model.columns.at(col)
-          if row < column.issues.size() {
-            on_open_issue(column.issues.at(row))
-          }
-        }
       }
-
-      // Only the active tab participates in focus management. When
-      // the board is the visible tab, reclaim_focus: true lets us
-      // recover focus after a picker modal closes (the focused
-      // subtree is disposed) and the board's own outer ui::focus
-      // becomes the reclaim target. When the board tab is hidden
-      // (user is on inbox or an issue), both flags are false so
-      // we don't steal focus from whichever tab is showing.
-      ui::shortcuts(
-        ui::actions(
-          ui::focus_scope(
-            ui::focus(body(theme, model, on_card_click)),
-            trap: false,
-            auto_focus: active,
-            reclaim_focus: active,
-          ),
-          [
-            ui::action("board.row_down", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              // Capture model BEFORE state.set so we can read the
-              // freshly-mutated value via state.value() afterwards
-              // and scroll the active column accordingly.
-              if model.columns.size() > 0 {
-                let count = col_size(model.columns, model.cursor_col)
-                if count > 0 {
-                  let next_row = clamp(model.cursor_row + 1, count)
-                  state.set(fn(mut v: Board) { v.cursor_row = next_row })
-                  scroll_cursor_into_view(state.value())
-                }
-              }
-              ui::EventResult::handled
-            }),
-            ui::action("board.row_up", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              if model.columns.size() > 0 {
-                let count = col_size(model.columns, model.cursor_col)
-                if count > 0 {
-                  let next_row = clamp(model.cursor_row - 1, count)
-                  state.set(fn(mut v: Board) { v.cursor_row = next_row })
-                  scroll_cursor_into_view(state.value())
-                }
-              }
-              ui::EventResult::handled
-            }),
-            ui::action("board.col_next", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              if model.columns.size() > 0 {
-                let target = next_non_empty(model.columns, model.cursor_col + 1)
-                if target >= 0 {
-                  state.set(fn(mut v: Board) {
-                    v.cursor_col = target
-                    v.cursor_row = clamp(v.cursor_row, col_size(v.columns, target))
-                  })
-                  let _ = ui::scroll_controller_scroll_to_offset(
-                    model.board_h_scroll,
-                    target * (COLUMN_WIDTH + COLUMN_GAP),
-                  )
-                  // After switching columns the new column's cursor
-                  // row may be off-screen vertically; reveal it in
-                  // the new column's sliver list.
-                  scroll_cursor_into_view(state.value())
-                }
-              }
-              ui::EventResult::handled
-            }),
-            ui::action("board.col_prev", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              if model.columns.size() > 0 {
-                let target = prev_non_empty(model.columns, model.cursor_col - 1)
-                if target >= 0 {
-                  state.set(fn(mut v: Board) {
-                    v.cursor_col = target
-                    v.cursor_row = clamp(v.cursor_row, col_size(v.columns, target))
-                  })
-                  let _ = ui::scroll_controller_scroll_to_offset(
-                    model.board_h_scroll,
-                    target * (COLUMN_WIDTH + COLUMN_GAP),
-                  )
-                  scroll_cursor_into_view(state.value())
-                }
-              }
-              ui::EventResult::handled
-            }),
-            ui::action("board.open", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              match selected_issue(model) {
-                issue => on_open_issue(issue),
-                _ => (),
-              }
-              ui::EventResult::handled
-            }),
-            ui::action("board.refresh", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              state.set(fn(mut v: Board) {
-                v.loading = true
-                v.error = ""
-              })
-              load_board(api_key, rt, notify)
-              ui::EventResult::handled
-            }),
-            ui::action("board.state_picker", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              match selected_issue(model) {
-                issue => {
-                  let issue_id = issue.id
-                  issue_pickers::open_state_picker(
-                    api_key, issue, show_modal, close_modal, notify,
-                    fn(new_state_id: Str) {
-                      run_issue_mutation(
-                        api_key, rt, notify, "Update state",
-                        fn() Void!Str {
-                          issues::update_state(api_key, issue_id, new_state_id)
-                        },
-                      )
-                    },
-                  )
-                },
-                _ => (),
-              }
-              ui::EventResult::handled
-            }),
-            ui::action("board.cycle_picker", fn(_ctx: ui::EventContext, _intent: Str) ui::EventResult {
-              match selected_issue(model) {
-                issue => {
-                  let issue_id = issue.id
-                  issue_pickers::open_cycle_picker(
-                    api_key, issue, show_modal, close_modal, notify,
-                    fn(new_cycle_id: Str) {
-                      run_issue_mutation(
-                        api_key, rt, notify, "Update cycle",
-                        fn() Void!Str {
-                          issues::update_cycle(api_key, issue_id, new_cycle_id)
-                        },
-                      )
-                    },
-                  )
-                },
-                _ => (),
-              }
-              ui::EventResult::handled
-            }),
-          ],
-        ),
-        [
-          "j": "board.row_down",
-          "Down": "board.row_down",
-          "k": "board.row_up",
-          "Up": "board.row_up",
-          "l": "board.col_next",
-          "Right": "board.col_next",
-          "h": "board.col_prev",
-          "Left": "board.col_prev",
-          "Enter": "board.open",
-          "r": "board.refresh",
-          "s": "board.state_picker",
-          "y": "board.cycle_picker",
-        ],
-      )
+      build(c, ctx, api_key, on_open_issue, notify, show_modal, close_modal, active)
     },
-  )
+  }
 }
