@@ -1,0 +1,45 @@
+use ard/testing
+
+use tinear/tui/logged_in_screen as shell
+
+fn model(tab_index: Int, issue_tabs: [Str]) shell::Model {
+  shell::Model{tab_index: tab_index, issue_tabs: issue_tabs}
+}
+
+test fn cycle_wraps_around_all_tabs() Void!Str {
+  let s = model(0, ["CCA-1"])
+  try testing::assert(shell::total_tabs(s) == 3, "two fixed tabs plus one issue tab")
+  try testing::assert(shell::cycle_next(model(2, ["CCA-1"])) == 0, "next wraps to inbox")
+  try testing::assert(shell::cycle_prev(model(0, ["CCA-1"])) == 2, "prev wraps to last")
+  testing::pass()
+}
+
+test fn open_issue_tab_appends_and_selects() Void!Str {
+  let s = shell::open_issue_tab(model(0, []), "CCA-9")
+  try testing::assert(s.issue_tabs.size() == 1, "tab appended")
+  try testing::assert(s.tab_index == 2, "new tab selected")
+  testing::pass()
+}
+
+test fn open_issue_tab_reuses_existing() Void!Str {
+  let s = shell::open_issue_tab(model(0, ["CCA-9", "CCA-10"]), "CCA-9")
+  try testing::assert(s.issue_tabs.size() == 2, "no duplicate tab")
+  try testing::assert(s.tab_index == 2, "existing tab selected")
+  testing::pass()
+}
+
+test fn close_current_issue_tab_returns_to_board() Void!Str {
+  let s = shell::close_current_issue_tab(model(3, ["CCA-9", "CCA-10"]))
+  try testing::assert(s.issue_tabs.size() == 1, "tab removed")
+  try testing::assert(s.issue_tabs.at(0).expect("bounds") == "CCA-9", "other tab kept")
+  try testing::assert(s.tab_index == 1, "selection returns to My Issues")
+  testing::pass()
+}
+
+test fn tab_labels_resolve() Void!Str {
+  let s = model(0, ["CCA-9"])
+  try testing::assert(shell::tab_label_at(s, 0) == "Inbox", "inbox label")
+  try testing::assert(shell::tab_label_at(s, 1) == "My Issues", "board label")
+  try testing::assert(shell::tab_label_at(s, 2) == "CCA-9", "issue tab label")
+  testing::pass()
+}

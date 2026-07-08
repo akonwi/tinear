@@ -2,6 +2,7 @@ use go:go.rockorager.dev/vaxis/ui
 use go:tinear/ffi
 
 use tinear/config
+use tinear/tui/logged_in_screen
 use tinear/tui/welcome_screen
 
 struct AppState {
@@ -18,24 +19,21 @@ fn set_api_key(c: mut ffi::StateCtx, api_key: Str) {
   ffi::MarkDirty(c)
 }
 
-// Placeholder for the logged-in shell until that slice is rebuilt.
-fn logged_in_placeholder() ui::Widget {
-  ui::Text{Value: "Logged in. The shell returns in the next slice."}
-}
-
 fn body(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
   let theme = ui::MustDepend<ui::Theme>(ctx)
   let model = ffi::StateValue<AppState>(c)
   let content = match model.has_auth() {
-    true => logged_in_placeholder(),
-    false => welcome_screen::new(fn(api_key: Str) {
-      set_api_key(c, api_key)
-    }),
+    true => logged_in_screen::new(model.api_key),
+    false => ui::Center(ui::Padding(
+      ui::Symmetric(0, 1),
+      welcome_screen::new(fn(api_key: Str) {
+        set_api_key(c, api_key)
+      }),
+    )),
   }
-  let centered = ui::Center(ui::Padding(ui::Symmetric(0, 1), content))
   ui::DecoratedBox(
     ui::Decoration{Style: ui::Style{Foreground: theme.Foreground, Background: theme.Background}},
-    centered,
+    content,
   )
 }
 

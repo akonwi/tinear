@@ -1,0 +1,319 @@
+use ard/async
+use go:go.rockorager.dev/vaxis/ui
+use go:tinear/ffi
+
+use tinear/models/cache
+use tinear/tui/hints_bar
+
+// Shell for the logged-in view.
+//
+// Two permanent tabs (Inbox, My Issues) plus zero or more dynamic issue
+// detail tabs. Tab math treats them as one flat list:
+//   index 0       -> Inbox
+//   index 1       -> My Issues
+//   index 2..n+1  -> issue_tabs[i - 2]
+//
+// Tab bodies are placeholders until their slices are rebuilt.
+struct Model {
+  tab_index: Int,
+  issue_tabs: [Str],
+}
+
+fn total_tabs(s: Model) Int { 2 + s.issue_tabs.size() }
+
+fn tab_label_at(s: Model, i: Int) Str {
+  match i {
+    0 => "Inbox",
+    1 => "My Issues",
+    _ => {
+      let issue_idx = i - 2
+      match issue_idx >= 0 and issue_idx < s.issue_tabs.size() {
+        true => s.issue_tabs.at(issue_idx).expect("bounds checked"),
+        false => "?",
+      }
+    },
+  }
+}
+
+fn cycle_next(s: Model) Int {
+  let n = total_tabs(s)
+  match s.tab_index + 1 >= n {
+    true => 0,
+    false => s.tab_index + 1,
+  }
+}
+
+fn cycle_prev(s: Model) Int {
+  match s.tab_index <= 0 {
+    true => total_tabs(s) - 1,
+    false => s.tab_index - 1,
+  }
+}
+
+fn selected_is_issue_tab(s: Model) Bool { s.tab_index >= 2 }
+
+fn close_current_issue_tab(s: Model) Model {
+  mut next = s
+  let issue_idx = s.tab_index - 2
+  if issue_idx >= 0 and issue_idx < s.issue_tabs.size() {
+    mut remaining: [Str] = []
+    for label, idx in s.issue_tabs {
+      if not (idx == issue_idx) {
+        remaining.push(label)
+      }
+    }
+    next.issue_tabs = remaining
+    next.tab_index = 1
+  }
+  next
+}
+
+// Open `identifier` as an issue tab. If it's already in `issue_tabs`,
+// just switch to it; otherwise append a new tab and select it. Used by
+// the inbox's Enter action to surface a notification's issue.
+fn open_issue_tab(s: Model, identifier: Str) Model {
+  mut existing_idx = -1
+  for tab, i in s.issue_tabs {
+    if tab == identifier {
+      existing_idx = i
+    }
+  }
+  mut next = s
+  if existing_idx >= 0 {
+    next.tab_index = 2 + existing_idx
+  } else {
+    mut new_tabs: [Str] = []
+    for tab in s.issue_tabs {
+      new_tabs.push(tab)
+    }
+    new_tabs.push(identifier)
+    next.issue_tabs = new_tabs
+    next.tab_index = 2 + new_tabs.size() - 1
+  }
+  next
+}
+
+// ── State updates ─────────────────────────────────────────────────────
+
+// Persist the current logged-in slice to the on-disk cache. Wrapped in
+// async::start so disk I/O doesn't block the UI; errors are swallowed
+// because cache persistence is best-effort — a failed save shouldn't
+// break the session.
+fn persist(c: mut ffi::StateCtx) {
+  let snap = ffi::StateValue<Model>(c)
+  async::start(fn() {
+    let _ = cache::save_logged_in(cache::LoggedInCache{
+      tab_index: snap.tab_index,
+      issue_tabs: snap.issue_tabs,
+    })
+  })
+}
+
+fn select_tab(c: mut ffi::StateCtx, idx: Int) {
+  let state = ffi::StateRef<Model>(c)
+  state.tab_index = idx
+  ffi::MarkDirty(c)
+  persist(c)
+}
+
+fn replace_model(c: mut ffi::StateCtx, next: Model) {
+  let state = ffi::StateRef<Model>(c)
+  state.tab_index = next.tab_index
+  state.issue_tabs = next.issue_tabs
+  ffi::MarkDirty(c)
+  persist(c)
+}
+
+// ── Rendering ─────────────────────────────────────────────────────────
+
+// Tab chip. Mirrors the theming used by upstream ListTile:
+//
+//   selected   => fg theme.Foreground on bg theme.Primary
+//   unselected => fg theme.MutedForeground, transparent bg
+//
+// ClickAffordanceNone suppresses the default underline vaxis/ui adds
+// to clickable Text; the bg fill is the visual affordance for tabs.
+fn tab_chip(theme: ui::Theme, label: Str, selected: Bool, on_press: fn(ui::EventContext)) ui::Widget {
+  let padded = " {label} "
+  match selected {
+    true => ui::Text{
+      Value: padded,
+      Style: ui::Style{Foreground: theme.Foreground, Background: theme.Primary},
+      OnPressed: on_press,
+      ClickAffordance: ui::ClickAffordanceNone,
+    },
+    false => ui::Text{
+      Value: padded,
+      Style: ui::Style{Foreground: theme.MutedForeground},
+      OnPressed: on_press,
+      ClickAffordance: ui::ClickAffordanceNone,
+    },
+  }
+}
+
+// Tab bar widget. Owns its own bottom border so the composing column
+// doesn't need to space anything around it.
+fn tab_bar(c: mut ffi::StateCtx, theme: ui::Theme, s: Model) ui::Widget {
+  mut chips: [ui::Widget] = []
+  let n = total_tabs(s)
+  if n > 0 {
+    for i in 0..n - 1 {
+      if i > 0 {
+        chips.push(ui::Text{Value: "│", Style: ui::Style{Foreground: theme.Border}})
+      }
+      // `for` binds an immutable per-iteration `i`, captured by value
+      // by the closure below — no loop-closure trap.
+      chips.push(tab_chip(
+        theme,
+        tab_label_at(s, i),
+        i == s.tab_index,
+        fn(ev: ui::EventContext) { select_tab(c, i) },
+      ))
+    }
+  }
+  mut children: [ui::Widget] = [
+    ui::Flex{Axis: ui::Horizontal, Children: chips},
+    ui::Divider{Style: ui::Style{Foreground: theme.Border, Background: theme.Background}},
+  ]
+  ui::Flex{Axis: ui::Vertical, MainAxisSize: ui::MainAxisSizeMin, Children: children}
+}
+
+// Placeholder tab body until the real views are rebuilt.
+fn placeholder(label: Str) ui::Widget {
+  ui::Center(ui::Text{Value: "{label} — coming back soon"})
+}
+
+// Resolves the active tab to a body widget. All bodies are mounted at
+// once via IndexedStack so each tab's local state survives switching
+// tabs — only the visible tab paints.
+fn body_for(api_key: Str, s: Model) ui::Widget {
+  mut children: [ui::Widget] = [
+    placeholder("Inbox"),
+    placeholder("My Issues"),
+  ]
+  for label in s.issue_tabs {
+    children.push(placeholder(label))
+  }
+  ui::IndexedStack{
+    Index: s.tab_index,
+    Alignment: ui::TopLeft,
+    Children: children,
+  }
+}
+
+fn hints_for(s: Model) [hints_bar::Hint] {
+  match {
+    s.tab_index == 0 => [
+      hints_bar::Hint{key: "Tab", label: "switch"},
+      hints_bar::Hint{key: "↑↓", label: "select"},
+      hints_bar::Hint{key: "⌫", label: "delete"},
+      hints_bar::Hint{key: "r", label: "refresh"},
+      hints_bar::Hint{key: "↵", label: "open"},
+      hints_bar::Hint{key: "?", label: "search"},
+    ],
+    s.tab_index == 1 => [
+      hints_bar::Hint{key: "↑↓", label: ""},
+      hints_bar::Hint{key: "←→", label: ""},
+      hints_bar::Hint{key: "↵", label: "open"},
+      hints_bar::Hint{key: "s", label: "status"},
+      hints_bar::Hint{key: "y", label: "cycle"},
+      hints_bar::Hint{key: "r", label: "refresh"},
+      hints_bar::Hint{key: "?", label: "search"},
+    ],
+    _ => [
+      hints_bar::Hint{key: "↑↓", label: "scroll"},
+      hints_bar::Hint{key: "d", label: "description"},
+      hints_bar::Hint{key: "c", label: "comments"},
+      hints_bar::Hint{key: "n", label: "new comment"},
+      hints_bar::Hint{key: "s", label: "status"},
+      hints_bar::Hint{key: "y", label: "cycle"},
+      hints_bar::Hint{key: "Esc", label: "close"},
+    ],
+  }
+}
+
+fn screen(c: mut ffi::StateCtx, theme: ui::Theme, s: Model, api_key: Str) ui::Widget {
+  mut children: [ui::Widget] = [
+    tab_bar(c, theme, s),
+    ui::Expanded(body_for(api_key, s)),
+    hints_bar::new(theme, hints_for(s)),
+  ]
+  ui::Flex{Axis: ui::Vertical, Children: children}
+}
+
+// ── Entry point ───────────────────────────────────────────────────────
+
+fn build(c: mut ffi::StateCtx, ctx: ui::BuildContext, api_key: Str) ui::Widget {
+  let theme = ui::MustDepend<ui::Theme>(ctx)
+  let model = ffi::StateValue<Model>(c)
+  // Tab / Shift+Tab / Escape are already mapped to NextFocusIntent,
+  // PreviousFocusIntent and DismissIntent by the app-level Shortcuts
+  // that wraps every vaxis/ui root. We can't override those keys from
+  // an inner Shortcuts because the outer one consumes them during the
+  // capture phase. Instead we install handlers for those upstream
+  // intents in our Actions: Invoke walks UP from the focused widget
+  // and finds our handler before it reaches the app-level Actions.
+  ui::Actions{
+    Bindings: [
+      "vaxis.next-focus": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        select_tab(c, cycle_next(ffi::StateValue<Model>(c)))
+        ui::EventHandled
+      },
+      "vaxis.previous-focus": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        select_tab(c, cycle_prev(ffi::StateValue<Model>(c)))
+        ui::EventHandled
+      },
+      "vaxis.dismiss": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        let current = ffi::StateValue<Model>(c)
+        match selected_is_issue_tab(current) {
+          true => {
+            replace_model(c, close_current_issue_tab(current))
+            ui::EventHandled
+          },
+          false => ui::EventIgnored,
+        }
+      },
+      "tabs.inbox": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        select_tab(c, 0)
+        ui::EventHandled
+      },
+      "tabs.my_issues": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        select_tab(c, 1)
+        ui::EventHandled
+      },
+    ],
+    Child: ui::Shortcuts{
+      Bindings: [
+        "1": ffi::Intent("tabs.inbox"),
+        "2": ffi::Intent("tabs.my_issues"),
+      ],
+      Child: ui::FocusScope{
+        AutoFocus: true,
+        Child: screen(c, theme, model, api_key),
+      },
+    },
+  }
+}
+
+fn new(api_key: Str) ui::Widget {
+  ffi::Stateful{
+    Init: fn() Any {
+      // Hydrate from the on-disk cache so the user returns to
+      // whatever they had open last session. Missing / unreadable /
+      // version-mismatched cache falls back to the default layout.
+      match cache::load_logged_in() {
+        cached => Model{
+          tab_index: cached.tab_index,
+          issue_tabs: cached.issue_tabs,
+        },
+        _ => Model{
+          tab_index: 0,
+          issue_tabs: [],
+        },
+      }
+    },
+    Build: fn(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
+      build(c, ctx, api_key)
+    },
+  }
+}
