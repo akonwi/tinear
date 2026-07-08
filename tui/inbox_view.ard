@@ -364,7 +364,7 @@ fn render_split(theme: ui::Theme, model: View) ui::Widget {
     // word/line, Ctrl+C copy via OSC 52. (Quit is on Ctrl+Q so Ctrl+C
     // isn't preempted.)
     ui::Expanded(ui::SelectionArea{
-      Child: ui::Padding(ui::Symmetric(0, 1), detail_pane(theme, model)),
+      Child: ui::Padding(ui::Symmetric(1, 0), detail_pane(theme, model)),
     }),
   ]
   ui::Flex{

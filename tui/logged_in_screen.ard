@@ -4,9 +4,11 @@ use go:tinear/ffi
 
 use tinear/models/cache
 use tinear/models/inbox
+use tinear/models/issues
 use tinear/os
 use tinear/tui/hints_bar
 use tinear/tui/inbox_view
+use tinear/tui/my_issues_view
 
 // Shell for the logged-in view.
 //
@@ -217,7 +219,16 @@ fn body_for(c: mut ffi::StateCtx, api_key: Str, s: Model) ui::Widget {
       fn(title: Str, description: Str) {},
       s.tab_index == 0,
     ),
-    placeholder("My Issues"),
+    my_issues_view::new(
+      api_key,
+      // From the My Issues board, Enter on a card promotes the issue
+      // to a dynamic tab. Same shell helper as the inbox uses.
+      fn(issue: issues::Issue) {
+        replace_model(c, open_issue_tab(ffi::StateValue<Model>(c), issue.identifier))
+      },
+      fn(title: Str, description: Str) {},
+      s.tab_index == 1,
+    ),
   ]
   for label in s.issue_tabs {
     children.push(placeholder(label))

@@ -23,9 +23,9 @@ fn body(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
   let theme = ui::MustDepend<ui::Theme>(ctx)
   let model = ffi::StateValue<AppState>(c)
   let content = match model.has_auth() {
-    true => logged_in_screen::new(model.api_key),
+    true => ui::Padding(ui::Symmetric(1, 0), logged_in_screen::new(model.api_key)),
     false => ui::Center(ui::Padding(
-      ui::Symmetric(0, 1),
+      ui::Symmetric(1, 0),
       welcome_screen::new(fn(api_key: Str) {
         set_api_key(c, api_key)
       }),
