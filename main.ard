@@ -159,11 +159,17 @@ fn root() ui::Widget {
         ui::EventHandled
       },
     ],
-    // Quit on Ctrl+Q. Ctrl+C is intentionally left free so vaxis's
-    // SelectionArea (wrapping the inbox detail pane and issue detail
-    // body) can claim it for copy-selection-to-clipboard.
+    // Quit on Ctrl+C (delivered as a key in raw mode, not SIGINT).
+    // Cmd+C (reported as Super+c where the terminal forwards it) copies
+    // the active selection: the binding invokes vaxis's
+    // copy-selection intent, which bubbles up from the focused element
+    // to whichever SelectionArea wraps it (the detail panes). With no
+    // selection on the focus path it's a harmless no-op.
     Child: ui::Shortcuts{
-      Bindings: ["Ctrl+q": ffi::Intent("tinear.quit")],
+      Bindings: [
+        "Ctrl+c": ffi::Intent("tinear.quit"),
+        "Super+c": ffi::Intent("vaxis.text.copy-selection"),
+      ],
       Child: ffi::Stateful{
         Init: fn() Any {
           let api_key = match config::load() {

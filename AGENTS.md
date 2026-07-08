@@ -27,7 +27,7 @@ ard test                         # run all unit tests
 
 | Path | Purpose |
 |------|---------|
-| `main.ard` | App entrypoint: AppState (`api_key`, toasts, `current_modal`), dispatch-safe `show_modal`/`close_modal`/`notify`, always-mounted overlay. Routes to `welcome_screen` if no API key, else `logged_in_screen`. Ctrl+Q quits (Ctrl+C stays free for SelectionArea copy). |
+| `main.ard` | App entrypoint: AppState (`api_key`, toasts, `current_modal`), dispatch-safe `show_modal`/`close_modal`/`notify`, always-mounted overlay. Routes to `welcome_screen` if no API key, else `logged_in_screen`. Ctrl+C quits; Super+c (Cmd+C, where the terminal forwards it) invokes the copy-selection intent so the detail-pane SelectionArea copies the active selection. |
 | `config.ard` | Read/write `~/.tinear/config.json` and `$LINEAR_API_KEY` via `go:os` + `go:encoding/json`. |
 | `decode.ard` | Composable JSON decoding over opaque `Any`: `from_json`, `run`, primitives, `nullable`/`list`/`field`/`path` combinators with path-carrying errors. |
 | `linear/client.ard` | Shared GraphQL client (`graphql(api_key, query)`) over `go:net/http` with a 30s client timeout and GraphQL-error extraction. |
