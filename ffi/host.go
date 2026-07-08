@@ -25,3 +25,9 @@ func OpenURL(url string) error {
 	}
 	return cmd.Start()
 }
+
+// StrFromBytes converts raw bytes to a string. Stopgap until the language
+// provides Str::from_bytes (filed upstream); JSON marshalling returns [Byte].
+func StrFromBytes(b []byte) string {
+	return string(b)
+}
