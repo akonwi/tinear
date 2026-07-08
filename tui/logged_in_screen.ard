@@ -3,7 +3,10 @@ use go:go.rockorager.dev/vaxis/ui
 use go:tinear/ffi
 
 use tinear/models/cache
+use tinear/models/inbox
+use tinear/os
 use tinear/tui/hints_bar
+use tinear/tui/inbox_view
 
 // Shell for the logged-in view.
 //
@@ -183,12 +186,37 @@ fn placeholder(label: Str) ui::Widget {
   ui::Center(ui::Text{Value: "{label} — coming back soon"})
 }
 
+// Open an inbox item. Routing:
+//   issue/comment/mention notifications -> promote target_id to a
+//     new (or existing) tab in issue_tabs and select it
+//   PR notifications -> launch notification.url in the system
+//     browser. The URL is Linear's deep-link to the specific
+//     comment/mention activity, so it lands the user in the right
+//     spot in Linear's review UI.
+//   project / other notifications -> if a url is present, open it
+//     in the browser; otherwise no-op.
+fn open_inbox_item(c: mut ffi::StateCtx, item: inbox::Item) {
+  if item.notification_type.starts_with("issue") {
+    replace_model(c, open_issue_tab(ffi::StateValue<Model>(c), item.target_id))
+  } else {
+    if not item.url.is_empty() {
+      let _ = os::open_url(item.url)
+    }
+  }
+}
+
 // Resolves the active tab to a body widget. All bodies are mounted at
 // once via IndexedStack so each tab's local state survives switching
 // tabs — only the visible tab paints.
-fn body_for(api_key: Str, s: Model) ui::Widget {
+fn body_for(c: mut ffi::StateCtx, api_key: Str, s: Model) ui::Widget {
   mut children: [ui::Widget] = [
-    placeholder("Inbox"),
+    inbox_view::new(
+      api_key,
+      fn(item: inbox::Item) { open_inbox_item(c, item) },
+      // Toasts return with their slice; drop notifications for now.
+      fn(title: Str, description: Str) {},
+      s.tab_index == 0,
+    ),
     placeholder("My Issues"),
   ]
   for label in s.issue_tabs {
@@ -235,7 +263,7 @@ fn hints_for(s: Model) [hints_bar::Hint] {
 fn screen(c: mut ffi::StateCtx, theme: ui::Theme, s: Model, api_key: Str) ui::Widget {
   mut children: [ui::Widget] = [
     tab_bar(c, theme, s),
-    ui::Expanded(body_for(api_key, s)),
+    ui::Expanded(body_for(c, api_key, s)),
     hints_bar::new(theme, hints_for(s)),
   ]
   ui::Flex{Axis: ui::Vertical, Children: children}

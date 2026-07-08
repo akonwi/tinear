@@ -17,6 +17,16 @@ type StateCtx struct {
 	value          any
 	markNeedsBuild func()
 	anim           *ui.AnimationController
+	runtime        ui.Runtime
+}
+
+// Dispatch posts fn onto the UI thread. Background fibers must route all
+// state mutation through here: StateRef + MarkDirty are only safe on the
+// UI thread. Dispatching after unmount is a silent no-op upstream.
+func Dispatch(c *StateCtx, fn func()) {
+	if c.runtime != nil {
+		c.runtime.Dispatch(fn)
+	}
 }
 
 // Animation returns the StateBase-owned animation controller. It is nil unless
@@ -130,7 +140,7 @@ func (s *statefulState) Build(bctx ui.BuildContext) ui.Widget {
 	// new closure); state persists in s.ctx across rebuilds.
 	w := s.StateBase.Widget().(Stateful)
 	if s.ctx == nil {
-		s.ctx = &StateCtx{markNeedsBuild: s.MarkNeedsBuild, value: w.Init()}
+		s.ctx = &StateCtx{markNeedsBuild: s.MarkNeedsBuild, value: w.Init(), runtime: s.Context().Runtime()}
 	}
 	s.ctx.anim = s.anim
 	return w.Build(s.ctx, bctx)

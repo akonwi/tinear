@@ -1,0 +1,586 @@
+use ard/async
+use ard/maybe
+use go:go.rockorager.dev/vaxis/ui
+use go:tinear/ffi
+
+use tinear/models/inbox
+
+// Local state for the Inbox view.
+//
+// The scroll controllers are created once in Init and stored here so the
+// list and detail scroll positions survive rebuilds.
+//
+// Detail-pane fields:
+//   detail_request_id  the notification id we currently want to display
+//                      (set when cursor moves to a new item)
+//   detail_loaded_id   the notification id of the loaded detail (cache key)
+//   detail             the loaded data, when present
+//   detail_loading     true while a fetch is in flight for detail_request_id
+//   detail_error       last detail-load error message (cleared on success)
+struct View {
+  started: Bool,
+  items: [inbox::Item],
+  cursor: Int,
+  loading: Bool,
+  error: Str,
+  list_scroll: mut ui::ScrollPaneController,
+  // Detail pane uses a ScrollController (single-axis) instead of a
+  // ScrollPaneController (both axes) so its child gets a bounded
+  // cross-axis width, which is what makes SoftWrap actually wrap.
+  detail_scroll: mut ui::ScrollController,
+  detail_request_id: Str,
+  detail_loaded_id: Str,
+  detail: inbox::Detail?,
+  detail_loading: Bool,
+  detail_error: Str,
+}
+
+fn clamp_cursor(cursor: Int, count: Int) Int {
+  match {
+    count <= 0 => 0,
+    cursor < 0 => 0,
+    cursor >= count => count - 1,
+    _ => cursor,
+  }
+}
+
+// ── Async work ────────────────────────────────────────────────────────
+
+// Background detail fetch. Late results are discarded if the user has
+// since moved to a different item (detail_request_id no longer matches).
+// Errors are surfaced inline in the detail pane (no toast — the pane
+// itself is the dedicated slot for that failure mode).
+fn fetch_detail(c: mut ffi::StateCtx, api_key: Str, target_id: Str) {
+  async::start(fn() {
+    let result = inbox::load_detail(api_key, target_id)
+    ffi::Dispatch(c, fn() {
+      let s = ffi::StateRef<View>(c)
+      if s.detail_request_id == target_id {
+        match result {
+          ok(d) => {
+            s.detail = maybe::some(d)
+            s.detail_loaded_id = target_id
+            s.detail_loading = false
+            s.detail_error = ""
+          },
+          err(e) => {
+            s.detail_loading = false
+            s.detail_error = e
+          },
+        }
+        ffi::MarkDirty(c)
+      }
+    })
+  })
+}
+
+// Request the detail for whatever item the cursor is currently on, if it
+// differs from what's already loaded or in-flight. Safe to call from any
+// action handler.
+fn request_detail_for_cursor(c: mut ffi::StateCtx, api_key: Str) {
+  let s = ffi::StateValue<View>(c)
+  if s.items.size() > 0 {
+    let target_id = s.items.at(s.cursor).expect("cursor clamped").notification_id
+    let already_requested = s.detail_request_id == target_id
+    let already_loaded = s.detail_loaded_id == target_id
+    if not target_id.is_empty() and not already_requested and not already_loaded {
+      let live = ffi::StateRef<View>(c)
+      live.detail_request_id = target_id
+      live.detail_loading = true
+      live.detail_error = ""
+      live.detail = maybe::none()
+      ffi::MarkDirty(c)
+      fetch_detail(c, api_key, target_id)
+    }
+  }
+}
+
+// Errors are surfaced inline via the error_pane the body renders when
+// `view.error` is non-empty — no toast for load failures since the pane
+// itself is the dedicated UI slot for that.
+fn load_inbox(c: mut ffi::StateCtx, api_key: Str) {
+  async::start(fn() {
+    let result = inbox::load(api_key)
+    ffi::Dispatch(c, fn() {
+      let s = ffi::StateRef<View>(c)
+      match result {
+        ok(items) => {
+          s.items = items
+          s.error = ""
+          s.cursor = clamp_cursor(s.cursor, items.size())
+        },
+        err(e) => { s.error = e },
+      }
+      s.loading = false
+      ffi::MarkDirty(c)
+      // After the inbox lands, kick off a detail fetch for whatever item
+      // ends up under the cursor (cursor 0 on first load).
+      request_detail_for_cursor(c, api_key)
+    })
+  })
+}
+
+// ── List rendering ────────────────────────────────────────────────────
+
+// A single inbox row. Two lines per tile:
+//   line 1 (title):    issue title, ellipsis-truncated to pane width
+//   line 2 (subtitle): actor name + action (e.g. "alice commented")
+fn render_row(theme: ui::Theme, item: inbox::Item, selected: Bool) ui::Widget {
+  let title = ui::RichText{
+    Spans: [ui::TextSpan{Text: item.title, Style: ui::Style{Foreground: theme.Foreground}}],
+    Overflow: ui::TextOverflowEllipsis,
+    MaxLines: 1,
+  }
+  let subtitle = ui::Text{
+    Value: "{item.actor_name} {item.type_label}",
+    Style: ui::Style{Foreground: theme.MutedForeground},
+  }
+  ui::ListTile{Title: title, Subtitle: subtitle, Selected: selected}
+}
+
+fn list_rows(theme: ui::Theme, model: View) [ui::Widget] {
+  mut rows: [ui::Widget] = []
+  for item, idx in model.items {
+    rows.push(render_row(theme, item, idx == model.cursor))
+  }
+  rows
+}
+
+// Width of the list pane (left side) in the split. Fixed at 36 cols for
+// v1; future versions can make this responsive once we expose terminal
+// size from the runtime.
+let LIST_PANE_WIDTH: Int = 36
+
+fn list_pane(theme: ui::Theme, model: View) ui::Widget {
+  // ScrollPane lays its child out with unbounded width AND height (so
+  // the child can be larger than the pane and scroll). That unbounded
+  // width means the row inside each ListTile has no flex space to hand
+  // to its expanded cell — the row collapses to its intrinsic content
+  // width and the selected-row highlight ends up only as wide as the
+  // text, not the pane.
+  //
+  // We pin the column's width with an inner SizedBox so the ListTiles
+  // get full-pane width and the highlight spans the whole row.
+  // MainAxisSizeMin keeps the column the height of its rows so they sit
+  // at the top instead of stretching vertically.
+  ui::ScrollPane{
+    Controller: model.list_scroll,
+    Child: ui::SizedBox{
+      Width: LIST_PANE_WIDTH,
+      Child: ui::Flex{
+        Axis: ui::Vertical,
+        MainAxisSize: ui::MainAxisSizeMin,
+        CrossAxisAlignment: ui::CrossAxisStretch,
+        Children: list_rows(theme, model),
+      },
+    },
+  }
+}
+
+// ── Detail rendering ──────────────────────────────────────────────────
+
+fn muted(theme: ui::Theme, value: Str) ui::Widget {
+  ui::Text{Value: value, Style: ui::Style{Foreground: theme.MutedForeground}}
+}
+
+fn blank_line() ui::Widget {
+  ui::SizedBox{Height: 1}
+}
+
+fn min_column(children: [ui::Widget], stretch: Bool) ui::Widget {
+  match stretch {
+    true => ui::Flex{
+      Axis: ui::Vertical,
+      MainAxisSize: ui::MainAxisSizeMin,
+      CrossAxisAlignment: ui::CrossAxisStretch,
+      Children: children,
+    },
+    false => ui::Flex{
+      Axis: ui::Vertical,
+      MainAxisSize: ui::MainAxisSizeMin,
+      CrossAxisAlignment: ui::CrossAxisStart,
+      Children: children,
+    },
+  }
+}
+
+// Header reminds the reader WHY they got the notification: who acted,
+// what they did, and which item it's about. This is the context that
+// gets lost if we lead with the full issue title.
+fn detail_header(theme: ui::Theme, item: inbox::Item, d: inbox::Detail) ui::Widget {
+  let context_line = "{item.actor_name} {item.type_label}"
+  let id_label = match d.team_key.is_empty() {
+    false => "{d.identifier} · {d.team_key}",
+    true => d.identifier,
+  }
+  mut children: [ui::Widget] = [
+    ui::Text{Value: context_line, Style: ui::Style{Foreground: theme.AccentText, Attribute: ui::AttrBold}},
+    muted(theme, id_label),
+    blank_line(),
+    ui::RichText{
+      Spans: [ui::TextSpan{Text: d.title, Style: ui::Style{Foreground: theme.Foreground, Attribute: ui::AttrBold}}],
+      SoftWrap: true,
+    },
+  ]
+  min_column(children, false)
+}
+
+fn meta_row(theme: ui::Theme, label: Str, value: Str) ui::Widget {
+  mut children: [ui::Widget] = [
+    ui::SizedBox{Width: 12, Height: 1, Child: muted(theme, label)},
+    ui::Expanded(ui::Text{Value: value, Style: ui::Style{Foreground: theme.Foreground}}),
+  ]
+  ui::Flex{Axis: ui::Horizontal, Children: children}
+}
+
+// Compact metadata: just status and assignee. Keeping this short means
+// the description (the thing the user actually wants to read) lands on
+// screen without a scroll.
+fn detail_meta(theme: ui::Theme, d: inbox::Detail) ui::Widget {
+  min_column([
+    meta_row(theme, "Status", d.state_name),
+    meta_row(theme, "Assignee", d.assignee_name),
+  ], true)
+}
+
+fn section_divider(theme: ui::Theme, label: Str) ui::Widget {
+  min_column([
+    blank_line(),
+    ui::Text{Value: label, Style: ui::Style{Foreground: theme.MutedForeground, Attribute: ui::AttrBold}},
+    blank_line(),
+  ], false)
+}
+
+fn detail_description(theme: ui::Theme, body: Str) ui::Widget {
+  match body.is_empty() {
+    true => muted(theme, "(no description)"),
+    false => ui::RichText{
+      Spans: [ui::TextSpan{Text: body, Style: ui::Style{Foreground: theme.Foreground}}],
+      SoftWrap: true,
+    },
+  }
+}
+
+fn render_comment(theme: ui::Theme, comment: inbox::DetailComment) ui::Widget {
+  let header = match comment.created_at.is_empty() {
+    false => "{comment.author} · {comment.created_at}",
+    true => comment.author,
+  }
+  min_column([
+    muted(theme, header),
+    ui::RichText{
+      Spans: [ui::TextSpan{Text: comment.body, Style: ui::Style{Foreground: theme.Foreground}}],
+      SoftWrap: true,
+    },
+    blank_line(),
+  ], false)
+}
+
+fn render_detail(theme: ui::Theme, item: inbox::Item, d: inbox::Detail, scroll: mut ui::ScrollController) ui::Widget {
+  // Layout order: notification context, identifier, issue title, compact
+  // metadata, then the *thing that triggered the notification* (the
+  // specific comment/mention if present, else the issue description).
+  // For comment/mention notifications the user wants to see THAT comment
+  // immediately, not scroll past the whole issue body to find it.
+  mut children: [ui::Widget] = [
+    detail_header(theme, item, d),
+    section_divider(theme, "Details"),
+    detail_meta(theme, d),
+  ]
+  match d.triggering_comment {
+    comment => {
+      children.push(section_divider(theme, "Comment"))
+      children.push(render_comment(theme, comment))
+    },
+    _ => {
+      children.push(section_divider(theme, "Description"))
+      children.push(detail_description(theme, d.description))
+    },
+  }
+  if d.comments.size() > 0 {
+    children.push(blank_line())
+    children.push(muted(
+      theme,
+      "{d.comments.size()} comments in thread — press Enter for the full issue",
+    ))
+  }
+  // ScrollView (single-axis) keeps the child's cross-axis (width)
+  // bounded so SoftWrap can actually wrap title and comment text.
+  // ScrollPane would unbound both axes and the wrapped text would
+  // render on a single very long line.
+  ui::ScrollView{
+    Controller: scroll,
+    Child: min_column(children, true),
+  }
+}
+
+fn detail_pane(theme: ui::Theme, model: View) ui::Widget {
+  if model.detail_loading {
+    ui::Center(muted(theme, "Loading detail…"))
+  } else if not model.detail_error.is_empty() {
+    ui::Center(min_column([
+      ui::Text{Value: "Failed to load detail", Style: ui::Style{Foreground: theme.DangerText}},
+      blank_line(),
+      ui::RichText{
+        Spans: [ui::TextSpan{Text: model.detail_error, Style: ui::Style{Foreground: theme.MutedForeground}}],
+        SoftWrap: true,
+      },
+    ], false))
+  } else if model.items.size() > 0 {
+    let item = model.items.at(model.cursor).expect("cursor clamped")
+    match model.detail {
+      d => render_detail(theme, item, d, model.detail_scroll),
+      _ => ui::Center(muted(theme, "Select a notification")),
+    }
+  } else {
+    ui::Center(muted(theme, "Select a notification"))
+  }
+}
+
+// ── Split body ────────────────────────────────────────────────────────
+
+fn render_split(theme: ui::Theme, model: View) ui::Widget {
+  let separator = ui::SizedBox{
+    Width: 1,
+    Child: ui::DecoratedBox(
+      ui::Decoration{
+        Style: ui::Style{Background: theme.Background},
+        Border: ui::Border{
+          Left: true,
+          Style: ui::Style{Foreground: theme.Border, Background: theme.Background},
+        },
+      },
+      ui::Text{Value: ""},
+    ),
+  }
+  // CrossAxisStretch is critical here: a row defaults to centering
+  // children vertically at intrinsic size, which would leave the list
+  // and detail floating in the middle of the body. We want both panes
+  // tall.
+  mut children: [ui::Widget] = [
+    ui::SizedBox{Width: LIST_PANE_WIDTH, Child: list_pane(theme, model)},
+    separator,
+    // SelectionArea: mouse-drag selection, double/triple-click
+    // word/line, Ctrl+C copy via OSC 52. (Quit is on Ctrl+Q so Ctrl+C
+    // isn't preempted.)
+    ui::Expanded(ui::SelectionArea{
+      Child: ui::Padding(ui::Symmetric(0, 1), detail_pane(theme, model)),
+    }),
+  ]
+  ui::Flex{
+    Axis: ui::Horizontal,
+    CrossAxisAlignment: ui::CrossAxisStretch,
+    Children: children,
+  }
+}
+
+fn error_pane(theme: ui::Theme, err: Str) ui::Widget {
+  mut children: [ui::Widget] = [
+    ui::Text{Value: err, Style: ui::Style{Foreground: theme.DangerText}},
+    blank_line(),
+    muted(theme, "press r to retry"),
+  ]
+  ui::Center(ui::Flex{
+    Axis: ui::Vertical,
+    MainAxisSize: ui::MainAxisSizeMin,
+    CrossAxisAlignment: ui::CrossAxisCenter,
+    Children: children,
+  })
+}
+
+// All body branches return a Flex so the outermost widget type at the
+// body slot never changes between rebuilds (widget-reconciliation trap).
+fn body(theme: ui::Theme, model: View) ui::Widget {
+  let inner = match {
+    model.loading => ui::Center(ui::Text{Value: "Loading inbox…"}),
+    not model.error.is_empty() => error_pane(theme, model.error),
+    model.items.size() == 0 => ui::Center(muted(theme, "No notifications")),
+    _ => render_split(theme, model),
+  }
+  mut children: [ui::Widget] = [ui::Expanded(inner)]
+  ui::Flex{Axis: ui::Vertical, Children: children}
+}
+
+// ── Actions ───────────────────────────────────────────────────────────
+
+fn move_cursor(c: mut ffi::StateCtx, api_key: Str, delta: Int) {
+  let s = ffi::StateRef<View>(c)
+  let next_cursor = clamp_cursor(s.cursor + delta, s.items.size())
+  s.cursor = next_cursor
+  s.list_scroll.ScrollTo(0, next_cursor)
+  s.detail_scroll.ScrollToStart()
+  ffi::MarkDirty(c)
+  request_detail_for_cursor(c, api_key)
+}
+
+fn delete_current(c: mut ffi::StateCtx, api_key: Str, notify: fn(Str, Str)) {
+  let before = ffi::StateValue<View>(c)
+  if before.cursor < before.items.size() {
+    let item = before.items.at(before.cursor).expect("cursor clamped")
+    let id = item.notification_id
+    // Fire-and-forget archive; on failure surface a toast. A failed
+    // archive will also reappear on the next manual refresh since we
+    // removed it locally.
+    async::start(fn() {
+      match inbox::archive(api_key, id) {
+        ok(_) => {},
+        err(e) => notify("Couldn't archive notification", e),
+      }
+    })
+    // Batch every post-delete mutation into one pass so the optimistic
+    // update is a single rebuild: drop the row, clamp the cursor, and
+    // update the detail-pane tracking fields for the new cursor target.
+    let s = ffi::StateRef<View>(c)
+    mut remaining: [inbox::Item] = []
+    for it, idx in before.items {
+      if not (idx == before.cursor) {
+        remaining.push(it)
+      }
+    }
+    s.items = remaining
+    s.cursor = clamp_cursor(before.cursor, remaining.size())
+    if remaining.size() == 0 {
+      s.detail = maybe::none()
+      s.detail_loaded_id = ""
+      s.detail_request_id = ""
+      s.detail_loading = false
+      s.detail_error = ""
+    } else {
+      let new_target = remaining.at(s.cursor).expect("clamped").notification_id
+      if not (s.detail_loaded_id == new_target) {
+        s.detail = maybe::none()
+        s.detail_request_id = new_target
+        s.detail_loading = true
+        s.detail_error = ""
+      }
+    }
+    ffi::MarkDirty(c)
+    // After the single state mutation, kick off a fetch for the new
+    // cursor target if that detail isn't already cached.
+    let after = ffi::StateValue<View>(c)
+    let needs_fetch = after.items.size() > 0 and after.detail_loading and not after.detail_request_id.is_empty()
+    if needs_fetch {
+      fetch_detail(c, api_key, after.detail_request_id)
+    }
+  }
+}
+
+// ── Entry point ───────────────────────────────────────────────────────
+
+fn build(
+  c: mut ffi::StateCtx, ctx: ui::BuildContext,
+  api_key: Str, on_open: fn(inbox::Item), notify: fn(Str, Str), active: Bool,
+) ui::Widget {
+  let theme = ui::MustDepend<ui::Theme>(ctx)
+  let model = ffi::StateValue<View>(c)
+
+  // Only the active tab's focus scope participates in auto_focus and
+  // reclaim. Hidden tabs (kept mounted by IndexedStack) must not pull
+  // focus onto themselves, or keystrokes would route to a tab the user
+  // can't see.
+  ui::Actions{
+    Bindings: [
+      "inbox.next": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        move_cursor(c, api_key, 1)
+        ui::EventHandled
+      },
+      "inbox.prev": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        move_cursor(c, api_key, -1)
+        ui::EventHandled
+      },
+      "inbox.open": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        let s = ffi::StateValue<View>(c)
+        if s.cursor < s.items.size() {
+          on_open(s.items.at(s.cursor).expect("cursor clamped"))
+        }
+        ui::EventHandled
+      },
+      "inbox.delete": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        delete_current(c, api_key, notify)
+        ui::EventHandled
+      },
+      "inbox.refresh": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        let s = ffi::StateRef<View>(c)
+        s.loading = true
+        s.error = ""
+        ffi::MarkDirty(c)
+        load_inbox(c, api_key)
+        ui::EventHandled
+      },
+      // Detail-pane scrolling forwarded from list-focused shortcuts.
+      "inbox.detail.line_down": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        model.detail_scroll.ScrollByLines(1)
+        ui::EventHandled
+      },
+      "inbox.detail.line_up": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        model.detail_scroll.ScrollByLines(-1)
+        ui::EventHandled
+      },
+      "inbox.detail.page_down": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        model.detail_scroll.ScrollByPages(1)
+        ui::EventHandled
+      },
+      "inbox.detail.page_up": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        model.detail_scroll.ScrollByPages(-1)
+        ui::EventHandled
+      },
+    ],
+    Child: ui::Shortcuts{
+      Bindings: [
+        "j": ffi::Intent("inbox.next"),
+        "Down": ffi::Intent("inbox.next"),
+        "k": ffi::Intent("inbox.prev"),
+        "Up": ffi::Intent("inbox.prev"),
+        "Enter": ffi::Intent("inbox.open"),
+        "Backspace": ffi::Intent("inbox.delete"),
+        "r": ffi::Intent("inbox.refresh"),
+        "l": ffi::Intent("inbox.detail.line_down"),
+        "Right": ffi::Intent("inbox.detail.line_down"),
+        "h": ffi::Intent("inbox.detail.line_up"),
+        "Left": ffi::Intent("inbox.detail.line_up"),
+        "Space": ffi::Intent("inbox.detail.page_down"),
+        "Shift+Space": ffi::Intent("inbox.detail.page_up"),
+      ],
+      Child: ui::FocusScope{
+        AutoFocus: active,
+        ReclaimFocus: active,
+        Child: body(theme, model),
+      },
+    },
+  }
+}
+
+fn new(api_key: Str, on_open: fn(inbox::Item), notify: fn(Str, Str), active: Bool) ui::Widget {
+  ffi::Stateful{
+    Init: fn() Any {
+      // Bound first because `mut pkg::Type{}` doesn't parse yet (ard#285).
+      mut list_scroll = ui::ScrollPaneController{}
+      mut detail_scroll = ui::ScrollController{}
+      View{
+        started: false,
+        items: [],
+        cursor: 0,
+        loading: true,
+        error: "",
+        list_scroll: mut list_scroll,
+        detail_scroll: mut detail_scroll,
+        detail_request_id: "",
+        detail_loaded_id: "",
+        detail: maybe::none(),
+        detail_loading: false,
+        detail_error: "",
+      }
+    },
+    Build: fn(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
+      // Kick the initial fetch on the first build: the shim's StateCtx
+      // is created lazily, so Init cannot reach it yet. `started` makes
+      // this once-only across rebuilds.
+      let s = ffi::StateRef<View>(c)
+      if not s.started {
+        s.started = true
+        load_inbox(c, api_key)
+      }
+      build(c, ctx, api_key, on_open, notify, active)
+    },
+  }
+}
