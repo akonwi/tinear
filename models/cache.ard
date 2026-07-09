@@ -1,8 +1,7 @@
 use ard/maybe
+
 use go:encoding/json
 use go:os
-use go:tinear/ffi
-
 use tinear/config
 use tinear/decode
 
@@ -16,7 +15,9 @@ use tinear/decode
 // view fetches the issue itself, so we'd just be persisting stale
 // metadata if we cached the full struct.
 
-fn version() Int { 1 }
+fn version() Int {
+  1
+}
 
 struct LoggedInCache {
   tab_index: Int,
@@ -30,11 +31,11 @@ struct DataCache {
 
 fn empty_logged_in() LoggedInCache {
   let empty: [Str] = []
-  LoggedInCache{ tab_index: 0, issue_tabs: empty }
+  LoggedInCache{tab_index: 0, issue_tabs: empty}
 }
 
 fn empty() DataCache {
-  DataCache{ version: version(), logged_in: empty_logged_in() }
+  DataCache{version: version(), logged_in: empty_logged_in()}
 }
 
 fn data_path() Str!Str {
@@ -47,9 +48,11 @@ fn data_path() Str!Str {
 // than to load incompatible data.
 fn decode(content: Str) DataCache? {
   match parse(content) {
-    ok(cache) => match cache.version == version() {
-      true => maybe::some(cache),
-      false => maybe::none(),
+    ok(cache) => {
+      match cache.version == version() {
+        true => maybe::some(cache),
+        false => maybe::none(),
+      }
     },
     err(_) => maybe::none(),
   }
@@ -64,25 +67,24 @@ private fn describe(e: decode::Error) Str {
 private fn parse(content: Str) DataCache!Str {
   let data = try decode::from_json(content)
   let parsed_version = try decode::run(data, decode::field("version", decode::int)).map_err(describe)
-  let tab_index = try decode::run(
-    data,
-    decode::path(["logged_in", "tab_index"], decode::int),
-  ).map_err(describe)
+  let tab_index = try decode::run(data, decode::path(["logged_in", "tab_index"], decode::int)).map_err(describe)
   let issue_tabs = try decode::run(
     data,
     decode::path(["logged_in", "issue_tabs"], decode::list(decode::string)),
   ).map_err(describe)
-  Result::ok(DataCache{
-    version: parsed_version,
-    logged_in: LoggedInCache{tab_index: tab_index, issue_tabs: issue_tabs},
-  })
+  Result::ok(
+    DataCache{
+      version: parsed_version,
+      logged_in: LoggedInCache{tab_index: tab_index, issue_tabs: issue_tabs},
+    },
+  )
 }
 
 fn encode(cache: DataCache) Str!Str {
   mut normalized = cache
   normalized.version = version()
   mut bytes = try json::Marshal(normalized)
-  Result::ok(ffi::StrFromBytes(bytes))
+  Result::ok(Str::from(bytes))
 }
 
 fn load() DataCache? {
@@ -91,7 +93,7 @@ fn load() DataCache? {
       match os::ReadFile(path) {
         ok(bytes) => {
           mut copy = bytes
-          decode(ffi::StrFromBytes(copy))
+          decode(Str::from(copy))
         },
         err(_) => maybe::none(),
       }

@@ -1,7 +1,6 @@
 use go:go.rockorager.dev/vaxis/ui
-use go:tinear/ffi
-
 use tinear/config
+use go:tinear/ffi
 use tinear/linear/client
 
 struct State {
@@ -40,24 +39,32 @@ fn spacer(height: Int) ui::Widget {
 }
 
 fn set_draft(c: mut ffi::StateCtx, value: Str) {
-  ffi::Update<State>(c, fn(s: mut State) {
-    s.draft_api_key = value
-    s.has_error = false
-  })
+  ffi::Update<State>(
+    c,
+    fn(s: mut State) {
+      s.draft_api_key = value
+      s.has_error = false
+    },
+  )
 }
 
 fn set_error(c: mut ffi::StateCtx) {
-  ffi::Update<State>(c, fn(s: mut State) {
-    s.has_error = true
-  })
+  ffi::Update<State>(
+    c,
+    fn(s: mut State) {
+      s.has_error = true
+    },
+  )
 }
 
 fn submit_login(c: mut ffi::StateCtx, api_key: Str, on_login_success: fn(Str)) {
   match api_key.is_empty() {
     true => set_error(c),
-    false => match validate_and_save(api_key) {
-      ok(_) => on_login_success(api_key),
-      err(_) => set_error(c),
+    false => {
+      match validate_and_save(api_key) {
+        ok(_) => on_login_success(api_key),
+        err(_) => set_error(c),
+      }
     },
   }
 }
@@ -67,24 +74,28 @@ fn form(c: mut ffi::StateCtx, theme: ui::Theme, model: State, on_login_success: 
   children.push(spacer(2))
   children.push(ui::Text{Value: "Enter your Linear API key"})
   children.push(spacer(1))
-  children.push(ui::TextField{
-    Value: model.draft_api_key,
-    Placeholder: "Paste Linear API key",
-    MinWidth: 48,
-    OnChanged: fn(ev: ui::EventContext, value: Str) {
-      set_draft(c, value)
+  children.push(
+    ui::TextField{
+      Value: model.draft_api_key,
+      Placeholder: "Paste Linear API key",
+      MinWidth: 48,
+      OnChanged: fn(ev: ui::EventContext, value: Str) {
+        set_draft(c, value)
+      },
+      OnSubmitted: fn(ev: ui::EventContext, value: Str) {
+        submit_login(c, value, on_login_success)
+      },
     },
-    OnSubmitted: fn(ev: ui::EventContext, value: Str) {
-      submit_login(c, value, on_login_success)
-    },
-  })
+  )
   children.push(spacer(1))
-  children.push(ui::Button{
-    Label: "Login",
-    OnPressed: fn(ev: ui::EventContext) {
-      submit_login(c, ffi::StateValue<State>(c).draft_api_key, on_login_success)
+  children.push(
+    ui::Button{
+      Label: "Login",
+      OnPressed: fn(ev: ui::EventContext) {
+        submit_login(c, ffi::StateValue<State>(c).draft_api_key, on_login_success)
+      },
     },
-  })
+  )
   if model.has_error {
     children.push(spacer(1))
     children.push(ui::Text{Value: "Invalid API token", Style: ui::Style{Foreground: theme.DangerText}})

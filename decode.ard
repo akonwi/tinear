@@ -1,3 +1,8 @@
+use ard/maybe
+use ard/unsafe
+
+use go:encoding/json
+
 // Composable JSON decoding over opaque `Any` values.
 //
 // This replaces the removed `ard/decode` stdlib module. JSON text parses into
@@ -9,9 +14,6 @@
 // `nullable` build bigger decoders out of smaller ones:
 //
 //   let title = try decode::run(data, decode::field("title", decode::string))
-use ard/maybe
-use ard/unsafe
-use go:encoding/json
 
 struct Error {
   expected: Str,
@@ -139,12 +141,14 @@ fn list(decoder: fn(Any) $T!Error) fn(Any) [$T]!Error {
 fn field(name: Str, decoder: fn(Any) $T!Error) fn(Any) $T!Error {
   fn(data: Any) $T!Error {
     match unsafe::cast<[Str: Any]>(data) {
-      obj => match obj.get(name) {
-        value => {
-          let decoded = try decoder(value) -> e { Result::err(nest(e, name)) }
-          Result::ok(decoded)
-        },
-        _ => Result::err(Error{expected: "a value", path: [name]}),
+      obj => {
+        match obj.get(name) {
+          value => {
+            let decoded = try decoder(value) -> e { Result::err(nest(e, name)) }
+            Result::ok(decoded)
+          },
+          _ => Result::err(Error{expected: "a value", path: [name]}),
+        }
       },
       _ => Result::err(fail("an object")),
     }
@@ -165,12 +169,16 @@ fn walk_path(data: Any, names: [Str], index: Int, decoder: fn(Any) $T!Error) $T!
     false => {
       let name = names.at(index).expect("bounds checked")
       match unsafe::cast<[Str: Any]>(data) {
-        obj => match obj.get(name) {
-          value => match walk_path(value, names, index + 1, decoder) {
-            ok(decoded) => Result::ok(decoded),
-            err(e) => Result::err(nest(e, name)),
-          },
-          _ => Result::err(Error{expected: "a value", path: [name]}),
+        obj => {
+          match obj.get(name) {
+            value => {
+              match walk_path(value, names, index + 1, decoder) {
+                ok(decoded) => Result::ok(decoded),
+                err(e) => Result::err(nest(e, name)),
+              }
+            },
+            _ => Result::err(Error{expected: "a value", path: [name]}),
+          }
         },
         _ => Result::err(fail("an object")),
       }

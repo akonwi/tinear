@@ -1,6 +1,6 @@
-use tinear/decode
 use ard/testing
 
+use tinear/decode
 use tinear/models/issues
 
 fn issue_json_with_title(title: Str, description: Str) Str {

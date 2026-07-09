@@ -1,7 +1,5 @@
-use ard/maybe
 use go:go.rockorager.dev/vaxis/ui
 use go:tinear/ffi
-
 use tinear/tui/hints_bar
 use tinear/tui/modal
 
@@ -78,11 +76,15 @@ fn render_options(theme: ui::Theme, props: Props, cursor: Int, on_pick: fn(Int))
       true => "{option.label}   (current)",
       false => option.label,
     }
-    rows.push(ui::ListTile{
-      Title: ui::Text{Value: title_text, Style: ui::Style{Foreground: theme.Foreground}},
-      Selected: idx == cursor,
-      OnPressed: fn(ev: ui::EventContext) { on_pick(row_idx) },
-    })
+    rows.push(
+      ui::ListTile{
+        Title: ui::Text{Value: title_text, Style: ui::Style{Foreground: theme.Foreground}},
+        Selected: idx == cursor,
+        OnPressed: fn(ev: ui::EventContext) {
+          on_pick(row_idx)
+        },
+      },
+    )
   }
   ui::Flex{
     Axis: ui::Vertical,
@@ -101,9 +103,12 @@ fn picker_hints() [hints_bar::Hint] {
 }
 
 fn move_cursor(c: mut ffi::StateCtx, count: Int, delta: Int) {
-  ffi::Update<PickerState>(c, fn(s: mut PickerState) {
-    s.cursor = clamp_cursor(s.cursor + delta, count)
-  })
+  ffi::Update<PickerState>(
+    c,
+    fn(s: mut PickerState) {
+      s.cursor = clamp_cursor(s.cursor + delta, count)
+    },
+  )
 }
 
 // Body widget (everything between the title divider and the footer
@@ -175,7 +180,9 @@ fn new(props: Props) fn(ui::Theme, fn()) ui::Widget {
       picker_body(props, close),
       hints_bar::row(theme, picker_hints()),
       props.width,
-      fn(ev: ui::EventContext) { close() },
+      fn(ev: ui::EventContext) {
+        close()
+      },
     )
   }
 }

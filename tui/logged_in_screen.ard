@@ -1,8 +1,8 @@
 use ard/async
 use ard/maybe
+
 use go:go.rockorager.dev/vaxis/ui
 use go:tinear/ffi
-
 use tinear/models/cache
 use tinear/models/inbox
 use tinear/models/issues
@@ -29,7 +29,9 @@ struct Model {
   issue_tabs: [Str],
 }
 
-fn total_tabs(s: Model) Int { 2 + s.issue_tabs.size() }
+fn total_tabs(s: Model) Int {
+  2 + s.issue_tabs.size()
+}
 
 fn tab_label_at(s: Model, i: Int) Str {
   match i {
@@ -60,7 +62,9 @@ fn cycle_prev(s: Model) Int {
   }
 }
 
-fn selected_is_issue_tab(s: Model) Bool { s.tab_index >= 2 }
+fn selected_is_issue_tab(s: Model) Bool {
+  s.tab_index >= 2
+}
 
 fn close_current_issue_tab(s: Model) Model {
   mut next = s
@@ -68,7 +72,7 @@ fn close_current_issue_tab(s: Model) Model {
   if issue_idx >= 0 and issue_idx < s.issue_tabs.size() {
     mut remaining: [Str] = []
     for label, idx in s.issue_tabs {
-      if not (idx == issue_idx) {
+      if not idx == issue_idx {
         remaining.push(label)
       }
     }
@@ -111,26 +115,31 @@ fn open_issue_tab(s: Model, identifier: Str) Model {
 // break the session.
 fn persist(c: mut ffi::StateCtx) {
   let snap = ffi::StateValue<Model>(c)
-  async::start(fn() {
-    let _ = cache::save_logged_in(cache::LoggedInCache{
-      tab_index: snap.tab_index,
-      issue_tabs: snap.issue_tabs,
-    })
-  })
+  async::start(
+    fn() {
+      let _ = cache::save_logged_in(cache::LoggedInCache{tab_index: snap.tab_index, issue_tabs: snap.issue_tabs})
+    },
+  )
 }
 
 fn select_tab(c: mut ffi::StateCtx, idx: Int) {
-  ffi::Update<Model>(c, fn(s: mut Model) {
-    s.tab_index = idx
-  })
+  ffi::Update<Model>(
+    c,
+    fn(s: mut Model) {
+      s.tab_index = idx
+    },
+  )
   persist(c)
 }
 
 fn replace_model(c: mut ffi::StateCtx, next: Model) {
-  ffi::Update<Model>(c, fn(s: mut Model) {
-    s.tab_index = next.tab_index
-    s.issue_tabs = next.issue_tabs
-  })
+  ffi::Update<Model>(
+    c,
+    fn(s: mut Model) {
+      s.tab_index = next.tab_index
+      s.issue_tabs = next.issue_tabs
+    },
+  )
   persist(c)
 }
 
@@ -146,17 +155,21 @@ fn replace_model(c: mut ffi::StateCtx, next: Model) {
 fn tab_chip(theme: ui::Theme, label: Str, selected: Bool, on_press: fn(ui::EventContext)) ui::Widget {
   let padded = " {label} "
   match selected {
-    true => ui::Text{
-      Value: padded,
-      Style: ui::Style{Foreground: theme.Foreground, Background: theme.Primary},
-      OnPressed: on_press,
-      ClickAffordance: ui::ClickAffordanceNone,
+    true => {
+      ui::Text{
+        Value: padded,
+        Style: ui::Style{Foreground: theme.Foreground, Background: theme.Primary},
+        OnPressed: on_press,
+        ClickAffordance: ui::ClickAffordanceNone,
+      }
     },
-    false => ui::Text{
-      Value: padded,
-      Style: ui::Style{Foreground: theme.MutedForeground},
-      OnPressed: on_press,
-      ClickAffordance: ui::ClickAffordanceNone,
+    false => {
+      ui::Text{
+        Value: padded,
+        Style: ui::Style{Foreground: theme.MutedForeground},
+        OnPressed: on_press,
+        ClickAffordance: ui::ClickAffordanceNone,
+      }
     },
   }
 }
@@ -173,19 +186,27 @@ fn tab_bar(c: mut ffi::StateCtx, theme: ui::Theme, s: Model) ui::Widget {
       }
       // `for` binds an immutable per-iteration `i`, captured by value
       // by the closure below — no loop-closure trap.
-      chips.push(tab_chip(
-        theme,
-        tab_label_at(s, i),
-        i == s.tab_index,
-        fn(ev: ui::EventContext) { select_tab(c, i) },
-      ))
+      chips.push(
+        tab_chip(
+          theme,
+          tab_label_at(s, i),
+          i == s.tab_index,
+          fn(ev: ui::EventContext) {
+            select_tab(c, i)
+          },
+        ),
+      )
     }
   }
   mut children: [ui::Widget] = [
     ui::Flex{Axis: ui::Horizontal, Children: chips},
     ui::Divider{Style: ui::Style{Foreground: theme.Border, Background: theme.Background}},
   ]
-  ui::Flex{Axis: ui::Vertical, MainAxisSize: ui::MainAxisSizeMin, Children: children}
+  ui::Flex{
+    Axis: ui::Vertical,
+    MainAxisSize: ui::MainAxisSizeMin,
+    Children: children,
+  }
 }
 
 // Open an inbox item. Routing:
@@ -211,7 +232,9 @@ fn open_inbox_item(c: mut ffi::StateCtx, item: inbox::Item) {
 // once via IndexedStack so each tab's local state survives switching
 // tabs — only the visible tab paints.
 fn body_for(
-  c: mut ffi::StateCtx, api_key: Str, s: Model,
+  c: mut ffi::StateCtx,
+  api_key: Str,
+  s: Model,
   notify: fn(Str, Str, toast::ToastVariant),
   show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
   close_modal: fn(),
@@ -223,14 +246,16 @@ fn body_for(
   mut children: [ui::Widget] = [
     inbox_view::new(
       api_key,
-      fn(item: inbox::Item) { open_inbox_item(c, item) },
+      fn(item: inbox::Item) {
+        open_inbox_item(c, item)
+      },
       notify_error,
       s.tab_index == 0,
     ),
     my_issues_view::new(
-      api_key,
       // From the My Issues board, Enter on a card promotes the issue
       // to a dynamic tab. Same shell helper as the inbox uses.
+      api_key,
       fn(issue: issues::Issue) {
         replace_model(c, open_issue_tab(ffi::StateValue<Model>(c), issue.identifier))
       },
@@ -241,14 +266,9 @@ fn body_for(
     ),
   ]
   for label, idx in s.issue_tabs {
-    children.push(issue_detail_view::new(
-      api_key,
-      label,
-      notify,
-      show_modal,
-      close_modal,
-      s.tab_index == idx + 2,
-    ))
+    children.push(
+      issue_detail_view::new(api_key, label, notify, show_modal, close_modal, s.tab_index == idx + 2),
+    )
   }
   ui::IndexedStack{
     Index: s.tab_index,
@@ -259,37 +279,46 @@ fn body_for(
 
 fn hints_for(s: Model) [hints_bar::Hint] {
   match {
-    s.tab_index == 0 => [
-      hints_bar::Hint{key: "Tab", label: "switch"},
-      hints_bar::Hint{key: "↑↓", label: "select"},
-      hints_bar::Hint{key: "⌫", label: "delete"},
-      hints_bar::Hint{key: "r", label: "refresh"},
-      hints_bar::Hint{key: "↵", label: "open"},
-      hints_bar::Hint{key: "?", label: "search"},
-    ],
-    s.tab_index == 1 => [
-      hints_bar::Hint{key: "↑↓", label: ""},
-      hints_bar::Hint{key: "←→", label: ""},
-      hints_bar::Hint{key: "↵", label: "open"},
-      hints_bar::Hint{key: "s", label: "status"},
-      hints_bar::Hint{key: "y", label: "cycle"},
-      hints_bar::Hint{key: "r", label: "refresh"},
-      hints_bar::Hint{key: "?", label: "search"},
-    ],
-    _ => [
-      hints_bar::Hint{key: "↑↓", label: "scroll"},
-      hints_bar::Hint{key: "d", label: "description"},
-      hints_bar::Hint{key: "c", label: "comments"},
-      hints_bar::Hint{key: "n", label: "new comment"},
-      hints_bar::Hint{key: "s", label: "status"},
-      hints_bar::Hint{key: "y", label: "cycle"},
-      hints_bar::Hint{key: "Esc", label: "close"},
-    ],
+    s.tab_index == 0 => {
+      [
+        hints_bar::Hint{key: "Tab", label: "switch"},
+        hints_bar::Hint{key: "↑↓", label: "select"},
+        hints_bar::Hint{key: "⌫", label: "delete"},
+        hints_bar::Hint{key: "r", label: "refresh"},
+        hints_bar::Hint{key: "↵", label: "open"},
+        hints_bar::Hint{key: "?", label: "search"},
+      ]
+    },
+    s.tab_index == 1 => {
+      [
+        hints_bar::Hint{key: "↑↓", label: ""},
+        hints_bar::Hint{key: "←→", label: ""},
+        hints_bar::Hint{key: "↵", label: "open"},
+        hints_bar::Hint{key: "s", label: "status"},
+        hints_bar::Hint{key: "y", label: "cycle"},
+        hints_bar::Hint{key: "r", label: "refresh"},
+        hints_bar::Hint{key: "?", label: "search"},
+      ]
+    },
+    _ => {
+      [
+        hints_bar::Hint{key: "↑↓", label: "scroll"},
+        hints_bar::Hint{key: "d", label: "description"},
+        hints_bar::Hint{key: "c", label: "comments"},
+        hints_bar::Hint{key: "n", label: "new comment"},
+        hints_bar::Hint{key: "s", label: "status"},
+        hints_bar::Hint{key: "y", label: "cycle"},
+        hints_bar::Hint{key: "Esc", label: "close"},
+      ]
+    },
   }
 }
 
 fn screen(
-  c: mut ffi::StateCtx, theme: ui::Theme, s: Model, api_key: Str,
+  c: mut ffi::StateCtx,
+  theme: ui::Theme,
+  s: Model,
+  api_key: Str,
   notify: fn(Str, Str, toast::ToastVariant),
   show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
   close_modal: fn(),
@@ -305,7 +334,9 @@ fn screen(
 // ── Entry point ───────────────────────────────────────────────────────
 
 fn build(
-  c: mut ffi::StateCtx, ctx: ui::BuildContext, api_key: Str,
+  c: mut ffi::StateCtx,
+  ctx: ui::BuildContext,
+  api_key: Str,
   notify: fn(Str, Str, toast::ToastVariant),
   show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
   close_modal: fn(),
@@ -322,6 +353,11 @@ fn build(
   // and finds our handler before it reaches the app-level Actions.
   ui::Actions{
     Bindings: [
+      // Tab switches are gated on modal_open so their bound keys
+      // (1 / 2) can flow through to text fields inside modals as
+      // typed characters: Shortcuts dispatch in the capture phase,
+      // and returning Ignored lets the event continue to the focused
+      // element's target phase.
       "vaxis.next-focus": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
         select_tab(c, cycle_next(ffi::StateValue<Model>(c)))
         ui::EventHandled
@@ -340,11 +376,6 @@ fn build(
           false => ui::EventIgnored,
         }
       },
-      // Tab switches are gated on modal_open so their bound keys
-      // (1 / 2) can flow through to text fields inside modals as
-      // typed characters: Shortcuts dispatch in the capture phase,
-      // and returning Ignored lets the event continue to the focused
-      // element's target phase.
       "tabs.inbox": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
         match modal_open {
           true => ui::EventIgnored,
@@ -371,20 +402,27 @@ fn build(
               replace_model(c, open_issue_tab(ffi::StateValue<Model>(c), issue.identifier))
               close_modal()
             }
-            show_modal(fn(theme_inner: ui::Theme, close: fn()) ui::Widget {
-              modal::show_modal(
-                theme_inner,
-                "Search",
-                search_view::new(api_key, on_open_search_result),
-                hints_bar::row(theme_inner, [
-                  hints_bar::Hint{key: "↑↓", label: "select"},
-                  hints_bar::Hint{key: "↵", label: "open"},
-                  hints_bar::Hint{key: "Esc", label: "close"},
-                ]),
-                maybe::some(60),
-                fn(ev2: ui::EventContext) { close() },
-              )
-            })
+            show_modal(
+              fn(theme_inner: ui::Theme, close: fn()) ui::Widget {
+                modal::show_modal(
+                  theme_inner,
+                  "Search",
+                  search_view::new(api_key, on_open_search_result),
+                  hints_bar::row(
+                    theme_inner,
+                    [
+                      hints_bar::Hint{key: "↑↓", label: "select"},
+                      hints_bar::Hint{key: "↵", label: "open"},
+                      hints_bar::Hint{key: "Esc", label: "close"},
+                    ],
+                  ),
+                  maybe::some(60),
+                  fn(ev2: ui::EventContext) {
+                    close()
+                  },
+                )
+              },
+            )
             ui::EventHandled
           },
         }
@@ -417,14 +455,8 @@ fn new(
       // whatever they had open last session. Missing / unreadable /
       // version-mismatched cache falls back to the default layout.
       match cache::load_logged_in() {
-        cached => Model{
-          tab_index: cached.tab_index,
-          issue_tabs: cached.issue_tabs,
-        },
-        _ => Model{
-          tab_index: 0,
-          issue_tabs: [],
-        },
+        cached => Model{tab_index: cached.tab_index, issue_tabs: cached.issue_tabs},
+        _ => Model{tab_index: 0, issue_tabs: []},
       }
     },
     Build: fn(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {

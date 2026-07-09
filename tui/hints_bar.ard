@@ -23,10 +23,14 @@ struct Hint {
 fn render_hint(theme: ui::Theme, hint: Hint) ui::Widget {
   match hint.label.is_empty() {
     true => ui::Text{Value: hint.key, Style: ui::Style{Foreground: theme.Foreground}},
-    false => ui::RichText{Spans: [
-      ui::TextSpan{Text: hint.key, Style: ui::Style{Foreground: theme.Foreground}},
-      ui::TextSpan{Text: " {hint.label}", Style: ui::Style{Foreground: theme.MutedForeground}},
-    ]},
+    false => {
+      ui::RichText{
+        Spans: [
+          ui::TextSpan{Text: hint.key, Style: ui::Style{Foreground: theme.Foreground}},
+          ui::TextSpan{Text: " {hint.label}", Style: ui::Style{Foreground: theme.MutedForeground}},
+        ],
+      }
+    },
   }
 }
 
@@ -48,5 +52,9 @@ fn new(theme: ui::Theme, items: [Hint]) ui::Widget {
     ui::Divider{Style: ui::Style{Foreground: theme.Border, Background: theme.Background}},
     row(theme, items),
   ]
-  ui::Flex{Axis: ui::Vertical, MainAxisSize: ui::MainAxisSizeMin, Children: children}
+  ui::Flex{
+    Axis: ui::Vertical,
+    MainAxisSize: ui::MainAxisSizeMin,
+    Children: children,
+  }
 }

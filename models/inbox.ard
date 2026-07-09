@@ -1,8 +1,7 @@
-use tinear/decode
 use ard/maybe
 
+use tinear/decode
 use tinear/linear/client
-use tinear/tui/text
 
 struct Item {
   notification_id: Str,
@@ -62,9 +61,11 @@ struct IdTitle {
 
 fn optional_nested_str(data: Any, name: Str, nested: Str, fallback: Str) Str {
   match decode::run(data, decode::path([name, nested], decode::nullable(decode::string))) {
-    ok(value) => match value {
-      v => v,
-      _ => fallback,
+    ok(value) => {
+      match value {
+        v => v,
+        _ => fallback,
+      }
     },
     err(_) => fallback,
   }
@@ -114,12 +115,16 @@ fn decode_item(notif: Any) Item {
   let info = dynamic_id_and_title(notif, n_type)
   let url = match is_pr_type(n_type) {
     true => optional_nested_str(notif, "pullRequest", "url", ""),
-    false => match decode::run(notif, decode::field("url", decode::nullable(decode::string))) {
-      ok(value) => match value {
-        v => v,
-        _ => "",
-      },
-      err(_) => "",
+    false => {
+      match decode::run(notif, decode::field("url", decode::nullable(decode::string))) {
+        ok(value) => {
+          match value {
+            v => v,
+            _ => "",
+          }
+        },
+        err(_) => "",
+      }
     },
   }
   Item{
@@ -164,7 +169,6 @@ fn load(api_key: Str) [Item]!Str {
   }
   Result::ok(items)
 }
-
 
 fn archive(api_key: Str, notification_id: Str) Void!Str {
   archive_notification(api_key, notification_id)
@@ -215,9 +219,11 @@ struct Detail {
 // to `[PathSegment]` (only inline list literals are special-cased).
 fn path_str1(data: Any, k: Str, fallback: Str) Str {
   match decode::run(data, decode::field(k, decode::nullable(decode::string))) {
-    ok(value) => match value {
-      v => v,
-      _ => fallback,
+    ok(value) => {
+      match value {
+        v => v,
+        _ => fallback,
+      }
     },
     err(_) => fallback,
   }
@@ -225,19 +231,26 @@ fn path_str1(data: Any, k: Str, fallback: Str) Str {
 
 fn path_str2(data: Any, k1: Str, k2: Str, fallback: Str) Str {
   match decode::run(data, decode::field(k1, decode::field(k2, decode::nullable(decode::string)))) {
-    ok(value) => match value {
-      v => v,
-      _ => fallback,
+    ok(value) => {
+      match value {
+        v => v,
+        _ => fallback,
+      }
     },
     err(_) => fallback,
   }
 }
 
 fn path_str3(data: Any, k1: Str, k2: Str, k3: Str, fallback: Str) Str {
-  match decode::run(data, decode::field(k1, decode::field(k2, decode::field(k3, decode::nullable(decode::string))))) {
-    ok(value) => match value {
-      v => v,
-      _ => fallback,
+  match decode::run(
+    data,
+    decode::field(k1, decode::field(k2, decode::field(k3, decode::nullable(decode::string)))),
+  ) {
+    ok(value) => {
+      match value {
+        v => v,
+        _ => fallback,
+      }
     },
     err(_) => fallback,
   }
@@ -259,7 +272,10 @@ fn path_dynamic2(data: Any, k1: Str, k2: Str) Any {
 
 // Read a list at a 3-deep path (e.g. issue.comments.nodes).
 fn path_list3(data: Any, k1: Str, k2: Str, k3: Str) [Any] {
-  match decode::run(data, decode::field(k1, decode::field(k2, decode::field(k3, decode::list(decode::any))))) {
+  match decode::run(
+    data,
+    decode::field(k1, decode::field(k2, decode::field(k3, decode::list(decode::any)))),
+  ) {
     ok(list) => list,
     err(_) => [],
   }
@@ -307,11 +323,15 @@ fn decode_pr_detail(notif: Any) Detail {
   let subtitle = path_str1(notif, "subtitle", "")
   let triggering = match comment_id.is_empty() or subtitle.is_empty() {
     true => maybe::none(),
-    false => maybe::some(DetailComment{
-      author: decode_user_display(path_dynamic1(notif, "actor")),
-      created_at: path_str1(notif, "createdAt", ""),
-      body: subtitle,
-    }),
+    false => {
+      maybe::some(
+        DetailComment{
+          author: decode_user_display(path_dynamic1(notif, "actor")),
+          created_at: path_str1(notif, "createdAt", ""),
+          body: subtitle,
+        },
+      )
+    },
   }
   Detail{
     is_pr: true,
@@ -336,9 +356,11 @@ fn decode_pr_detail(notif: Any) Detail {
 // comment field.
 fn decode_triggering_comment(notif: Any) DetailComment? {
   match decode::run(notif, decode::field("comment", decode::nullable(decode::any))) {
-    ok(value) => match value {
-      raw => maybe::some(decode_detail_comment(raw)),
-      _ => maybe::none(),
+    ok(value) => {
+      match value {
+        raw => maybe::some(decode_detail_comment(raw)),
+        _ => maybe::none(),
+      }
     },
     err(_) => maybe::none(),
   }
@@ -383,5 +405,3 @@ fn load_detail(api_key: Str, notification_id: Str) Detail!Str {
   let notif = try fetch_notification_detail(api_key, notification_id)
   Result::ok(decode_detail(notif))
 }
-
-

@@ -1,10 +1,10 @@
 use ard/async
 use ard/maybe
+
 use go:go.rockorager.dev/vaxis/ui
 use go:time
-use go:tinear/ffi
-
 use tinear/config
+use go:tinear/ffi
 use tinear/tui/logged_in_screen
 use tinear/tui/modal
 use tinear/tui/toast
@@ -22,49 +22,78 @@ struct AppState {
 }
 
 impl AppState {
-  fn has_auth() Bool { not self.api_key.is_empty() }
+  fn has_auth() Bool {
+    not self.api_key.is_empty()
+  }
 }
 
 fn set_api_key(c: mut ffi::StateCtx, api_key: Str) {
-  ffi::Update<AppState>(c, fn(s: mut AppState) {
-    s.api_key = api_key
-  })
+  ffi::Update<AppState>(
+    c,
+    fn(s: mut AppState) {
+      s.api_key = api_key
+    },
+  )
 }
 
 // Append a new toast and schedule its removal once the TTL elapses.
 // Safe to call from event handlers and from background fibers
 // (ffi::Dispatch lands the state mutation on the UI thread).
-fn dispatch_toast(c: mut ffi::StateCtx, title: Str, description: Str, variant: toast::ToastVariant, ttl_ms: Int) {
-  ffi::Dispatch(c, fn() {
-    let toast_id = ffi::StateValue<AppState>(c).next_toast_id + 1
-    ffi::Update<AppState>(c, fn(s: mut AppState) {
-      s.next_toast_id = toast_id
-      mut next_toasts: [toast::Toast] = []
-      for t in s.toasts { next_toasts.push(t) }
-      next_toasts.push(toast::Toast{
-        id: toast_id,
-        title: title,
-        description: description,
-        variant: variant,
-        ttl_ms: ttl_ms,
-      })
-      s.toasts = next_toasts
-    })
-    async::start(fn() {
-      time::Sleep(ffi::Millis(ttl_ms))
-      ffi::Dispatch(c, fn() {
-        ffi::Update<AppState>(c, fn(s: mut AppState) {
-          mut remaining: [toast::Toast] = []
+fn dispatch_toast(
+  c: mut ffi::StateCtx,
+  title: Str,
+  description: Str,
+  variant: toast::ToastVariant,
+  ttl_ms: Int,
+) {
+  ffi::Dispatch(
+    c,
+    fn() {
+      let toast_id = ffi::StateValue<AppState>(c).next_toast_id + 1
+      ffi::Update<AppState>(
+        c,
+        fn(s: mut AppState) {
+          s.next_toast_id = toast_id
+          mut next_toasts: [toast::Toast] = []
           for t in s.toasts {
-            if not (t.id == toast_id) {
-              remaining.push(t)
-            }
+            next_toasts.push(t)
           }
-          s.toasts = remaining
-        })
-      })
-    })
-  })
+          next_toasts.push(
+            toast::Toast{
+              id: toast_id,
+              title: title,
+              description: description,
+              variant: variant,
+              ttl_ms: ttl_ms,
+            },
+          )
+          s.toasts = next_toasts
+        },
+      )
+      async::start(
+        fn() {
+          time::Sleep(time::Duration::from(ttl_ms) * time::Millisecond)
+          ffi::Dispatch(
+            c,
+            fn() {
+              ffi::Update<AppState>(
+                c,
+                fn(s: mut AppState) {
+                  mut remaining: [toast::Toast] = []
+                  for t in s.toasts {
+                    if not t.id == toast_id {
+                      remaining.push(t)
+                    }
+                  }
+                  s.toasts = remaining
+                },
+              )
+            },
+          )
+        },
+      )
+    },
+  )
 }
 
 // Modal lifecycle helpers. close_modal clears the slot; show_modal
@@ -72,19 +101,31 @@ fn dispatch_toast(c: mut ffi::StateCtx, title: Str, description: Str, variant: t
 // state mutation on the UI thread) so callers can invoke them from
 // event handlers or background fibers.
 fn close_modal(c: mut ffi::StateCtx) {
-  ffi::Dispatch(c, fn() {
-    ffi::Update<AppState>(c, fn(s: mut AppState) {
-      s.current_modal = maybe::none()
-    })
-  })
+  ffi::Dispatch(
+    c,
+    fn() {
+      ffi::Update<AppState>(
+        c,
+        fn(s: mut AppState) {
+          s.current_modal = maybe::none()
+        },
+      )
+    },
+  )
 }
 
 fn show_modal(c: mut ffi::StateCtx, builder: fn(ui::Theme, fn()) ui::Widget) {
-  ffi::Dispatch(c, fn() {
-    ffi::Update<AppState>(c, fn(s: mut AppState) {
-      s.current_modal = maybe::some(modal::ModalDef{build: builder})
-    })
-  })
+  ffi::Dispatch(
+    c,
+    fn() {
+      ffi::Update<AppState>(
+        c,
+        fn(s: mut AppState) {
+          s.current_modal = maybe::some(modal::ModalDef{build: builder})
+        },
+      )
+    },
+  )
 }
 
 fn body(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
@@ -94,19 +135,34 @@ fn body(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
     dispatch_toast(c, title, description, variant, DEFAULT_TOAST_TTL_MS)
   }
   let content = match model.has_auth() {
-    true => ui::Padding(ui::Symmetric(1, 0), logged_in_screen::new(
-      model.api_key,
-      notify,
-      fn(builder: fn(ui::Theme, fn()) ui::Widget) { show_modal(c, builder) },
-      fn() { close_modal(c) },
-      model.current_modal.is_some(),
-    )),
-    false => ui::Center(ui::Padding(
-      ui::Symmetric(1, 0),
-      welcome_screen::new(fn(api_key: Str) {
-        set_api_key(c, api_key)
-      }),
-    )),
+    true => {
+      ui::Padding(
+        ui::Symmetric(1, 0),
+        logged_in_screen::new(
+          model.api_key,
+          notify,
+          fn(builder: fn(ui::Theme, fn()) ui::Widget) {
+            show_modal(c, builder)
+          },
+          fn() {
+            close_modal(c)
+          },
+          model.current_modal.is_some(),
+        ),
+      )
+    },
+    false => {
+      ui::Center(
+        ui::Padding(
+          ui::Symmetric(1, 0),
+          welcome_screen::new(
+            fn(api_key: Str) {
+              set_api_key(c, api_key)
+            },
+          ),
+        ),
+      )
+    },
   }
   // Toast overlay rides above the screen content, anchored
   // bottom-right with 1 col of padding from the right edge and 2 rows
@@ -122,14 +178,13 @@ fn body(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
   // nothing to layer.
   mut entries: [ui::OverlayEntry] = []
   if model.toasts.size() > 0 {
-    entries.push(ui::OverlayEntry{
-      Child: ui::Padding(
-        ui::Insets{Right: 1, Bottom: 2},
-        toast::render_stack(theme, model.toasts),
-      ),
-      Modal: false,
-      Alignment: ui::BottomRight,
-    })
+    entries.push(
+      ui::OverlayEntry{
+        Child: ui::Padding(ui::Insets{Right: 1, Bottom: 2}, toast::render_stack(theme, model.toasts)),
+        Modal: false,
+        Alignment: ui::BottomRight,
+      },
+    )
   }
   // Modal entry. Modal: true inserts a barrier behind the entry so the
   // body view stops responding to keys and clicks while the modal is
@@ -137,12 +192,21 @@ fn body(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
   // the focus trap.
   match model.current_modal {
     def => {
-      entries.push(ui::OverlayEntry{
-        Child: ui::Center(def.build(theme, fn() { close_modal(c) })),
-        Modal: true,
-      })
+      entries.push(
+        ui::OverlayEntry{
+          Child: ui::Center(
+            def.build(
+              theme,
+              fn() {
+                close_modal(c)
+              },
+            ),
+          ),
+          Modal: true,
+        },
+      )
     },
-    _ => {},
+    _ => (),
   }
   let layered = ui::Overlay{Child: content, Entries: entries}
   ui::DecoratedBox(
@@ -153,23 +217,20 @@ fn body(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
 
 fn root() ui::Widget {
   ui::Actions{
-    Bindings: [
-      "tinear.quit": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
-        ev.Quit()
-        ui::EventHandled
-      },
-    ],
     // Quit on Ctrl+C (delivered as a key in raw mode, not SIGINT).
     // Cmd+C (reported as Super+c where the terminal forwards it) copies
     // the active selection: the binding invokes vaxis's
     // copy-selection intent, which bubbles up from the focused element
     // to whichever SelectionArea wraps it (the detail panes). With no
     // selection on the focus path it's a harmless no-op.
+    Bindings: [
+      "tinear.quit": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        ev.Quit()
+        ui::EventHandled
+      },
+    ],
     Child: ui::Shortcuts{
-      Bindings: [
-        "Ctrl+c": ffi::Intent("tinear.quit"),
-        "Super+c": ffi::Intent("vaxis.text.copy-selection"),
-      ],
+      Bindings: ["Ctrl+c": ffi::Intent("tinear.quit"), "Super+c": ffi::Intent("vaxis.text.copy-selection")],
       Child: ffi::Stateful{
         Init: fn() Any {
           let api_key = match config::load() {

@@ -1,7 +1,6 @@
 use ard/testing
-use go:encoding/json
-use go:tinear/ffi
 
+use go:encoding/json
 use tinear/models/cache
 
 test fn test_cache_decode_ignores_corrupt_json() Void!Str {
@@ -12,11 +11,10 @@ test fn test_cache_decode_ignores_corrupt_json() Void!Str {
 }
 
 test fn test_cache_decode_ignores_unknown_version() Void!Str {
-  mut encoded = json::Marshal(cache::DataCache{
-    version: 999,
-    logged_in: cache::empty_logged_in(),
-  }).expect("encode cache")
-  let content = ffi::StrFromBytes(encoded)
+  mut encoded = json::Marshal(
+    cache::DataCache{version: 999, logged_in: cache::empty_logged_in()},
+  ).expect("encode cache")
+  let content = Str::from(encoded)
 
   match cache::decode(content) {
     _cache => testing::assert(false, "unknown cache version should be ignored"),
@@ -28,20 +26,15 @@ test fn test_cache_round_trips_logged_in_state() Void!Str {
   let tabs: [Str] = ["CCA-123", "RND-456"]
   let original = cache::DataCache{
     version: cache::version(),
-    logged_in: cache::LoggedInCache{ tab_index: 2, issue_tabs: tabs },
+    logged_in: cache::LoggedInCache{tab_index: 2, issue_tabs: tabs},
   }
+
   let content = try cache::encode(original)
 
   match cache::decode(content) {
     restored => {
-      try testing::assert(
-        restored.logged_in.tab_index == 2,
-        "active tab index should round trip",
-      )
-      try testing::assert(
-        restored.logged_in.issue_tabs.size() == 2,
-        "issue tab list size should round trip",
-      )
+      try testing::assert(restored.logged_in.tab_index == 2, "active tab index should round trip")
+      try testing::assert(restored.logged_in.issue_tabs.size() == 2, "issue tab list size should round trip")
       try testing::assert(
         restored.logged_in.issue_tabs.at(0).expect("bounds") == "CCA-123",
         "first issue tab identifier should round trip",

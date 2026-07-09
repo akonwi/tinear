@@ -1,8 +1,7 @@
-use tinear/decode
-use go:encoding/json
-use go:tinear/ffi
 use ard/maybe
 
+use go:encoding/json
+use tinear/decode
 use tinear/linear/client
 use tinear/tui/state
 
@@ -117,9 +116,11 @@ struct TeamCyclesResult {
 
 fn optional_str(data: Any, name: Str, fallback: Str) Str {
   match decode::run(data, decode::field(name, decode::nullable(decode::string))) {
-    ok(value) => match value {
-      v => v,
-      _ => fallback,
+    ok(value) => {
+      match value {
+        v => v,
+        _ => fallback,
+      }
     },
     err(_) => fallback,
   }
@@ -148,9 +149,11 @@ fn nullable_int(data: Any, name: Str) Int? {
 
 fn nested_str(data: Any, name: Str, nested: Str, fallback: Str) Str {
   match decode::run(data, decode::path([name, nested], decode::nullable(decode::string))) {
-    ok(value) => match value {
-      v => v,
-      _ => fallback,
+    ok(value) => {
+      match value {
+        v => v,
+        _ => fallback,
+      }
     },
     err(_) => fallback,
   }
@@ -162,9 +165,11 @@ fn user_display_name(user: Any) Str {
     decode::nullable(decode::field("displayName", decode::string)),
   ).expect("optional user.displayName invalid")
   match display_name {
-    value => match value.is_empty() {
-      true => decode::run(user, decode::field("name", decode::string)).expect("Missing user.name"),
-      false => value,
+    value => {
+      match value.is_empty() {
+        true => decode::run(user, decode::field("name", decode::string)).expect("Missing user.name"),
+        false => value,
+      }
     },
     _ => decode::run(user, decode::field("name", decode::string)).expect("Missing user.name"),
   }
@@ -316,7 +321,7 @@ fn update_cycle(api_key: Str, issue_id: Str, cycle_id: Str) Void!Str {
 
 fn create_comment(api_key: Str, issue_id: Str, body: Str) Void!Str {
   mut body_bytes = json::Marshal(body).expect("encode body")
-  let body_json = ffi::StrFromBytes(body_bytes)
+  let body_json = Str::from(body_bytes)
   let mutation = "mutation \{ commentCreate(input: \{ issueId: \"{issue_id}\", body: {body_json} \}) \{ success \} \}"
   let data = try client::graphql(api_key, mutation)
   let success = decode::run(
@@ -358,10 +363,7 @@ fn fetch_team_cycles(api_key: Str, team_id: Str) TeamCyclesResult!Str {
     decode::path(["cycles", "nodes"], decode::list(decode::any)),
   ).expect("Missing team.cycles.nodes")
 
-  let active_number = match decode::run(
-    team_obj,
-    decode::path(["activeCycle", "number"], decode::nullable(decode::int)),
-  ) {
+  let active_number = match decode::run(team_obj, decode::path(["activeCycle", "number"], decode::nullable(decode::int))) {
     ok(value) => value,
     err(_) => maybe::none(),
   }
@@ -386,7 +388,7 @@ fn fetch_single_issue(api_key: Str, issue_id: Str) Any!Str {
 
 fn fetch_issue_search(api_key: Str, term: Str) [Any]!Str {
   mut q_bytes = json::Marshal(term).expect("encode search query")
-  let q = ffi::StrFromBytes(q_bytes)
+  let q = Str::from(q_bytes)
   let query = "query \{ searchIssues(term: {q}, first: 20) \{ nodes \{ {issue_fields()} \} \} \}"
   let data = try client::graphql(api_key, query)
   let nodes = decode::run(
