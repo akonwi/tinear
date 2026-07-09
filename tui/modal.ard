@@ -1,4 +1,3 @@
-use ard/maybe
 use go:go.rockorager.dev/vaxis/ui
 
 // A pending modal request. The app root keeps a single `ModalDef?` in
@@ -72,6 +71,7 @@ fn show_modal(
     CrossAxisAlignment: ui::CrossAxisStretch,
     Children: content_children,
   }
+
   let bordered = ui::DecoratedBox(
     ui::Decoration{
       Style: ui::Style{Background: theme.Surface},
@@ -80,9 +80,15 @@ fn show_modal(
     content,
   )
   let sized: ui::Widget = match width {
-    w => ui::ConstrainedBox{
-      Constraints: ui::Constraints{MinWidth: w, MaxWidth: w, MaxHeight: ui::Unbounded},
-      Child: bordered,
+    w => {
+      ui::ConstrainedBox{
+        Constraints: ui::Constraints{
+          MinWidth: w,
+          MaxWidth: w,
+          MaxHeight: ui::Unbounded,
+        },
+        Child: bordered,
+      }
     },
     _ => bordered,
   }

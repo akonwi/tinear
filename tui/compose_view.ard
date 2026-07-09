@@ -1,7 +1,7 @@
 use ard/async
+
 use go:go.rockorager.dev/vaxis/ui
 use go:tinear/ffi
-
 use tinear/models/issues
 
 // Compose-comment modal body.
@@ -31,37 +31,51 @@ struct Compose {
 
 fn submit(
   c: mut ffi::StateCtx,
-  api_key: Str, issue: issues::Issue, text: Str,
-  refresh_comments: fn(), close: fn(),
+  api_key: Str,
+  issue: issues::Issue,
+  text: Str,
+  refresh_comments: fn(),
+  close: fn(),
 ) {
   let trimmed = text.trim()
   if trimmed.is_empty() {
     {}
   } else {
-    ffi::Update<Compose>(c, fn(s: mut Compose) {
-      s.sending = true
-      s.error = ""
-    })
-    async::start(fn() {
-      let result = issues::create_comment(api_key, issue.id, trimmed)
-      match result {
-        ok(_) => {
-          // Reload the host's comments, then close. refresh_comments
-          // dispatches onto the host's UI state internally, so it's
-          // safe to call from this background fiber. So is close.
-          refresh_comments()
-          close()
-        },
-        err(e) => {
-          ffi::Dispatch(c, fn() {
-            ffi::Update<Compose>(c, fn(s: mut Compose) {
-              s.sending = false
-              s.error = e
-            })
-          })
-        },
-      }
-    })
+    ffi::Update<Compose>(
+      c,
+      fn(s: mut Compose) {
+        s.sending = true
+        s.error = ""
+      },
+    )
+    async::start(
+      fn() {
+        let result = issues::create_comment(api_key, issue.id, trimmed)
+        match result {
+          ok(_) => {
+            // Reload the host's comments, then close. refresh_comments
+            // dispatches onto the host's UI state internally, so it's
+            // safe to call from this background fiber. So is close.
+            refresh_comments()
+            close()
+          },
+          err(e) => {
+            ffi::Dispatch(
+              c,
+              fn() {
+                ffi::Update<Compose>(
+                  c,
+                  fn(s: mut Compose) {
+                    s.sending = false
+                    s.error = e
+                  },
+                )
+              },
+            )
+          },
+        }
+      },
+    )
   }
 }
 
@@ -70,7 +84,11 @@ fn submit(
 fn new(api_key: Str, issue: issues::Issue, refresh_comments: fn(), close: fn()) ui::Widget {
   ffi::Stateful{
     Init: fn() Any {
-      Compose{text: "", sending: false, error: ""}
+      Compose{
+        text: "",
+        sending: false,
+        error: "",
+      }
     },
     Build: fn(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
       let theme = ui::MustDepend<ui::Theme>(ctx)
@@ -89,16 +107,20 @@ fn new(api_key: Str, issue: issues::Issue, refresh_comments: fn(), close: fn()) 
       // type-changing reconciliation pitfall.
       let error_widget: ui::Widget = match model.error.is_empty() {
         true => ui::SizedBox{},
-        false => ui::Padding(
-          ui::Insets{Bottom: 1},
-          ui::Text{Value: "⚠ {model.error}", Style: ui::Style{Foreground: theme.DangerText}},
-        ),
+        false => {
+          ui::Padding(
+            ui::Insets{Bottom: 1},
+            ui::Text{Value: "⚠ {model.error}", Style: ui::Style{Foreground: theme.DangerText}},
+          )
+        },
       }
       let sending_widget: ui::Widget = match model.sending {
-        true => ui::Padding(
-          ui::Insets{Top: 1},
-          ui::Text{Value: "Sending…", Style: ui::Style{Foreground: theme.MutedForeground}},
-        ),
+        true => {
+          ui::Padding(
+            ui::Insets{Top: 1},
+            ui::Text{Value: "Sending…", Style: ui::Style{Foreground: theme.MutedForeground}},
+          )
+        },
         false => ui::SizedBox{},
       }
 
@@ -113,10 +135,13 @@ fn new(api_key: Str, issue: issues::Issue, refresh_comments: fn(), close: fn()) 
             MinHeight: 6,
             SoftWrap: true,
             OnChanged: fn(ev: ui::EventContext, value: Str) {
-              ffi::Update<Compose>(c, fn(s: mut Compose) {
-                s.text = value
-                s.error = ""
-              })
+              ffi::Update<Compose>(
+                c,
+                fn(s: mut Compose) {
+                  s.text = value
+                  s.error = ""
+                },
+              )
             },
           },
         },

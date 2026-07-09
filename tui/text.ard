@@ -20,7 +20,7 @@ fn truncate(s: Str, max: Int) Str {
         }
       }
       result
-    }
+    },
   }
 }
 

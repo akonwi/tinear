@@ -1,8 +1,11 @@
 use ard/testing
+
 use tinear/decode
 
 test fn parses_scalars() Void!Str {
-  let data = decode::from_json("\{\"name\": \"Ada\", \"age\": 36, \"score\": 9.5, \"active\": true\}").expect("parse")
+  let data = decode::from_json(
+    "\{\"name\": \"Ada\", \"age\": 36, \"score\": 9.5, \"active\": true\}",
+  ).expect("parse")
 
   let name = decode::run(data, decode::field("name", decode::string)).expect("name")
   try testing::assert(name == "Ada", "name should decode")
@@ -53,10 +56,9 @@ test fn errors_carry_paths() Void!Str {
   let data = decode::from_json("\{\"issue\": \{\"state\": 5\}\}").expect("parse")
   match decode::run(data, decode::path(["issue", "state"], decode::string)) {
     ok => testing::fail("should not decode"),
-    err(e) => testing::assert(
-      e.to_str() == "expected a string at issue.state",
-      "unexpected error: {e.to_str()}",
-    ),
+    err(e) => {
+      testing::assert(e.to_str() == "expected a string at issue.state", "unexpected error: {e.to_str()}")
+    },
   }
 }
 
@@ -64,9 +66,6 @@ test fn missing_field_reports_name() Void!Str {
   let data = decode::from_json("\{\}").expect("parse")
   match decode::run(data, decode::field("id", decode::string)) {
     ok => testing::fail("should not decode"),
-    err(e) => testing::assert(
-      e.to_str() == "expected a value at id",
-      "unexpected error: {e.to_str()}",
-    ),
+    err(e) => testing::assert(e.to_str() == "expected a value at id", "unexpected error: {e.to_str()}"),
   }
 }

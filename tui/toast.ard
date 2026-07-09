@@ -73,14 +73,14 @@ fn reveal_width(progress: Float64, max_width: Int) Int {
 // only variant signal.
 fn render_body(theme: ui::Theme, toast: Toast) ui::Widget {
   let border_color = variant_color(theme, toast.variant)
-  mut col_children: [ui::Widget] = [
-    ui::Text{Value: toast.title, Style: ui::Style{Foreground: theme.Foreground}},
-  ]
+  mut col_children: [ui::Widget] = [ui::Text{Value: toast.title, Style: ui::Style{Foreground: theme.Foreground}}]
   if not toast.description.is_empty() {
-    col_children.push(ui::Text{
-      Value: toast.description,
-      Style: ui::Style{Foreground: theme.MutedForeground, Attribute: ui::AttrDim},
-    })
+    col_children.push(
+      ui::Text{
+        Value: toast.description,
+        Style: ui::Style{Foreground: theme.MutedForeground, Attribute: ui::AttrDim},
+      },
+    )
   }
   let body_column = ui::Flex{
     Axis: ui::Vertical,
@@ -88,6 +88,7 @@ fn render_body(theme: ui::Theme, toast: Toast) ui::Widget {
     CrossAxisAlignment: ui::CrossAxisStart,
     Children: col_children,
   }
+
   // Interior padding: horizontal 2 gives the title breathing room from
   // the left/right edges; vertical 1 keeps it off the border lines.
   ui::DecoratedBox(
@@ -109,7 +110,9 @@ fn render_body(theme: ui::Theme, toast: Toast) ui::Widget {
 fn render_animated(theme: ui::Theme, toast: Toast) ui::Widget {
   let max_w = natural_width(toast)
   ffi::Stateful{
-    Init: fn() Any { toast },
+    Init: fn() Any {
+      toast
+    },
     Animate: true,
     AnimateMs: toast.ttl_ms,
     Build: fn(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {

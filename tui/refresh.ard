@@ -1,4 +1,5 @@
 use ard/async
+
 use go:time
 
 // Schedules `action` to run every `interval_ms` milliseconds on a
@@ -15,10 +16,12 @@ use go:time
 // until the app exits, which we'll fix when we expose a cancellable
 // Fiber handle).
 fn schedule_periodic(interval_ms: Int, action: fn()) {
-  let _ = async::start(fn() {
-    while true {
-      time::Sleep(time::Duration::from(interval_ms) * time::Millisecond)
-      action()
-    }
-  })
+  let _ = async::start(
+    fn() {
+      while true {
+        time::Sleep(time::Duration::from(interval_ms) * time::Millisecond)
+        action()
+      }
+    },
+  )
 }

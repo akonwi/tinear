@@ -1,7 +1,7 @@
-use tinear/decode
-use go:encoding/json
 use ard/maybe
 
+use go:encoding/json
+use tinear/decode
 use tinear/linear/client
 use tinear/tui/state
 
@@ -116,9 +116,11 @@ struct TeamCyclesResult {
 
 fn optional_str(data: Any, name: Str, fallback: Str) Str {
   match decode::run(data, decode::field(name, decode::nullable(decode::string))) {
-    ok(value) => match value {
-      v => v,
-      _ => fallback,
+    ok(value) => {
+      match value {
+        v => v,
+        _ => fallback,
+      }
     },
     err(_) => fallback,
   }
@@ -147,9 +149,11 @@ fn nullable_int(data: Any, name: Str) Int? {
 
 fn nested_str(data: Any, name: Str, nested: Str, fallback: Str) Str {
   match decode::run(data, decode::path([name, nested], decode::nullable(decode::string))) {
-    ok(value) => match value {
-      v => v,
-      _ => fallback,
+    ok(value) => {
+      match value {
+        v => v,
+        _ => fallback,
+      }
     },
     err(_) => fallback,
   }
@@ -161,9 +165,11 @@ fn user_display_name(user: Any) Str {
     decode::nullable(decode::field("displayName", decode::string)),
   ).expect("optional user.displayName invalid")
   match display_name {
-    value => match value.is_empty() {
-      true => decode::run(user, decode::field("name", decode::string)).expect("Missing user.name"),
-      false => value,
+    value => {
+      match value.is_empty() {
+        true => decode::run(user, decode::field("name", decode::string)).expect("Missing user.name"),
+        false => value,
+      }
     },
     _ => decode::run(user, decode::field("name", decode::string)).expect("Missing user.name"),
   }
@@ -357,10 +363,7 @@ fn fetch_team_cycles(api_key: Str, team_id: Str) TeamCyclesResult!Str {
     decode::path(["cycles", "nodes"], decode::list(decode::any)),
   ).expect("Missing team.cycles.nodes")
 
-  let active_number = match decode::run(
-    team_obj,
-    decode::path(["activeCycle", "number"], decode::nullable(decode::int)),
-  ) {
+  let active_number = match decode::run(team_obj, decode::path(["activeCycle", "number"], decode::nullable(decode::int))) {
     ok(value) => value,
     err(_) => maybe::none(),
   }

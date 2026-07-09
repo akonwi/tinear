@@ -1,6 +1,5 @@
 use go:encoding/json
 use go:os
-
 use tinear/decode
 
 struct Config {

@@ -1,11 +1,11 @@
 use ard/async
 use ard/maybe
+
 use go:go.rockorager.dev/vaxis/ui
 use go:time
 use go:tinear/ffi
-
 use tinear/models/issues
-use tinear/tui/text as text
+use tinear/tui/text
 
 // Search modal body. Owns a stateful Search and renders the TextField
 // + results list. Up / Down / Enter are handled by an inner Shortcuts
@@ -48,9 +48,9 @@ fn clamp_cursor(cursor: Int, count: Int) Int {
 fn selected_issue(model: Search) issues::Issue? {
   match model.results.size() == 0 {
     true => maybe::none(),
-    false => maybe::some(
-      model.results.at(clamp_cursor(model.cursor, model.results.size())).expect("clamped"),
-    ),
+    false => {
+      maybe::some(model.results.at(clamp_cursor(model.cursor, model.results.size())).expect("clamped"))
+    },
   }
 }
 
@@ -63,41 +63,54 @@ fn selected_issue(model: Search) issues::Issue? {
 // result so a long-running request from an older query can't
 // overwrite newer results.
 fn start_search(c: mut ffi::StateCtx, api_key: Str, query: Str, generation: Int) {
-  async::start(fn() {
-    time::Sleep(300 * time::Millisecond)
-    let trimmed = query.trim()
-    ffi::Dispatch(c, fn() {
-      let current = ffi::StateValue<Search>(c)
-      let still_current = current.generation == generation and current.query.trim() == trimmed and not trimmed.is_empty()
-      if still_current {
-        async::start(fn() {
-          let result = issues::search(api_key, trimmed)
-          ffi::Dispatch(c, fn() {
-            let current2 = ffi::StateValue<Search>(c)
-            if current2.generation == generation and current2.query.trim() == trimmed {
-              ffi::Update<Search>(c, fn(next: mut Search) {
-                match result {
-                  ok(results) => {
-                    next.results = results
-                    next.cursor = 0
-                    next.error = ""
+  async::start(
+    fn() {
+      time::Sleep(300 * time::Millisecond)
+      let trimmed = query.trim()
+      ffi::Dispatch(
+        c,
+        fn() {
+          let current = ffi::StateValue<Search>(c)
+          let still_current = current.generation == generation and current.query.trim() == trimmed and (not trimmed.is_empty())
+          if still_current {
+            async::start(
+              fn() {
+                let result = issues::search(api_key, trimmed)
+                ffi::Dispatch(
+                  c,
+                  fn() {
+                    let current2 = ffi::StateValue<Search>(c)
+                    if current2.generation == generation and current2.query.trim() == trimmed {
+                      ffi::Update<Search>(
+                        c,
+                        fn(next: mut Search) {
+                          match result {
+                            ok(results) => {
+                              next.results = results
+                              next.cursor = 0
+                              next.error = ""
+                            },
+                            err(e) => {
+                              let empty: [issues::Issue] = []
+                              next.results = empty
+                              next.cursor = 0
+                              next.error = e
+                            },
+                          }
+                          next.loading = false
+                          next.searched = true
+                        },
+                      )
+                    }
                   },
-                  err(e) => {
-                    let empty: [issues::Issue] = []
-                    next.results = empty
-                    next.cursor = 0
-                    next.error = e
-                  },
-                }
-                next.loading = false
-                next.searched = true
-              })
-            }
-          })
-        })
-      }
-    })
-  })
+                )
+              },
+            )
+          }
+        },
+      )
+    },
+  )
 }
 
 // ── Result rows ──────────────────────────────────────────────────────
@@ -105,23 +118,33 @@ fn start_search(c: mut ffi::StateCtx, api_key: Str, query: Str, generation: Int)
 // Single row: identifier (10 cols) | title (flex, clipped with
 // ellipsis) | state name (12 cols). ListTile.Selected gives the cursor
 // row its theme.Primary chrome.
-fn result_row(theme: ui::Theme, issue: issues::Issue, selected: Bool, on_press: fn(ui::EventContext)) ui::Widget {
+fn result_row(
+  theme: ui::Theme,
+  issue: issues::Issue,
+  selected: Bool,
+  on_press: fn(ui::EventContext),
+) ui::Widget {
   let state_name = text::truncate_with_ellipsis(issue.state_name, 12)
   mut row_children: [ui::Widget] = [
-    ui::SizedBox{
-      Width: 10,
-      Height: 1,
-      Child: ui::Text{Value: issue.identifier, Style: ui::Style{Foreground: theme.Foreground, Attribute: ui::AttrBold}},
-    },
-    ui::SizedBox{Width: 2, Height: 1},
     // RichText with overflow ellipsis truncates to whatever width
     // Expanded actually gives the title, instead of relying on a
     // hard-coded byte budget that has to match the layout.
-    ui::Expanded(ui::RichText{
-      Spans: [ui::TextSpan{Text: issue.title, Style: ui::Style{Foreground: theme.Foreground}}],
-      Overflow: ui::TextOverflowEllipsis,
-      MaxLines: 1,
-    }),
+    ui::SizedBox{
+      Width: 10,
+      Height: 1,
+      Child: ui::Text{
+        Value: issue.identifier,
+        Style: ui::Style{Foreground: theme.Foreground, Attribute: ui::AttrBold},
+      },
+    },
+    ui::SizedBox{Width: 2, Height: 1},
+    ui::Expanded(
+      ui::RichText{
+        Spans: [ui::TextSpan{Text: issue.title, Style: ui::Style{Foreground: theme.Foreground}}],
+        Overflow: ui::TextOverflowEllipsis,
+        MaxLines: 1,
+      },
+    ),
     ui::SizedBox{Width: 2, Height: 1},
     ui::SizedBox{
       Width: 12,
@@ -145,29 +168,35 @@ fn empty_placeholder(theme: ui::Theme, message: Str) ui::Widget {
 fn results_body(theme: ui::Theme, model: Search, on_pick: fn(Int)) ui::Widget {
   match {
     model.loading => empty_placeholder(theme, "Searching…"),
-    not model.error.is_empty() => ui::Center(
-      ui::Text{Value: "Unable to search: {model.error}", Style: ui::Style{Foreground: theme.DangerText}},
-    ),
+    not model.error.is_empty() => {
+      ui::Center(
+        ui::Text{Value: "Unable to search: {model.error}", Style: ui::Style{Foreground: theme.DangerText}},
+      )
+    },
     model.query.trim().is_empty() => empty_placeholder(theme, "Type to search across issues"),
     model.searched and model.results.size() == 0 => empty_placeholder(theme, "No issues found"),
-    _ => ui::CustomScrollView{
-      Controller: model.scroll,
-      Slivers: [
-        ui::SliverListBuilder{
-          Controller: model.list_scroll,
-          Count: model.results.size(),
-          ItemExtent: 1,
-          Overscan: 4,
-          Builder: fn(ctx: ui::BuildContext, i: Int) ui::Widget {
-            result_row(
-              theme,
-              model.results.at(i).expect("builder index in range"),
-              i == model.cursor,
-              fn(ev: ui::EventContext) { on_pick(i) },
-            )
+    _ => {
+      ui::CustomScrollView{
+        Controller: model.scroll,
+        Slivers: [
+          ui::SliverListBuilder{
+            Controller: model.list_scroll,
+            Count: model.results.size(),
+            ItemExtent: 1,
+            Overscan: 4,
+            Builder: fn(ctx: ui::BuildContext, i: Int) ui::Widget {
+              result_row(
+                theme,
+                model.results.at(i).expect("builder index in range"),
+                i == model.cursor,
+                fn(ev: ui::EventContext) {
+                  on_pick(i)
+                },
+              )
+            },
           },
-        },
-      ],
+        ],
+      }
     },
   }
 }
@@ -177,34 +206,46 @@ fn results_body(theme: ui::Theme, model: Search, on_pick: fn(Int)) ui::Widget {
 fn on_query_changed(c: mut ffi::StateCtx, api_key: Str, value: Str) {
   let trimmed = value.trim()
   let generation = ffi::StateValue<Search>(c).generation + 1
-  ffi::Update<Search>(c, fn(next: mut Search) {
-    let empty: [issues::Issue] = []
-    next.query = value
-    next.generation = generation
-    next.results = empty
-    next.cursor = 0
-    next.error = ""
-    if trimmed.is_empty() {
-      next.loading = false
-      next.searched = false
-    } else {
-      next.loading = true
-    }
-  })
+  ffi::Update<Search>(
+    c,
+    fn(next: mut Search) {
+      let empty: [issues::Issue] = []
+      next.query = value
+      next.generation = generation
+      next.results = empty
+      next.cursor = 0
+      next.error = ""
+      if trimmed.is_empty() {
+        next.loading = false
+        next.searched = false
+      } else {
+        next.loading = true
+      }
+    },
+  )
   if not trimmed.is_empty() {
     start_search(c, api_key, value, generation)
   }
 }
 
-fn body(c: mut ffi::StateCtx, api_key: Str, theme: ui::Theme, model: Search, on_open: fn(issues::Issue)) ui::Widget {
+fn body(
+  c: mut ffi::StateCtx,
+  api_key: Str,
+  theme: ui::Theme,
+  model: Search,
+  on_open: fn(issues::Issue),
+) ui::Widget {
   let on_pick = fn(idx: Int) {
     // Click handler: move cursor to the picked row and open it (same
     // UX as the picker option click).
     let safe = clamp_cursor(idx, model.results.size())
     if model.results.size() > 0 {
-      ffi::Update<Search>(c, fn(next: mut Search) {
-        next.cursor = safe
-      })
+      ffi::Update<Search>(
+        c,
+        fn(next: mut Search) {
+          next.cursor = safe
+        },
+      )
       on_open(model.results.at(safe).expect("clamped"))
     }
   }
@@ -212,26 +253,26 @@ fn body(c: mut ffi::StateCtx, api_key: Str, theme: ui::Theme, model: Search, on_
     // Search input. FocusScope(AutoFocus) so the modal frame's
     // auto-focus lands here on first open. TextField handles its own
     // internal events; we don't trap Tab.
+    // Divider blends with the modal surface, not the app background.
+    // modal::show_modal uses theme.Surface as its fill so any in-modal
+    // widget that paints its own background has to match.
+    // Fixed-height results region. The CustomScrollView inside needs a
+    // bounded extent to clip and scroll; 8 rows matches main.
     ui::FocusScope{
       AutoFocus: true,
       Child: ui::TextField{
-        Value: model.query,
-        Placeholder: "Search issues…",
         // TextField renders at exactly MinWidth, so set it to the
         // modal's content width (60 − 2 cols of horizontal padding)
         // to make the field fill the row.
+        Value: model.query,
+        Placeholder: "Search issues…",
         MinWidth: 58,
         OnChanged: fn(ev: ui::EventContext, value: Str) {
           on_query_changed(c, api_key, value)
         },
       },
     },
-    // Divider blends with the modal surface, not the app background.
-    // modal::show_modal uses theme.Surface as its fill so any in-modal
-    // widget that paints its own background has to match.
     ui::Divider{Style: ui::Style{Foreground: theme.Border, Background: theme.Surface}},
-    // Fixed-height results region. The CustomScrollView inside needs a
-    // bounded extent to clip and scroll; 8 rows matches main.
     ui::SizedBox{Height: 8, Child: results_body(theme, model, on_pick)},
   ]
   ui::Flex{
@@ -277,9 +318,12 @@ fn new(api_key: Str, on_open: fn(issues::Issue)) ui::Widget {
         let count = current.results.size()
         if count > 0 {
           let next_cursor = clamp_cursor(current.cursor + delta, count)
-          ffi::Update<Search>(c, fn(next: mut Search) {
-            next.cursor = next_cursor
-          })
+          ffi::Update<Search>(
+            c,
+            fn(next: mut Search) {
+              next.cursor = next_cursor
+            },
+          )
           current.list_scroll.RevealIndex(next_cursor)
         }
       }
@@ -309,7 +353,7 @@ fn new(api_key: Str, on_open: fn(issues::Issue)) ui::Widget {
               if not current.loading {
                 match selected_issue(current) {
                   issue => on_open(issue),
-                  _ => {},
+                  _ => (),
                 }
               }
               ui::EventHandled

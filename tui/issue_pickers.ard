@@ -1,8 +1,7 @@
 use ard/async
 use ard/maybe
-use go:go.rockorager.dev/vaxis/ui
-use go:tinear/ffi
 
+use go:go.rockorager.dev/vaxis/ui
 use tinear/models/issues
 use tinear/tui/hints_bar
 use tinear/tui/modal
@@ -92,13 +91,18 @@ fn loading_modal_builder(title: Str) fn(ui::Theme, fn()) ui::Widget {
     modal::show_modal(
       theme,
       title,
-      ui::Focus(mut focus_node, ui::SizedBox{
-        Height: 3,
-        Child: ui::Center(ui::Text{Value: "Loading…", Style: ui::Style{Foreground: theme.MutedForeground}}),
-      }),
+      ui::Focus(
+        mut focus_node,
+        ui::SizedBox{
+          Height: 3,
+          Child: ui::Center(ui::Text{Value: "Loading…", Style: ui::Style{Foreground: theme.MutedForeground}}),
+        },
+      ),
       hints_bar::row(theme, [hints_bar::Hint{key: "Esc", label: "cancel"}]),
       maybe::some(50),
-      fn(ev: ui::EventContext) { close() },
+      fn(ev: ui::EventContext) {
+        close()
+      },
     )
   }
 }
@@ -120,31 +124,41 @@ fn open_state_picker(
 
   show_modal(loading_modal_builder(title))
 
-  async::start(fn() {
-    let result = issues::load_team_states(key, team_id)
-    match result {
-      ok(states) => {
-        mut options: [picker::Option] = []
-        for ws in states {
-          options.push(picker::Option{
-            id: ws.id,
-            label: ws.name,
-            current: ws.id == current_state_id,
-          })
-        }
-        show_modal(picker::new(picker::Props{
-          title: title,
-          options: options,
-          width: maybe::some(50),
-          on_confirm: fn(opt: picker::Option) { on_change(opt.id) },
-        }))
-      },
-      err(e) => {
-        close_modal()
-        notify("State picker", "Failed to load states: {e}", toast::ToastVariant::error)
-      },
-    }
-  })
+  async::start(
+    fn() {
+      let result = issues::load_team_states(key, team_id)
+      match result {
+        ok(states) => {
+          mut options: [picker::Option] = []
+          for ws in states {
+            options.push(
+              picker::Option{
+                id: ws.id,
+                label: ws.name,
+                current: ws.id == current_state_id,
+              },
+            )
+          }
+          show_modal(
+            picker::new(
+              picker::Props{
+                title: title,
+                options: options,
+                width: maybe::some(50),
+                on_confirm: fn(opt: picker::Option) {
+                  on_change(opt.id)
+                },
+              },
+            ),
+          )
+        },
+        err(e) => {
+          close_modal()
+          notify("State picker", "Failed to load states: {e}", toast::ToastVariant::error)
+        },
+      }
+    },
+  )
 }
 
 // Open the cycle picker for the given issue. The first option is a
@@ -165,36 +179,46 @@ fn open_cycle_picker(
 
   show_modal(loading_modal_builder(title))
 
-  async::start(fn() {
-    let result = issues::load_team_cycles(key, team_id)
-    match result {
-      ok(tcr) => {
-        let cycles = sort_cycles(filter_cycles_for_issue(tcr, current_cycle_id))
-        mut options: [picker::Option] = [
-          picker::Option{
-            id: "",
-            label: "(no cycle)",
-            current: current_cycle_id.is_empty(),
-          },
-        ]
-        for c in cycles {
-          options.push(picker::Option{
-            id: c.id,
-            label: cycle_label(c),
-            current: c.id == current_cycle_id,
-          })
-        }
-        show_modal(picker::new(picker::Props{
-          title: title,
-          options: options,
-          width: maybe::some(60),
-          on_confirm: fn(opt: picker::Option) { on_change(opt.id) },
-        }))
-      },
-      err(e) => {
-        close_modal()
-        notify("Cycle picker", "Failed to load cycles: {e}", toast::ToastVariant::error)
-      },
-    }
-  })
+  async::start(
+    fn() {
+      let result = issues::load_team_cycles(key, team_id)
+      match result {
+        ok(tcr) => {
+          let cycles = sort_cycles(filter_cycles_for_issue(tcr, current_cycle_id))
+          mut options: [picker::Option] = [
+            picker::Option{
+              id: "",
+              label: "(no cycle)",
+              current: current_cycle_id.is_empty(),
+            },
+          ]
+          for c in cycles {
+            options.push(
+              picker::Option{
+                id: c.id,
+                label: cycle_label(c),
+                current: c.id == current_cycle_id,
+              },
+            )
+          }
+          show_modal(
+            picker::new(
+              picker::Props{
+                title: title,
+                options: options,
+                width: maybe::some(60),
+                on_confirm: fn(opt: picker::Option) {
+                  on_change(opt.id)
+                },
+              },
+            ),
+          )
+        },
+        err(e) => {
+          close_modal()
+          notify("Cycle picker", "Failed to load cycles: {e}", toast::ToastVariant::error)
+        },
+      }
+    },
+  )
 }

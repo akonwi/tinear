@@ -1,5 +1,6 @@
-// OS-level utilities backed by tinear's Go FFI package (ffi/host.go).
 use go:tinear/ffi
+
+// OS-level utilities backed by tinear's Go FFI package (ffi/host.go).
 
 // Launch the system's default handler for the given URL (browser for
 // http(s), file viewer for file paths, etc.). Returns immediately; does
