@@ -1,5 +1,4 @@
 use ard/async
-use ard/maybe
 
 use go:go.rockorager.dev/vaxis/ui
 use go:time
@@ -47,9 +46,9 @@ fn clamp_cursor(cursor: Int, count: Int) Int {
 
 fn selected_issue(model: Search) issues::Issue? {
   match model.results.size() == 0 {
-    true => maybe::none(),
+    true => Maybe::new(),
     false => {
-      maybe::some(model.results.at(clamp_cursor(model.cursor, model.results.size())).expect("clamped"))
+      Maybe::new(model.results.at(clamp_cursor(model.cursor, model.results.size())).expect("clamped"))
     },
   }
 }

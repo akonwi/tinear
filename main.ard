@@ -1,5 +1,4 @@
 use ard/async
-use ard/maybe
 
 use go:go.rockorager.dev/vaxis/ui
 use go:time
@@ -107,7 +106,7 @@ fn close_modal(c: mut ffi::StateCtx) {
       ffi::Update<AppState>(
         c,
         fn(s: mut AppState) {
-          s.current_modal = maybe::none()
+          s.current_modal = Maybe::new()
         },
       )
     },
@@ -121,7 +120,7 @@ fn show_modal(c: mut ffi::StateCtx, builder: fn(ui::Theme, fn()) ui::Widget) {
       ffi::Update<AppState>(
         c,
         fn(s: mut AppState) {
-          s.current_modal = maybe::some(modal::ModalDef{build: builder})
+          s.current_modal = Maybe::new(modal::ModalDef{build: builder})
         },
       )
     },
@@ -241,7 +240,7 @@ fn root() ui::Widget {
             api_key: api_key,
             toasts: [],
             next_toast_id: 0,
-            current_modal: maybe::none(),
+            current_modal: Maybe::new(),
           }
         },
         Build: body,

@@ -1,5 +1,4 @@
 use ard/async
-use ard/maybe
 
 use go:go.rockorager.dev/vaxis/ui
 use go:tinear/ffi
@@ -72,7 +71,7 @@ fn load_issue(c: mut ffi::StateCtx, api_key: Str, identifier: Str) {
             fn(v: mut Detail) {
               match result {
                 ok(issue) => {
-                  v.issue = maybe::some(issue)
+                  v.issue = Maybe::new(issue)
                   v.issue_error = ""
                 },
                 err(e) => { v.issue_error = e },
@@ -162,7 +161,7 @@ fn refresh_detail(
               ffi::Update<Detail>(
                 c,
                 fn(v: mut Detail) {
-                  v.issue = maybe::some(issue)
+                  v.issue = Maybe::new(issue)
                   v.issue_error = ""
                 },
               )
@@ -568,7 +567,7 @@ fn build(
                     theme_inner,
                     [hints_bar::Hint{key: "Ctrl+↵", label: "send"}, hints_bar::Hint{key: "Esc", label: "cancel"}],
                   ),
-                  maybe::some(70),
+                  Maybe::new(70),
                   fn(ev2: ui::EventContext) {
                     close()
                   },
@@ -680,7 +679,7 @@ fn new(
       Detail{
         started: false,
         identifier: identifier,
-        issue: maybe::none(),
+        issue: Maybe::new(),
         issue_loading: true,
         issue_error: "",
         comments: [],

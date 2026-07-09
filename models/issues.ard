@@ -1,5 +1,3 @@
-use ard/maybe
-
 use go:encoding/json
 use tinear/decode
 use tinear/linear/client
@@ -135,8 +133,8 @@ fn nullable_str(data: Any, name: Str) Str? {
 
 fn normalize_nullable_str(value: Str?) Str? {
   match value {
-    v => maybe::some(normalize_text(v)),
-    _ => maybe::none(),
+    v => Maybe::new(normalize_text(v)),
+    _ => Maybe::new(),
   }
 }
 
@@ -190,7 +188,7 @@ fn cycle_id(raw: Any) Str {
 fn cycle_label(raw: Any) Str {
   let number = match decode::run(raw, decode::path(["cycle", "number"], decode::nullable(decode::int))) {
     ok(value) => value,
-    err(_) => maybe::none(),
+    err(_) => Maybe::new(),
   }
   match number {
     n => {
@@ -365,7 +363,7 @@ fn fetch_team_cycles(api_key: Str, team_id: Str) TeamCyclesResult!Str {
 
   let active_number = match decode::run(team_obj, decode::path(["activeCycle", "number"], decode::nullable(decode::int))) {
     ok(value) => value,
-    err(_) => maybe::none(),
+    err(_) => Maybe::new(),
   }
 
   mut cycles: [Cycle] = []

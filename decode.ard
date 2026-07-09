@@ -1,4 +1,3 @@
-use ard/maybe
 use ard/unsafe
 
 use go:encoding/json
@@ -113,10 +112,10 @@ fn any(data: Any) Any!Error {
 fn nullable(decoder: fn(Any) $T!Error) fn(Any) $T?!Error {
   fn(data: Any) $T?!Error {
     match unsafe::is_nil(data) {
-      true => Result::ok(maybe::none()),
+      true => Result::ok(Maybe::new()),
       false => {
         let value = try decoder(data)
-        Result::ok(maybe::some(value))
+        Result::ok(Maybe::new(value))
       },
     }
   }

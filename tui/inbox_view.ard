@@ -1,5 +1,4 @@
 use ard/async
-use ard/maybe
 
 use go:go.rockorager.dev/vaxis/ui
 use go:tinear/ffi
@@ -63,7 +62,7 @@ fn fetch_detail(c: mut ffi::StateCtx, api_key: Str, target_id: Str) {
               fn(s: mut View) {
                 match result {
                   ok(d) => {
-                    s.detail = maybe::some(d)
+                    s.detail = Maybe::new(d)
                     s.detail_loaded_id = target_id
                     s.detail_loading = false
                     s.detail_error = ""
@@ -98,7 +97,7 @@ fn request_detail_for_cursor(c: mut ffi::StateCtx, api_key: Str) {
           live.detail_request_id = target_id
           live.detail_loading = true
           live.detail_error = ""
-          live.detail = maybe::none()
+          live.detail = Maybe::new()
         },
       )
       fetch_detail(c, api_key, target_id)
@@ -490,7 +489,7 @@ fn delete_current(c: mut ffi::StateCtx, api_key: Str, notify: fn(Str, Str)) {
         s.items = remaining
         s.cursor = clamp_cursor(before.cursor, remaining.size())
         if remaining.size() == 0 {
-          s.detail = maybe::none()
+          s.detail = Maybe::new()
           s.detail_loaded_id = ""
           s.detail_request_id = ""
           s.detail_loading = false
@@ -498,7 +497,7 @@ fn delete_current(c: mut ffi::StateCtx, api_key: Str, notify: fn(Str, Str)) {
         } else {
           let new_target = remaining.at(s.cursor).expect("clamped").notification_id
           if not s.detail_loaded_id == new_target {
-            s.detail = maybe::none()
+            s.detail = Maybe::new()
             s.detail_request_id = new_target
             s.detail_loading = true
             s.detail_error = ""
@@ -624,7 +623,7 @@ fn new(api_key: Str, on_open: fn(inbox::Item), notify: fn(Str, Str), active: Boo
         detail_scroll: mut detail_scroll,
         detail_request_id: "",
         detail_loaded_id: "",
-        detail: maybe::none(),
+        detail: Maybe::new(),
         detail_loading: false,
         detail_error: "",
       }

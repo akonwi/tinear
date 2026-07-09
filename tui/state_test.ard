@@ -1,10 +1,9 @@
-use ard/maybe
 use ard/testing
 
 use tinear/tui/state
 
 test fn test_priority_helpers() Void!Str {
-  let missing: Int? = maybe::none()
+  let missing: Int? = Maybe::new()
   try testing::assert(state::priority_label(1) == "Urgent", "priority 1 should be Urgent")
   try testing::assert(state::priority_label(missing) == "—", "missing priority should be em dash")
   try testing::assert(state::priority_glyph(2) == "↑", "priority 2 should use up glyph")

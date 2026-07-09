@@ -1,5 +1,3 @@
-use ard/maybe
-
 use tinear/decode
 use tinear/linear/client
 
@@ -74,7 +72,7 @@ fn optional_nested_str(data: Any, name: Str, nested: Str, fallback: Str) Str {
 fn optional_nested_int(data: Any, name: Str, nested: Str) Int? {
   match decode::run(data, decode::path([name, nested], decode::nullable(decode::int))) {
     ok(value) => value,
-    err(_) => maybe::none(),
+    err(_) => Maybe::new(),
   }
 }
 
@@ -322,9 +320,9 @@ fn decode_pr_detail(notif: Any) Detail {
   let comment_id = path_str1(notif, "pullRequestCommentId", "")
   let subtitle = path_str1(notif, "subtitle", "")
   let triggering = match comment_id.is_empty() or subtitle.is_empty() {
-    true => maybe::none(),
+    true => Maybe::new(),
     false => {
-      maybe::some(
+      Maybe::new(
         DetailComment{
           author: decode_user_display(path_dynamic1(notif, "actor")),
           created_at: path_str1(notif, "createdAt", ""),
@@ -339,7 +337,7 @@ fn decode_pr_detail(notif: Any) Detail {
     title: path_str2(notif, "pullRequest", "title", ""),
     description: "",
     state_name: path_str2(notif, "pullRequest", "status", ""),
-    priority: maybe::none(),
+    priority: Maybe::new(),
     assignee_name: decode_user_display(path_dynamic2(notif, "pullRequest", "creator")),
     team_name: "",
     team_key: "",
@@ -358,11 +356,11 @@ fn decode_triggering_comment(notif: Any) DetailComment? {
   match decode::run(notif, decode::field("comment", decode::nullable(decode::any))) {
     ok(value) => {
       match value {
-        raw => maybe::some(decode_detail_comment(raw)),
-        _ => maybe::none(),
+        raw => Maybe::new(decode_detail_comment(raw)),
+        _ => Maybe::new(),
       }
     },
-    err(_) => maybe::none(),
+    err(_) => Maybe::new(),
   }
 }
 

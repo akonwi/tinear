@@ -1,5 +1,3 @@
-use ard/maybe
-
 use go:encoding/json
 use go:os
 use tinear/config
@@ -50,11 +48,11 @@ fn decode(content: Str) DataCache? {
   match parse(content) {
     ok(cache) => {
       match cache.version == version() {
-        true => maybe::some(cache),
-        false => maybe::none(),
+        true => Maybe::new(cache),
+        false => Maybe::new(),
       }
     },
-    err(_) => maybe::none(),
+    err(_) => Maybe::new(),
   }
 }
 
@@ -95,10 +93,10 @@ fn load() DataCache? {
           mut copy = bytes
           decode(Str::from(copy))
         },
-        err(_) => maybe::none(),
+        err(_) => Maybe::new(),
       }
     },
-    err(_) => maybe::none(),
+    err(_) => Maybe::new(),
   }
 }
 
@@ -116,8 +114,8 @@ fn save(cache: DataCache) Void!Str {
 
 fn load_logged_in() LoggedInCache? {
   match load() {
-    cache => maybe::some(cache.logged_in),
-    _ => maybe::none(),
+    cache => Maybe::new(cache.logged_in),
+    _ => Maybe::new(),
   }
 }
 

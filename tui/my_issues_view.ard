@@ -1,5 +1,4 @@
 use ard/async
-use ard/maybe
 
 use go:go.rockorager.dev/vaxis/ui
 use go:tinear/ffi
@@ -90,11 +89,11 @@ fn prev_non_empty(columns: [issues::BoardColumn], start: Int) Int {
 }
 
 fn selected_issue(v: Board) issues::Issue? {
-  mut found: issues::Issue? = maybe::none()
+  mut found: issues::Issue? = Maybe::new()
   if v.columns.size() > 0 and v.cursor_col < v.columns.size() {
     let col = v.columns.at(v.cursor_col).expect("bounds checked")
     if v.cursor_row < col.issues.size() {
-      found = maybe::some(col.issues.at(v.cursor_row).expect("bounds checked"))
+      found = Maybe::new(col.issues.at(v.cursor_row).expect("bounds checked"))
     }
   }
   found

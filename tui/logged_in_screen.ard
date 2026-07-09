@@ -1,5 +1,4 @@
 use ard/async
-use ard/maybe
 
 use go:go.rockorager.dev/vaxis/ui
 use go:tinear/ffi
@@ -416,7 +415,7 @@ fn build(
                       hints_bar::Hint{key: "Esc", label: "close"},
                     ],
                   ),
-                  maybe::some(60),
+                  Maybe::new(60),
                   fn(ev2: ui::EventContext) {
                     close()
                   },
