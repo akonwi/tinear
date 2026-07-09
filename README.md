@@ -2,6 +2,8 @@
 
 A terminal UI for [Linear](https://linear.app/) built with [Ard](https://ard.run).
 
+<img width="1302" height="1013" alt="Ghostty000486" src="https://github.com/user-attachments/assets/0cb3b3a2-2beb-49e7-af53-a67ca33ac294" />
+
 ## Setup
 
 1. **Get an API key** from Linear Settings → API → Personal API keys.
