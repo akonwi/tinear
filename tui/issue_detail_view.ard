@@ -50,6 +50,9 @@ struct Detail {
   comments_loading: Bool,
   comments_error: Str,
 
+  // Stops the per-tab periodic refresh loop on dispose.
+  refresh_stop: Chan<Bool>,
+
   // Body scroll controller.
   scroll: mut ui::ScrollController,
 
@@ -685,21 +688,22 @@ fn new(
         comments: [],
         comments_loading: true,
         comments_error: "",
+        refresh_stop: Chan::new<Bool>(),
         scroll: mut scroll,
         active_section: SECTION_DESCRIPTION,
       }
     },
     Build: fn(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
       // First-build kick: initial fetches plus the 5-minute background
-      // refresh. The fiber keeps polling even after this tab is closed
-      // (no cancellation yet); the dispatch is a safe no-op against a
-      // disposed state, so this is wasteful but harmless.
+      // refresh. The stop channel is closed on dispose so closed tabs
+      // stop polling.
       let s = ffi::StateRef<Detail>(c)
       if not s.started {
         s.started = true
         load_issue(c, api_key, identifier)
         load_comments(c, api_key, identifier)
         refresh::schedule_periodic(
+          s.refresh_stop,
           5 * 60 * 1000,
           fn() {
             refresh_detail(c, api_key, identifier, notify)
@@ -707,6 +711,10 @@ fn new(
         )
       }
       build(c, ctx, api_key, identifier, notify, show_modal, close_modal, active)
+    },
+    OnDispose: fn(c: mut ffi::StateCtx) {
+      let s = ffi::StateValue<Detail>(c)
+      s.refresh_stop.close()
     },
   }
 }

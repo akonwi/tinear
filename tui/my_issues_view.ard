@@ -39,6 +39,7 @@ struct Board {
   cursor_row: Int,
   loading: Bool,
   error: Str,
+  refresh_stop: Chan<Bool>,
   board_h_scroll: mut ui::ScrollController,
   col_h_scrolls: [mut ui::ScrollController],
   col_list_scrolls: [mut ui::SliverListController],
@@ -816,6 +817,7 @@ fn new(
         cursor_row: 0,
         loading: true,
         error: "",
+        refresh_stop: Chan::new<Bool>(),
         board_h_scroll: mut board_h_scroll,
         col_h_scrolls: [],
         col_list_scrolls: [],
@@ -829,6 +831,7 @@ fn new(
         s.started = true
         load_board(c, api_key, notify)
         refresh::schedule_periodic(
+          s.refresh_stop,
           5 * 60 * 1000,
           fn() {
             refresh_board(c, api_key, notify)
@@ -836,6 +839,10 @@ fn new(
         )
       }
       build(c, ctx, api_key, on_open_issue, notify, show_modal, close_modal, active)
+    },
+    OnDispose: fn(c: mut ffi::StateCtx) {
+      let s = ffi::StateValue<Board>(c)
+      s.refresh_stop.close()
     },
   }
 }

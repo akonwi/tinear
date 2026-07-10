@@ -18,14 +18,20 @@ type StateCtx struct {
 	markNeedsBuild func()
 	anim           *ui.AnimationController
 	runtime        ui.Runtime
+	disposed       bool
 }
 
 // Dispatch posts fn onto the UI thread. Background fibers must route all
 // state mutation through here: StateRef + MarkDirty are only safe on the
 // UI thread. Dispatching after unmount is a silent no-op upstream.
 func Dispatch(c *StateCtx, fn func()) {
-	if c.runtime != nil {
-		c.runtime.Dispatch(fn)
+	if c != nil && !c.disposed && c.runtime != nil {
+		c.runtime.Dispatch(func() {
+			if c.disposed {
+				return
+			}
+			fn()
+		})
 	}
 }
 
@@ -45,6 +51,9 @@ func StateValue[T any](c *StateCtx) T {
 
 // StateSet replaces the whole state value (copy-then-write model).
 func StateSet[T any](c *StateCtx, v T) {
+	if c.disposed {
+		return
+	}
 	if p, ok := c.value.(*T); ok {
 		*p = v
 	} else {
@@ -70,12 +79,18 @@ func StateRef[T any](c *StateCtx) *T {
 // Update runs mutate against the live *T state pointer, then schedules a
 // rebuild. React-like callback ergonomics with a live pointer (not a copy).
 func Update[T any](c *StateCtx, mutate func(*T)) {
+	if c.disposed {
+		return
+	}
 	mutate(StateRef[T](c))
 	MarkDirty(c)
 }
 
 // MarkDirty schedules a rebuild after in-place state mutation.
 func MarkDirty(c *StateCtx) {
+	if c.disposed {
+		return
+	}
 	if c.markNeedsBuild != nil {
 		c.markNeedsBuild()
 	}
@@ -91,6 +106,9 @@ type Stateful struct {
 	// lets Ard drive time-based state (a background goroutine posting through
 	// Runtime.Dispatch is Go-only plumbing; the increment logic stays in Ard).
 	OnTick func(c *StateCtx)
+	// OnDispose, when set, is invoked exactly once when vaxis disposes this
+	// stateful widget. Ard uses it to cancel widget-owned background work.
+	OnDispose func(c *StateCtx)
 	// Animate, when true, creates a StateBase-owned AnimationController the
 	// runner ticks before each frame; reachable from Ard via ffi.Animation.
 	Animate bool
@@ -144,6 +162,15 @@ func (s *statefulState) InitState() {
 }
 
 func (s *statefulState) Dispose() {
+	if s.ctx != nil && !s.ctx.disposed {
+		w := s.StateBase.Widget().(Stateful)
+		if w.OnDispose != nil {
+			w.OnDispose(s.ctx)
+		}
+		s.ctx.disposed = true
+		s.ctx.runtime = nil
+		s.ctx.markNeedsBuild = nil
+	}
 	if s.stop != nil {
 		close(s.stop)
 	}

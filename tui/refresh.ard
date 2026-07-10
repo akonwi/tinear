@@ -3,24 +3,18 @@ use ard/async
 use go:time
 
 // Schedules `action` to run every `interval_ms` milliseconds on a
-// background fiber, indefinitely. The first invocation happens AFTER
-// the first sleep — callers that want immediate fetch-on-mount do
+// background fiber until `stop` is closed. The first invocation happens
+// AFTER the first sleep — callers that want immediate fetch-on-mount do
 // it themselves before calling schedule_periodic.
-//
-// The fiber lives for the duration of the app (or until the runtime
-// is shut down). View-level disposal does NOT cancel it; if the
-// action's rt.dispatch lands on a disposed state, the dispatch is a
-// silent no-op (per the FFI). So this is safe but wasteful for
-// short-lived views — fine for the inbox/board (alive for the whole
-// session) and acceptable for issue tabs (closed tabs keep polling
-// until the app exits, which we'll fix when we expose a cancellable
-// Fiber handle).
-fn schedule_periodic(interval_ms: Int, action: fn()) {
-  let _ = async::start(
+fn schedule_periodic(stop: Chan<Bool>, interval_ms: Int, action: fn()) {
+  async::start(
     fn() {
-      while true {
-        time::Sleep(time::Duration::from(interval_ms) * time::Millisecond)
-        action()
+      mut running = true
+      while running {
+        select {
+          stop.recv() => { running = false },
+          time::After(time::Duration::from(interval_ms) * time::Millisecond).recv() => action(),
+        }
       }
     },
   )
