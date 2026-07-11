@@ -1,7 +1,7 @@
 use go:encoding/json
 use go:os
 use tinear/config
-use tinear/decode
+use decode
 
 // On-disk cache of UI state we want to survive across app launches.
 // Currently scoped to the logged-in shell's tab layout so the user

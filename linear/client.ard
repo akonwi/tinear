@@ -3,7 +3,7 @@ use go:io
 use go:net/http
 use go:strings
 use go:time
-use tinear/decode
+use decode
 
 // Shared GraphQL client for the Linear API.
 //

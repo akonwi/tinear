@@ -1,5 +1,5 @@
 use go:encoding/json
-use tinear/decode
+use decode
 use tinear/linear/client
 use tinear/tui/state
 

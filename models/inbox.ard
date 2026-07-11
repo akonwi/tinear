@@ -1,4 +1,4 @@
-use tinear/decode
+use decode
 use tinear/linear/client
 
 struct Item {

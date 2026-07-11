@@ -1,6 +1,6 @@
 use go:encoding/json
 use go:os
-use tinear/decode
+use decode
 
 struct Config {
   api_key: Str,
