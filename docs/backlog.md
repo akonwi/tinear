@@ -9,9 +9,12 @@ Not commitments — a parking lot for what to build next.
   tinear can triage, read, and comment, but not capture a new bug/idea.
   Compose-style modal (title + markdown body, team/project pickers);
   reuses `compose_view` and `picker` machinery. `issueCreate` mutation.
-- [ ] **Edit more issue fields**: ~~priority (`p`), assignee (`a`),
-  project (`P`)~~ done. Remaining: **labels** (needs a multi-select
-  picker widget).
+- [x] **Edit more issue fields**: priority (`p`), assignee (`a`),
+  project (`P`).
+- [ ] **Labels** — deliberately deferred: tinear doesn't display labels
+  anywhere yet, so display (detail header, maybe board cards) would
+  have to come first, and editing needs a multi-select picker widget.
+  Low priority until labels prove useful to see.
 - [ ] **Comment threading**. Linear comments have `parent`/`children`;
   indent replies in `comment_card`. Reading value even before posting
   replies is supported.
