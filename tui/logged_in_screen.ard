@@ -360,6 +360,7 @@ fn hints_for(s: Model) [hints_bar::Hint] {
         hints_bar::Hint{key: "⌫", label: "delete"},
         hints_bar::Hint{key: "r", label: "refresh"},
         hints_bar::Hint{key: "↵", label: "open"},
+        hints_bar::Hint{key: "o", label: "browser"},
         hints_bar::Hint{key: "c", label: "new issue"},
         hints_bar::Hint{key: "?", label: "search"},
       ]
@@ -404,6 +405,7 @@ fn hints_for(s: Model) [hints_bar::Hint] {
             hints_bar::Hint{key: "a", label: "assign"},
             hints_bar::Hint{key: "y", label: "cycle"},
             hints_bar::Hint{key: "P", label: "project"},
+            hints_bar::Hint{key: "o", label: "browser"},
             hints_bar::Hint{key: "Esc", label: "close"},
           ]
         },

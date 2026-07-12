@@ -3,6 +3,7 @@ use ard/async
 use go:go.rockorager.dev/vaxis/ui
 use go:tinear/ffi
 use tinear/models/issues
+use tinear/os
 use tinear/tui/compose_view
 use tinear/tui/hints_bar
 use tinear/tui/issue_pickers
@@ -573,6 +574,17 @@ fn build(
         }
         ui::EventHandled
       },
+      "issue_detail.open_in_browser": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        match ffi::StateValue<Detail>(c).issue {
+          issue => {
+            if not issue.url.is_empty() {
+              let _ = os::open_url(issue.url)
+            }
+          },
+          _ => (),
+        }
+        ui::EventHandled
+      },
       "issue_detail.state_picker": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
         match ffi::StateValue<Detail>(c).issue {
           issue => {
@@ -740,6 +752,7 @@ fn build(
         "d": ffi::Intent("issue_detail.section_description"),
         "c": ffi::Intent("issue_detail.section_comments"),
         "n": ffi::Intent("issue_detail.compose"),
+        "o": ffi::Intent("issue_detail.open_in_browser"),
         "s": ffi::Intent("issue_detail.state_picker"),
         "y": ffi::Intent("issue_detail.cycle_picker"),
         "p": ffi::Intent("issue_detail.priority_picker"),
