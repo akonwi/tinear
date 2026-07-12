@@ -5,7 +5,7 @@ Not commitments — a parking lot for what to build next.
 
 ## High value, fits existing patterns
 
-- [ ] **Issue creation** (`c` from the board). The biggest workflow gap:
+- [x] **Issue creation** (`c` from the board). The biggest workflow gap:
   tinear can triage, read, and comment, but not capture a new bug/idea.
   Compose-style modal (title + markdown body, team/project pickers);
   reuses `compose_view` and `picker` machinery. `issueCreate` mutation.

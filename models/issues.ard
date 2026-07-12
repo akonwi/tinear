@@ -531,3 +531,76 @@ fn load(api_key: Str) [BoardColumn]!Str {
   }
   Result::ok(columns)
 }
+
+// ── Issue creation ───────────────────────────────────────────────────
+
+struct Team {
+  id: Str,
+  name: Str,
+  key: Str,
+}
+
+fn fetch_teams(api_key: Str) [Team]!Str {
+  // first: 250 is Linear's page-size cap; workspaces beyond that need
+  // pagination (unlikely for now, but the default page is smaller).
+  let query = "query \{ teams(first: 250) \{ nodes \{ id name key \} \} \}"
+  let data = try client::graphql(api_key, query)
+  let nodes = try decode::run(
+    data,
+    decode::path(["teams", "nodes"], decode::list(decode::any)),
+  ) -> e {
+    Result::err(e.to_str())
+  }
+  mut teams: [Team] = []
+  for node in nodes {
+    let id = try decode::run(node, decode::field("id", decode::string)) -> e {
+      Result::err(e.to_str())
+    }
+    let name = try decode::run(node, decode::field("name", decode::string)) -> e {
+      Result::err(e.to_str())
+    }
+    let key = try decode::run(node, decode::field("key", decode::string)) -> e {
+      Result::err(e.to_str())
+    }
+    teams.push(Team{id: id, name: normalize_text(name), key: key})
+  }
+  Result::ok(teams)
+}
+
+// Create an issue and report the new identifier (e.g. "CCA-123") so the
+// caller can open it as a tab. Description may be empty.
+fn create_issue(api_key: Str, team_id: Str, title: Str, description: Str) Str!Str {
+  mut title_bytes = json::Marshal(title).expect("encode title")
+  let title_json = Str::from(title_bytes)
+  mut team_bytes = json::Marshal(team_id).expect("encode team id")
+  let team_json = Str::from(team_bytes)
+  mut input = "teamId: {team_json}, title: {title_json}"
+  if not description.trim().is_empty() {
+    mut desc_bytes = json::Marshal(description).expect("encode description")
+    let desc_json = Str::from(desc_bytes)
+    input = "{input}, description: {desc_json}"
+  }
+  let mutation = "mutation \{ issueCreate(input: \{ {input} \}) \{ success issue \{ identifier \} \} \}"
+  let data = try client::graphql(api_key, mutation)
+  let success = try decode::run(
+    data,
+    decode::path(["issueCreate", "success"], decode::boolean),
+  ) -> e {
+    Result::err(e.to_str())
+  }
+  match success {
+    true => {
+      let identifier = try decode::run(
+        data,
+        decode::path(["issueCreate", "issue", "identifier"], decode::string),
+      ) -> e {
+        Result::err(e.to_str())
+      }
+      Result::ok(identifier)
+    },
+    // Linear surfaces real failures (permissions, validation) as
+    // GraphQL errors, which client::graphql already extracts; a bare
+    // success=false without one is unexpected.
+    false => Result::err("Linear rejected the issue (no error detail returned)"),
+  }
+}

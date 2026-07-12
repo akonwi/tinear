@@ -141,6 +141,7 @@ fn open_state_picker(
           show_modal(
             picker::new(
               picker::Props{
+                key: "issue-state:{issue.identifier}",
                 title: title,
                 options: options,
                 width: Maybe::new(50),
@@ -203,6 +204,7 @@ fn open_cycle_picker(
           show_modal(
             picker::new(
               picker::Props{
+                key: "issue-cycle:{issue.identifier}",
                 title: title,
                 options: options,
                 width: Maybe::new(60),

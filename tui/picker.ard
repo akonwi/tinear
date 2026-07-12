@@ -33,6 +33,10 @@ struct Option {
 }
 
 struct Props {
+  // Stable identity for the picker's Stateful (e.g.
+  // "issue-state:CCA-123"). Distinct purposes/entities must not share
+  // a key, or cursor state leaks between pickers in the modal slot.
+  key: Str,
   title: Str,
   options: [Option],
   // Optional fixed width. When none, the modal hugs content; for
@@ -116,6 +120,7 @@ fn move_cursor(c: mut ffi::StateCtx, count: Int, delta: Int) {
 // position survives across modal-builder rebuilds.
 fn picker_body(props: Props, close: fn()) ui::Widget {
   ffi::Stateful{
+    Key: "picker:{props.key}",
     Init: fn() Any {
       PickerState{cursor: initial_cursor(props)}
     },
@@ -123,13 +128,16 @@ fn picker_body(props: Props, close: fn()) ui::Widget {
       let theme = ui::MustDepend<ui::Theme>(ctx)
       let cursor = clamp_cursor(ffi::StateValue<PickerState>(c).cursor, props.options.size())
 
-      // Confirm and pick helpers. Both end the picker.
+      // Confirm and pick helpers. Both end the picker. Close BEFORE
+      // confirming: on_confirm may open a follow-up modal (e.g. the
+      // create-issue team picker leads to the form), and closing
+      // afterwards would immediately dismiss it.
       let confirm_at = fn(idx: Int) {
         let safe = clamp_cursor(idx, props.options.size())
+        close()
         if props.options.size() > 0 {
           props.on_confirm(props.options.at(safe).expect("clamped"))
         }
-        close()
       }
 
       // Outer Focus absorbs the modal frame's AutoFocus so it doesn't

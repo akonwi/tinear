@@ -83,6 +83,7 @@ fn submit(
 // modal::show_modal(title, child: this, footer, on_dismiss).
 fn new(api_key: Str, issue: issues::Issue, refresh_comments: fn(), close: fn()) ui::Widget {
   ffi::Stateful{
+    Key: "compose:{issue.identifier}",
     Init: fn() Any {
       Compose{
         text: "",

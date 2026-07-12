@@ -62,6 +62,7 @@ smallest possible shim to `ffi/`.
 | `tui/my_issues_view.ard` | Kanban board. Per-column `CustomScrollView` + `SliverListBuilder` + `SliverListController.RevealIndex` for auto-scroll. Horizontal outer `ScrollView`, metric-driven overflow chevrons. 5-minute silent refresh preserving cursor by issue id. |
 | `tui/issue_detail_view.ard` | Issue detail tab. Sticky header (id, title, field grid), Description / Comments section tabs, scrollable body, compose modal entry (`n`), picker entry points (`s`/`y`), background refresh of both issue and comments. |
 | `tui/search_view.ard` | Debounced (300ms, generation-guarded) global search modal body. Up/Down/Enter intercepted at the modal level so the TextField doesn't swallow them. |
+| `tui/create_issue_view.ard` | Issue-creation flow (`c` from Inbox / My Issues): fetch teams → team picker when >1 → title+description form modal, Ctrl+Enter creates, success opens the new issue as a tab. |
 | `tui/compose_view.ard` | Comment-compose modal body. `TextArea` + capture-phase shortcuts for `Ctrl+Enter`/`Ctrl+m`/`Ctrl+j`. |
 | `tui/markdown.ard` | Renders the `ffi/markdown` block model as themed widgets: headings, lists, quotes, code blocks (mermaid labelled, not rendered), tables, clickable OSC-8 links. Used by issue descriptions, comments, and doc bodies. |
 | `tui/picker.ard` | Reusable single-select picker (state/cycle pickers, etc.). |
