@@ -1,4 +1,5 @@
 use go:go.rockorager.dev/vaxis/ui
+use go:strings
 use go:tinear/ffi
 use tinear/tui/hints_bar
 use tinear/tui/modal
@@ -9,6 +10,9 @@ use tinear/tui/modal
 //
 // Behaviour:
 //   - up / down (or j / k) move the highlighted option
+//   - more than 5 options adds a filter field: typing narrows the list
+//     (case-insensitive substring); j / k / Space then type instead of
+//     navigating, and Up / Down / Enter are captured before the field
 //   - Enter (or Space) calls `on_confirm` with the picked Option and
 //     dismisses the modal
 //   - Esc dismisses the modal without confirming (handled by the modal
@@ -48,6 +52,9 @@ struct Props {
 struct PickerState {
   started: Bool,
   cursor: Int,
+  // Filter query; only rendered/active when the option list is long
+  // enough to warrant it (see FILTER_THRESHOLD).
+  filter: Str,
   // Long option lists (e.g. project pickers) scroll; RevealIndex keeps
   // the cursor row visible.
   scroll: mut ui::ScrollController,
@@ -60,6 +67,31 @@ fn clamp_cursor(cursor: Int, count: Int) Int {
     cursor < 0 => 0,
     cursor >= count => count - 1,
     _ => cursor,
+  }
+}
+
+// Option lists longer than this get a filter field.
+let FILTER_THRESHOLD: Int = 5
+
+fn filterable(props: Props) Bool {
+  props.options.size() > FILTER_THRESHOLD
+}
+
+// Options matching the filter (case-insensitive substring), in their
+// original order. An empty filter matches everything.
+fn visible_options(props: Props, filter: Str) [Option] {
+  let query = strings::ToLower(filter.trim())
+  match query.is_empty() {
+    true => props.options,
+    false => {
+      mut matched: [Option] = []
+      for option in props.options {
+        if strings::ToLower(option.label).contains(query) {
+          matched.push(option)
+        }
+      }
+      matched
+    },
   }
 }
 
@@ -93,39 +125,60 @@ fn option_row(theme: ui::Theme, option: Option, selected: Bool, on_press: fn(ui:
   }
 }
 
-fn render_options(theme: ui::Theme, state: PickerState, props: Props, cursor: Int, on_pick: fn(Int)) ui::Widget {
-  let count = props.options.size()
-  let height = match count > MAX_VISIBLE_OPTIONS {
-    true => MAX_VISIBLE_OPTIONS,
-    false => count,
-  }
-  ui::SizedBox{
-    Height: height,
-    Child: ui::CustomScrollView{
-      Controller: state.scroll,
-      Slivers: [
-        ui::SliverListBuilder{
-          Controller: state.list,
-          Count: count,
-          ItemExtent: 1,
-          Overscan: 4,
-          Builder: fn(ctx: ui::BuildContext, i: Int) ui::Widget {
-            option_row(
-              theme,
-              props.options.at(i).expect("builder index in range"),
-              i == cursor,
-              fn(ev: ui::EventContext) {
-                on_pick(i)
+fn render_options(theme: ui::Theme, state: PickerState, options: [Option], cursor: Int, on_pick: fn(Int)) ui::Widget {
+  let count = options.size()
+  match count == 0 {
+    true => {
+      ui::SizedBox{
+        Height: 1,
+        Child: ui::Text{Value: "No matches", Style: ui::Style{Foreground: theme.MutedForeground}},
+      }
+    },
+    false => {
+      let height = match count > MAX_VISIBLE_OPTIONS {
+        true => MAX_VISIBLE_OPTIONS,
+        false => count,
+      }
+      ui::SizedBox{
+        Height: height,
+        Child: ui::CustomScrollView{
+          Controller: state.scroll,
+          Slivers: [
+            ui::SliverListBuilder{
+              Controller: state.list,
+              Count: count,
+              ItemExtent: 1,
+              Overscan: 4,
+              Builder: fn(ctx: ui::BuildContext, i: Int) ui::Widget {
+                option_row(
+                  theme,
+                  options.at(i).expect("builder index in range"),
+                  i == cursor,
+                  fn(ev: ui::EventContext) {
+                    on_pick(i)
+                  },
+                )
               },
-            )
-          },
+            },
+          ],
         },
-      ],
+      }
     },
   }
 }
 
+// TextField renders at exactly MinWidth; match the modal's content
+// width (fixed width minus the frame's 2 cols of horizontal padding).
+fn filter_field_width(props: Props) Int {
+  match props.width {
+    w => w - 4,
+    _ => 44,
+  }
+}
+
 fn picker_hints() [hints_bar::Hint] {
+  // No hint for filtering: the field's placeholder is affordance
+  // enough, and the extra hint overflows the modal footer.
   [
     hints_bar::Hint{key: "↑↓", label: "select"},
     hints_bar::Hint{key: "↵", label: "confirm"},
@@ -153,7 +206,7 @@ fn picker_body(props: Props, close: fn()) ui::Widget {
     Init: fn() Any {
       mut scroll = ui::ScrollController{}
       mut list = ui::SliverListController{}
-      PickerState{started: false, cursor: initial_cursor(props), scroll: mut scroll, list: mut list}
+      PickerState{started: false, cursor: initial_cursor(props), filter: "", scroll: mut scroll, list: mut list}
     },
     Build: fn(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
       let theme = ui::MustDepend<ui::Theme>(ctx)
@@ -164,35 +217,94 @@ fn picker_body(props: Props, close: fn()) ui::Widget {
         state.started = true
         state.list.RevealIndex(state.cursor)
       }
-      let cursor = clamp_cursor(ffi::StateValue<PickerState>(c).cursor, props.options.size())
+      let snapshot = ffi::StateValue<PickerState>(c)
+      let options = visible_options(props, snapshot.filter)
+      let cursor = clamp_cursor(snapshot.cursor, options.size())
+      let has_filter = filterable(props)
 
-      // Confirm and pick helpers. Both end the picker. Close BEFORE
-      // confirming: on_confirm may open a follow-up modal (e.g. the
-      // create-issue team picker leads to the form), and closing
-      // afterwards would immediately dismiss it.
+      // Confirm and pick helpers (indexes are into the FILTERED list).
+      // Both end the picker. Close BEFORE confirming: on_confirm may
+      // open a follow-up modal (e.g. the create-issue team picker
+      // leads to the form), and closing afterwards would immediately
+      // dismiss it.
       let confirm_at = fn(idx: Int) {
-        let safe = clamp_cursor(idx, props.options.size())
-        close()
-        if props.options.size() > 0 {
-          props.on_confirm(props.options.at(safe).expect("clamped"))
+        let safe = clamp_cursor(idx, options.size())
+        if options.size() > 0 {
+          close()
+          props.on_confirm(options.at(safe).expect("clamped"))
         }
       }
 
-      // Outer Focus absorbs the modal frame's AutoFocus so it doesn't
-      // land on option[0]'s ListTile (which would paint SurfaceHovered
-      // on top of and competing with the cursor's Selected styling on
-      // a different row). The outer focus has no visual treatment of
-      // its own; the cursor option is the only highlighted row on
-      // open.
-      mut focus_node = ui::FocusNode{}
+      let list_widget = render_options(theme, snapshot, options, cursor, confirm_at)
+
+      // With a filter field, the field owns focus and ordinary keys
+      // (j / k / Space type into it); without one, an outer Focus
+      // absorbs the modal frame's AutoFocus so it doesn't land on
+      // option[0]'s ListTile (which would paint SurfaceHovered
+      // competing with the cursor's Selected styling).
+      let body: ui::Widget = match has_filter {
+        true => {
+          mut children: [ui::Widget] = [
+            ui::FocusScope{
+              AutoFocus: true,
+              Child: ui::TextField{
+                Value: snapshot.filter,
+                Placeholder: "Filter…",
+                MinWidth: filter_field_width(props),
+                OnChanged: fn(ev: ui::EventContext, value: Str) {
+                  ffi::Update<PickerState>(
+                    c,
+                    fn(s: mut PickerState) {
+                      s.filter = value
+                      s.cursor = 0
+                    },
+                  )
+                  ffi::StateValue<PickerState>(c).list.RevealIndex(0)
+                },
+              },
+            },
+            ui::Divider{Style: ui::Style{Foreground: theme.Border, Background: theme.Surface}},
+            list_widget,
+          ]
+          ui::Flex{
+            Axis: ui::Vertical,
+            MainAxisSize: ui::MainAxisSizeMin,
+            CrossAxisAlignment: ui::CrossAxisStretch,
+            Children: children,
+          }
+        },
+        false => {
+          mut focus_node = ui::FocusNode{}
+          ui::Focus(mut focus_node, list_widget)
+        },
+      }
+
+      // j / k / Space only navigate when there's no filter field —
+      // otherwise they're typed characters.
+      let bindings: [Str: ui::Intent] = match has_filter {
+        true => [
+          "Down": ffi::Intent("picker.next"),
+          "Up": ffi::Intent("picker.prev"),
+          "Enter": ffi::Intent("picker.confirm"),
+        ],
+        false => [
+          "j": ffi::Intent("picker.next"),
+          "Down": ffi::Intent("picker.next"),
+          "k": ffi::Intent("picker.prev"),
+          "Up": ffi::Intent("picker.prev"),
+          "Enter": ffi::Intent("picker.confirm"),
+          "Space": ffi::Intent("picker.confirm"),
+        ],
+      }
+
       ui::Actions{
         Bindings: [
           "picker.next": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
-            move_cursor(c, props.options.size(), 1)
+            move_cursor(c, visible_options(props, ffi::StateValue<PickerState>(c).filter).size(), 1)
             ui::EventHandled
           },
           "picker.prev": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
-            move_cursor(c, props.options.size(), -1)
+            move_cursor(c, visible_options(props, ffi::StateValue<PickerState>(c).filter).size(), -1)
             ui::EventHandled
           },
           "picker.confirm": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
@@ -201,15 +313,8 @@ fn picker_body(props: Props, close: fn()) ui::Widget {
           },
         ],
         Child: ui::Shortcuts{
-          Bindings: [
-            "j": ffi::Intent("picker.next"),
-            "Down": ffi::Intent("picker.next"),
-            "k": ffi::Intent("picker.prev"),
-            "Up": ffi::Intent("picker.prev"),
-            "Enter": ffi::Intent("picker.confirm"),
-            "Space": ffi::Intent("picker.confirm"),
-          ],
-          Child: ui::Focus(mut focus_node, render_options(theme, ffi::StateValue<PickerState>(c), props, cursor, confirm_at)),
+          Bindings: bindings,
+          Child: body,
         },
       }
     },
