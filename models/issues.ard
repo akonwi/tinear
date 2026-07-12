@@ -76,6 +76,7 @@ struct Issue {
   assignee_name: Str,
   cycle_id: Str,
   cycle_label: Str,
+  url: Str,
 }
 
 // A column on the My Issues board: a workflow state name + the issues currently
@@ -230,6 +231,7 @@ fn decode_issue(raw: Any) Issue {
     assignee_name: normalize_text(user_display_name_opt(raw, "assignee")),
     cycle_id: cycle_id(raw),
     cycle_label: cycle_label(raw),
+    url: optional_str(raw, "url", ""),
   }
 }
 
@@ -378,7 +380,7 @@ fn fetch_team_cycles(api_key: Str, team_id: Str) TeamCyclesResult!Str {
 }
 
 fn issue_fields() Str {
-  "id identifier title description priority state \{ id name type position \} team \{ id name key \} project \{ id name \} assignee \{ id name displayName \} cycle \{ id number name \}"
+  "id identifier title description priority state \{ id name type position \} team \{ id name key \} project \{ id name \} assignee \{ id name displayName \} cycle \{ id number name \} url"
 }
 
 fn fetch_single_issue(api_key: Str, issue_id: Str) Any!Str {

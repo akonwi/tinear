@@ -3,6 +3,7 @@ use ard/async
 use go:go.rockorager.dev/vaxis/ui
 use go:tinear/ffi
 use tinear/models/inbox
+use tinear/os
 
 // Local state for the Inbox view.
 //
@@ -550,6 +551,16 @@ fn build(
         }
         ui::EventHandled
       },
+      "inbox.open_in_browser": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        let s = ffi::StateValue<View>(c)
+        if s.cursor < s.items.size() {
+          let item = s.items.at(s.cursor).expect("cursor clamped")
+          if not item.url.is_empty() {
+            let _ = os::open_url(item.url)
+          }
+        }
+        ui::EventHandled
+      },
       "inbox.delete": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
         delete_current(c, api_key, notify)
         ui::EventHandled
@@ -589,6 +600,7 @@ fn build(
         "k": ffi::Intent("inbox.prev"),
         "Up": ffi::Intent("inbox.prev"),
         "Enter": ffi::Intent("inbox.open"),
+        "o": ffi::Intent("inbox.open_in_browser"),
         "Backspace": ffi::Intent("inbox.delete"),
         "r": ffi::Intent("inbox.refresh"),
         "l": ffi::Intent("inbox.detail.line_down"),

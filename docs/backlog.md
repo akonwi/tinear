@@ -26,11 +26,9 @@ Not commitments — a parking lot for what to build next.
 - [ ] **Filtered board views**. My Issues is fixed to "assigned to me";
   add an active-cycle filter and/or project switcher. Persist the
   filter in the existing cache shape.
-- [ ] **Recent documents list**. `documents::fetch_recent` already exists
-  and is unused — a docs section or tab listing recently updated docs
-  gives discovery without searching.
-- [ ] **Open in browser everywhere** (`o`). Doc tabs have it; issue tabs
-  and inbox items should too (issue `url` is already fetched).
+- [x] **Open in browser** (`o`): inbox items, issue tabs, doc tabs
+  (board deliberately unbound — Enter opens the tab there).
+- [ ] ~~Recent documents list~~ dropped — search covers doc discovery.
 
 ## Polish that compounds
 
