@@ -4,6 +4,7 @@ use go:go.rockorager.dev/vaxis/ui
 use go:tinear/ffi
 use tinear/models/documents
 use tinear/os
+use tinear/tui/markdown
 use tinear/tui/refresh
 use tinear/tui/text
 use tinear/tui/toast
@@ -197,12 +198,7 @@ fn content_body(theme: ui::Theme, doc: documents::Doc) ui::Widget {
     content => {
       match content.is_empty() {
         true => muted(theme, "(empty document)"),
-        false => {
-          ui::RichText{
-            Spans: [ui::TextSpan{Text: content, Style: ui::Style{Foreground: theme.Foreground}}],
-            SoftWrap: true,
-          }
-        },
+        false => markdown::render(theme, content),
       }
     },
     _ => muted(theme, "(empty document)"),

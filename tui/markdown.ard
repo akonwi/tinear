@@ -1,0 +1,217 @@
+use go:go.rockorager.dev/vaxis/ui
+use go:tinear/ffi/markdown
+use tinear/os
+
+// Markdown rendering: maps the semantic block/run model from the Go
+// `tinear/markdown` package onto themed vaxis/ui widgets. Used by
+// issue descriptions, comments, and document bodies.
+//
+// Block spacing: paragraphs, headings, code blocks, quotes, and rules
+// get a blank line between them; consecutive list items and table rows
+// stay tight, like source markdown reads.
+
+fn attr_for(run: markdown::Run) ui::AttributeMask {
+  // AttributeMask is a bitmask; distinct attribute bits sum cleanly.
+  // (ui::AttrNone itself imports as Int — ard#301 — but an annotated
+  // binding adopts the literal zero just fine.)
+  mut mask: ui::AttributeMask = 0
+  if run.Bold {
+    mask = mask + ui::AttrBold
+  }
+  if run.Italic {
+    mask = mask + ui::AttrItalic
+  }
+  if run.Strike {
+    mask = mask + ui::AttrStrikethrough
+  }
+  mask
+}
+
+fn span_for(theme: ui::Theme, run: markdown::Run) ui::TextSpan {
+  match {
+    not run.Link.is_empty() => {
+      let url = run.Link
+      ui::TextSpan{
+        Text: run.Text,
+        Style: ui::Style{
+          Foreground: theme.Primary,
+          Attribute: attr_for(run),
+          UnderlineStyle: ui::UnderlineSingle,
+          Hyperlink: url,
+        },
+        OnPressed: fn(ev: ui::EventContext) {
+          let _ = os::open_url(url)
+        },
+      }
+    },
+    run.Code => {
+      ui::TextSpan{
+        Text: run.Text,
+        Style: ui::Style{Foreground: theme.WarningText, Background: theme.Surface, Attribute: attr_for(run)},
+      }
+    },
+    _ => {
+      ui::TextSpan{
+        Text: run.Text,
+        Style: ui::Style{Foreground: theme.Foreground, Attribute: attr_for(run)},
+      }
+    },
+  }
+}
+
+fn spans_for(theme: ui::Theme, block: markdown::Block) [ui::TextSpan] {
+  mut spans: [ui::TextSpan] = []
+  mut runs = block.Runs
+  for run in runs {
+    spans.push(span_for(theme, run))
+  }
+  spans
+}
+
+fn wrapped(spans: [ui::TextSpan]) ui::Widget {
+  ui::RichText{Spans: spans, SoftWrap: true}
+}
+
+fn indent_pad(depth: Int) Str {
+  mut pad = ""
+  mut i = 0
+  while i < depth {
+    pad = "{pad}  "
+    i = i + 1
+  }
+  pad
+}
+
+fn heading_widget(theme: ui::Theme, block: markdown::Block) ui::Widget {
+  // Level 1-2 headings pop in Primary; deeper ones stay foreground
+  // bold, mirroring how weight falls off in rendered markdown.
+  let color = match block.Level <= 2 {
+    true => theme.Primary,
+    false => theme.Foreground,
+  }
+  mut spans: [ui::TextSpan] = []
+  mut runs = block.Runs
+  for run in runs {
+    spans.push(
+      ui::TextSpan{Text: run.Text, Style: ui::Style{Foreground: color, Attribute: ui::AttrBold}},
+    )
+  }
+  wrapped(spans)
+}
+
+fn quote_widget(theme: ui::Theme, block: markdown::Block) ui::Widget {
+  mut spans: [ui::TextSpan] = [
+    ui::TextSpan{
+      Text: "{indent_pad(block.Indent - 1)}▌ ",
+      Style: ui::Style{Foreground: theme.Border},
+    },
+  ]
+  mut runs = block.Runs
+  for run in runs {
+    // Quoted text renders muted; inline emphasis still applies.
+    mut span = span_for(theme, run)
+    if not run.Code and run.Link.is_empty() {
+      span = ui::TextSpan{Text: run.Text, Style: ui::Style{Foreground: theme.MutedForeground, Attribute: attr_for(run)}}
+    }
+    spans.push(span)
+  }
+  wrapped(spans)
+}
+
+fn list_item_widget(theme: ui::Theme, block: markdown::Block) ui::Widget {
+  let marker = match block.Marker.is_empty() {
+    // Continuation lines align under the item text.
+    true => "  ",
+    false => "{block.Marker} ",
+  }
+  mut spans: [ui::TextSpan] = [
+    ui::TextSpan{
+      Text: "{indent_pad(block.Indent)}{marker}",
+      Style: ui::Style{Foreground: theme.MutedForeground},
+    },
+  ]
+  for span in spans_for(theme, block) {
+    spans.push(span)
+  }
+  wrapped(spans)
+}
+
+fn code_widget(theme: ui::Theme, block: markdown::Block) ui::Widget {
+  let text = match block.Runs.at(0) {
+    run => run.Text,
+    _ => "",
+  }
+  mut column: [ui::Widget] = []
+  // Language tag row. Mermaid diagrams can't render in a terminal;
+  // label them honestly — Linear renders them in the browser.
+  let tag = match block.Lang {
+    "mermaid" => "mermaid diagram (rendered in Linear)",
+    _ => block.Lang,
+  }
+  if not tag.is_empty() {
+    column.push(
+      ui::Text{Value: tag, Style: ui::Style{Foreground: theme.MutedForeground, Background: theme.Surface, Attribute: ui::AttrItalic}},
+    )
+  }
+  column.push(
+    ui::RichText{
+      Spans: [ui::TextSpan{Text: text, Style: ui::Style{Foreground: theme.Foreground, Background: theme.Surface}}],
+      SoftWrap: true,
+    },
+  )
+  ui::DecoratedBox(
+    ui::Decoration{Style: ui::Style{Background: theme.Surface}},
+    ui::Padding(
+      ui::Symmetric(1, 0),
+      ui::Flex{
+        Axis: ui::Vertical,
+        MainAxisSize: ui::MainAxisSizeMin,
+        CrossAxisAlignment: ui::CrossAxisStretch,
+        Children: column,
+      },
+    ),
+  )
+}
+
+fn block_widget(theme: ui::Theme, block: markdown::Block) ui::Widget {
+  match block.Kind {
+    "heading" => heading_widget(theme, block),
+    "code" => code_widget(theme, block),
+    "quote" => quote_widget(theme, block),
+    "list_item" => list_item_widget(theme, block),
+    "rule" => ui::Divider{Style: ui::Style{Foreground: theme.Border, Background: theme.Background}},
+    "table_row" => wrapped(spans_for(theme, block)),
+    _ => wrapped(spans_for(theme, block)),
+  }
+}
+
+// True when consecutive blocks of these kinds should stay tight (no
+// blank line): list items among themselves, table rows among
+// themselves, and consecutive quote lines.
+fn tight(prev: Str, next: Str) Bool {
+  (prev == "list_item" and next == "list_item") or (prev == "table_row" and next == "table_row") or (prev == "quote" and next == "quote")
+}
+
+// Render markdown source as a column of themed widgets. The caller
+// provides scrolling and horizontal padding.
+fn render(theme: ui::Theme, source: Str) ui::Widget {
+  mut blocks = markdown::Parse(source)
+  mut children: [ui::Widget] = []
+  mut prev_kind = ""
+  for block, idx in blocks {
+    if idx > 0 and not tight(prev_kind, block.Kind) {
+      children.push(ui::SizedBox{Height: 1})
+    }
+    children.push(block_widget(theme, block))
+    prev_kind = block.Kind
+  }
+  if children.size() == 0 {
+    children.push(ui::Text{Value: "", Style: ui::Style{Foreground: theme.MutedForeground}})
+  }
+  ui::Flex{
+    Axis: ui::Vertical,
+    MainAxisSize: ui::MainAxisSizeMin,
+    CrossAxisAlignment: ui::CrossAxisStretch,
+    Children: children,
+  }
+}

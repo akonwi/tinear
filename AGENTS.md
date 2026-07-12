@@ -33,6 +33,7 @@ ard test                         # run all unit tests
 | `linear/client.ard` | Shared GraphQL client (`graphql(api_key, query)`) over `go:net/http` with a 30s client timeout and GraphQL-error extraction. |
 | `os.ard` | `open_url` wrapper over `ffi::OpenURL`. |
 | `ffi/*.go` | Tinear's Go shim package, imported as `use go:tinear/ffi`. See *The ffi shim*. |
+| `ffi/markdown/` | Go package (`use go:tinear/ffi/markdown`): goldmark (CommonMark+GFM) parse → flat semantic `Block`/`Run` model. No styling — presentation lives in `tui/markdown.ard`. |
 | `models/*.ard` | Stateless fetch/decode/mutation modules for `inbox`, `issues`, and the persisted `cache`. |
 | `tui/*.ard` | TUI implementation, split by concern. See *Active TUI Architecture*. |
 
@@ -62,6 +63,7 @@ smallest possible shim to `ffi/`.
 | `tui/issue_detail_view.ard` | Issue detail tab. Sticky header (id, title, field grid), Description / Comments section tabs, scrollable body, compose modal entry (`n`), picker entry points (`s`/`y`), background refresh of both issue and comments. |
 | `tui/search_view.ard` | Debounced (300ms, generation-guarded) global search modal body. Up/Down/Enter intercepted at the modal level so the TextField doesn't swallow them. |
 | `tui/compose_view.ard` | Comment-compose modal body. `TextArea` + capture-phase shortcuts for `Ctrl+Enter`/`Ctrl+m`/`Ctrl+j`. |
+| `tui/markdown.ard` | Renders the `ffi/markdown` block model as themed widgets: headings, lists, quotes, code blocks (mermaid labelled, not rendered), tables, clickable OSC-8 links. Used by issue descriptions, comments, and doc bodies. |
 | `tui/picker.ard` | Reusable single-select picker (state/cycle pickers, etc.). |
 | `tui/issue_pickers.ard` | State/cycle picker builders for an issue. Take a caller-supplied `on_change(new_id)` so each surface can choose what to refresh after the mutation. |
 | `tui/modal.ard` | `show_modal(theme, title, child, footer, width, on_dismiss)` frame. Does **not** wrap `child` in a focusable; the body must bring its own so events bubble through the body's `Shortcuts`/`Actions` before hitting the frame. |

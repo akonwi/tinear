@@ -6,6 +6,7 @@ use tinear/models/issues
 use tinear/tui/compose_view
 use tinear/tui/hints_bar
 use tinear/tui/issue_pickers
+use tinear/tui/markdown
 use tinear/tui/modal
 use tinear/tui/refresh
 use tinear/tui/state
@@ -371,22 +372,12 @@ fn section_tabs(c: mut ffi::StateCtx, theme: ui::Theme, model: Detail) ui::Widge
   min_column([ui::Flex{Axis: ui::Horizontal, Children: tab_children}, divider(theme)], true)
 }
 
-// Soft-wrap a string to whatever cross-axis extent the parent gives
-// us. RichText wraps on word boundaries with the available width — no
-// need to compute a width up front or watch the viewport.
-fn wrapped_text(theme: ui::Theme, value: Str) ui::Widget {
-  ui::RichText{
-    Spans: [ui::TextSpan{Text: value, Style: ui::Style{Foreground: theme.Foreground}}],
-    SoftWrap: true,
-  }
-}
-
 fn description_body_widget(theme: ui::Theme, issue: issues::Issue) ui::Widget {
   match issue.description {
     desc => {
       match desc.is_empty() {
         true => muted(theme, "(no description)"),
-        false => wrapped_text(theme, desc),
+        false => markdown::render(theme, desc),
       }
     },
     _ => muted(theme, "(no description)"),
@@ -399,7 +390,7 @@ fn comment_card(theme: ui::Theme, comment: issues::Comment, is_last: Bool) ui::W
     muted(theme, " · "),
     muted(theme, text::format_date(comment.created_at)),
   ]
-  mut children: [ui::Widget] = [ui::Flex{Axis: ui::Horizontal, Children: header_children}, wrapped_text(theme, comment.body)]
+  mut children: [ui::Widget] = [ui::Flex{Axis: ui::Horizontal, Children: header_children}, markdown::render(theme, comment.body)]
   if not is_last {
     // Separator stretches to whatever width the parent column gives
     // us, so it scales with the viewport.
