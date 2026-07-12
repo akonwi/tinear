@@ -5,6 +5,7 @@ use tinear/models/issues
 use tinear/tui/hints_bar
 use tinear/tui/modal
 use tinear/tui/picker
+use tinear/tui/state
 use tinear/tui/toast
 
 // Shared modal helpers used by both the My Issues board and the issue
@@ -141,6 +142,7 @@ fn open_state_picker(
           show_modal(
             picker::new(
               picker::Props{
+                key: "issue-state:{issue.identifier}",
                 title: title,
                 options: options,
                 width: Maybe::new(50),
@@ -203,6 +205,7 @@ fn open_cycle_picker(
           show_modal(
             picker::new(
               picker::Props{
+                key: "issue-cycle:{issue.identifier}",
                 title: title,
                 options: options,
                 width: Maybe::new(60),
@@ -216,6 +219,163 @@ fn open_cycle_picker(
         err(e) => {
           close_modal()
           notify("Cycle picker", "Failed to load cycles: {e}", toast::ToastVariant::error)
+        },
+      }
+    },
+  )
+}
+
+// ── Priority ─────────────────────────────────────────────────────────
+
+// Static option set: Linear priorities are fixed (0 = none, 1 = urgent
+// … 4 = low). No fetch, so the picker shows immediately.
+fn open_priority_picker(
+  issue: issues::Issue,
+  show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
+  on_change: fn(Int),
+) {
+  let current = issue.priority.or(0)
+  mut options: [picker::Option] = []
+  for value in [0, 1, 2, 3, 4] {
+    let label = match value {
+      0 => "No priority",
+      _ => {
+        let glyph = state::priority_glyph(Maybe::new(value))
+        "{glyph} {state::priority_label(Maybe::new(value))}"
+      },
+    }
+    options.push(picker::Option{id: "{value}", label: label, current: value == current})
+  }
+  let values = [0, 1, 2, 3, 4]
+  show_modal(
+    picker::new(
+      picker::Props{
+        key: "issue-priority:{issue.identifier}",
+        title: "Change priority — {issue.identifier}",
+        options: options,
+        width: Maybe::new(46),
+        on_confirm: fn(picked: picker::Option) {
+          mut chosen = 0
+          for value in values {
+            if picked.id == "{value}" {
+              chosen = value
+            }
+          }
+          on_change(chosen)
+        },
+      },
+    ),
+  )
+}
+
+// ── Assignee ─────────────────────────────────────────────────────────
+
+fn open_assignee_picker(
+  api_key: Str,
+  issue: issues::Issue,
+  show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
+  close_modal: fn(),
+  notify: fn(Str, Str, toast::ToastVariant),
+  on_change: fn(Str),
+) {
+  let key = api_key
+  let team_id = issue.team_id
+  let current_assignee_id = issue.assignee_id
+  let title = "Assign — {issue.identifier}"
+
+  show_modal(loading_modal_builder(title))
+
+  async::start(
+    fn() {
+      let result = issues::fetch_team_members(key, team_id)
+      match result {
+        ok(members) => {
+          mut options: [picker::Option] = [
+            picker::Option{id: "", label: "Unassigned", current: current_assignee_id.is_empty()},
+          ]
+          for member in members {
+            options.push(
+              picker::Option{
+                id: member.id,
+                label: member.name,
+                current: member.id == current_assignee_id,
+              },
+            )
+          }
+          show_modal(
+            picker::new(
+              picker::Props{
+                key: "issue-assignee:{issue.identifier}",
+                title: title,
+                options: options,
+                width: Maybe::new(46),
+                on_confirm: fn(picked: picker::Option) {
+                  on_change(picked.id)
+                },
+              },
+            ),
+          )
+        },
+        err(e) => {
+          close_modal()
+          notify("Assign", e, toast::ToastVariant::error)
+        },
+      }
+    },
+  )
+}
+
+// ── Project ──────────────────────────────────────────────────────────
+
+fn open_project_picker(
+  api_key: Str,
+  issue: issues::Issue,
+  show_modal: fn(fn(ui::Theme, fn()) ui::Widget),
+  close_modal: fn(),
+  notify: fn(Str, Str, toast::ToastVariant),
+  on_change: fn(Str),
+) {
+  let key = api_key
+  let team_id = issue.team_id
+  let current_project_id = issue.project_id
+  let title = "Change project — {issue.identifier}"
+
+  show_modal(loading_modal_builder(title))
+
+  async::start(
+    fn() {
+      let result = issues::fetch_team_projects(key, team_id)
+      match result {
+        ok(projects) => {
+          mut options: [picker::Option] = [
+            picker::Option{id: "", label: "No project", current: current_project_id.is_empty()},
+          ]
+          for project in projects {
+            options.push(
+              picker::Option{
+                id: project.id,
+                label: project.name,
+                current: project.id == current_project_id,
+              },
+            )
+          }
+          show_modal(
+            picker::new(
+              picker::Props{
+                key: "issue-project:{issue.identifier}",
+                title: title,
+                options: options,
+                width: Maybe::new(56),
+                on_confirm: fn(picked: picker::Option) {
+                  on_change(picked.id)
+                },
+              },
+            ),
+          )
+        },
+        err(e) => {
+          close_modal()
+          notify("Change project", e, toast::ToastVariant::error)
         },
       }
     },

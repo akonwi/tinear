@@ -747,6 +747,84 @@ fn build(
         }
         ui::EventHandled
       },
+      "board.priority_picker": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        match selected_issue(ffi::StateValue<Board>(c)) {
+          issue => {
+            let issue_id = issue.id
+            issue_pickers::open_priority_picker(
+              issue,
+              show_modal,
+              fn(new_priority: Int) {
+                run_issue_mutation(
+                  c,
+                  api_key,
+                  notify,
+                  "Update priority",
+                  fn() Void!Str {
+                    issues::update_priority(api_key, issue_id, new_priority)
+                  },
+                )
+              },
+            )
+          },
+          _ => (),
+        }
+        ui::EventHandled
+      },
+      "board.assignee_picker": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        match selected_issue(ffi::StateValue<Board>(c)) {
+          issue => {
+            let issue_id = issue.id
+            issue_pickers::open_assignee_picker(
+              api_key,
+              issue,
+              show_modal,
+              close_modal,
+              notify,
+              fn(new_assignee_id: Str) {
+                run_issue_mutation(
+                  c,
+                  api_key,
+                  notify,
+                  "Assign",
+                  fn() Void!Str {
+                    issues::update_assignee(api_key, issue_id, new_assignee_id)
+                  },
+                )
+              },
+            )
+          },
+          _ => (),
+        }
+        ui::EventHandled
+      },
+      "board.project_picker": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        match selected_issue(ffi::StateValue<Board>(c)) {
+          issue => {
+            let issue_id = issue.id
+            issue_pickers::open_project_picker(
+              api_key,
+              issue,
+              show_modal,
+              close_modal,
+              notify,
+              fn(new_project_id: Str) {
+                run_issue_mutation(
+                  c,
+                  api_key,
+                  notify,
+                  "Update project",
+                  fn() Void!Str {
+                    issues::update_project(api_key, issue_id, new_project_id)
+                  },
+                )
+              },
+            )
+          },
+          _ => (),
+        }
+        ui::EventHandled
+      },
       "board.cycle_picker": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
         match selected_issue(ffi::StateValue<Board>(c)) {
           issue => {
@@ -789,6 +867,9 @@ fn build(
         "r": ffi::Intent("board.refresh"),
         "s": ffi::Intent("board.state_picker"),
         "y": ffi::Intent("board.cycle_picker"),
+        "p": ffi::Intent("board.priority_picker"),
+        "a": ffi::Intent("board.assignee_picker"),
+        "Shift+p": ffi::Intent("board.project_picker"),
       ],
       Child: ui::FocusScope{
         AutoFocus: active,

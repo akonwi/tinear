@@ -5,13 +5,13 @@ Not commitments — a parking lot for what to build next.
 
 ## High value, fits existing patterns
 
-- [ ] **Issue creation** (`c` from the board). The biggest workflow gap:
+- [x] **Issue creation** (`c` from the board). The biggest workflow gap:
   tinear can triage, read, and comment, but not capture a new bug/idea.
   Compose-style modal (title + markdown body, team/project pickers);
   reuses `compose_view` and `picker` machinery. `issueCreate` mutation.
-- [ ] **Edit more issue fields**: **priority** (`p`), **assignee** (`a`),
-  **project**, **labels**. Same pattern as the existing state/cycle
-  pickers — one picker builder + one mutation each in `models/issues`.
+- [ ] **Edit more issue fields**: ~~priority (`p`), assignee (`a`),
+  project (`P`)~~ done. Remaining: **labels** (needs a multi-select
+  picker widget).
 - [ ] **Comment threading**. Linear comments have `parent`/`children`;
   indent replies in `comment_card`. Reading value even before posting
   replies is supported.

@@ -8,6 +8,7 @@ use tinear/models/inbox
 use tinear/models/issues
 use tinear/models/tabs
 use tinear/os
+use tinear/tui/create_issue_view
 use tinear/tui/doc_detail_view
 use tinear/tui/hints_bar
 use tinear/tui/inbox_view
@@ -359,6 +360,7 @@ fn hints_for(s: Model) [hints_bar::Hint] {
         hints_bar::Hint{key: "⌫", label: "delete"},
         hints_bar::Hint{key: "r", label: "refresh"},
         hints_bar::Hint{key: "↵", label: "open"},
+        hints_bar::Hint{key: "c", label: "new issue"},
         hints_bar::Hint{key: "?", label: "search"},
       ]
     },
@@ -368,8 +370,12 @@ fn hints_for(s: Model) [hints_bar::Hint] {
         hints_bar::Hint{key: "←→", label: ""},
         hints_bar::Hint{key: "↵", label: "open"},
         hints_bar::Hint{key: "s", label: "status"},
+        hints_bar::Hint{key: "p", label: "priority"},
+        hints_bar::Hint{key: "a", label: "assign"},
         hints_bar::Hint{key: "y", label: "cycle"},
+        hints_bar::Hint{key: "P", label: "project"},
         hints_bar::Hint{key: "r", label: "refresh"},
+        hints_bar::Hint{key: "c", label: "new issue"},
         hints_bar::Hint{key: "?", label: "search"},
       ]
     },
@@ -394,7 +400,10 @@ fn hints_for(s: Model) [hints_bar::Hint] {
             hints_bar::Hint{key: "c", label: "comments"},
             hints_bar::Hint{key: "n", label: "new comment"},
             hints_bar::Hint{key: "s", label: "status"},
+            hints_bar::Hint{key: "p", label: "priority"},
+            hints_bar::Hint{key: "a", label: "assign"},
             hints_bar::Hint{key: "y", label: "cycle"},
+            hints_bar::Hint{key: "P", label: "project"},
             hints_bar::Hint{key: "Esc", label: "close"},
           ]
         },
@@ -483,6 +492,33 @@ fn build(
           },
         }
       },
+      "issues.create": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        // Gated on modal_open (so `c` types into modal text fields)
+        // and on dynamic tabs (where `c` switches to Comments).
+        match modal_open or selected_is_dynamic_tab(ffi::StateValue<Model>(c)) {
+          true => ui::EventIgnored,
+          false => {
+            create_issue_view::open(
+              api_key,
+              show_modal,
+              close_modal,
+              notify,
+              // Called from the create flow's background fiber, so
+              // re-enter the UI thread before touching shell state
+              // (notify/close_modal are dispatch-safe; this must be too).
+              fn(identifier: Str) {
+                ffi::Dispatch(
+                  c,
+                  fn() {
+                    replace_model(c, open_tab(ffi::StateValue<Model>(c), tabs::issue_tab(identifier)))
+                  },
+                )
+              },
+            )
+            ui::EventHandled
+          },
+        }
+      },
       "global.search": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
         match modal_open {
           true => ui::EventIgnored,
@@ -526,6 +562,7 @@ fn build(
         "1": ffi::Intent("tabs.inbox"),
         "2": ffi::Intent("tabs.my_issues"),
         "?": ffi::Intent("global.search"),
+        "c": ffi::Intent("issues.create"),
       ],
       Child: ui::FocusScope{
         AutoFocus: true,

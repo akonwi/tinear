@@ -605,6 +605,99 @@ fn build(
         }
         ui::EventHandled
       },
+      "issue_detail.priority_picker": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        match ffi::StateValue<Detail>(c).issue {
+          issue => {
+            let issue_id = issue.id
+            issue_pickers::open_priority_picker(
+              issue,
+              show_modal,
+              fn(new_priority: Int) {
+                async::start(
+                  fn() {
+                    let r = issues::update_priority(api_key, issue_id, new_priority)
+                    ffi::Dispatch(
+                      c,
+                      fn() {
+                        match r {
+                          ok(_) => load_issue(c, api_key, identifier),
+                          err(e) => notify("Update priority", e, toast::ToastVariant::error),
+                        }
+                      },
+                    )
+                  },
+                )
+              },
+            )
+          },
+          _ => (),
+        }
+        ui::EventHandled
+      },
+      "issue_detail.assignee_picker": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        match ffi::StateValue<Detail>(c).issue {
+          issue => {
+            let issue_id = issue.id
+            issue_pickers::open_assignee_picker(
+              api_key,
+              issue,
+              show_modal,
+              close_modal,
+              notify,
+              fn(new_assignee_id: Str) {
+                async::start(
+                  fn() {
+                    let r = issues::update_assignee(api_key, issue_id, new_assignee_id)
+                    ffi::Dispatch(
+                      c,
+                      fn() {
+                        match r {
+                          ok(_) => load_issue(c, api_key, identifier),
+                          err(e) => notify("Assign", e, toast::ToastVariant::error),
+                        }
+                      },
+                    )
+                  },
+                )
+              },
+            )
+          },
+          _ => (),
+        }
+        ui::EventHandled
+      },
+      "issue_detail.project_picker": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        match ffi::StateValue<Detail>(c).issue {
+          issue => {
+            let issue_id = issue.id
+            issue_pickers::open_project_picker(
+              api_key,
+              issue,
+              show_modal,
+              close_modal,
+              notify,
+              fn(new_project_id: Str) {
+                async::start(
+                  fn() {
+                    let r = issues::update_project(api_key, issue_id, new_project_id)
+                    ffi::Dispatch(
+                      c,
+                      fn() {
+                        match r {
+                          ok(_) => load_issue(c, api_key, identifier),
+                          err(e) => notify("Update project", e, toast::ToastVariant::error),
+                        }
+                      },
+                    )
+                  },
+                )
+              },
+            )
+          },
+          _ => (),
+        }
+        ui::EventHandled
+      },
       "issue_detail.cycle_picker": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
         match ffi::StateValue<Detail>(c).issue {
           issue => {
@@ -649,6 +742,9 @@ fn build(
         "n": ffi::Intent("issue_detail.compose"),
         "s": ffi::Intent("issue_detail.state_picker"),
         "y": ffi::Intent("issue_detail.cycle_picker"),
+        "p": ffi::Intent("issue_detail.priority_picker"),
+        "a": ffi::Intent("issue_detail.assignee_picker"),
+        "Shift+p": ffi::Intent("issue_detail.project_picker"),
       ],
       Child: ui::FocusScope{
         AutoFocus: active,
