@@ -12,9 +12,9 @@ use tinear/os
 
 fn attr_for(run: markdown::Run) ui::AttributeMask {
   // AttributeMask is a bitmask; distinct attribute bits sum cleanly.
-  // (ui::AttrNone itself imports as Int — ard#301 — but an annotated
-  // binding adopts the literal zero just fine.)
-  mut mask: ui::AttributeMask = 0
+  // (ui::AttrNone itself imports as Int — ard#301 — so construct the
+  // typed zero explicitly.)
+  mut mask = ui::AttributeMask::from(0)
   if run.Bold {
     mask = mask + ui::AttrBold
   }
