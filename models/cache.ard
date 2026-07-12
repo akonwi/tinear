@@ -1,25 +1,28 @@
 use go:encoding/json
 use go:os
-use tinear/config
 use decode
+
+use tinear/config
+use tinear/models/tabs
 
 // On-disk cache of UI state we want to survive across app launches.
 // Currently scoped to the logged-in shell's tab layout so the user
 // reopens to whatever they last had visible (active tab + the list
 // of issue tabs they had open).
 //
-// Issue tabs are stored as identifiers (e.g. "CCA-1234"), not full
-// Issue records: when the tab mounts on restore, the issue detail
-// view fetches the issue itself, so we'd just be persisting stale
-// metadata if we cached the full struct.
+// Tabs are stored as TabRef identities (kind + id + label), not full
+// records: when a tab mounts on restore, the detail view fetches its
+// content itself, so we'd just be persisting stale metadata if we
+// cached full structs. Kind is persisted as a stable string label,
+// not the enum's numeric value.
 
 fn version() Int {
-  1
+  2
 }
 
 struct LoggedInCache {
   tab_index: Int,
-  issue_tabs: [Str],
+  tabs: [tabs::TabRef],
 }
 
 struct DataCache {
@@ -28,8 +31,8 @@ struct DataCache {
 }
 
 fn empty_logged_in() LoggedInCache {
-  let empty: [Str] = []
-  LoggedInCache{tab_index: 0, issue_tabs: empty}
+  let empty: [tabs::TabRef] = []
+  LoggedInCache{tab_index: 0, tabs: empty}
 }
 
 fn empty() DataCache {
@@ -56,6 +59,34 @@ fn decode(content: Str) DataCache? {
   }
 }
 
+// Serialized shape: TabRef.kind is written as its stable string label
+// ("issue" / "doc"), never the enum's numeric value.
+private struct TabRefDto {
+  kind: Str,
+  id: Str,
+  title: Str,
+}
+
+private struct LoggedInDto {
+  tab_index: Int,
+  tabs: [TabRefDto],
+}
+
+private struct DataDto {
+  version: Int,
+  logged_in: LoggedInDto,
+}
+
+private fn decode_tab_ref(raw: Any) tabs::TabRef!decode::Error {
+  let kind_name = try decode::run(raw, decode::field("kind", decode::string))
+  let id = try decode::run(raw, decode::field("id", decode::string))
+  let title = try decode::run(raw, decode::field("title", decode::string))
+  match tabs::Kind::from(kind_name) {
+    kind => Result::ok(tabs::TabRef{kind: kind, id: id, title: title}),
+    _ => Result::err(decode::Error{expected: "a known tab kind", path: ["kind"]}),
+  }
+}
+
 private fn parse(content: Str) DataCache!Str {
   let data = try decode::from_json(content)
   let parsed_version = try decode::run(data, decode::field("version", decode::int)) -> e {
@@ -64,24 +95,30 @@ private fn parse(content: Str) DataCache!Str {
   let tab_index = try decode::run(data, decode::path(["logged_in", "tab_index"], decode::int)) -> e {
     Result::err(e.to_str())
   }
-  let issue_tabs = try decode::run(
+  let tab_refs = try decode::run(
     data,
-    decode::path(["logged_in", "issue_tabs"], decode::list(decode::string)),
+    decode::path(["logged_in", "tabs"], decode::list(decode_tab_ref)),
   ) -> e {
     Result::err(e.to_str())
   }
   Result::ok(
     DataCache{
       version: parsed_version,
-      logged_in: LoggedInCache{tab_index: tab_index, issue_tabs: issue_tabs},
+      logged_in: LoggedInCache{tab_index: tab_index, tabs: tab_refs},
     },
   )
 }
 
 fn encode(cache: DataCache) Str!Str {
-  mut normalized = cache
-  normalized.version = version()
-  mut bytes = try json::Marshal(normalized)
+  mut tab_dtos: [TabRefDto] = []
+  for tab in cache.logged_in.tabs {
+    tab_dtos.push(TabRefDto{kind: tab.kind.to_str(), id: tab.id, title: tab.title})
+  }
+  let dto = DataDto{
+    version: version(),
+    logged_in: LoggedInDto{tab_index: cache.logged_in.tab_index, tabs: tab_dtos},
+  }
+  mut bytes = try json::Marshal(dto)
   Result::ok(Str::from(bytes))
 }
 

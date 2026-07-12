@@ -1,0 +1,104 @@
+use decode
+use go:encoding/json
+
+use tinear/linear/client
+use tinear/models/issues
+
+// Linear documents: fetch + decode. Documents are effectively longer
+// issue bodies — `content` is plain markdown text like
+// `Issue.description` — so decoding mirrors `models/issues`.
+
+// Listing/search node: everything but the content.
+struct DocMeta {
+  id: Str,
+  slug_id: Str,
+  title: Str,
+  // Owning container, if any: project name, else initiative name, else "—".
+  container: Str,
+  creator: Str,
+  updated_at: Str,
+  url: Str,
+}
+
+// Full document, fetched per tab.
+struct Doc {
+  meta: DocMeta,
+  content: Str?,
+}
+
+fn meta_fields() Str {
+  "id slugId title updatedAt url project \{ name \} initiative \{ name \} creator \{ displayName name \}"
+}
+
+fn decode_meta(raw: Any) DocMeta {
+  let project = issues::nested_str(raw, "project", "name", "")
+  let initiative = issues::nested_str(raw, "initiative", "name", "")
+  let container = match project.is_empty() {
+    false => project,
+    true => match initiative.is_empty() {
+      false => initiative,
+      true => "—",
+    },
+  }
+  DocMeta{
+    id: decode::run(raw, decode::field("id", decode::string)).expect("Missing document.id"),
+    slug_id: decode::run(raw, decode::field("slugId", decode::string)).expect("Missing document.slugId"),
+    title: issues::normalize_text(
+      decode::run(raw, decode::field("title", decode::string)).expect("Missing document.title"),
+    ),
+    container: issues::normalize_text(container),
+    creator: issues::normalize_text(issues::user_display_name_opt(raw, "creator")),
+    updated_at: issues::optional_str(raw, "updatedAt", ""),
+    url: issues::optional_str(raw, "url", ""),
+  }
+}
+
+fn decode_doc(raw: Any) Doc {
+  Doc{
+    meta: decode_meta(raw),
+    content: issues::normalize_nullable_str(issues::nullable_str(raw, "content")),
+  }
+}
+
+// Most recently updated documents across the workspace.
+fn fetch_recent(api_key: Str, limit: Int) [DocMeta]!Str {
+  let query = "query \{ documents(first: {limit}, orderBy: updatedAt) \{ nodes \{ {meta_fields()} \} \} \}"
+  let data = try client::graphql(api_key, query)
+  let nodes = decode::run(
+    data,
+    decode::path(["documents", "nodes"], decode::list(decode::any)),
+  ).expect("Missing documents.nodes")
+  mut out: [DocMeta] = []
+  for node in nodes {
+    out.push(decode_meta(node))
+  }
+  Result::ok(out)
+}
+
+// Full-text search over documents.
+fn search(api_key: Str, term: Str) [DocMeta]!Str {
+  mut q_bytes = json::Marshal(term).expect("encode search term")
+  let q = Str::from(q_bytes)
+  let query = "query \{ searchDocuments(term: {q}, first: 20) \{ nodes \{ {meta_fields()} \} \} \}"
+  let data = try client::graphql(api_key, query)
+  let nodes = decode::run(
+    data,
+    decode::path(["searchDocuments", "nodes"], decode::list(decode::any)),
+  ).expect("Missing searchDocuments.nodes")
+  mut out: [DocMeta] = []
+  for node in nodes {
+    out.push(decode_meta(node))
+  }
+  Result::ok(out)
+}
+
+// Fetch one document with content. `document(id:)` accepts the slugId.
+// The id is JSON-encoded so a hand-edited cache can't break the query.
+fn fetch_single(api_key: Str, slug_id: Str) Doc!Str {
+  mut id_bytes = json::Marshal(slug_id).expect("encode document id")
+  let id = Str::from(id_bytes)
+  let query = "query \{ document(id: {id}) \{ {meta_fields()} content \} \}"
+  let data = try client::graphql(api_key, query)
+  let raw = decode::run(data, decode::field("document", decode::any)).expect("Missing document")
+  Result::ok(decode_doc(raw))
+}

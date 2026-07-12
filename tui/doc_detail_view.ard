@@ -1,0 +1,361 @@
+use ard/async
+
+use go:go.rockorager.dev/vaxis/ui
+use go:tinear/ffi
+use tinear/models/documents
+use tinear/os
+use tinear/tui/refresh
+use tinear/tui/text
+use tinear/tui/toast
+
+// Document detail tab.
+//
+// Layout:
+//   ┌────────────────────────────────────────────┐
+//   │ <title>                                     │  ← sticky header
+//   │ Project  P      Creator  C                  │
+//   │ Updated  D                                  │
+//   ├────────────────────────────────────────────┤
+//   │ <wrapped markdown content>                  │   scrollable (j/k)
+//   └────────────────────────────────────────────┘
+//
+// Documents are effectively longer issue bodies, so this mirrors
+// issue_detail_view minus comments, compose, and pickers. `o` opens
+// the document in the browser via its Linear URL.
+
+struct DocView {
+  started: Bool,
+
+  // slugId identifies the document; the title arrives with the fetch
+  // (a cached title from the tab ref paints the header until then).
+  slug_id: Str,
+  title: Str,
+  doc: documents::Doc?,
+  error: Str,
+
+  // Stops the per-tab periodic refresh loop on dispose.
+  refresh_stop: Chan<Bool>,
+
+  // Body scroll controller.
+  scroll: mut ui::ScrollController,
+}
+
+// ── Async loads ──────────────────────────────────────────────────────
+
+fn load_doc(c: mut ffi::StateCtx, api_key: Str, slug_id: Str, on_title: fn(Str)) {
+  async::start(
+    fn() {
+      let result = documents::fetch_single(api_key, slug_id)
+      ffi::Dispatch(
+        c,
+        fn() {
+          ffi::Update<DocView>(
+            c,
+            fn(v: mut DocView) {
+              match result {
+                ok(doc) => {
+                  v.doc = Maybe::new(doc)
+                  v.title = doc.meta.title
+                  v.error = ""
+                },
+                err(e) => { v.error = e },
+              }
+            },
+          )
+          // Report the (possibly renamed) title so the shell can
+          // refresh the tab label and persisted cache.
+          match result {
+            ok(doc) => on_title(doc.meta.title),
+            err(_) => (),
+          }
+        },
+      )
+    },
+  )
+}
+
+// Background refresh: silent (no loading flash) — just re-fetch and
+// swap. Failures surface as a toast, not an inline error, so a blip
+// doesn't wipe visible content.
+fn refresh_doc(
+  c: mut ffi::StateCtx,
+  api_key: Str,
+  slug_id: Str,
+  on_title: fn(Str),
+  notify: fn(Str, Str, toast::ToastVariant),
+) {
+  async::start(
+    fn() {
+      let result = documents::fetch_single(api_key, slug_id)
+      ffi::Dispatch(
+        c,
+        fn() {
+          match result {
+            ok(doc) => {
+              ffi::Update<DocView>(
+                c,
+                fn(v: mut DocView) {
+                  v.doc = Maybe::new(doc)
+                  v.title = doc.meta.title
+                  v.error = ""
+                },
+              )
+              on_title(doc.meta.title)
+            },
+            err(e) => notify("Refresh document", e, toast::ToastVariant::error),
+          }
+        },
+      )
+    },
+  )
+}
+
+// ── Layout helpers ───────────────────────────────────────────────────
+
+fn min_column(children: [ui::Widget], stretch: Bool) ui::Widget {
+  match stretch {
+    true => {
+      ui::Flex{
+        Axis: ui::Vertical,
+        MainAxisSize: ui::MainAxisSizeMin,
+        CrossAxisAlignment: ui::CrossAxisStretch,
+        Children: children,
+      }
+    },
+    false => {
+      ui::Flex{
+        Axis: ui::Vertical,
+        MainAxisSize: ui::MainAxisSizeMin,
+        CrossAxisAlignment: ui::CrossAxisCenter,
+        Children: children,
+      }
+    },
+  }
+}
+
+fn muted(theme: ui::Theme, value: Str) ui::Widget {
+  ui::Text{Value: value, Style: ui::Style{Foreground: theme.MutedForeground}}
+}
+
+fn blank_line() ui::Widget {
+  ui::SizedBox{Height: 1}
+}
+
+fn divider(theme: ui::Theme) ui::Widget {
+  ui::Divider{Style: ui::Style{Foreground: theme.Border, Background: theme.Background}}
+}
+
+fn value_or_dash(value: Str) Str {
+  match value.is_empty() {
+    true => "—",
+    false => value,
+  }
+}
+
+// One labelled field: "Label  Value" with a fixed-width label column.
+fn field_pair(theme: ui::Theme, label: Str, value: Str, value_width: Int) ui::Widget {
+  mut children: [ui::Widget] = [
+    ui::SizedBox{
+      Width: 10,
+      Height: 1,
+      Child: muted(theme, label),
+    },
+    ui::SizedBox{
+      Width: value_width,
+      Height: 1,
+      Child: ui::Text{
+        Value: text::truncate_with_ellipsis(value_or_dash(value), value_width),
+        Style: ui::Style{Foreground: theme.Foreground},
+      },
+    },
+  ]
+  ui::Flex{Axis: ui::Horizontal, Children: children}
+}
+
+fn metadata_header(theme: ui::Theme, meta: documents::DocMeta) ui::Widget {
+  mut field_children: [ui::Widget] = [
+    field_pair(theme, "Project", meta.container, 24),
+    ui::SizedBox{Width: 3, Height: 1},
+    field_pair(theme, "Creator", meta.creator, 24),
+  ]
+  mut children: [ui::Widget] = [
+    ui::Text{
+      Value: meta.title,
+      Style: ui::Style{Foreground: theme.Foreground, Attribute: ui::AttrBold},
+    },
+    blank_line(),
+    ui::Flex{Axis: ui::Horizontal, Children: field_children},
+    field_pair(theme, "Updated", text::format_date(meta.updated_at), 24),
+  ]
+  min_column(children, true)
+}
+
+// Soft-wrap the markdown content to the available width, same as issue
+// descriptions.
+fn content_body(theme: ui::Theme, doc: documents::Doc) ui::Widget {
+  let inner: ui::Widget = match doc.content {
+    content => {
+      match content.is_empty() {
+        true => muted(theme, "(empty document)"),
+        false => {
+          ui::RichText{
+            Spans: [ui::TextSpan{Text: content, Style: ui::Style{Foreground: theme.Foreground}}],
+            SoftWrap: true,
+          }
+        },
+      }
+    },
+    _ => muted(theme, "(empty document)"),
+  }
+  ui::Padding(ui::Symmetric(1, 0), min_column([inner], true))
+}
+
+// ── Top-level layout ─────────────────────────────────────────────────
+
+fn loaded_layout(theme: ui::Theme, doc: documents::Doc, model: DocView) ui::Widget {
+  mut children: [ui::Widget] = [
+    ui::Padding(ui::Symmetric(1, 0), metadata_header(theme, doc.meta)),
+    divider(theme),
+    ui::Expanded(ui::ScrollView{Controller: model.scroll, Child: content_body(theme, doc)}),
+  ]
+  let content = ui::Flex{
+    Axis: ui::Vertical,
+    CrossAxisAlignment: ui::CrossAxisStretch,
+    Children: children,
+  }
+  // SelectionArea spans header + body so mouse-drag selection and
+  // Cmd+C copy work anywhere in the tab, mirroring issue tabs.
+  ui::SelectionArea{Child: content}
+}
+
+fn loading_placeholder(theme: ui::Theme, title: Str) ui::Widget {
+  match title.is_empty() {
+    true => ui::Center(muted(theme, "Loading document…")),
+    false => ui::Center(muted(theme, "Loading {title}…")),
+  }
+}
+
+fn error_placeholder(theme: ui::Theme, title: Str, error: Str) ui::Widget {
+  ui::Center(
+    min_column(
+      [
+        ui::Text{
+          Value: "Couldn't load {value_or_dash(title)}",
+          Style: ui::Style{Foreground: theme.DangerText, Attribute: ui::AttrBold},
+        },
+        blank_line(),
+        muted(theme, error),
+      ],
+      false,
+    ),
+  )
+}
+
+// ── Public widget ────────────────────────────────────────────────────
+
+fn build(c: mut ffi::StateCtx, ctx: ui::BuildContext, active: Bool) ui::Widget {
+  let theme = ui::MustDepend<ui::Theme>(ctx)
+  let model = ffi::StateValue<DocView>(c)
+
+  // Stable outer column across loading / error / loaded so the widget
+  // type at this slot never changes between rebuilds.
+  let body_widget = match model.doc {
+    doc => loaded_layout(theme, doc, model),
+    _ => {
+      match {
+        not model.error.is_empty() => error_placeholder(theme, model.title, model.error),
+        _ => loading_placeholder(theme, model.title),
+      }
+    },
+  }
+  mut children: [ui::Widget] = [ui::Expanded(body_widget)]
+  let inner = ui::Flex{
+    Axis: ui::Vertical,
+    CrossAxisAlignment: ui::CrossAxisStretch,
+    Children: children,
+  }
+
+  ui::Actions{
+    Bindings: [
+      "doc_detail.scroll_up": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        model.scroll.ScrollByLines(-1)
+        ui::EventHandled
+      },
+      "doc_detail.scroll_down": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        model.scroll.ScrollByLines(1)
+        ui::EventHandled
+      },
+      "doc_detail.open_in_browser": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        match ffi::StateValue<DocView>(c).doc {
+          doc => {
+            if not doc.meta.url.is_empty() {
+              let _ = os::open_url(doc.meta.url)
+            }
+          },
+          _ => (),
+        }
+        ui::EventHandled
+      },
+    ],
+    Child: ui::Shortcuts{
+      Bindings: [
+        "j": ffi::Intent("doc_detail.scroll_down"),
+        "Down": ffi::Intent("doc_detail.scroll_down"),
+        "k": ffi::Intent("doc_detail.scroll_up"),
+        "Up": ffi::Intent("doc_detail.scroll_up"),
+        "o": ffi::Intent("doc_detail.open_in_browser"),
+      ],
+      Child: ui::FocusScope{
+        AutoFocus: active,
+        ReclaimFocus: active,
+        Child: inner,
+      },
+    },
+  }
+}
+
+fn new(
+  api_key: Str,
+  slug_id: Str,
+  cached_title: Str,
+  on_title: fn(Str),
+  notify: fn(Str, Str, toast::ToastVariant),
+  active: Bool,
+) ui::Widget {
+  ffi::Stateful{
+    Key: "doc:{slug_id}",
+    Init: fn() Any {
+      DocView{
+        started: false,
+        slug_id: slug_id,
+        title: cached_title,
+        doc: Maybe::new(),
+        error: "",
+        refresh_stop: Chan::new<Bool>(),
+        scroll: mut ui::ScrollController{},
+      }
+    },
+    Build: fn(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
+      // First-build kick: initial fetch plus the 5-minute background
+      // refresh. The stop channel is closed on dispose so closed tabs
+      // stop polling.
+      let s = ffi::StateRef<DocView>(c)
+      if not s.started {
+        s.started = true
+        load_doc(c, api_key, slug_id, on_title)
+        refresh::schedule_periodic(
+          s.refresh_stop,
+          5 * 60 * 1000,
+          fn() {
+            refresh_doc(c, api_key, slug_id, on_title, notify)
+          },
+        )
+      }
+      build(c, ctx, active)
+    },
+    OnDispose: fn(c: mut ffi::StateCtx) {
+      let s = ffi::StateValue<DocView>(c)
+      s.refresh_stop.close()
+    },
+  }
+}

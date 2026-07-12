@@ -115,6 +115,13 @@ type Stateful struct {
 	// AnimateMs overrides the animation duration (milliseconds) and switches
 	// the curve to linear. Zero keeps the 1200ms EaseInOut default.
 	AnimateMs int
+	// Key scopes the persistent state to a logical identity. Reconciliation
+	// is positional: when a dynamic list of Stateful widgets shifts (e.g.
+	// closing the first of two adjacent tabs), the surviving element would
+	// otherwise keep the previous slot's state. When a rebuild delivers a
+	// widget with a different Key, the old state is disposed (OnDispose runs,
+	// background fibers see a disposed ctx) and Init runs fresh.
+	Key string
 }
 
 func (w Stateful) CreateState() ui.State { return &statefulState{} }
@@ -159,6 +166,29 @@ func (s *statefulState) InitState() {
 			}
 		}
 	}()
+}
+
+// DidUpdateWidget resets state when the widget's Key changes: the element is
+// being reused for a different logical identity, so the old identity's state
+// must not leak into the new one.
+func (s *statefulState) DidUpdateWidget(old ui.Widget) {
+	oldW, ok := old.(Stateful)
+	if !ok {
+		return
+	}
+	newW := s.StateBase.Widget().(Stateful)
+	if oldW.Key == newW.Key {
+		return
+	}
+	if s.ctx != nil && !s.ctx.disposed {
+		if oldW.OnDispose != nil {
+			oldW.OnDispose(s.ctx)
+		}
+		s.ctx.disposed = true
+		s.ctx.runtime = nil
+		s.ctx.markNeedsBuild = nil
+	}
+	s.ctx = nil
 }
 
 func (s *statefulState) Dispose() {

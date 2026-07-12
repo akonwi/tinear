@@ -1,0 +1,49 @@
+// Identity for the shell's dynamic tabs. A tab is either an issue
+// (identified by its human identifier, e.g. "CCA-123") or a document
+// (identified by its slugId). The label is carried alongside the id:
+// for issues it IS the identifier; for documents it's the title, which
+// is cached so restored tabs are labelled before the doc loads.
+
+enum Kind {
+  issue,
+  doc,
+}
+
+struct TabRef {
+  kind: Kind,
+  id: Str,
+  title: Str,
+}
+
+fn issue_tab(identifier: Str) TabRef {
+  TabRef{kind: Kind::issue, id: identifier, title: identifier}
+}
+
+fn doc_tab(slug_id: Str, title: Str) TabRef {
+  TabRef{kind: Kind::doc, id: slug_id, title: title}
+}
+
+// Two refs address the same tab when kind and id match; the title is
+// display-only and may drift (doc renames).
+fn same(a: TabRef, b: TabRef) Bool {
+  a.kind == b.kind and a.id == b.id
+}
+
+// Stable string names for persistence. The enum's numeric value is an
+// ordering accident; the cache stores these labels instead.
+impl Kind {
+  fn to_str() Str {
+    match self {
+      Kind::issue => "issue",
+      Kind::doc => "doc",
+    }
+  }
+}
+
+fn Kind::from(label: Str) Kind? {
+  match label {
+    "issue" => Maybe::new(Kind::issue),
+    "doc" => Maybe::new(Kind::doc),
+    _ => Maybe::new(),
+  }
+}

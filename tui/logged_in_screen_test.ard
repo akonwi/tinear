@@ -1,9 +1,14 @@
 use ard/testing
 
+use tinear/models/tabs
 use tinear/tui/logged_in_screen as shell
 
-fn model(tab_index: Int, issue_tabs: [Str]) shell::Model {
-  shell::Model{tab_index: tab_index, issue_tabs: issue_tabs}
+fn model(tab_index: Int, identifiers: [Str]) shell::Model {
+  mut refs: [tabs::TabRef] = []
+  for identifier in identifiers {
+    refs.push(tabs::issue_tab(identifier))
+  }
+  shell::Model{tab_index: tab_index, tabs: refs}
 }
 
 test fn cycle_wraps_around_all_tabs() Void!Str {
@@ -14,24 +19,31 @@ test fn cycle_wraps_around_all_tabs() Void!Str {
   testing::pass()
 }
 
-test fn open_issue_tab_appends_and_selects() Void!Str {
-  let s = shell::open_issue_tab(model(0, []), "CCA-9")
-  try testing::assert(s.issue_tabs.size() == 1, "tab appended")
+test fn open_tab_appends_and_selects() Void!Str {
+  let s = shell::open_tab(model(0, []), tabs::issue_tab("CCA-9"))
+  try testing::assert(s.tabs.size() == 1, "tab appended")
   try testing::assert(s.tab_index == 2, "new tab selected")
   testing::pass()
 }
 
-test fn open_issue_tab_reuses_existing() Void!Str {
-  let s = shell::open_issue_tab(model(0, ["CCA-9", "CCA-10"]), "CCA-9")
-  try testing::assert(s.issue_tabs.size() == 2, "no duplicate tab")
+test fn open_tab_reuses_existing() Void!Str {
+  let s = shell::open_tab(model(0, ["CCA-9", "CCA-10"]), tabs::issue_tab("CCA-9"))
+  try testing::assert(s.tabs.size() == 2, "no duplicate tab")
   try testing::assert(s.tab_index == 2, "existing tab selected")
   testing::pass()
 }
 
-test fn close_current_issue_tab_returns_to_board() Void!Str {
-  let s = shell::close_current_issue_tab(model(3, ["CCA-9", "CCA-10"]))
-  try testing::assert(s.issue_tabs.size() == 1, "tab removed")
-  try testing::assert(s.issue_tabs.at(0).expect("bounds") == "CCA-9", "other tab kept")
+test fn same_id_different_kind_opens_separate_tabs() Void!Str {
+  let s = shell::open_tab(model(0, ["abc123"]), tabs::doc_tab("abc123", "A Doc"))
+  try testing::assert(s.tabs.size() == 2, "doc tab is distinct from issue tab with same id")
+  try testing::assert(s.tab_index == 3, "new doc tab selected")
+  testing::pass()
+}
+
+test fn close_current_tab_returns_to_board() Void!Str {
+  let s = shell::close_current_tab(model(3, ["CCA-9", "CCA-10"]))
+  try testing::assert(s.tabs.size() == 1, "tab removed")
+  try testing::assert(s.tabs.at(0).expect("bounds").id == "CCA-9", "other tab kept")
   try testing::assert(s.tab_index == 1, "selection returns to My Issues")
   testing::pass()
 }
@@ -41,5 +53,42 @@ test fn tab_labels_resolve() Void!Str {
   try testing::assert(shell::tab_label_at(s, 0) == "Inbox", "inbox label")
   try testing::assert(shell::tab_label_at(s, 1) == "My Issues", "board label")
   try testing::assert(shell::tab_label_at(s, 2) == "CCA-9", "issue tab label")
+  testing::pass()
+}
+
+test fn doc_tab_labels_truncate_long_titles() Void!Str {
+  let long_title = "A very long document title that exceeds the tab width"
+  let s = shell::open_tab(model(0, []), tabs::doc_tab("abc123", long_title))
+  let label = shell::tab_label_at(s, 2)
+  try testing::assert(not label == long_title, "long titles should truncate")
+  testing::pass()
+}
+
+test fn retitle_tab_updates_matching_tab_only() Void!Str {
+  mut s = shell::open_tab(model(0, []), tabs::doc_tab("abc123", "Loading…"))
+  s = shell::open_tab(s, tabs::issue_tab("CCA-9"))
+  let renamed = shell::retitle_tab(s, tabs::doc_tab("abc123", "Loading…"), "Real Title")
+  try testing::assert(renamed.tabs.at(0).expect("bounds").title == "Real Title", "doc tab retitled")
+  try testing::assert(renamed.tabs.at(1).expect("bounds").title == "CCA-9", "issue tab untouched")
+  testing::pass()
+}
+
+test fn clamp_tab_index_bounds() Void!Str {
+  try testing::assert(shell::clamp_tab_index(-1, 3) == 0, "negative clamps to 0")
+  try testing::assert(shell::clamp_tab_index(9, 3) == 2, "overflow clamps to last")
+  try testing::assert(shell::clamp_tab_index(1, 3) == 1, "in-range passes through")
+  testing::pass()
+}
+
+test fn tab_title_looks_up_open_tabs() Void!Str {
+  let s = shell::open_tab(model(0, []), tabs::doc_tab("abc", "A Doc"))
+  try testing::assert(
+    shell::tab_title(s, tabs::doc_tab("abc", "ignored")).or("?") == "A Doc",
+    "title resolves by identity, not by the probe's title",
+  )
+  try testing::assert(
+    shell::tab_title(s, tabs::issue_tab("abc")).is_none(),
+    "different kind does not match",
+  )
   testing::pass()
 }

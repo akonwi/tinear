@@ -677,6 +677,7 @@ fn new(
   active: Bool,
 ) ui::Widget {
   ffi::Stateful{
+    Key: "issue:{identifier}",
     Init: fn() Any {
       mut scroll = ui::ScrollController{}
       Detail{

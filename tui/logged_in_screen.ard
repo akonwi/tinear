@@ -3,33 +3,48 @@ use ard/async
 use go:go.rockorager.dev/vaxis/ui
 use go:tinear/ffi
 use tinear/models/cache
+use tinear/models/documents
 use tinear/models/inbox
 use tinear/models/issues
+use tinear/models/tabs
 use tinear/os
+use tinear/tui/doc_detail_view
 use tinear/tui/hints_bar
 use tinear/tui/inbox_view
 use tinear/tui/issue_detail_view
 use tinear/tui/modal
 use tinear/tui/my_issues_view
 use tinear/tui/search_view
+use tinear/tui/text
 use tinear/tui/toast
 
 // Shell for the logged-in view.
 //
-// Two permanent tabs (Inbox, My Issues) plus zero or more dynamic issue
-// detail tabs. Tab math treats them as one flat list:
+// Two permanent tabs (Inbox, My Issues) plus zero or more dynamic
+// detail tabs (issues and documents). Tab math treats them as one
+// flat list:
 //   index 0       -> Inbox
 //   index 1       -> My Issues
-//   index 2..n+1  -> issue_tabs[i - 2]
-//
-// Tab bodies are placeholders until their slices are rebuilt.
+//   index 2..n+1  -> tabs[i - 2]
 struct Model {
   tab_index: Int,
-  issue_tabs: [Str],
+  tabs: [tabs::TabRef],
 }
 
+// Widest a dynamic tab label may render. Issue identifiers are short;
+// document titles get truncated with an ellipsis.
+let MAX_TAB_LABEL_WIDTH: Int = 24
+
 fn total_tabs(s: Model) Int {
-  2 + s.issue_tabs.size()
+  2 + s.tabs.size()
+}
+
+fn clamp_tab_index(idx: Int, total: Int) Int {
+  match {
+    idx < 0 => 0,
+    idx >= total => total - 1,
+    _ => idx,
+  }
 }
 
 fn tab_label_at(s: Model, i: Int) Str {
@@ -37,9 +52,12 @@ fn tab_label_at(s: Model, i: Int) Str {
     0 => "Inbox",
     1 => "My Issues",
     _ => {
-      let issue_idx = i - 2
-      match issue_idx >= 0 and issue_idx < s.issue_tabs.size() {
-        true => s.issue_tabs.at(issue_idx).expect("bounds checked"),
+      let tab_idx = i - 2
+      match tab_idx >= 0 and tab_idx < s.tabs.size() {
+        true => text::truncate_with_ellipsis(
+          s.tabs.at(tab_idx).expect("bounds checked").title,
+          MAX_TAB_LABEL_WIDTH,
+        ),
         false => "?",
       }
     },
@@ -61,33 +79,33 @@ fn cycle_prev(s: Model) Int {
   }
 }
 
-fn selected_is_issue_tab(s: Model) Bool {
+fn selected_is_dynamic_tab(s: Model) Bool {
   s.tab_index >= 2
 }
 
-fn close_current_issue_tab(s: Model) Model {
+fn close_current_tab(s: Model) Model {
   mut next = s
-  let issue_idx = s.tab_index - 2
-  if issue_idx >= 0 and issue_idx < s.issue_tabs.size() {
-    mut remaining: [Str] = []
-    for label, idx in s.issue_tabs {
-      if not idx == issue_idx {
-        remaining.push(label)
+  let tab_idx = s.tab_index - 2
+  if tab_idx >= 0 and tab_idx < s.tabs.size() {
+    mut remaining: [tabs::TabRef] = []
+    for tab, idx in s.tabs {
+      if not idx == tab_idx {
+        remaining.push(tab)
       }
     }
-    next.issue_tabs = remaining
+    next.tabs = remaining
     next.tab_index = 1
   }
   next
 }
 
-// Open `identifier` as an issue tab. If it's already in `issue_tabs`,
-// just switch to it; otherwise append a new tab and select it. Used by
-// the inbox's Enter action to surface a notification's issue.
-fn open_issue_tab(s: Model, identifier: Str) Model {
+// Open `ref` as a dynamic tab. If a tab with the same identity (kind +
+// id) is already open, just switch to it; otherwise append a new tab
+// and select it.
+fn open_tab(s: Model, ref: tabs::TabRef) Model {
   mut existing_idx = -1
-  for tab, i in s.issue_tabs {
-    if tab == identifier {
+  for tab, i in s.tabs {
+    if tabs::same(tab, ref) {
       existing_idx = i
     }
   }
@@ -95,14 +113,41 @@ fn open_issue_tab(s: Model, identifier: Str) Model {
   if existing_idx >= 0 {
     next.tab_index = 2 + existing_idx
   } else {
-    mut new_tabs: [Str] = []
-    for tab in s.issue_tabs {
+    mut new_tabs: [tabs::TabRef] = []
+    for tab in s.tabs {
       new_tabs.push(tab)
     }
-    new_tabs.push(identifier)
-    next.issue_tabs = new_tabs
+    new_tabs.push(ref)
+    next.tabs = new_tabs
     next.tab_index = 2 + new_tabs.size() - 1
   }
+  next
+}
+
+// Current title of an open tab, if present. Used to skip no-op
+// retitles (every doc refresh reports its title).
+fn tab_title(s: Model, ref: tabs::TabRef) Str? {
+  mut found: Str? = Maybe::new()
+  for tab in s.tabs {
+    if tabs::same(tab, ref) {
+      found = Maybe::new(tab.title)
+    }
+  }
+  found
+}
+
+// Refresh the label of an open doc tab once its title is known (on
+// first load, or when a rename comes back from a refresh).
+fn retitle_tab(s: Model, ref: tabs::TabRef, title: Str) Model {
+  mut next = s
+  mut new_tabs: [tabs::TabRef] = []
+  for tab in s.tabs {
+    match tabs::same(tab, ref) {
+      true => new_tabs.push(tabs::TabRef{kind: tab.kind, id: tab.id, title: title}),
+      false => new_tabs.push(tab),
+    }
+  }
+  next.tabs = new_tabs
   next
 }
 
@@ -116,7 +161,7 @@ fn persist(c: mut ffi::StateCtx) {
   let snap = ffi::StateValue<Model>(c)
   async::start(
     fn() {
-      let _ = cache::save_logged_in(cache::LoggedInCache{tab_index: snap.tab_index, issue_tabs: snap.issue_tabs})
+      let _ = cache::save_logged_in(cache::LoggedInCache{tab_index: snap.tab_index, tabs: snap.tabs})
     },
   )
 }
@@ -136,7 +181,7 @@ fn replace_model(c: mut ffi::StateCtx, next: Model) {
     c,
     fn(s: mut Model) {
       s.tab_index = next.tab_index
-      s.issue_tabs = next.issue_tabs
+      s.tabs = next.tabs
     },
   )
   persist(c)
@@ -219,7 +264,7 @@ fn tab_bar(c: mut ffi::StateCtx, theme: ui::Theme, s: Model) ui::Widget {
 //     in the browser; otherwise no-op.
 fn open_inbox_item(c: mut ffi::StateCtx, item: inbox::Item) {
   if item.notification_type.starts_with("issue") {
-    replace_model(c, open_issue_tab(ffi::StateValue<Model>(c), item.target_id))
+    replace_model(c, open_tab(ffi::StateValue<Model>(c), tabs::issue_tab(item.target_id)))
   } else {
     if not item.url.is_empty() {
       let _ = os::open_url(item.url)
@@ -256,7 +301,7 @@ fn body_for(
       // to a dynamic tab. Same shell helper as the inbox uses.
       api_key,
       fn(issue: issues::Issue) {
-        replace_model(c, open_issue_tab(ffi::StateValue<Model>(c), issue.identifier))
+        replace_model(c, open_tab(ffi::StateValue<Model>(c), tabs::issue_tab(issue.identifier)))
       },
       notify,
       show_modal,
@@ -264,10 +309,39 @@ fn body_for(
       s.tab_index == 1,
     ),
   ]
-  for label, idx in s.issue_tabs {
-    children.push(
-      issue_detail_view::new(api_key, label, notify, show_modal, close_modal, s.tab_index == idx + 2),
-    )
+  for tab, idx in s.tabs {
+    let body: ui::Widget = match tab.kind {
+      tabs::Kind::issue => issue_detail_view::new(
+        api_key,
+        tab.id,
+        notify,
+        show_modal,
+        close_modal,
+        s.tab_index == idx + 2,
+      ),
+      tabs::Kind::doc => doc_detail_view::new(
+        api_key,
+        tab.id,
+        tab.title,
+        fn(title: Str) {
+          // Skip no-op retitles: every 5-minute doc refresh reports its
+          // title, and an unchanged one shouldn't rebuild the shell or
+          // rewrite the cache.
+          let current = ffi::StateValue<Model>(c)
+          match tab_title(current, tab) {
+            existing => {
+              if not existing == title {
+                replace_model(c, retitle_tab(current, tab, title))
+              }
+            },
+            _ => (),
+          }
+        },
+        notify,
+        s.tab_index == idx + 2,
+      ),
+    }
+    children.push(body)
   }
   ui::IndexedStack{
     Index: s.tab_index,
@@ -300,15 +374,31 @@ fn hints_for(s: Model) [hints_bar::Hint] {
       ]
     },
     _ => {
-      [
-        hints_bar::Hint{key: "↑↓", label: "scroll"},
-        hints_bar::Hint{key: "d", label: "description"},
-        hints_bar::Hint{key: "c", label: "comments"},
-        hints_bar::Hint{key: "n", label: "new comment"},
-        hints_bar::Hint{key: "s", label: "status"},
-        hints_bar::Hint{key: "y", label: "cycle"},
-        hints_bar::Hint{key: "Esc", label: "close"},
-      ]
+      let tab_idx = s.tab_index - 2
+      let kind = match tab_idx >= 0 and tab_idx < s.tabs.size() {
+        true => s.tabs.at(tab_idx).expect("bounds checked").kind,
+        false => tabs::Kind::issue,
+      }
+      match kind {
+        tabs::Kind::doc => {
+          [
+            hints_bar::Hint{key: "↑↓", label: "scroll"},
+            hints_bar::Hint{key: "o", label: "open in Linear"},
+            hints_bar::Hint{key: "Esc", label: "close"},
+          ]
+        },
+        tabs::Kind::issue => {
+          [
+            hints_bar::Hint{key: "↑↓", label: "scroll"},
+            hints_bar::Hint{key: "d", label: "description"},
+            hints_bar::Hint{key: "c", label: "comments"},
+            hints_bar::Hint{key: "n", label: "new comment"},
+            hints_bar::Hint{key: "s", label: "status"},
+            hints_bar::Hint{key: "y", label: "cycle"},
+            hints_bar::Hint{key: "Esc", label: "close"},
+          ]
+        },
+      }
     },
   }
 }
@@ -367,9 +457,9 @@ fn build(
       },
       "vaxis.dismiss": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
         let current = ffi::StateValue<Model>(c)
-        match selected_is_issue_tab(current) {
+        match selected_is_dynamic_tab(current) {
           true => {
-            replace_model(c, close_current_issue_tab(current))
+            replace_model(c, close_current_tab(current))
             ui::EventHandled
           },
           false => ui::EventIgnored,
@@ -397,8 +487,12 @@ fn build(
         match modal_open {
           true => ui::EventIgnored,
           false => {
-            let on_open_search_result = fn(issue: issues::Issue) {
-              replace_model(c, open_issue_tab(ffi::StateValue<Model>(c), issue.identifier))
+            let on_open_issue = fn(issue: issues::Issue) {
+              replace_model(c, open_tab(ffi::StateValue<Model>(c), tabs::issue_tab(issue.identifier)))
+              close_modal()
+            }
+            let on_open_doc = fn(doc: documents::DocMeta) {
+              replace_model(c, open_tab(ffi::StateValue<Model>(c), tabs::doc_tab(doc.slug_id, doc.title)))
               close_modal()
             }
             show_modal(
@@ -406,7 +500,7 @@ fn build(
                 modal::show_modal(
                   theme_inner,
                   "Search",
-                  search_view::new(api_key, on_open_search_result),
+                  search_view::new(api_key, on_open_issue, on_open_doc),
                   hints_bar::row(
                     theme_inner,
                     [
@@ -454,8 +548,13 @@ fn new(
       // whatever they had open last session. Missing / unreadable /
       // version-mismatched cache falls back to the default layout.
       match cache::load_logged_in() {
-        cached => Model{tab_index: cached.tab_index, issue_tabs: cached.issue_tabs},
-        _ => Model{tab_index: 0, issue_tabs: []},
+        cached => {
+          let hydrated = Model{tab_index: cached.tab_index, tabs: cached.tabs}
+          // A hand-edited cache can hold an out-of-range index, which
+          // would feed IndexedStack an invalid child index.
+          Model{tab_index: clamp_tab_index(cached.tab_index, total_tabs(hydrated)), tabs: cached.tabs}
+        },
+        _ => Model{tab_index: 0, tabs: []},
       }
     },
     Build: fn(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
