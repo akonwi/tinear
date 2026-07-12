@@ -46,7 +46,12 @@ struct Props {
 }
 
 struct PickerState {
+  started: Bool,
   cursor: Int,
+  // Long option lists (e.g. project pickers) scroll; RevealIndex keeps
+  // the cursor row visible.
+  scroll: mut ui::ScrollController,
+  list: mut ui::SliverListController,
 }
 
 fn clamp_cursor(cursor: Int, count: Int) Int {
@@ -72,29 +77,51 @@ fn initial_cursor(props: Props) Int {
 // styling (theme.Primary bg); the "(current)" suffix marks the option
 // the data already considers selected. Clicking an option fires the
 // confirm + close sequence (same as Enter).
-fn render_options(theme: ui::Theme, props: Props, cursor: Int, on_pick: fn(Int)) ui::Widget {
-  mut rows: [ui::Widget] = []
-  for option, idx in props.options {
-    let row_idx = idx
-    let title_text = match option.current {
-      true => "{option.label}   (current)",
-      false => option.label,
-    }
-    rows.push(
-      ui::ListTile{
-        Title: ui::Text{Value: title_text, Style: ui::Style{Foreground: theme.Foreground}},
-        Selected: idx == cursor,
-        OnPressed: fn(ev: ui::EventContext) {
-          on_pick(row_idx)
-        },
-      },
-    )
+// Cap the visible rows; longer lists scroll (RevealIndex follows the
+// cursor).
+let MAX_VISIBLE_OPTIONS: Int = 12
+
+fn option_row(theme: ui::Theme, option: Option, selected: Bool, on_press: fn(ui::EventContext)) ui::Widget {
+  let title_text = match option.current {
+    true => "{option.label}   (current)",
+    false => option.label,
   }
-  ui::Flex{
-    Axis: ui::Vertical,
-    MainAxisSize: ui::MainAxisSizeMin,
-    CrossAxisAlignment: ui::CrossAxisStretch,
-    Children: rows,
+  ui::ListTile{
+    Title: ui::Text{Value: title_text, Style: ui::Style{Foreground: theme.Foreground}},
+    Selected: selected,
+    OnPressed: on_press,
+  }
+}
+
+fn render_options(theme: ui::Theme, state: PickerState, props: Props, cursor: Int, on_pick: fn(Int)) ui::Widget {
+  let count = props.options.size()
+  let height = match count > MAX_VISIBLE_OPTIONS {
+    true => MAX_VISIBLE_OPTIONS,
+    false => count,
+  }
+  ui::SizedBox{
+    Height: height,
+    Child: ui::CustomScrollView{
+      Controller: state.scroll,
+      Slivers: [
+        ui::SliverListBuilder{
+          Controller: state.list,
+          Count: count,
+          ItemExtent: 1,
+          Overscan: 4,
+          Builder: fn(ctx: ui::BuildContext, i: Int) ui::Widget {
+            option_row(
+              theme,
+              props.options.at(i).expect("builder index in range"),
+              i == cursor,
+              fn(ev: ui::EventContext) {
+                on_pick(i)
+              },
+            )
+          },
+        },
+      ],
+    },
   }
 }
 
@@ -113,6 +140,8 @@ fn move_cursor(c: mut ffi::StateCtx, count: Int, delta: Int) {
       s.cursor = clamp_cursor(s.cursor + delta, count)
     },
   )
+  let s = ffi::StateValue<PickerState>(c)
+  s.list.RevealIndex(s.cursor)
 }
 
 // Body widget (everything between the title divider and the footer
@@ -122,10 +151,19 @@ fn picker_body(props: Props, close: fn()) ui::Widget {
   ffi::Stateful{
     Key: "picker:{props.key}",
     Init: fn() Any {
-      PickerState{cursor: initial_cursor(props)}
+      mut scroll = ui::ScrollController{}
+      mut list = ui::SliverListController{}
+      PickerState{started: false, cursor: initial_cursor(props), scroll: mut scroll, list: mut list}
     },
     Build: fn(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
       let theme = ui::MustDepend<ui::Theme>(ctx)
+      let state = ffi::StateRef<PickerState>(c)
+      if not state.started {
+        // Scroll the initial cursor (the "current" option) into view
+        // on first open; deliberately does not schedule a rebuild.
+        state.started = true
+        state.list.RevealIndex(state.cursor)
+      }
       let cursor = clamp_cursor(ffi::StateValue<PickerState>(c).cursor, props.options.size())
 
       // Confirm and pick helpers. Both end the picker. Close BEFORE
@@ -171,7 +209,7 @@ fn picker_body(props: Props, close: fn()) ui::Widget {
             "Enter": ffi::Intent("picker.confirm"),
             "Space": ffi::Intent("picker.confirm"),
           ],
-          Child: ui::Focus(mut focus_node, render_options(theme, props, cursor, confirm_at)),
+          Child: ui::Focus(mut focus_node, render_options(theme, ffi::StateValue<PickerState>(c), props, cursor, confirm_at)),
         },
       }
     },

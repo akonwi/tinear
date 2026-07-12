@@ -70,7 +70,9 @@ struct Issue {
   team_id: Str,
   team_name: Str,
   team_key: Str,
+  project_id: Str,
   project_name: Str,
+  assignee_id: Str,
   assignee_name: Str,
   cycle_id: Str,
   cycle_label: Str,
@@ -222,7 +224,9 @@ fn decode_issue(raw: Any) Issue {
     team_id: decode::run(team, decode::field("id", decode::string)).expect("Missing team.id"),
     team_name: normalize_text(decode::run(team, decode::field("name", decode::string)).expect("Missing team.name")),
     team_key: decode::run(team, decode::field("key", decode::string)).expect("Missing team.key"),
+    project_id: nested_str(raw, "project", "id", ""),
     project_name: normalize_text(nested_str(raw, "project", "name", "—")),
+    assignee_id: nested_str(raw, "assignee", "id", ""),
     assignee_name: normalize_text(user_display_name_opt(raw, "assignee")),
     cycle_id: cycle_id(raw),
     cycle_label: cycle_label(raw),
@@ -374,7 +378,7 @@ fn fetch_team_cycles(api_key: Str, team_id: Str) TeamCyclesResult!Str {
 }
 
 fn issue_fields() Str {
-  "id identifier title description priority state \{ id name type position \} team \{ id name key \} project \{ name \} assignee \{ name displayName \} cycle \{ id number name \}"
+  "id identifier title description priority state \{ id name type position \} team \{ id name key \} project \{ id name \} assignee \{ id name displayName \} cycle \{ id number name \}"
 }
 
 fn fetch_single_issue(api_key: Str, issue_id: Str) Any!Str {
@@ -530,6 +534,130 @@ fn load(api_key: Str) [BoardColumn]!Str {
     columns.push(decode_column(col))
   }
   Result::ok(columns)
+}
+
+fn update_priority(api_key: Str, issue_id: Str, priority: Int) Void!Str {
+  let mutation = "mutation \{ issueUpdate(id: \"{issue_id}\", input: \{ priority: {priority} \}) \{ success \} \}"
+  let data = try client::graphql(api_key, mutation)
+  let success = try decode::run(
+    data,
+    decode::path(["issueUpdate", "success"], decode::boolean),
+  ) -> e {
+    Result::err(e.to_str())
+  }
+  match success {
+    true => Result::ok(()),
+    false => Result::err("issueUpdate returned success=false"),
+  }
+}
+
+// Empty assignee_id unassigns (GraphQL null).
+fn update_assignee(api_key: Str, issue_id: Str, assignee_id: Str) Void!Str {
+  let value = match assignee_id.is_empty() {
+    true => "null",
+    false => "\"{assignee_id}\"",
+  }
+  let mutation = "mutation \{ issueUpdate(id: \"{issue_id}\", input: \{ assigneeId: {value} \}) \{ success \} \}"
+  let data = try client::graphql(api_key, mutation)
+  let success = try decode::run(
+    data,
+    decode::path(["issueUpdate", "success"], decode::boolean),
+  ) -> e {
+    Result::err(e.to_str())
+  }
+  match success {
+    true => Result::ok(()),
+    false => Result::err("issueUpdate returned success=false"),
+  }
+}
+
+// Empty project_id clears the project (GraphQL null).
+fn update_project(api_key: Str, issue_id: Str, project_id: Str) Void!Str {
+  let value = match project_id.is_empty() {
+    true => "null",
+    false => "\"{project_id}\"",
+  }
+  let mutation = "mutation \{ issueUpdate(id: \"{issue_id}\", input: \{ projectId: {value} \}) \{ success \} \}"
+  let data = try client::graphql(api_key, mutation)
+  let success = try decode::run(
+    data,
+    decode::path(["issueUpdate", "success"], decode::boolean),
+  ) -> e {
+    Result::err(e.to_str())
+  }
+  match success {
+    true => Result::ok(()),
+    false => Result::err("issueUpdate returned success=false"),
+  }
+}
+
+struct Member {
+  id: Str,
+  name: Str,
+}
+
+// Active members of a team, for the assignee picker.
+fn fetch_team_members(api_key: Str, team_id: Str) [Member]!Str {
+  let query = "query \{ team(id: \"{team_id}\") \{ members(first: 250) \{ nodes \{ id name displayName active \} \} \} \}"
+  let data = try client::graphql(api_key, query)
+  let nodes = try decode::run(
+    data,
+    decode::path(["team", "members", "nodes"], decode::list(decode::any)),
+  ) -> e {
+    Result::err(e.to_str())
+  }
+  mut members: [Member] = []
+  for node in nodes {
+    let active = decode::run(node, decode::field("active", decode::boolean)).or(true)
+    if active {
+      let id = try decode::run(node, decode::field("id", decode::string)) -> e {
+        Result::err(e.to_str())
+      }
+      members.push(Member{id: id, name: normalize_text(user_display_name_opt_self(node))})
+    }
+  }
+  Result::ok(members)
+}
+
+// displayName with name fallback for a user node itself (not nested).
+private fn user_display_name_opt_self(node: Any) Str {
+  let display_name = decode::run(node, decode::field("displayName", decode::string)).or("")
+  match display_name.is_empty() {
+    true => decode::run(node, decode::field("name", decode::string)).or("—"),
+    false => display_name,
+  }
+}
+
+struct Project {
+  id: Str,
+  name: Str,
+}
+
+// Projects available to a team, for the project picker.
+fn fetch_team_projects(api_key: Str, team_id: Str) [Project]!Str {
+  let query = "query \{ team(id: \"{team_id}\") \{ projects(first: 250) \{ nodes \{ id name state \} \} \} \}"
+  let data = try client::graphql(api_key, query)
+  let nodes = try decode::run(
+    data,
+    decode::path(["team", "projects", "nodes"], decode::list(decode::any)),
+  ) -> e {
+    Result::err(e.to_str())
+  }
+  mut projects: [Project] = []
+  for node in nodes {
+    // Hide finished projects; issues shouldn't be filed into them.
+    let project_state = decode::run(node, decode::field("state", decode::string)).or("")
+    if not (project_state == "completed" or project_state == "canceled") {
+      let id = try decode::run(node, decode::field("id", decode::string)) -> e {
+        Result::err(e.to_str())
+      }
+      let name = try decode::run(node, decode::field("name", decode::string)) -> e {
+        Result::err(e.to_str())
+      }
+      projects.push(Project{id: id, name: normalize_text(name)})
+    }
+  }
+  Result::ok(projects)
 }
 
 // ── Issue creation ───────────────────────────────────────────────────
