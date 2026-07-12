@@ -56,20 +56,20 @@ fn decode(content: Str) DataCache? {
   }
 }
 
-// Note: errors surface via map_err + plain try instead of `try ... -> catch`
-// to avoid a Result-ABI miscompile (ard#282).
-private fn describe(e: decode::Error) Str {
-  e.to_str()
-}
-
 private fn parse(content: Str) DataCache!Str {
   let data = try decode::from_json(content)
-  let parsed_version = try decode::run(data, decode::field("version", decode::int)).map_err(describe)
-  let tab_index = try decode::run(data, decode::path(["logged_in", "tab_index"], decode::int)).map_err(describe)
+  let parsed_version = try decode::run(data, decode::field("version", decode::int)) -> e {
+    Result::err(e.to_str())
+  }
+  let tab_index = try decode::run(data, decode::path(["logged_in", "tab_index"], decode::int)) -> e {
+    Result::err(e.to_str())
+  }
   let issue_tabs = try decode::run(
     data,
     decode::path(["logged_in", "issue_tabs"], decode::list(decode::string)),
-  ).map_err(describe)
+  ) -> e {
+    Result::err(e.to_str())
+  }
   Result::ok(
     DataCache{
       version: parsed_version,

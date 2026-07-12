@@ -610,17 +610,14 @@ fn build(
 fn new(api_key: Str, on_open: fn(inbox::Item), notify: fn(Str, Str), active: Bool) ui::Widget {
   ffi::Stateful{
     Init: fn() Any {
-      // Bound first because `mut pkg::Type{}` doesn't parse yet (ard#285).
-      mut list_scroll = ui::ScrollPaneController{}
-      mut detail_scroll = ui::ScrollController{}
       View{
         started: false,
         items: [],
         cursor: 0,
         loading: true,
         error: "",
-        list_scroll: mut list_scroll,
-        detail_scroll: mut detail_scroll,
+        list_scroll: mut ui::ScrollPaneController{},
+        detail_scroll: mut ui::ScrollController{},
         detail_request_id: "",
         detail_loaded_id: "",
         detail: Maybe::new(),
