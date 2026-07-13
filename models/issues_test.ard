@@ -113,3 +113,36 @@ test fn test_decode_comment_normalizes_mojibake_body() Void!Str {
     "comment body should normalize mojibake punctuation",
   )
 }
+
+fn comment(id: Str, parent_id: Str) issues::Comment {
+  issues::Comment{id: id, author: "a", created_at: "", body: "b", parent_id: parent_id, depth: 0}
+}
+
+test fn thread_comments_groups_replies_under_parents() Void!Str {
+  // Input order: c1, c2, r2 (reply to c2), r1 (reply to c1)
+  let ordered = issues::thread_comments(
+    [comment("c1", ""), comment("c2", ""), comment("r2", "c2"), comment("r1", "c1")],
+  )
+  try testing::assert(ordered.size() == 4, "all comments kept")
+  try testing::assert(ordered.at(0).expect("bounds").id == "c1", "first top-level first")
+  try testing::assert(ordered.at(1).expect("bounds").id == "r1", "c1's reply follows it")
+  try testing::assert(ordered.at(1).expect("bounds").depth == 1, "reply gets depth 1")
+  try testing::assert(ordered.at(2).expect("bounds").id == "c2", "second top-level next")
+  try testing::assert(ordered.at(3).expect("bounds").id == "r2", "c2's reply last")
+  testing::assert(ordered.at(0).expect("bounds").depth == 0, "top-level stays depth 0")
+}
+
+test fn thread_comments_orphan_reply_degrades_to_top_level() Void!Str {
+  let ordered = issues::thread_comments([comment("r", "gone"), comment("c", "")])
+  try testing::assert(ordered.size() == 2, "orphan kept")
+  try testing::assert(ordered.at(0).expect("bounds").id == "r", "orphan stays in position")
+  testing::assert(ordered.at(0).expect("bounds").depth == 0, "orphan renders top-level")
+}
+
+test fn thread_comments_multiple_replies_keep_order() Void!Str {
+  let ordered = issues::thread_comments(
+    [comment("c", ""), comment("r1", "c"), comment("r2", "c")],
+  )
+  try testing::assert(ordered.at(1).expect("bounds").id == "r1", "replies keep original order")
+  testing::assert(ordered.at(2).expect("bounds").id == "r2", "replies keep original order")
+}

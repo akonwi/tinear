@@ -15,9 +15,9 @@ Not commitments — a parking lot for what to build next.
   anywhere yet, so display (detail header, maybe board cards) would
   have to come first, and editing needs a multi-select picker widget.
   Low priority until labels prove useful to see.
-- [ ] **Comment threading**. Linear comments have `parent`/`children`;
-  indent replies in `comment_card`. Reading value even before posting
-  replies is supported.
+- [x] **Comment threading** (read-only): replies render indented with
+  `↳` under their parents. Posting replies still TODO (compose would
+  need a reply-to target).
 - [ ] **Edit your own comments / issue description** (`e`). Compose modal
   prefilled with the existing text; `commentUpdate` / `issueUpdate`.
 
