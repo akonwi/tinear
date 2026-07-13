@@ -94,6 +94,11 @@ struct Comment {
   author: Str,
   created_at: Str,
   body: Str,
+  // Parent comment id for replies; empty for top-level comments.
+  // Linear threads are one level deep (replies can't have replies).
+  parent_id: Str,
+  // Display depth computed by thread_comments: 0 top-level, 1 reply.
+  depth: Int,
 }
 
 struct WorkflowState {
@@ -257,7 +262,35 @@ fn decode_comment(raw: Any) Comment {
     body: normalize_text(
       decode::run(raw, decode::field("body", decode::string)).expect("Missing comment.body"),
     ),
+    parent_id: nested_str(raw, "parent", "id", ""),
+    depth: 0,
   }
+}
+
+// Arrange comments into threaded display order: each top-level comment
+// (in its original relative order) followed by its replies (in theirs),
+// with depth set for indentation. Replies whose parent isn't present
+// (deleted, or beyond the fetch page) degrade to top-level.
+fn thread_comments(comments: [Comment]) [Comment] {
+  mut present: [Str: Bool] = [:]
+  for comment in comments {
+    present.set(comment.id, true)
+  }
+  mut ordered: [Comment] = []
+  for comment in comments {
+    let is_reply = (not comment.parent_id.is_empty()) and present.get(comment.parent_id).or(false)
+    if not is_reply {
+      ordered.push(comment)
+      for candidate in comments {
+        if candidate.parent_id == comment.id {
+          mut reply = candidate
+          reply.depth = 1
+          ordered.push(reply)
+        }
+      }
+    }
+  }
+  ordered
 }
 
 fn decode_workflow_state(raw: Any) WorkflowState {
@@ -339,7 +372,7 @@ fn create_comment(api_key: Str, issue_id: Str, body: Str) Void!Str {
 }
 
 fn fetch_issue_comments(api_key: Str, issue_id: Str) [Any]!Str {
-  let query = "query \{ issue(id: \"{issue_id}\") \{ comments(first: 50) \{ nodes \{ id body createdAt user \{ name displayName \} \} \} \} \}"
+  let query = "query \{ issue(id: \"{issue_id}\") \{ comments(first: 50) \{ nodes \{ id body createdAt parent \{ id \} user \{ name displayName \} \} \} \} \}"
   let data = try client::graphql(api_key, query)
   let nodes = decode::run(
     data,
@@ -497,7 +530,7 @@ fn load_comments(api_key: Str, issue_id: Str) [Comment]!Str {
   for raw in raw_comments {
     comments.push(decode_comment(raw))
   }
-  Result::ok(comments)
+  Result::ok(thread_comments(comments))
 }
 
 fn load_team_states(api_key: Str, team_id: Str) [WorkflowState]!Str {

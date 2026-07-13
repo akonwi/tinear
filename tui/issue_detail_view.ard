@@ -385,19 +385,24 @@ fn description_body_widget(theme: ui::Theme, issue: issues::Issue) ui::Widget {
   }
 }
 
-fn comment_card(theme: ui::Theme, comment: issues::Comment, is_last: Bool) ui::Widget {
-  mut header_children: [ui::Widget] = [
-    ui::Text{Value: comment.author, Style: ui::Style{Foreground: theme.Foreground, Attribute: ui::AttrBold}},
-    muted(theme, " · "),
-    muted(theme, text::format_date(comment.created_at)),
-  ]
-  mut children: [ui::Widget] = [ui::Flex{Axis: ui::Horizontal, Children: header_children}, markdown::render(theme, comment.body)]
-  if not is_last {
-    // Separator stretches to whatever width the parent column gives
-    // us, so it scales with the viewport.
-    children.push(ui::Padding(ui::Symmetric(0, 1), divider(theme)))
+fn comment_card(theme: ui::Theme, comment: issues::Comment) ui::Widget {
+  mut header_children: [ui::Widget] = []
+  if comment.depth > 0 {
+    header_children.push(muted(theme, "↳ "))
   }
-  min_column(children, true)
+  header_children.push(
+    ui::Text{Value: comment.author, Style: ui::Style{Foreground: theme.Foreground, Attribute: ui::AttrBold}},
+  )
+  header_children.push(muted(theme, " · "))
+  header_children.push(muted(theme, text::format_date(comment.created_at)))
+  mut children: [ui::Widget] = [ui::Flex{Axis: ui::Horizontal, Children: header_children}, markdown::render(theme, comment.body)]
+  let card = min_column(children, true)
+  // Replies indent under their parent; Linear threads are one level
+  // deep, so a single indent step is all there is.
+  match comment.depth > 0 {
+    true => ui::Padding(ui::Insets{Left: 3}, card),
+    false => card,
+  }
 }
 
 fn comments_body(theme: ui::Theme, comments: [issues::Comment], loading: Bool, error: Str) ui::Widget {
@@ -411,7 +416,12 @@ fn comments_body(theme: ui::Theme, comments: [issues::Comment], loading: Bool, e
       mut rows: [ui::Widget] = []
       let last_idx = comments.size() - 1
       for comment, idx in comments {
-        rows.push(comment_card(theme, comment, idx == last_idx))
+        rows.push(comment_card(theme, comment))
+        if not idx == last_idx {
+          // Separator lives at the list level so it stays full width
+          // even when the card above it is an indented reply.
+          rows.push(ui::Padding(ui::Symmetric(0, 1), divider(theme)))
+        }
       }
       min_column(rows, true)
     },
