@@ -4,6 +4,7 @@ use go:go.rockorager.dev/vaxis/ui
 use go:tinear/ffi
 use tinear/models/inbox
 use tinear/os
+use tinear/tui/refresh
 
 // Local state for the Inbox view.
 //
@@ -23,6 +24,11 @@ struct View {
   cursor: Int,
   loading: Bool,
   error: Str,
+  // Stops the periodic silent refresh on dispose.
+  refresh_stop: Chan<Bool>,
+  // Last count pushed into the terminal title; -1 until the first
+  // load so an empty inbox still reports once.
+  reported_count: Int,
   list_scroll: mut ui::ScrollPaneController,
   // Detail pane uses a ScrollController (single-axis) instead of a
   // ScrollPaneController (both axes) so its child gets a bounded
@@ -104,6 +110,48 @@ fn request_detail_for_cursor(c: mut ffi::StateCtx, api_key: Str) {
       fetch_detail(c, api_key, target_id)
     }
   }
+}
+
+// Silent background refresh: no loading flash, cursor preserved by
+// notification id (AGENTS convention for auto-refresh handlers).
+// Failures are ignored — the previous list is still fine and the next
+// tick will retry.
+fn refresh_inbox(c: mut ffi::StateCtx, api_key: Str) {
+  async::start(
+    fn() {
+      let result = inbox::load(api_key)
+      ffi::Dispatch(
+        c,
+        fn() {
+          match result {
+            ok(items) => {
+              let previous = ffi::StateValue<View>(c)
+              mut next_cursor = 0
+              match previous.items.at(previous.cursor) {
+                cursored => {
+                  for item, idx in items {
+                    if item.notification_id == cursored.notification_id {
+                      next_cursor = idx
+                    }
+                  }
+                },
+                _ => (),
+              }
+              ffi::Update<View>(
+                c,
+                fn(s: mut View) {
+                  s.items = items
+                  s.error = ""
+                  s.cursor = clamp_cursor(next_cursor, items.size())
+                },
+              )
+            },
+            err(_) => (),
+          }
+        },
+      )
+    },
+  )
 }
 
 // Errors are surfaced inline via the error_pane the body renders when
@@ -628,6 +676,8 @@ fn new(api_key: Str, on_open: fn(inbox::Item), notify: fn(Str, Str), active: Boo
         cursor: 0,
         loading: true,
         error: "",
+        refresh_stop: Chan::new<Bool>(),
+        reported_count: -1,
         list_scroll: mut ui::ScrollPaneController{},
         detail_scroll: mut ui::ScrollController{},
         detail_request_id: "",
@@ -640,13 +690,36 @@ fn new(api_key: Str, on_open: fn(inbox::Item), notify: fn(Str, Str), active: Boo
     Build: fn(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
       // Kick the initial fetch on the first build: the shim's StateCtx
       // is created lazily, so Init cannot reach it yet. `started` makes
-      // this once-only across rebuilds.
+      // this once-only across rebuilds. Plus the 5-minute silent
+      // refresh so the title count stays honest without user action.
       let s = ffi::StateRef<View>(c)
       if not s.started {
         s.started = true
         load_inbox(c, api_key)
+        refresh::schedule_periodic(
+          s.refresh_stop,
+          5 * 60 * 1000,
+          fn() {
+            refresh_inbox(c, api_key)
+          },
+        )
+      }
+      // Reflect the notification count in the terminal title. Runs as
+      // a build side effect (BuildContext.EventContext exists for
+      // exactly this); reported_count makes it once-per-change, and
+      // StateRef deliberately skips scheduling a rebuild.
+      if not s.loading and not s.reported_count == s.items.size() {
+        s.reported_count = s.items.size()
+        match s.reported_count > 0 {
+          true => ctx.EventContext().SetTitle("tinear ({s.reported_count})"),
+          false => ctx.EventContext().SetTitle("tinear"),
+        }
       }
       build(c, ctx, api_key, on_open, notify, active)
+    },
+    OnDispose: fn(c: mut ffi::StateCtx) {
+      let s = ffi::StateValue<View>(c)
+      s.refresh_stop.close()
     },
   }
 }
