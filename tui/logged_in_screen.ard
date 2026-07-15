@@ -398,6 +398,7 @@ fn hints_for(s: Model) [hints_bar::Hint] {
           [
             hints_bar::Hint{key: "↑↓", label: "scroll"},
             hints_bar::Hint{key: "d", label: "description"},
+            hints_bar::Hint{key: "e", label: "edit"},
             hints_bar::Hint{key: "c", label: "comments"},
             hints_bar::Hint{key: "n", label: "new comment"},
             hints_bar::Hint{key: "s", label: "status"},

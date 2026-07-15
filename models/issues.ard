@@ -695,6 +695,25 @@ fn fetch_team_projects(api_key: Str, team_id: Str) [Project]!Str {
   Result::ok(projects)
 }
 
+fn update_description(api_key: Str, issue_id: Str, description: Str) Void!Str {
+  mut desc_bytes = json::Marshal(description).expect("encode description")
+  let desc_json = Str::from(desc_bytes)
+  mut id_bytes = json::Marshal(issue_id).expect("encode issue id")
+  let id_json = Str::from(id_bytes)
+  let mutation = "mutation \{ issueUpdate(id: {id_json}, input: \{ description: {desc_json} \}) \{ success \} \}"
+  let data = try client::graphql(api_key, mutation)
+  let success = try decode::run(
+    data,
+    decode::path(["issueUpdate", "success"], decode::boolean),
+  ) -> e {
+    Result::err(e.to_str())
+  }
+  match success {
+    true => Result::ok(()),
+    false => Result::err("issueUpdate returned success=false"),
+  }
+}
+
 // ── Issue creation ───────────────────────────────────────────────────
 
 struct Team {
