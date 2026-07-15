@@ -18,8 +18,11 @@ Not commitments — a parking lot for what to build next.
 - [x] **Comment threading** (read-only): replies render indented with
   `↳` under their parents. Posting replies still TODO (compose would
   need a reply-to target).
-- [ ] **Edit your own comments / issue description** (`e`). Compose modal
-  prefilled with the existing text; `commentUpdate` / `issueUpdate`.
+- [x] **Edit issue description** (`e` on an issue tab): prefilled
+  modal, Ctrl+Enter saves via `issueUpdate`.
+- [ ] **Edit your own comments** — blocked on a comment cursor: the
+  comments section has no per-comment selection yet. Building one also
+  unlocks posting threaded replies (reply-to target).
 
 ## Discovery & navigation
 

@@ -52,6 +52,20 @@ struct Detail {
   comments_loading: Bool,
   comments_error: Str,
 
+  // Guards stale issue snapshots: loads capture the generation when
+  // they start and only apply if it hasn't moved (a successful save
+  // bumps it, so an older periodic refresh can't reinstall the
+  // pre-save description).
+  issue_generation: Int,
+
+  // In-place description editing (Description section only). The
+  // draft is separate from the issue so a background refresh can't
+  // clobber unsaved edits.
+  editing_description: Bool,
+  description_draft: Str,
+  description_saving: Bool,
+  description_error: Str,
+
   // Stops the per-tab periodic refresh loop on dispose.
   refresh_stop: Chan<Bool>,
 
@@ -65,25 +79,28 @@ struct Detail {
 // ── Async loads ──────────────────────────────────────────────────────
 
 fn load_issue(c: mut ffi::StateCtx, api_key: Str, identifier: Str) {
+  let generation = ffi::StateValue<Detail>(c).issue_generation
   async::start(
     fn() {
       let result = issues::load_issue(api_key, identifier)
       ffi::Dispatch(
         c,
         fn() {
-          ffi::Update<Detail>(
-            c,
-            fn(v: mut Detail) {
-              match result {
-                ok(issue) => {
-                  v.issue = Maybe::new(issue)
-                  v.issue_error = ""
-                },
-                err(e) => { v.issue_error = e },
-              }
-              v.issue_loading = false
-            },
-          )
+          if ffi::StateValue<Detail>(c).issue_generation == generation {
+            ffi::Update<Detail>(
+              c,
+              fn(v: mut Detail) {
+                match result {
+                  ok(issue) => {
+                    v.issue = Maybe::new(issue)
+                    v.issue_error = ""
+                  },
+                  err(e) => { v.issue_error = e },
+                }
+                v.issue_loading = false
+              },
+            )
+          }
         },
       )
     },
@@ -155,6 +172,7 @@ fn refresh_detail(
   identifier: Str,
   notify: fn(Str, Str, toast::ToastVariant),
 ) {
+  let generation = ffi::StateValue<Detail>(c).issue_generation
   async::start(
     fn() {
       let issue_result = issues::load_issue(api_key, identifier)
@@ -163,13 +181,16 @@ fn refresh_detail(
           ffi::Dispatch(
             c,
             fn() {
-              ffi::Update<Detail>(
-                c,
-                fn(v: mut Detail) {
-                  v.issue = Maybe::new(issue)
-                  v.issue_error = ""
-                },
-              )
+              // Discard snapshots that started before a save landed.
+              if ffi::StateValue<Detail>(c).issue_generation == generation {
+                ffi::Update<Detail>(
+                  c,
+                  fn(v: mut Detail) {
+                    v.issue = Maybe::new(issue)
+                    v.issue_error = ""
+                  },
+                )
+              }
             },
           )
         },
@@ -343,6 +364,104 @@ fn switch_section(c: mut ffi::StateCtx, target: Int) {
   }
 }
 
+fn start_editing_description(c: mut ffi::StateCtx) {
+  let current = ffi::StateValue<Detail>(c)
+  match current.issue {
+    issue => {
+      ffi::Update<Detail>(
+        c,
+        fn(v: mut Detail) {
+          v.active_section = SECTION_DESCRIPTION
+          v.editing_description = true
+          v.description_draft = issue.description.or("")
+          v.description_error = ""
+        },
+      )
+    },
+    _ => (),
+  }
+}
+
+fn cancel_editing_description(c: mut ffi::StateCtx) {
+  ffi::Update<Detail>(
+    c,
+    fn(v: mut Detail) {
+      v.editing_description = false
+      v.description_saving = false
+      v.description_error = ""
+    },
+  )
+}
+
+fn save_description(
+  c: mut ffi::StateCtx,
+  api_key: Str,
+  identifier: Str,
+  notify: fn(Str, Str, toast::ToastVariant),
+) {
+  let current = ffi::StateValue<Detail>(c)
+  match current.issue {
+    issue => {
+      if not current.description_saving {
+        let text = current.description_draft
+        ffi::Update<Detail>(
+          c,
+          fn(v: mut Detail) {
+            v.description_saving = true
+            v.description_error = ""
+          },
+        )
+        async::start(
+          fn() {
+            let result = issues::update_description(api_key, issue.id, text)
+            ffi::Dispatch(
+              c,
+              fn() {
+                match result {
+                  ok(_) => {
+                    // No success toast: the re-rendered description IS
+                    // the feedback (applied optimistically from the
+                    // draft). Bumping the generation invalidates any
+                    // in-flight pre-save refresh; the follow-up load
+                    // reconciles with the server. Errors surface inline.
+                    ffi::Update<Detail>(
+                      c,
+                      fn(v: mut Detail) {
+                        v.editing_description = false
+                        v.description_saving = false
+                        v.issue_generation = v.issue_generation + 1
+                        match v.issue {
+                          loaded => {
+                            mut updated = loaded
+                            updated.description = Maybe::new(text)
+                            v.issue = Maybe::new(updated)
+                          },
+                          _ => (),
+                        }
+                      },
+                    )
+                    load_issue(c, api_key, identifier)
+                  },
+                  err(e) => {
+                    ffi::Update<Detail>(
+                      c,
+                      fn(v: mut Detail) {
+                        v.description_saving = false
+                        v.description_error = e
+                      },
+                    )
+                  },
+                }
+              },
+            )
+          },
+        )
+      }
+    },
+    _ => (),
+  }
+}
+
 // Tab bar for the body sections: "Description" and "Comments (N)" side
 // by side, separated by the same theme.Border pipe used by the
 // app-level tab bar, with a border underneath.
@@ -383,6 +502,46 @@ fn description_body_widget(theme: ui::Theme, issue: issues::Issue) ui::Widget {
     },
     _ => muted(theme, "(no description)"),
   }
+}
+
+// In-place editor shown in the Description slot while editing. The
+// error/saving slots are always present so the widget shape stays
+// stable across state transitions.
+fn description_editor(c: mut ffi::StateCtx, theme: ui::Theme, model: Detail) ui::Widget {
+  // Both slots keep one widget type across states (empty Text when
+  // there's nothing to say) so reconciliation never sees a type swap.
+  let error_widget: ui::Widget = match model.description_error.is_empty() {
+    true => ui::Text{Value: ""},
+    false => ui::Text{Value: "⚠ {model.description_error}", Style: ui::Style{Foreground: theme.DangerText}},
+  }
+  let status_widget: ui::Widget = match model.description_saving {
+    true => ui::Text{Value: "Saving…", Style: ui::Style{Foreground: theme.MutedForeground}},
+    false => ui::Text{Value: "Ctrl+↵ save · Esc cancel", Style: ui::Style{Foreground: theme.MutedForeground}},
+  }
+  mut children: [ui::Widget] = [
+    error_widget,
+    ui::FocusScope{
+      AutoFocus: true,
+      Child: ui::TextArea{
+        Value: model.description_draft,
+        Placeholder: "Describe the issue… (markdown)",
+        MinWidth: 70,
+        MinHeight: 12,
+        SoftWrap: true,
+        OnChanged: fn(ev: ui::EventContext, value: Str) {
+          ffi::Update<Detail>(
+            c,
+            fn(v: mut Detail) {
+              v.description_draft = value
+              v.description_error = ""
+            },
+          )
+        },
+      },
+    },
+    status_widget,
+  ]
+  min_column(children, true)
 }
 
 fn comment_card(theme: ui::Theme, comment: issues::Comment) ui::Widget {
@@ -432,10 +591,11 @@ fn comments_body(theme: ui::Theme, comments: [issues::Comment], loading: Bool, e
 // Padding(column(...)) so the widget type at this slot stays stable
 // across section switches — the conditional content changes one level
 // deeper, which reconciliation handles cleanly.
-fn active_body(theme: ui::Theme, issue: issues::Issue, model: Detail) ui::Widget {
-  let inner = match model.active_section == SECTION_COMMENTS {
-    true => comments_body(theme, model.comments, model.comments_loading, model.comments_error),
-    false => description_body_widget(theme, issue),
+fn active_body(c: mut ffi::StateCtx, theme: ui::Theme, issue: issues::Issue, model: Detail) ui::Widget {
+  let inner = match {
+    model.active_section == SECTION_COMMENTS => comments_body(theme, model.comments, model.comments_loading, model.comments_error),
+    model.editing_description => description_editor(c, theme, model),
+    _ => description_body_widget(theme, issue),
   }
   ui::Padding(ui::Symmetric(1, 0), min_column([inner], true))
 }
@@ -447,7 +607,7 @@ fn loaded_layout(c: mut ffi::StateCtx, theme: ui::Theme, issue: issues::Issue, m
     ui::Padding(ui::Symmetric(1, 0), metadata_header(theme, issue)),
     divider(theme),
     ui::Padding(ui::Symmetric(1, 0), section_tabs(c, theme, model)),
-    ui::Expanded(ui::ScrollView{Controller: model.scroll, Child: active_body(theme, issue, model)}),
+    ui::Expanded(ui::ScrollView{Controller: model.scroll, Child: active_body(c, theme, issue, model)}),
   ]
   let content = ui::Flex{
     Axis: ui::Vertical,
@@ -485,6 +645,32 @@ fn error_placeholder(theme: ui::Theme, identifier: Str, error: Str) ui::Widget {
   )
 }
 
+fn shortcut_bindings(editing: Bool) [Str: ui::Intent] {
+  match editing {
+    true => [
+      "Ctrl+Enter": ffi::Intent("issue_detail.save_description"),
+      "Ctrl+m": ffi::Intent("issue_detail.save_description"),
+      "Ctrl+j": ffi::Intent("issue_detail.save_description"),
+    ],
+    false => [
+      "j": ffi::Intent("issue_detail.scroll_down"),
+      "Down": ffi::Intent("issue_detail.scroll_down"),
+      "k": ffi::Intent("issue_detail.scroll_up"),
+      "Up": ffi::Intent("issue_detail.scroll_up"),
+      "d": ffi::Intent("issue_detail.section_description"),
+      "e": ffi::Intent("issue_detail.edit_description"),
+      "c": ffi::Intent("issue_detail.section_comments"),
+      "n": ffi::Intent("issue_detail.compose"),
+      "o": ffi::Intent("issue_detail.open_in_browser"),
+      "s": ffi::Intent("issue_detail.state_picker"),
+      "y": ffi::Intent("issue_detail.cycle_picker"),
+      "p": ffi::Intent("issue_detail.priority_picker"),
+      "a": ffi::Intent("issue_detail.assignee_picker"),
+      "Shift+p": ffi::Intent("issue_detail.project_picker"),
+    ],
+  }
+}
+
 // ── Public widget ────────────────────────────────────────────────────
 
 fn build(
@@ -499,6 +685,7 @@ fn build(
 ) ui::Widget {
   let theme = ui::MustDepend<ui::Theme>(ctx)
   let model = ffi::StateValue<Detail>(c)
+  let editing = model.editing_description
 
   // Body chooses between loading / error / loaded layouts, wrapped in
   // a stable outer column so the widget type at this slot never
@@ -520,6 +707,53 @@ fn build(
     CrossAxisAlignment: ui::CrossAxisStretch,
     Children: children,
   }
+
+  // While editing, an extra Actions layer shadows intents that must
+  // not escape to the shell. Actions lookup stops at the FIRST
+  // registered handler (Ignored does not forward to outer Actions),
+  // so these handlers exist only in edit mode:
+  //   - vaxis.dismiss: cancel the edit (swallowed while saving);
+  //     when not editing the binding is absent so Esc still reaches
+  //     the shell and closes the tab
+  //   - save chords: issue_detail.save_description
+  //   - tabs.inbox / tabs.my_issues / global.search: return Ignored —
+  //     lookup stops here (shell never switches tabs / opens search)
+  //     and the capture-phase key continues to the TextArea as a
+  //     typed character (1 / 2 / ?)
+  //   - vaxis.next-focus / previous-focus: swallowed so Tab can't
+  //     switch app tabs mid-edit
+  let editing_bindings: [ui::IntentType: ui::ActionFunc] = [
+    "vaxis.dismiss": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+      let current = ffi::StateValue<Detail>(c)
+      match current.description_saving {
+        true => ui::EventHandled,
+        false => {
+          cancel_editing_description(c)
+          ui::EventHandled
+        },
+      }
+    },
+    "issue_detail.save_description": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+      save_description(c, api_key, identifier, notify)
+      ui::EventHandled
+    },
+    "tabs.inbox": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+      ui::EventIgnored
+    },
+    "tabs.my_issues": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+      ui::EventIgnored
+    },
+    "global.search": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+      ui::EventIgnored
+    },
+    "vaxis.next-focus": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+      ui::EventHandled
+    },
+    "vaxis.previous-focus": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+      ui::EventHandled
+    },
+  ]
+  let no_bindings: [ui::IntentType: ui::ActionFunc] = [:]
 
   // Only the active issue tab participates in focus management (see
   // the shell's IndexedStack note).
@@ -582,6 +816,10 @@ fn build(
           },
           _ => (),
         }
+        ui::EventHandled
+      },
+      "issue_detail.edit_description": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        start_editing_description(c)
         ui::EventHandled
       },
       "issue_detail.open_in_browser": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
@@ -753,26 +991,22 @@ fn build(
         ui::EventHandled
       },
     ],
-    Child: ui::Shortcuts{
-      Bindings: [
-        "j": ffi::Intent("issue_detail.scroll_down"),
-        "Down": ffi::Intent("issue_detail.scroll_down"),
-        "k": ffi::Intent("issue_detail.scroll_up"),
-        "Up": ffi::Intent("issue_detail.scroll_up"),
-        "d": ffi::Intent("issue_detail.section_description"),
-        "c": ffi::Intent("issue_detail.section_comments"),
-        "n": ffi::Intent("issue_detail.compose"),
-        "o": ffi::Intent("issue_detail.open_in_browser"),
-        "s": ffi::Intent("issue_detail.state_picker"),
-        "y": ffi::Intent("issue_detail.cycle_picker"),
-        "p": ffi::Intent("issue_detail.priority_picker"),
-        "a": ffi::Intent("issue_detail.assignee_picker"),
-        "Shift+p": ffi::Intent("issue_detail.project_picker"),
-      ],
-      Child: ui::FocusScope{
-        AutoFocus: active,
-        ReclaimFocus: active,
-        Child: inner,
+    Child: ui::Actions{
+      Bindings: match editing {
+        true => editing_bindings,
+        false => no_bindings,
+      },
+      Child: ui::Shortcuts{
+        // While editing, single-key shortcuts would steal typing from
+        // the TextArea at the capture phase — bind only the save
+        // chords. (State changes rebuild, so the map tracks
+        // editing_description.)
+        Bindings: shortcut_bindings(editing),
+        Child: ui::FocusScope{
+          AutoFocus: active,
+          ReclaimFocus: active,
+          Child: inner,
+        },
       },
     },
   }
@@ -799,6 +1033,11 @@ fn new(
         comments: [],
         comments_loading: true,
         comments_error: "",
+        issue_generation: 0,
+        editing_description: false,
+        description_draft: "",
+        description_saving: false,
+        description_error: "",
         refresh_stop: Chan::new<Bool>(),
         scroll: mut scroll,
         active_section: SECTION_DESCRIPTION,
