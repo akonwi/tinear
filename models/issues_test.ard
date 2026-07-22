@@ -146,3 +146,23 @@ test fn thread_comments_multiple_replies_keep_order() Void!Str {
   try testing::assert(ordered.at(1).expect("bounds").id == "r1", "replies keep original order")
   testing::assert(ordered.at(2).expect("bounds").id == "r2", "replies keep original order")
 }
+
+test fn decode_comment_handles_bot_and_missing_authors() Void!Str {
+  // Integration comment: user is null, botActor carries the name.
+  let bot = decode::from_json(
+    "\{\"id\": \"c1\", \"body\": \"synced\", \"createdAt\": \"2026-01-01\", \"parent\": null, \"user\": null, \"botActor\": \{\"name\": \"GitHub\"\}\}",
+  ).expect("parse")
+  try testing::assert(issues::decode_comment(bot).author == "GitHub", "bot comments use botActor name")
+
+  // Deleted user: object present but empty-ish.
+  let ghost = decode::from_json(
+    "\{\"id\": \"c2\", \"body\": \"x\", \"createdAt\": \"2026-01-01\", \"parent\": null, \"user\": \{\"displayName\": \"\"\}, \"botActor\": null\}",
+  ).expect("parse")
+  try testing::assert(issues::decode_comment(ghost).author == "—", "missing names fall back to a dash")
+
+  // Normal user still resolves displayName first.
+  let human = decode::from_json(
+    "\{\"id\": \"c3\", \"body\": \"x\", \"createdAt\": \"2026-01-01\", \"parent\": null, \"user\": \{\"name\": \"Full Name\", \"displayName\": \"shortname\"\}, \"botActor\": null\}",
+  ).expect("parse")
+  testing::assert(issues::decode_comment(human).author == "shortname", "displayName preferred")
+}

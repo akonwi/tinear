@@ -165,19 +165,27 @@ fn nested_str(data: Any, name: Str, nested: Str, fallback: Str) Str {
   }
 }
 
-fn user_display_name(user: Any) Str {
-  let display_name = decode::run(
-    user,
-    decode::nullable(decode::field("displayName", decode::string)),
-  ).expect("optional user.displayName invalid")
-  match display_name {
-    value => {
-      match value.is_empty() {
-        true => decode::run(user, decode::field("name", decode::string)).expect("Missing user.name"),
-        false => value,
+// Comment authors are not always users: integration comments (GitHub
+// sync, Slack, OAuth apps) have user: null and a botActor instead, and
+// deleted users can be missing fields. Never panic — walk the
+// fallbacks and settle on a dash. (Fixes #16.)
+fn comment_author(raw: Any) Str {
+  let user_display = nested_str(raw, "user", "displayName", "")
+  match user_display.is_empty() {
+    false => user_display,
+    true => {
+      let user_name = nested_str(raw, "user", "name", "")
+      match user_name.is_empty() {
+        false => user_name,
+        true => {
+          let bot_name = nested_str(raw, "botActor", "name", "")
+          match bot_name.is_empty() {
+            false => bot_name,
+            true => "—",
+          }
+        },
       }
     },
-    _ => decode::run(user, decode::field("name", decode::string)).expect("Missing user.name"),
   }
 }
 
@@ -254,10 +262,9 @@ fn decode_column(raw: state::BoardColumn) BoardColumn {
 }
 
 fn decode_comment(raw: Any) Comment {
-  let user = decode::run(raw, decode::field("user", decode::any)).expect("Missing comment.user")
   Comment{
     id: decode::run(raw, decode::field("id", decode::string)).expect("Missing comment.id"),
-    author: user_display_name(user),
+    author: normalize_text(comment_author(raw)),
     created_at: decode::run(raw, decode::field("createdAt", decode::string)).expect("Missing comment.createdAt"),
     body: normalize_text(
       decode::run(raw, decode::field("body", decode::string)).expect("Missing comment.body"),
@@ -372,7 +379,7 @@ fn create_comment(api_key: Str, issue_id: Str, body: Str) Void!Str {
 }
 
 fn fetch_issue_comments(api_key: Str, issue_id: Str) [Any]!Str {
-  let query = "query \{ issue(id: \"{issue_id}\") \{ comments(first: 50) \{ nodes \{ id body createdAt parent \{ id \} user \{ name displayName \} \} \} \} \}"
+  let query = "query \{ issue(id: \"{issue_id}\") \{ comments(first: 50) \{ nodes \{ id body createdAt parent \{ id \} user \{ name displayName \} botActor \{ name \} \} \} \} \}"
   let data = try client::graphql(api_key, query)
   let nodes = decode::run(
     data,
