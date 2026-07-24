@@ -363,10 +363,19 @@ fn update_cycle(api_key: Str, issue_id: Str, cycle_id: Str) Void!Str {
   }
 }
 
-fn create_comment(api_key: Str, issue_id: Str, body: Str) Void!Str {
+// Empty parent_id posts a top-level comment; otherwise a threaded
+// reply. Linear threads are one level deep, so parent_id must be a
+// top-level comment's id.
+fn create_comment(api_key: Str, issue_id: Str, body: Str, parent_id: Str) Void!Str {
   mut body_bytes = json::Marshal(body).expect("encode body")
   let body_json = Str::from(body_bytes)
-  let mutation = "mutation \{ commentCreate(input: \{ issueId: \"{issue_id}\", body: {body_json} \}) \{ success \} \}"
+  mut input = "issueId: \"{issue_id}\", body: {body_json}"
+  if not parent_id.is_empty() {
+    mut parent_bytes = json::Marshal(parent_id).expect("encode parent id")
+    let parent_json = Str::from(parent_bytes)
+    input = "{input}, parentId: {parent_json}"
+  }
+  let mutation = "mutation \{ commentCreate(input: \{ {input} \}) \{ success \} \}"
   let data = try client::graphql(api_key, mutation)
   let success = decode::run(
     data,

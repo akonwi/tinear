@@ -15,14 +15,13 @@ Not commitments — a parking lot for what to build next.
   anywhere yet, so display (detail header, maybe board cards) would
   have to come first, and editing needs a multi-select picker widget.
   Low priority until labels prove useful to see.
-- [x] **Comment threading** (read-only): replies render indented with
-  `↳` under their parents. Posting replies still TODO (compose would
-  need a reply-to target).
+- [x] **Comment threading**: replies render indented with `↳` under
+  their parents; `r` replies to the cursored comment's thread (j/k
+  move a comment cursor in the Comments section).
 - [x] **Edit issue description** (`e` on an issue tab): prefilled
   modal, Ctrl+Enter saves via `issueUpdate`.
-- [ ] **Edit your own comments** — blocked on a comment cursor: the
-  comments section has no per-comment selection yet. Building one also
-  unlocks posting threaded replies (reply-to target).
+- [ ] **Edit your own comments** — the comment cursor now exists;
+  needs viewer-id ownership check + prefilled compose + commentUpdate.
 
 ## Discovery & navigation
 
