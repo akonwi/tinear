@@ -33,6 +33,7 @@ fn submit(
   c: mut ffi::StateCtx,
   api_key: Str,
   issue: issues::Issue,
+  parent_id: Str,
   text: Str,
   refresh_comments: fn(),
   close: fn(),
@@ -50,7 +51,7 @@ fn submit(
     )
     async::start(
       fn() {
-        let result = issues::create_comment(api_key, issue.id, trimmed)
+        let result = issues::create_comment(api_key, issue.id, trimmed, parent_id)
         match result {
           ok(_) => {
             // Reload the host's comments, then close. refresh_comments
@@ -81,9 +82,11 @@ fn submit(
 
 // Body widget for the modal. The caller wraps this in
 // modal::show_modal(title, child: this, footer, on_dismiss).
-fn new(api_key: Str, issue: issues::Issue, refresh_comments: fn(), close: fn()) ui::Widget {
+// parent_id: "" composes a top-level comment; a top-level comment's id
+// composes a threaded reply under it.
+fn new(api_key: Str, issue: issues::Issue, parent_id: Str, refresh_comments: fn(), close: fn()) ui::Widget {
   ffi::Stateful{
-    Key: "compose:{issue.identifier}",
+    Key: "compose:{issue.identifier}:{parent_id}",
     Init: fn() Any {
       Compose{
         text: "",
@@ -98,7 +101,7 @@ fn new(api_key: Str, issue: issues::Issue, refresh_comments: fn(), close: fn()) 
       let do_submit = fn() {
         let current = ffi::StateValue<Compose>(c)
         if not current.sending {
-          submit(c, api_key, issue, current.text, refresh_comments, close)
+          submit(c, api_key, issue, parent_id, current.text, refresh_comments, close)
         }
       }
 
@@ -131,7 +134,10 @@ fn new(api_key: Str, issue: issues::Issue, refresh_comments: fn(), close: fn()) 
           AutoFocus: true,
           Child: ui::TextArea{
             Value: model.text,
-            Placeholder: "Write a comment…",
+            Placeholder: match parent_id.is_empty() {
+              true => "Write a comment…",
+              false => "Write a reply…",
+            },
             MinWidth: 60,
             MinHeight: 6,
             SoftWrap: true,

@@ -51,6 +51,10 @@ struct Detail {
   comments: [issues::Comment],
   comments_loading: Bool,
   comments_error: Str,
+  // Cursor over the threaded comment list (Comments section). j/k
+  // move it; the cursored card is focused so the enclosing ScrollView
+  // auto-reveals it (variable-height cards — no ItemExtent tricks).
+  comment_cursor: Int,
 
   // Guards stale issue snapshots: loads capture the generation when
   // they start and only apply if it hasn't moved (a successful save
@@ -121,6 +125,7 @@ fn load_comments(c: mut ffi::StateCtx, api_key: Str, identifier: Str) {
                 ok(comments) => {
                   v.comments = comments
                   v.comments_error = ""
+                  v.comment_cursor = clamp_comment_cursor(v.comment_cursor, comments.size())
                 },
                 err(e) => { v.comments_error = e },
               }
@@ -151,6 +156,7 @@ fn refresh_comments_after_post(c: mut ffi::StateCtx, api_key: Str, identifier: S
                 ok(comments) => {
                   v.comments = comments
                   v.comments_error = ""
+                  v.comment_cursor = clamp_comment_cursor(v.comment_cursor, comments.size())
                 },
                 err(e) => { v.comments_error = e },
               }
@@ -211,6 +217,7 @@ fn refresh_detail(
                 fn(v: mut Detail) {
                   v.comments = comments
                   v.comments_error = ""
+                  v.comment_cursor = clamp_comment_cursor(v.comment_cursor, comments.size())
                 },
               )
             },
@@ -347,6 +354,34 @@ fn section_tab(theme: ui::Theme, label: Str, active: Bool, on_press: fn(ui::Even
         ClickAffordance: ui::ClickAffordanceNone,
       }
     },
+  }
+}
+
+fn clamp_comment_cursor(cursor: Int, count: Int) Int {
+  match {
+    count <= 0 => 0,
+    cursor < 0 => 0,
+    cursor >= count => count - 1,
+    _ => cursor,
+  }
+}
+
+fn move_comment_cursor(c: mut ffi::StateCtx, delta: Int, nodes: [mut ui::FocusNode]) {
+  let current = ffi::StateValue<Detail>(c)
+  let count = current.comments.size()
+  if count > 0 {
+    let next = clamp_comment_cursor(current.comment_cursor + delta, count)
+    ffi::Update<Detail>(
+      c,
+      fn(v: mut Detail) {
+        v.comment_cursor = next
+      },
+    )
+    // Focusing the card makes the enclosing ScrollView reveal it.
+    match nodes.at(next) {
+      node => node.RequestFocus(),
+      _ => (),
+    }
   }
 }
 
@@ -544,7 +579,7 @@ fn description_editor(c: mut ffi::StateCtx, theme: ui::Theme, model: Detail) ui:
   min_column(children, true)
 }
 
-fn comment_card(theme: ui::Theme, comment: issues::Comment) ui::Widget {
+fn comment_card(theme: ui::Theme, comment: issues::Comment, selected: Bool) ui::Widget {
   mut header_children: [ui::Widget] = []
   if comment.depth > 0 {
     header_children.push(muted(theme, "↳ "))
@@ -558,13 +593,37 @@ fn comment_card(theme: ui::Theme, comment: issues::Comment) ui::Widget {
   let card = min_column(children, true)
   // Replies indent under their parent; Linear threads are one level
   // deep, so a single indent step is all there is.
-  match comment.depth > 0 {
+  let indented: ui::Widget = match comment.depth > 0 {
     true => ui::Padding(ui::Insets{Left: 3}, card),
     false => card,
   }
+  // Cursor styling: a full-height Primary border along the card's left
+  // edge. Both branches occupy 2 leading columns so nothing shifts as
+  // the cursor moves.
+  match selected {
+    true => {
+      ui::DecoratedBox(
+        ui::Decoration{Border: ui::Border{Style: ui::Style{Foreground: theme.Primary}, Left: true}},
+        ui::Padding(ui::Insets{Left: 1}, indented),
+      )
+    },
+    false => ui::Padding(ui::Insets{Left: 2}, indented),
+  }
 }
 
-fn comments_body(theme: ui::Theme, comments: [issues::Comment], loading: Bool, error: Str) ui::Widget {
+// Renders the threaded list. `nodes` holds one pre-built FocusNode per
+// comment (created in build() scope — pushing through mut list params
+// loses appends, ard mut-slice bug) so cursor actions can RequestFocus
+// the cursored card — the app then auto-reveals the focused element
+// inside the enclosing ScrollView.
+fn comments_body(
+  theme: ui::Theme,
+  comments: [issues::Comment],
+  loading: Bool,
+  error: Str,
+  cursor: Int,
+  nodes: [mut ui::FocusNode],
+) ui::Widget {
   match {
     loading => muted(theme, "Loading comments…"),
     not error.is_empty() => {
@@ -575,7 +634,11 @@ fn comments_body(theme: ui::Theme, comments: [issues::Comment], loading: Bool, e
       mut rows: [ui::Widget] = []
       let last_idx = comments.size() - 1
       for comment, idx in comments {
-        rows.push(comment_card(theme, comment))
+        let focusable: ui::Widget = match nodes.at(idx) {
+          node => ui::Focus(node, comment_card(theme, comment, idx == cursor)),
+          _ => comment_card(theme, comment, idx == cursor),
+        }
+        rows.push(focusable)
         if not idx == last_idx {
           // Separator lives at the list level so it stays full width
           // even when the card above it is an indented reply.
@@ -591,9 +654,22 @@ fn comments_body(theme: ui::Theme, comments: [issues::Comment], loading: Bool, e
 // Padding(column(...)) so the widget type at this slot stays stable
 // across section switches — the conditional content changes one level
 // deeper, which reconciliation handles cleanly.
-fn active_body(c: mut ffi::StateCtx, theme: ui::Theme, issue: issues::Issue, model: Detail) ui::Widget {
+fn active_body(
+  c: mut ffi::StateCtx,
+  theme: ui::Theme,
+  issue: issues::Issue,
+  model: Detail,
+  nodes: [mut ui::FocusNode],
+) ui::Widget {
   let inner = match {
-    model.active_section == SECTION_COMMENTS => comments_body(theme, model.comments, model.comments_loading, model.comments_error),
+    model.active_section == SECTION_COMMENTS => comments_body(
+      theme,
+      model.comments,
+      model.comments_loading,
+      model.comments_error,
+      model.comment_cursor,
+      nodes,
+    ),
     model.editing_description => description_editor(c, theme, model),
     _ => description_body_widget(theme, issue),
   }
@@ -602,12 +678,18 @@ fn active_body(c: mut ffi::StateCtx, theme: ui::Theme, issue: issues::Issue, mod
 
 // ── Top-level layout ─────────────────────────────────────────────────
 
-fn loaded_layout(c: mut ffi::StateCtx, theme: ui::Theme, issue: issues::Issue, model: Detail) ui::Widget {
+fn loaded_layout(
+  c: mut ffi::StateCtx,
+  theme: ui::Theme,
+  issue: issues::Issue,
+  model: Detail,
+  nodes: [mut ui::FocusNode],
+) ui::Widget {
   mut children: [ui::Widget] = [
     ui::Padding(ui::Symmetric(1, 0), metadata_header(theme, issue)),
     divider(theme),
     ui::Padding(ui::Symmetric(1, 0), section_tabs(c, theme, model)),
-    ui::Expanded(ui::ScrollView{Controller: model.scroll, Child: active_body(c, theme, issue, model)}),
+    ui::Expanded(ui::ScrollView{Controller: model.scroll, Child: active_body(c, theme, issue, model, nodes)}),
   ]
   let content = ui::Flex{
     Axis: ui::Vertical,
@@ -653,14 +735,15 @@ fn shortcut_bindings(editing: Bool) [Str: ui::Intent] {
       "Ctrl+j": ffi::Intent("issue_detail.save_description"),
     ],
     false => [
-      "j": ffi::Intent("issue_detail.scroll_down"),
+      "j": ffi::Intent("issue_detail.nav_down"),
       "Down": ffi::Intent("issue_detail.scroll_down"),
-      "k": ffi::Intent("issue_detail.scroll_up"),
+      "k": ffi::Intent("issue_detail.nav_up"),
       "Up": ffi::Intent("issue_detail.scroll_up"),
       "d": ffi::Intent("issue_detail.section_description"),
       "e": ffi::Intent("issue_detail.edit_description"),
       "c": ffi::Intent("issue_detail.section_comments"),
       "n": ffi::Intent("issue_detail.compose"),
+      "r": ffi::Intent("issue_detail.reply"),
       "o": ffi::Intent("issue_detail.open_in_browser"),
       "s": ffi::Intent("issue_detail.state_picker"),
       "y": ffi::Intent("issue_detail.cycle_picker"),
@@ -686,12 +769,21 @@ fn build(
   let theme = ui::MustDepend<ui::Theme>(ctx)
   let model = ffi::StateValue<Detail>(c)
   let editing = model.editing_description
+  // One FocusNode per comment, built HERE (not inside comments_body:
+  // appends through mut list params are lost — ard mut-slice bug).
+  // The j/k cursor actions capture this list so RequestFocus reveals
+  // the cursored card via the app's focused-element auto-reveal.
+  mut comment_nodes: [mut ui::FocusNode] = []
+  for _comment in model.comments {
+    mut node = ui::FocusNode{}
+    comment_nodes.push(mut node)
+  }
 
   // Body chooses between loading / error / loaded layouts, wrapped in
   // a stable outer column so the widget type at this slot never
   // changes between rebuilds (widget-reconciliation trap).
   let body_widget = match model.issue {
-    issue => loaded_layout(c, theme, issue, model),
+    issue => loaded_layout(c, theme, issue, model, comment_nodes),
     _ => {
       match {
         not model.issue_error.is_empty() => error_placeholder(theme, identifier, model.issue_error),
@@ -770,6 +862,26 @@ fn build(
         model.scroll.ScrollByLines(1)
         ui::EventHandled
       },
+      // j/k: comment cursor in the Comments section, line scroll in
+      // Description. Up/Down always line-scroll (bound separately).
+      "issue_detail.nav_up": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        match ffi::StateValue<Detail>(c).active_section == SECTION_COMMENTS {
+          true => move_comment_cursor(c, -1, comment_nodes),
+          false => {
+            let _ = model.scroll.ScrollByLines(-1)
+          },
+        }
+        ui::EventHandled
+      },
+      "issue_detail.nav_down": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        match ffi::StateValue<Detail>(c).active_section == SECTION_COMMENTS {
+          true => move_comment_cursor(c, 1, comment_nodes),
+          false => {
+            let _ = model.scroll.ScrollByLines(1)
+          },
+        }
+        ui::EventHandled
+      },
       "issue_detail.section_description": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
         match ffi::StateValue<Detail>(c).active_section == SECTION_DESCRIPTION {
           true => ui::EventIgnored,
@@ -801,7 +913,7 @@ fn build(
                 modal::show_modal(
                   theme_inner,
                   "New comment — {issue.identifier}",
-                  compose_view::new(api_key, issue, refresh_cb, close),
+                  compose_view::new(api_key, issue, "", refresh_cb, close),
                   hints_bar::row(
                     theme_inner,
                     [hints_bar::Hint{key: "Ctrl+↵", label: "send"}, hints_bar::Hint{key: "Esc", label: "cancel"}],
@@ -817,6 +929,52 @@ fn build(
           _ => (),
         }
         ui::EventHandled
+      },
+      "issue_detail.reply": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
+        let current = ffi::StateValue<Detail>(c)
+        match current.issue {
+          issue => {
+            match current.active_section == SECTION_COMMENTS {
+              false => ui::EventIgnored,
+              true => {
+                match current.comments.at(clamp_comment_cursor(current.comment_cursor, current.comments.size())) {
+                  target => {
+                    // Replying to a reply targets its thread root:
+                    // Linear threads are one level deep.
+                    let parent_id = match target.depth > 0 {
+                      true => target.parent_id,
+                      false => target.id,
+                    }
+                    let author = target.author
+                    let refresh_cb = fn() {
+                      refresh_comments_after_post(c, api_key, identifier)
+                    }
+                    show_modal(
+                      fn(theme_inner: ui::Theme, close: fn()) ui::Widget {
+                        modal::show_modal(
+                          theme_inner,
+                          "Reply to {author} — {issue.identifier}",
+                          compose_view::new(api_key, issue, parent_id, refresh_cb, close),
+                          hints_bar::row(
+                            theme_inner,
+                            [hints_bar::Hint{key: "Ctrl+↵", label: "send"}, hints_bar::Hint{key: "Esc", label: "cancel"}],
+                          ),
+                          Maybe::new(70),
+                          fn(ev2: ui::EventContext) {
+                            close()
+                          },
+                        )
+                      },
+                    )
+                    ui::EventHandled
+                  },
+                  _ => ui::EventIgnored,
+                }
+              },
+            }
+          },
+          _ => ui::EventIgnored,
+        }
       },
       "issue_detail.edit_description": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
         start_editing_description(c)
@@ -1033,6 +1191,7 @@ fn new(
         comments: [],
         comments_loading: true,
         comments_error: "",
+        comment_cursor: 0,
         issue_generation: 0,
         editing_description: false,
         description_draft: "",
