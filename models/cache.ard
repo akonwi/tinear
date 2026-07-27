@@ -77,13 +77,13 @@ private struct DataDto {
   logged_in: LoggedInDto,
 }
 
-private fn decode_tab_ref(raw: Any) tabs::TabRef!decode::Error {
+private fn decode_tab_ref(raw: Any) tabs::TabRef!decode::Err {
   let kind_name = try decode::run(raw, decode::field("kind", decode::string))
   let id = try decode::run(raw, decode::field("id", decode::string))
   let title = try decode::run(raw, decode::field("title", decode::string))
   match tabs::Kind::from(kind_name) {
     kind => Result::ok(tabs::TabRef{kind: kind, id: id, title: title}),
-    _ => Result::err(decode::Error{expected: "a known tab kind", path: ["kind"]}),
+    _ => Result::err(decode::Err{expected: "a known tab kind", path: ["kind"]}),
   }
 }
 
