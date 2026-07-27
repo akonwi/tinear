@@ -88,19 +88,16 @@ private fn decode_tab_ref(raw: Any) tabs::TabRef!decode::Err {
 }
 
 private fn parse(content: Str) DataCache!Str {
-  let data = try decode::from_json(content)
-  let parsed_version = try decode::run(data, decode::field("version", decode::int)) -> e {
-    Result::err(e.to_str())
-  }
-  let tab_index = try decode::run(data, decode::path(["logged_in", "tab_index"], decode::int)) -> e {
-    Result::err(e.to_str())
-  }
+  decode::unmarshal(content, decode_cache).map_err(fn(e) { e.error() })
+}
+
+private fn decode_cache(data: Any) DataCache!decode::Err {
+  let parsed_version = try decode::run(data, decode::field("version", decode::int))
+  let tab_index = try decode::run(data, decode::path(["logged_in", "tab_index"], decode::int))
   let tab_refs = try decode::run(
     data,
     decode::path(["logged_in", "tabs"], decode::list(decode_tab_ref)),
-  ) -> e {
-    Result::err(e.to_str())
-  }
+  )
   Result::ok(
     DataCache{
       version: parsed_version,

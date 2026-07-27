@@ -44,10 +44,11 @@ fn write(api_key: Str) Str!Str {
 }
 
 fn parse(content: Str) Config!Str {
-  let data = try decode::from_json(content)
-  let api_key = try decode::run(data, decode::field("api_key", decode::string)) -> e {
-    Result::err("invalid config: {e.to_str()}")
-  }
+  decode::unmarshal(content, decode_config).map_err(fn(e) { "invalid config: {e.error()}" })
+}
+
+private fn decode_config(data: Any) Config!decode::Err {
+  let api_key = try decode::run(data, decode::field("api_key", decode::string))
   Result::ok(Config{api_key: api_key})
 }
 
