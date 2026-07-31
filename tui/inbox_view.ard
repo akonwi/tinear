@@ -137,12 +137,13 @@ fn refresh_inbox(c: mut ffi::StateCtx, api_key: Str) {
                 },
                 _ => (),
               }
+              let cursor_snapshot = next_cursor
               ffi::Update<View>(
                 c,
                 fn(s: mut View) {
                   s.items = items
                   s.error = ""
-                  s.cursor = clamp_cursor(next_cursor, items.size())
+                  s.cursor = clamp_cursor(cursor_snapshot, items.size())
                 },
               )
             },
@@ -212,11 +213,11 @@ fn render_row(theme: ui::Theme, item: inbox::Item, selected: Bool) ui::Widget {
 }
 
 fn list_rows(theme: ui::Theme, model: View) [ui::Widget] {
-  mut rows: [ui::Widget] = []
+  let rows: mut [ui::Widget] = mut []
   for item, idx in model.items {
     rows.push(render_row(theme, item, idx == model.cursor))
   }
-  rows
+  deref rows
 }
 
 // Width of the list pane (left side) in the split. Fixed at 36 cols for
@@ -378,7 +379,7 @@ fn render_detail(
   // specific comment/mention if present, else the issue description).
   // For comment/mention notifications the user wants to see THAT comment
   // immediately, not scroll past the whole issue body to find it.
-  mut children: [ui::Widget] = [detail_header(theme, item, d), section_divider(theme, "Details"), detail_meta(theme, d)]
+  let children: mut [ui::Widget] = mut [detail_header(theme, item, d), section_divider(theme, "Details"), detail_meta(theme, d)]
   match d.triggering_comment {
     comment => {
       children.push(section_divider(theme, "Comment"))
@@ -399,7 +400,7 @@ fn render_detail(
   // bounded so SoftWrap can actually wrap title and comment text.
   // ScrollPane would unbound both axes and the wrapped text would
   // render on a single very long line.
-  ui::ScrollView{Controller: scroll, Child: min_column(children, true)}
+  ui::ScrollView{Controller: scroll, Child: min_column(deref children, true)}
 }
 
 fn detail_pane(theme: ui::Theme, model: View) ui::Widget {
@@ -529,13 +530,13 @@ fn delete_current(c: mut ffi::StateCtx, api_key: Str, notify: fn(Str, Str)) {
     ffi::Update<View>(
       c,
       fn(s: mut View) {
-        mut remaining: [inbox::Item] = []
+        let remaining: mut [inbox::Item] = mut []
         for it, idx in before.items {
           if not idx == before.cursor {
             remaining.push(it)
           }
         }
-        s.items = remaining
+        s.items = deref remaining
         s.cursor = clamp_cursor(before.cursor, remaining.size())
         if remaining.size() == 0 {
           s.detail = Maybe::new()

@@ -107,13 +107,13 @@ private fn decode_cache(data: Any) DataCache!decode::Err {
 }
 
 fn encode(cache: DataCache) Str!Str {
-  mut tab_dtos: [TabRefDto] = []
+  let tab_dtos: mut [TabRefDto] = mut []
   for tab in cache.logged_in.tabs {
     tab_dtos.push(TabRefDto{kind: tab.kind.to_str(), id: tab.id, title: tab.title})
   }
   let dto = DataDto{
     version: version(),
-    logged_in: LoggedInDto{tab_index: cache.logged_in.tab_index, tabs: tab_dtos},
+    logged_in: LoggedInDto{tab_index: cache.logged_in.tab_index, tabs: deref tab_dtos},
   }
   mut bytes = try json::Marshal(dto)
   Result::ok(Str::from(bytes))
@@ -142,7 +142,7 @@ fn save(cache: DataCache) Void!Str {
   let path = try data_path()
   mut bytes = content.bytes()
   // 0o644: rw-r--r--
-  try os::WriteFile(path, bytes, 420)
+  try os::WriteFile(path, mut bytes, 420)
   Result::ok(())
 }
 
@@ -157,10 +157,11 @@ fn load_logged_in() LoggedInCache? {
 // other slices in the cache, but the wrapper keeps the door open
 // for inbox / board state without breaking the file format.
 fn save_logged_in(logged_in: LoggedInCache) Void!Str {
-  mut cache = match load() {
+  let base = match load() {
     existing => existing,
     _ => empty(),
   }
+  let cache = mut base
   cache.logged_in = logged_in
-  save(cache)
+  save(deref cache)
 }

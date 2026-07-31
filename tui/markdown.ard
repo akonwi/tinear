@@ -60,12 +60,12 @@ fn span_for(theme: ui::Theme, run: markdown::Run) ui::TextSpan {
 }
 
 fn spans_for(theme: ui::Theme, block: markdown::Block) [ui::TextSpan] {
-  mut spans: [ui::TextSpan] = []
+  let spans: mut [ui::TextSpan] = mut []
   mut runs = block.Runs
   for run in runs {
     spans.push(span_for(theme, run))
   }
-  spans
+  deref spans
 }
 
 fn wrapped(spans: [ui::TextSpan]) ui::Widget {
@@ -89,18 +89,18 @@ fn heading_widget(theme: ui::Theme, block: markdown::Block) ui::Widget {
     true => theme.Primary,
     false => theme.Foreground,
   }
-  mut spans: [ui::TextSpan] = []
+  let spans: mut [ui::TextSpan] = mut []
   mut runs = block.Runs
   for run in runs {
     spans.push(
       ui::TextSpan{Text: run.Text, Style: ui::Style{Foreground: color, Attribute: ui::AttrBold}},
     )
   }
-  wrapped(spans)
+  wrapped(deref spans)
 }
 
 fn quote_widget(theme: ui::Theme, block: markdown::Block) ui::Widget {
-  mut spans: [ui::TextSpan] = [
+  let spans: mut [ui::TextSpan] = mut [
     ui::TextSpan{
       Text: "{indent_pad(block.Indent - 1)}▌ ",
       Style: ui::Style{Foreground: theme.Border},
@@ -115,7 +115,7 @@ fn quote_widget(theme: ui::Theme, block: markdown::Block) ui::Widget {
     }
     spans.push(span)
   }
-  wrapped(spans)
+  wrapped(deref spans)
 }
 
 fn list_item_widget(theme: ui::Theme, block: markdown::Block) ui::Widget {
@@ -124,7 +124,7 @@ fn list_item_widget(theme: ui::Theme, block: markdown::Block) ui::Widget {
     true => "  ",
     false => "{block.Marker} ",
   }
-  mut spans: [ui::TextSpan] = [
+  let spans: mut [ui::TextSpan] = mut [
     ui::TextSpan{
       Text: "{indent_pad(block.Indent)}{marker}",
       Style: ui::Style{Foreground: theme.MutedForeground},
@@ -133,7 +133,7 @@ fn list_item_widget(theme: ui::Theme, block: markdown::Block) ui::Widget {
   for span in spans_for(theme, block) {
     spans.push(span)
   }
-  wrapped(spans)
+  wrapped(deref spans)
 }
 
 fn code_widget(theme: ui::Theme, block: markdown::Block) ui::Widget {
@@ -141,7 +141,7 @@ fn code_widget(theme: ui::Theme, block: markdown::Block) ui::Widget {
     run => run.Text,
     _ => "",
   }
-  mut column: [ui::Widget] = []
+  let column: mut [ui::Widget] = mut []
   // Language tag row. Mermaid diagrams can't render in a terminal;
   // label them honestly — Linear renders them in the browser.
   let tag = match block.Lang {
@@ -167,7 +167,7 @@ fn code_widget(theme: ui::Theme, block: markdown::Block) ui::Widget {
         Axis: ui::Vertical,
         MainAxisSize: ui::MainAxisSizeMin,
         CrossAxisAlignment: ui::CrossAxisStretch,
-        Children: column,
+        Children: deref column,
       },
     ),
   )
@@ -196,7 +196,7 @@ fn tight(prev: Str, next: Str) Bool {
 // provides scrolling and horizontal padding.
 fn render(theme: ui::Theme, source: Str) ui::Widget {
   mut blocks = markdown::Parse(source)
-  mut children: [ui::Widget] = []
+  let children: mut [ui::Widget] = mut []
   mut prev_kind = ""
   for block, idx in blocks {
     if idx > 0 and not tight(prev_kind, block.Kind) {
@@ -212,6 +212,6 @@ fn render(theme: ui::Theme, source: Str) ui::Widget {
     Axis: ui::Vertical,
     MainAxisSize: ui::MainAxisSizeMin,
     CrossAxisAlignment: ui::CrossAxisStretch,
-    Children: children,
+    Children: deref children,
   }
 }

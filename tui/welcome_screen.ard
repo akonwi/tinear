@@ -70,7 +70,7 @@ fn submit_login(c: mut ffi::StateCtx, api_key: Str, on_login_success: fn(Str)) {
 }
 
 fn form(c: mut ffi::StateCtx, theme: ui::Theme, model: State, on_login_success: fn(Str)) ui::Widget {
-  mut children = logo_lines()
+  let children = mut logo_lines()
   children.push(spacer(2))
   children.push(ui::Text{Value: "Enter your Linear API key"})
   children.push(spacer(1))
@@ -104,7 +104,7 @@ fn form(c: mut ffi::StateCtx, theme: ui::Theme, model: State, on_login_success: 
     Axis: ui::Vertical,
     MainAxisSize: ui::MainAxisSizeMin,
     CrossAxisAlignment: ui::CrossAxisCenter,
-    Children: children,
+    Children: deref children,
   }
 }
 

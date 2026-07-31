@@ -161,11 +161,11 @@ fn archive_notification(api_key: Str, id: Str) Void!Str {
 
 fn load(api_key: Str) [Item]!Str {
   let nodes = try fetch_inbox(api_key)
-  mut items: [Item] = []
+  let items: mut [Item] = mut []
   for node in nodes {
     items.push(decode_item(node))
   }
-  Result::ok(items)
+  Result::ok(deref items)
 }
 
 fn archive(api_key: Str, notification_id: Str) Void!Str {
@@ -365,11 +365,11 @@ fn decode_triggering_comment(notif: Any) DetailComment? {
 }
 
 fn decode_issue_detail(notif: Any) Detail {
-  mut comments: [DetailComment] = []
+  let comments: mut [DetailComment] = mut []
   for raw in path_list3(notif, "issue", "comments", "nodes") {
     comments.push(decode_detail_comment(raw))
   }
-  mut history: [DetailHistory] = []
+  let history: mut [DetailHistory] = mut []
   for raw in path_list3(notif, "issue", "history", "nodes") {
     history.push(decode_detail_history(raw))
   }
@@ -386,8 +386,8 @@ fn decode_issue_detail(notif: Any) Detail {
     project_name: path_str3(notif, "issue", "project", "name", ""),
     url: path_str2(notif, "issue", "url", ""),
     triggering_comment: decode_triggering_comment(notif),
-    comments: comments,
-    history: history,
+    comments: deref comments,
+    history: deref history,
   }
 }
 

@@ -467,9 +467,9 @@ fn save_description(
                         v.issue_generation = v.issue_generation + 1
                         match v.issue {
                           loaded => {
-                            mut updated = loaded
+                            let updated = mut loaded
                             updated.description = Maybe::new(text)
-                            v.issue = Maybe::new(updated)
+                            v.issue = Maybe::new(deref updated)
                           },
                           _ => (),
                         }
@@ -580,7 +580,7 @@ fn description_editor(c: mut ffi::StateCtx, theme: ui::Theme, model: Detail) ui:
 }
 
 fn comment_card(theme: ui::Theme, comment: issues::Comment, selected: Bool) ui::Widget {
-  mut header_children: [ui::Widget] = []
+  let header_children: mut [ui::Widget] = mut []
   if comment.depth > 0 {
     header_children.push(muted(theme, "↳ "))
   }
@@ -589,7 +589,7 @@ fn comment_card(theme: ui::Theme, comment: issues::Comment, selected: Bool) ui::
   )
   header_children.push(muted(theme, " · "))
   header_children.push(muted(theme, text::format_date(comment.created_at)))
-  mut children: [ui::Widget] = [ui::Flex{Axis: ui::Horizontal, Children: header_children}, markdown::render(theme, comment.body)]
+  mut children: [ui::Widget] = [ui::Flex{Axis: ui::Horizontal, Children: deref header_children}, markdown::render(theme, comment.body)]
   let card = min_column(children, true)
   // Replies indent under their parent; Linear threads are one level
   // deep, so a single indent step is all there is.
@@ -631,7 +631,7 @@ fn comments_body(
     },
     comments.size() == 0 => muted(theme, "(no comments)"),
     _ => {
-      mut rows: [ui::Widget] = []
+      let rows: mut [ui::Widget] = mut []
       let last_idx = comments.size() - 1
       for comment, idx in comments {
         let focusable: ui::Widget = match nodes.at(idx) {
@@ -645,7 +645,7 @@ fn comments_body(
           rows.push(ui::Padding(ui::Symmetric(0, 1), divider(theme)))
         }
       }
-      min_column(rows, true)
+      min_column(deref rows, true)
     },
   }
 }
@@ -773,7 +773,7 @@ fn build(
   // appends through mut list params are lost — ard mut-slice bug).
   // The j/k cursor actions capture this list so RequestFocus reveals
   // the cursored card via the app's focused-element auto-reveal.
-  mut comment_nodes: [mut ui::FocusNode] = []
+  let comment_nodes: mut [mut ui::FocusNode] = mut []
   for _comment in model.comments {
     mut node = ui::FocusNode{}
     comment_nodes.push(mut node)
@@ -783,7 +783,7 @@ fn build(
   // a stable outer column so the widget type at this slot never
   // changes between rebuilds (widget-reconciliation trap).
   let body_widget = match model.issue {
-    issue => loaded_layout(c, theme, issue, model, comment_nodes),
+    issue => loaded_layout(c, theme, issue, model, deref comment_nodes),
     _ => {
       match {
         not model.issue_error.is_empty() => error_placeholder(theme, identifier, model.issue_error),
@@ -866,7 +866,7 @@ fn build(
       // Description. Up/Down always line-scroll (bound separately).
       "issue_detail.nav_up": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
         match ffi::StateValue<Detail>(c).active_section == SECTION_COMMENTS {
-          true => move_comment_cursor(c, -1, comment_nodes),
+          true => move_comment_cursor(c, -1, deref comment_nodes),
           false => {
             let _ = model.scroll.ScrollByLines(-1)
           },
@@ -875,7 +875,7 @@ fn build(
       },
       "issue_detail.nav_down": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
         match ffi::StateValue<Detail>(c).active_section == SECTION_COMMENTS {
-          true => move_comment_cursor(c, 1, comment_nodes),
+          true => move_comment_cursor(c, 1, deref comment_nodes),
           false => {
             let _ = model.scroll.ScrollByLines(1)
           },

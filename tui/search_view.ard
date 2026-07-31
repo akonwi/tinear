@@ -75,7 +75,7 @@ struct SearchOutcome {
 fn combined_search(api_key: Str, term: Str) SearchOutcome!Str {
   let issues_result = issues::search(api_key, term)
   let docs_result = documents::search(api_key, term)
-  mut hits: [Hit] = []
+  let hits: mut [Hit] = mut []
   mut warning = ""
   match issues_result {
     ok(found) => {
@@ -100,7 +100,7 @@ fn combined_search(api_key: Str, term: Str) SearchOutcome!Str {
         err(e) => Result::err(e),
       }
     },
-    false => Result::ok(SearchOutcome{hits: hits, warning: warning}),
+    false => Result::ok(SearchOutcome{hits: deref hits, warning: warning}),
   }
 }
 
@@ -318,7 +318,7 @@ fn body(
       on_open(model.results.at(safe).expect("clamped"))
     }
   }
-  mut children: [ui::Widget] = [
+  let children: mut [ui::Widget] = mut [
     // Search input. FocusScope(AutoFocus) so the modal frame's
     // auto-focus lands here on first open. TextField handles its own
     // internal events; we don't trap Tab.
@@ -351,7 +351,7 @@ fn body(
     Axis: ui::Vertical,
     MainAxisSize: ui::MainAxisSizeMin,
     CrossAxisAlignment: ui::CrossAxisStretch,
-    Children: children,
+    Children: deref children,
   }
 }
 

@@ -68,11 +68,11 @@ fn fetch_recent(api_key: Str, limit: Int) [DocMeta]!Str {
     data,
     decode::path(["documents", "nodes"], decode::list(decode::any)),
   ).expect("Missing documents.nodes")
-  mut out: [DocMeta] = []
+  let out: mut [DocMeta] = mut []
   for node in nodes {
     out.push(decode_meta(node))
   }
-  Result::ok(out)
+  Result::ok(deref out)
 }
 
 // Full-text search over documents.
@@ -85,11 +85,11 @@ fn search(api_key: Str, term: Str) [DocMeta]!Str {
     data,
     decode::path(["searchDocuments", "nodes"], decode::list(decode::any)),
   ).expect("Missing searchDocuments.nodes")
-  mut out: [DocMeta] = []
+  let out: mut [DocMeta] = mut []
   for node in nodes {
     out.push(decode_meta(node))
   }
-  Result::ok(out)
+  Result::ok(deref out)
 }
 
 // Fetch one document with content. `document(id:)` accepts the slugId.

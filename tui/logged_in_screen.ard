@@ -85,19 +85,19 @@ fn selected_is_dynamic_tab(s: Model) Bool {
 }
 
 fn close_current_tab(s: Model) Model {
-  mut next = s
+  let next = mut s
   let tab_idx = s.tab_index - 2
   if tab_idx >= 0 and tab_idx < s.tabs.size() {
-    mut remaining: [tabs::TabRef] = []
+    let remaining: mut [tabs::TabRef] = mut []
     for tab, idx in s.tabs {
       if not idx == tab_idx {
         remaining.push(tab)
       }
     }
-    next.tabs = remaining
+    next.tabs = deref remaining
     next.tab_index = 1
   }
-  next
+  deref next
 }
 
 // Open `ref` as a dynamic tab. If a tab with the same identity (kind +
@@ -110,19 +110,19 @@ fn open_tab(s: Model, ref: tabs::TabRef) Model {
       existing_idx = i
     }
   }
-  mut next = s
+  let next = mut s
   if existing_idx >= 0 {
     next.tab_index = 2 + existing_idx
   } else {
-    mut new_tabs: [tabs::TabRef] = []
+    let new_tabs: mut [tabs::TabRef] = mut []
     for tab in s.tabs {
       new_tabs.push(tab)
     }
     new_tabs.push(ref)
-    next.tabs = new_tabs
+    next.tabs = deref new_tabs
     next.tab_index = 2 + new_tabs.size() - 1
   }
-  next
+  deref next
 }
 
 // Current title of an open tab, if present. Used to skip no-op
@@ -140,16 +140,16 @@ fn tab_title(s: Model, ref: tabs::TabRef) Str? {
 // Refresh the label of an open doc tab once its title is known (on
 // first load, or when a rename comes back from a refresh).
 fn retitle_tab(s: Model, ref: tabs::TabRef, title: Str) Model {
-  mut next = s
-  mut new_tabs: [tabs::TabRef] = []
+  let next = mut s
+  let new_tabs: mut [tabs::TabRef] = mut []
   for tab in s.tabs {
     match tabs::same(tab, ref) {
       true => new_tabs.push(tabs::TabRef{kind: tab.kind, id: tab.id, title: title}),
       false => new_tabs.push(tab),
     }
   }
-  next.tabs = new_tabs
-  next
+  next.tabs = deref new_tabs
+  deref next
 }
 
 // ── State updates ─────────────────────────────────────────────────────
@@ -222,7 +222,7 @@ fn tab_chip(theme: ui::Theme, label: Str, selected: Bool, on_press: fn(ui::Event
 // Tab bar widget. Owns its own bottom border so the composing column
 // doesn't need to space anything around it.
 fn tab_bar(c: mut ffi::StateCtx, theme: ui::Theme, s: Model) ui::Widget {
-  mut chips: [ui::Widget] = []
+  let chips: mut [ui::Widget] = mut []
   let n = total_tabs(s)
   if n > 0 {
     for i in 0..n - 1 {
@@ -244,7 +244,7 @@ fn tab_bar(c: mut ffi::StateCtx, theme: ui::Theme, s: Model) ui::Widget {
     }
   }
   mut children: [ui::Widget] = [
-    ui::Flex{Axis: ui::Horizontal, Children: chips},
+    ui::Flex{Axis: ui::Horizontal, Children: deref chips},
     ui::Divider{Style: ui::Style{Foreground: theme.Border, Background: theme.Background}},
   ]
   ui::Flex{
@@ -288,7 +288,7 @@ fn body_for(
   let notify_error = fn(title: Str, description: Str) {
     notify(title, description, toast::ToastVariant::error)
   }
-  mut children: [ui::Widget] = [
+  let children: mut [ui::Widget] = mut [
     inbox_view::new(
       api_key,
       fn(item: inbox::Item) {
@@ -347,7 +347,7 @@ fn body_for(
   ui::IndexedStack{
     Index: s.tab_index,
     Alignment: ui::TopLeft,
-    Children: children,
+    Children: deref children,
   }
 }
 

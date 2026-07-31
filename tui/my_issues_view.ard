@@ -106,19 +106,19 @@ fn selected_issue(v: Board) issues::Issue? {
 // columns. Scroll positions reset across reloads (acceptable since a
 // reload typically invalidates the previous layout).
 fn fresh_col_h_scrolls(columns: [issues::BoardColumn]) [mut ui::ScrollController] {
-  mut scrolls: [mut ui::ScrollController] = []
+  let scrolls: mut [mut ui::ScrollController] = mut []
   for _ in columns {
     scrolls.push(mut ui::ScrollController{})
   }
-  scrolls
+  deref scrolls
 }
 
 fn fresh_col_list_scrolls(columns: [issues::BoardColumn]) [mut ui::SliverListController] {
-  mut scrolls: [mut ui::SliverListController] = []
+  let scrolls: mut [mut ui::SliverListController] = mut []
   for _ in columns {
     scrolls.push(mut ui::SliverListController{})
   }
-  scrolls
+  deref scrolls
 }
 
 fn apply_loaded(c: mut ffi::StateCtx, columns: [issues::BoardColumn]) {
@@ -318,7 +318,7 @@ fn card_content(theme: ui::Theme, item: issues::Issue) ui::Widget {
     SoftWrap: true,
   }
 
-  mut indented: [ui::Widget] = [title]
+  let indented: mut [ui::Widget] = mut [title]
   let meta = metadata_text(item)
   if not meta.is_empty() {
     indented.push(ui::Text{Value: meta, Style: ui::Style{Foreground: theme.MutedForeground}})
@@ -328,7 +328,7 @@ fn card_content(theme: ui::Theme, item: issues::Issue) ui::Widget {
       // Indent title and metadata 2 more cols so they hang under the
       // identifier text (which sits at col 2 after the glyph + space).
       id_line,
-      ui::Padding(ui::Insets{Left: 2}, min_column(indented, true)),
+      ui::Padding(ui::Insets{Left: 2}, min_column(deref indented, true)),
     ],
     true,
   )
@@ -500,7 +500,7 @@ fn overflow_indicator(theme: ui::Theme, glyph: Str, show: Bool) ui::Widget {
 // the board's full height — which means the per-column CustomScrollView
 // below has a real viewport to clip and scroll within.
 fn render_board(theme: ui::Theme, v: Board, on_card_click: fn(Int, Int)) ui::Widget {
-  mut row_children: [ui::Widget] = []
+  let row_children: mut [ui::Widget] = mut []
   // Shared transient fallbacks; see the drift note below. Declared out
   // here because `mut x` can't be a block's final expression (it parses
   // as a variable declaration).
@@ -544,7 +544,7 @@ fn render_board(theme: ui::Theme, v: Board, on_card_click: fn(Int, Int)) ui::Wid
         Child: ui::Flex{
           Axis: ui::Horizontal,
           CrossAxisAlignment: ui::CrossAxisStretch,
-          Children: row_children,
+          Children: deref row_children,
         },
       },
     ),

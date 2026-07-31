@@ -34,7 +34,7 @@ jobs:
       # Pin Ard to a released version. Bump ARD_VERSION to upgrade.
       - name: Install Ard
         env:
-          ARD_VERSION: v0.28.0
+          ARD_VERSION: v0.33.0
         run: |
           curl -fsSL -o /tmp/ard.tar.gz \
             "https://github.com/akonwi/ard/releases/download/${ARD_VERSION}/ard_${ARD_VERSION}_linux_amd64.tar.gz"

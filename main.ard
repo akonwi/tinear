@@ -53,7 +53,7 @@ fn dispatch_toast(
         c,
         fn(s: mut AppState) {
           s.next_toast_id = toast_id
-          mut next_toasts: [toast::Toast] = []
+          let next_toasts: mut [toast::Toast] = mut []
           for t in s.toasts {
             next_toasts.push(t)
           }
@@ -66,7 +66,7 @@ fn dispatch_toast(
               ttl_ms: ttl_ms,
             },
           )
-          s.toasts = next_toasts
+          s.toasts = deref next_toasts
         },
       )
       async::start(
@@ -78,13 +78,13 @@ fn dispatch_toast(
               ffi::Update<AppState>(
                 c,
                 fn(s: mut AppState) {
-                  mut remaining: [toast::Toast] = []
+                  let remaining: mut [toast::Toast] = mut []
                   for t in s.toasts {
                     if not t.id == toast_id {
                       remaining.push(t)
                     }
                   }
-                  s.toasts = remaining
+                  s.toasts = deref remaining
                 },
               )
             },
@@ -175,7 +175,7 @@ fn body(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
   // and inbox view, forcing refetches on every toast appear/disappear.
   // Always use Overlay; pass an empty entries list when there's
   // nothing to layer.
-  mut entries: [ui::OverlayEntry] = []
+  let entries: mut [ui::OverlayEntry] = mut []
   if model.toasts.size() > 0 {
     entries.push(
       ui::OverlayEntry{
@@ -207,7 +207,7 @@ fn body(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
     },
     _ => (),
   }
-  let layered = ui::Overlay{Child: content, Entries: entries}
+  let layered = ui::Overlay{Child: content, Entries: deref entries}
   ui::DecoratedBox(
     ui::Decoration{Style: ui::Style{Foreground: theme.Foreground, Background: theme.Background}},
     layered,
