@@ -37,14 +37,14 @@ fn render_hint(theme: ui::Theme, hint: Hint) ui::Widget {
 // Bare hints row, no top border. Used inside containers (modal frames,
 // etc.) that already supply their own divider above the footer.
 fn row(theme: ui::Theme, items: [Hint]) ui::Widget {
-  mut children: [ui::Widget] = []
+  let children: mut [ui::Widget] = mut []
   for hint, idx in items {
     if idx > 0 {
       children.push(ui::Text{Value: "   "})
     }
     children.push(render_hint(theme, hint))
   }
-  ui::Flex{Axis: ui::Horizontal, Children: children}
+  ui::Flex{Axis: ui::Horizontal, Children: deref children}
 }
 
 fn new(theme: ui::Theme, items: [Hint]) ui::Widget {

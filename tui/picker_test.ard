@@ -3,14 +3,14 @@ use ard/testing
 use tinear/tui/picker
 
 fn props(labels: [Str]) picker::Props {
-  mut options: [picker::Option] = []
+  let options: mut [picker::Option] = mut []
   for label in labels {
     options.push(picker::Option{id: label, label: label, current: false})
   }
   picker::Props{
     key: "test",
     title: "Test",
-    options: options,
+    options: deref options,
     width: Maybe::new(),
     on_confirm: fn(opt: picker::Option) {},
   }

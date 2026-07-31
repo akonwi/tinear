@@ -38,7 +38,7 @@ fn write(api_key: Str) Str!Str {
   let config_path = try get_config_path()
   // 0o600: rw------- — the config holds an API key.
   mut content = encoded
-  try os::WriteFile(config_path, content, 384)
+  try os::WriteFile(config_path, mut content, 384)
 
   Result::ok(config_path)
 }

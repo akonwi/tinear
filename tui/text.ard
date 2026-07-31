@@ -59,7 +59,7 @@ struct TitleLines {
 // strings of at most `width` characters. Breaks at the last space
 // within the window when possible, otherwise hard-breaks at `width`.
 fn wrap_line(s: Str, width: Int) [Str] {
-  mut lines: [Str] = []
+  mut lines: mut [Str] = mut []
   mut remainder = s
   while remainder.size() > width {
     mut last_space = -1
@@ -96,13 +96,13 @@ fn wrap_line(s: Str, width: Int) [Str] {
   if (not remainder.is_empty()) or lines.size() == 0 {
     lines.push(remainder)
   }
-  lines
+  deref lines
 }
 
 // Wraps multi-line text to fit within `width` columns. Preserves
 // explicit newlines in the input and word-wraps each segment.
 fn wrap_text(s: Str, width: Int) [Str] {
-  mut segments: [Str] = []
+  let segments: mut [Str] = mut []
   mut current = ""
   for c in s {
     if c == '\n' {
@@ -116,14 +116,14 @@ fn wrap_text(s: Str, width: Int) [Str] {
   }
   segments.push(current)
 
-  mut out: [Str] = []
+  let out: mut [Str] = mut []
   for seg in segments {
     let lines = wrap_line(seg, width)
     for line in lines {
       out.push(line)
     }
   }
-  out
+  deref out
 }
 
 // Wraps a title onto at most two lines of `width` characters each.

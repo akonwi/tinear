@@ -73,7 +73,7 @@ fn reveal_width(progress: Float64, max_width: Int) Int {
 // only variant signal.
 fn render_body(theme: ui::Theme, toast: Toast) ui::Widget {
   let border_color = variant_color(theme, toast.variant)
-  mut col_children: [ui::Widget] = [ui::Text{Value: toast.title, Style: ui::Style{Foreground: theme.Foreground}}]
+  let col_children: mut [ui::Widget] = mut [ui::Text{Value: toast.title, Style: ui::Style{Foreground: theme.Foreground}}]
   if not toast.description.is_empty() {
     col_children.push(
       ui::Text{
@@ -86,7 +86,7 @@ fn render_body(theme: ui::Theme, toast: Toast) ui::Widget {
     Axis: ui::Vertical,
     MainAxisSize: ui::MainAxisSizeMin,
     CrossAxisAlignment: ui::CrossAxisStart,
-    Children: col_children,
+    Children: deref col_children,
   }
 
   // Interior padding: horizontal 2 gives the title breathing room from
@@ -137,7 +137,7 @@ fn render_animated(theme: ui::Theme, toast: Toast) ui::Widget {
 // overlay region so the slide animation reads as coming from the
 // screen edge.
 fn render_stack(theme: ui::Theme, toasts: [Toast]) ui::Widget {
-  mut children: [ui::Widget] = []
+  let children: mut [ui::Widget] = mut []
   for t, idx in toasts {
     if idx > 0 {
       children.push(ui::SizedBox{Height: 1})
@@ -148,6 +148,6 @@ fn render_stack(theme: ui::Theme, toasts: [Toast]) ui::Widget {
     Axis: ui::Vertical,
     MainAxisSize: ui::MainAxisSizeMin,
     CrossAxisAlignment: ui::CrossAxisEnd,
-    Children: children,
+    Children: deref children,
   }
 }

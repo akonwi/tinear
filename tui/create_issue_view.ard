@@ -168,7 +168,7 @@ fn loading_body(theme: ui::Theme) ui::Widget {
 }
 
 fn team_pick_body(c: mut ffi::StateCtx, flow: Flow) ui::Widget {
-  mut options: [picker::Option] = []
+  let options: mut [picker::Option] = mut []
   for team in flow.teams {
     options.push(picker::Option{id: team.id, label: "{team.name} ({team.key})", current: false})
   }
@@ -180,7 +180,7 @@ fn team_pick_body(c: mut ffi::StateCtx, flow: Flow) ui::Widget {
     picker::Props{
       key: "create-issue-team",
       title: "New issue",
-      options: options,
+      options: deref options,
       width: Maybe::new(),
       on_confirm: fn(picked: picker::Option) {
         mut chosen: issues::Team? = Maybe::new()
@@ -189,10 +189,11 @@ fn team_pick_body(c: mut ffi::StateCtx, flow: Flow) ui::Widget {
             chosen = Maybe::new(team)
           }
         }
+        let chosen_snapshot = chosen
         ffi::Update<Flow>(
           c,
           fn(s: mut Flow) {
-            s.team = chosen
+            s.team = chosen_snapshot
             s.stage = STAGE_FORM
           },
         )

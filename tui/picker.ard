@@ -84,13 +84,13 @@ fn visible_options(props: Props, filter: Str) [Option] {
   match query.is_empty() {
     true => props.options,
     false => {
-      mut matched: [Option] = []
+      let matched: mut [Option] = mut []
       for option in props.options {
         if strings::ToLower(option.label).contains(query) {
           matched.push(option)
         }
       }
-      matched
+      deref matched
     },
   }
 }
