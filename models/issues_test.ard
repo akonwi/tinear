@@ -4,7 +4,7 @@ use decode
 use tinear/models/issues
 
 fn issue_json_with_title(title: Str, description: Str) Str {
-  "\{\"id\":\"issue-1\",\"identifier\":\"AKO-123\",\"title\":\"{title}\",\"description\":{description},\"priority\":2,\"state\":\{\"id\":\"state-1\",\"name\":\"In Progress\",\"type\":\"started\",\"position\":1.0\},\"team\":\{\"id\":\"team-1\",\"name\":\"Core\",\"key\":\"AKO\"\},\"project\":null,\"assignee\":null,\"cycle\":null\}"
+  `{{"id":"issue-1","identifier":"AKO-123","title":"{title}","description":{description},"priority":2,"state":{{"id":"state-1","name":"In Progress","type":"started","position":1.0}},"team":{{"id":"team-1","name":"Core","key":"AKO"}},"project":null,"assignee":null,"cycle":null}}`
 }
 
 fn issue_json(description: Str) Str {

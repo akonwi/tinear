@@ -328,13 +328,13 @@ fn decode_cycle(raw: Any) Cycle {
 }
 
 fn fetch_viewer(api_key: Str) Any!Str {
-  let data = try client::graphql(api_key, "query \{ viewer \{ id name displayName email \} \}")
+  let data = try client::graphql(api_key, `query {{ viewer {{ id name displayName email }} }}`)
   let viewer = decode::run(data, decode::field("viewer", decode::any)).expect("Missing viewer")
   Result::ok(viewer)
 }
 
 fn update_state(api_key: Str, issue_id: Str, state_id: Str) Void!Str {
-  let mutation = "mutation \{ issueUpdate(id: \"{issue_id}\", input: \{ stateId: \"{state_id}\" \}) \{ success \} \}"
+  let mutation = `mutation {{ issueUpdate(id: "{issue_id}", input: {{ stateId: "{state_id}" }}) {{ success }} }}`
   let data = try client::graphql(api_key, mutation)
   let success = decode::run(
     data,
@@ -351,7 +351,7 @@ fn update_cycle(api_key: Str, issue_id: Str, cycle_id: Str) Void!Str {
     true => "cycleId: null",
     false => "cycleId: \"{cycle_id}\"",
   }
-  let mutation = "mutation \{ issueUpdate(id: \"{issue_id}\", input: \{ {cycle_part} \}) \{ success \} \}"
+  let mutation = `mutation {{ issueUpdate(id: "{issue_id}", input: {{ {cycle_part} }}) {{ success }} }}`
   let data = try client::graphql(api_key, mutation)
   let success = decode::run(
     data,
@@ -375,7 +375,7 @@ fn create_comment(api_key: Str, issue_id: Str, body: Str, parent_id: Str) Void!S
     let parent_json = Str::from(parent_bytes)
     input = "{input}, parentId: {parent_json}"
   }
-  let mutation = "mutation \{ commentCreate(input: \{ {input} \}) \{ success \} \}"
+  let mutation = `mutation {{ commentCreate(input: {{ {input} }}) {{ success }} }}`
   let data = try client::graphql(api_key, mutation)
   let success = decode::run(
     data,
@@ -388,7 +388,7 @@ fn create_comment(api_key: Str, issue_id: Str, body: Str, parent_id: Str) Void!S
 }
 
 fn fetch_issue_comments(api_key: Str, issue_id: Str) [Any]!Str {
-  let query = "query \{ issue(id: \"{issue_id}\") \{ comments(first: 50) \{ nodes \{ id body createdAt parent \{ id \} user \{ name displayName \} botActor \{ name \} \} \} \} \}"
+  let query = `query {{ issue(id: "{issue_id}") {{ comments(first: 50) {{ nodes {{ id body createdAt parent {{ id }} user {{ name displayName }} botActor {{ name }} }} }} }} }}`
   let data = try client::graphql(api_key, query)
   let nodes = decode::run(
     data,
@@ -398,7 +398,7 @@ fn fetch_issue_comments(api_key: Str, issue_id: Str) [Any]!Str {
 }
 
 fn fetch_team_states(api_key: Str, team_id: Str) [Any]!Str {
-  let query = "query \{ team(id: \"{team_id}\") \{ states \{ nodes \{ id name type position \} \} \} \}"
+  let query = `query {{ team(id: "{team_id}") {{ states {{ nodes {{ id name type position }} }} }} }}`
   let data = try client::graphql(api_key, query)
   let nodes = decode::run(
     data,
@@ -408,7 +408,7 @@ fn fetch_team_states(api_key: Str, team_id: Str) [Any]!Str {
 }
 
 fn fetch_team_cycles(api_key: Str, team_id: Str) TeamCyclesResult!Str {
-  let query = "query \{ team(id: \"{team_id}\") \{ activeCycle \{ number \} cycles(first: 50) \{ nodes \{ id number name startsAt \} \} \} \}"
+  let query = `query {{ team(id: "{team_id}") {{ activeCycle {{ number }} cycles(first: 50) {{ nodes {{ id number name startsAt }} }} }} }}`
   let data = try client::graphql(api_key, query)
   let team_obj = decode::run(data, decode::field("team", decode::any)).expect("Missing team")
   let nodes = decode::run(
@@ -429,11 +429,11 @@ fn fetch_team_cycles(api_key: Str, team_id: Str) TeamCyclesResult!Str {
 }
 
 fn issue_fields() Str {
-  "id identifier title description priority state \{ id name type position \} team \{ id name key \} project \{ id name \} assignee \{ id name displayName \} cycle \{ id number name \} url"
+  `id identifier title description priority state {{ id name type position }} team {{ id name key }} project {{ id name }} assignee {{ id name displayName }} cycle {{ id number name }} url`
 }
 
 fn fetch_single_issue(api_key: Str, issue_id: Str) Any!Str {
-  let query = "query \{ issue(id: \"{issue_id}\") \{ {issue_fields()} \} \}"
+  let query = `query {{ issue(id: "{issue_id}") {{ {issue_fields()} }} }}`
   let data = try client::graphql(api_key, query)
   let issue = decode::run(data, decode::field("issue", decode::any)).expect("Missing issue")
   Result::ok(issue)
@@ -442,7 +442,7 @@ fn fetch_single_issue(api_key: Str, issue_id: Str) Any!Str {
 fn fetch_issue_search(api_key: Str, term: Str) [Any]!Str {
   mut q_bytes = json::Marshal(term).expect("encode search query")
   let q = Str::from(q_bytes)
-  let query = "query \{ searchIssues(term: {q}, first: 20) \{ nodes \{ {issue_fields()} \} \} \}"
+  let query = `query {{ searchIssues(term: {q}, first: 20) {{ nodes {{ {issue_fields()} }} }} }}`
   let data = try client::graphql(api_key, query)
   let nodes = decode::run(
     data,
@@ -478,7 +478,30 @@ fn sort_columns_by_position(cols: [state::BoardColumn]) [state::BoardColumn] {
 }
 
 fn fetch_board(api_key: Str, my_id: Str) [state::BoardColumn]!Str {
-  let query = "query \{ issues(first: 200, filter: \{ assignee: \{ id: \{ eq: \"{my_id}\" \} \}, state: \{ type: \{ nin: [\"canceled\"] \} \} \}) \{ nodes \{ id identifier title description priority state \{ id name type position \} team \{ id name key \} project \{ name \} assignee \{ name displayName \} cycle \{ id number name \} \} \} \}"
+  let query = `
+    query {{
+      issues(
+        first: 200
+        filter: {{
+          assignee: {{ id: {{ eq: "{my_id}" }} }}
+          state: {{ type: {{ nin: ["canceled"] }} }}
+        }}
+      ) {{
+        nodes {{
+          id
+          identifier
+          title
+          description
+          priority
+          state {{ id name type position }}
+          team {{ id name key }}
+          project {{ name }}
+          assignee {{ name displayName }}
+          cycle {{ id number name }}
+        }}
+      }}
+    }}
+    `
   let data = try client::graphql(api_key, query)
   let raw_issues = decode::run(
     data,
@@ -588,7 +611,7 @@ fn load(api_key: Str) [BoardColumn]!Str {
 }
 
 fn update_priority(api_key: Str, issue_id: Str, priority: Int) Void!Str {
-  let mutation = "mutation \{ issueUpdate(id: \"{issue_id}\", input: \{ priority: {priority} \}) \{ success \} \}"
+  let mutation = `mutation {{ issueUpdate(id: "{issue_id}", input: {{ priority: {priority} }}) {{ success }} }}`
   let data = try client::graphql(api_key, mutation)
   let success = try decode::run(
     data,
@@ -608,7 +631,7 @@ fn update_assignee(api_key: Str, issue_id: Str, assignee_id: Str) Void!Str {
     true => "null",
     false => "\"{assignee_id}\"",
   }
-  let mutation = "mutation \{ issueUpdate(id: \"{issue_id}\", input: \{ assigneeId: {value} \}) \{ success \} \}"
+  let mutation = `mutation {{ issueUpdate(id: "{issue_id}", input: {{ assigneeId: {value} }}) {{ success }} }}`
   let data = try client::graphql(api_key, mutation)
   let success = try decode::run(
     data,
@@ -628,7 +651,7 @@ fn update_project(api_key: Str, issue_id: Str, project_id: Str) Void!Str {
     true => "null",
     false => "\"{project_id}\"",
   }
-  let mutation = "mutation \{ issueUpdate(id: \"{issue_id}\", input: \{ projectId: {value} \}) \{ success \} \}"
+  let mutation = `mutation {{ issueUpdate(id: "{issue_id}", input: {{ projectId: {value} }}) {{ success }} }}`
   let data = try client::graphql(api_key, mutation)
   let success = try decode::run(
     data,
@@ -649,7 +672,7 @@ struct Member {
 
 // Active members of a team, for the assignee picker.
 fn fetch_team_members(api_key: Str, team_id: Str) [Member]!Str {
-  let query = "query \{ team(id: \"{team_id}\") \{ members(first: 250) \{ nodes \{ id name displayName active \} \} \} \}"
+  let query = `query {{ team(id: "{team_id}") {{ members(first: 250) {{ nodes {{ id name displayName active }} }} }} }}`
   let data = try client::graphql(api_key, query)
   let nodes = try decode::run(
     data,
@@ -686,7 +709,7 @@ struct Project {
 
 // Projects available to a team, for the project picker.
 fn fetch_team_projects(api_key: Str, team_id: Str) [Project]!Str {
-  let query = "query \{ team(id: \"{team_id}\") \{ projects(first: 250) \{ nodes \{ id name state \} \} \} \}"
+  let query = `query {{ team(id: "{team_id}") {{ projects(first: 250) {{ nodes {{ id name state }} }} }} }}`
   let data = try client::graphql(api_key, query)
   let nodes = try decode::run(
     data,
@@ -716,7 +739,7 @@ fn update_description(api_key: Str, issue_id: Str, description: Str) Void!Str {
   let desc_json = Str::from(desc_bytes)
   mut id_bytes = json::Marshal(issue_id).expect("encode issue id")
   let id_json = Str::from(id_bytes)
-  let mutation = "mutation \{ issueUpdate(id: {id_json}, input: \{ description: {desc_json} \}) \{ success \} \}"
+  let mutation = `mutation {{ issueUpdate(id: {id_json}, input: {{ description: {desc_json} }}) {{ success }} }}`
   let data = try client::graphql(api_key, mutation)
   let success = try decode::run(
     data,
@@ -741,7 +764,7 @@ struct Team {
 fn fetch_teams(api_key: Str) [Team]!Str {
   // first: 250 is Linear's page-size cap; workspaces beyond that need
   // pagination (unlikely for now, but the default page is smaller).
-  let query = "query \{ teams(first: 250) \{ nodes \{ id name key \} \} \}"
+  let query = `query {{ teams(first: 250) {{ nodes {{ id name key }} }} }}`
   let data = try client::graphql(api_key, query)
   let nodes = try decode::run(
     data,
@@ -778,7 +801,7 @@ fn create_issue(api_key: Str, team_id: Str, title: Str, description: Str) Str!St
     let desc_json = Str::from(desc_bytes)
     input = "{input}, description: {desc_json}"
   }
-  let mutation = "mutation \{ issueCreate(input: \{ {input} \}) \{ success issue \{ identifier \} \} \}"
+  let mutation = `mutation {{ issueCreate(input: {{ {input} }}) {{ success issue {{ identifier }} }} }}`
   let data = try client::graphql(api_key, mutation)
   let success = try decode::run(
     data,

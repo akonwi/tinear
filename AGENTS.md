@@ -235,7 +235,7 @@ to `~/.tinear/config.json`. To bootstrap without the TUI, set
 - **No `return` keyword** — last expression is the return value. Use `try` for Result propagation.
 - **`and` / `not`** instead of `&&` / `!`.
 - **`Void!Str`** uses `Result::ok(())` for the Ok variant.
-- **String interpolation** with `{var}`; literal braces need `\{` / `\}`.
+- **String interpolation** uses `{var}`; literal braces use `{{` / `}}`. Backtick strings preserve backslashes, quotes, and physical newlines while retaining interpolation.
 - **Mutating methods** with `fn mut name() { self.field = v }`; callable only on mutable receivers.
 - **`mut <expr>` creates a mutable reference** (ADR 0045): `mut ctrl` aliases a mut binding; reads of a `mut T` variable deref (copy). Two current parser limits: `mut pkg::Type{}` doesn't parse (ard#285 — bind first, then `mut binding`) and `mut x` can't be a block's final expression (parses as a declaration).
 - **Match arms must unify types.** Arms returning different foreign widget types need an explicit annotation on the binding (`let w: ui::Widget = match ...`).

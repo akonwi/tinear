@@ -1,5 +1,8 @@
 name: Tests
 
+env:
+  ARD_VERSION: v0.36.0
+
 on:
   pull_request:
   push:
@@ -33,8 +36,6 @@ jobs:
 
       # Pin Ard to a released version. Bump ARD_VERSION to upgrade.
       - name: Install Ard
-        env:
-          ARD_VERSION: v0.33.0
         run: |
           curl -fsSL -o /tmp/ard.tar.gz \
             "https://github.com/akonwi/ard/releases/download/${ARD_VERSION}/ard_${ARD_VERSION}_linux_amd64.tar.gz"
@@ -42,7 +43,7 @@ jobs:
           sudo install /tmp/ard /usr/local/bin/ard
 
       - name: Verify Ard compiler
-        run: ard version
+        run: test "$(ard version)" = "$ARD_VERSION"
 
       - name: Download Go dependencies
         run: go mod download

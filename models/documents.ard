@@ -62,7 +62,7 @@ fn decode_doc(raw: Any) Doc {
 
 // Most recently updated documents across the workspace.
 fn fetch_recent(api_key: Str, limit: Int) [DocMeta]!Str {
-  let query = "query \{ documents(first: {limit}, orderBy: updatedAt) \{ nodes \{ {meta_fields()} \} \} \}"
+  let query = `query {{ documents(first: {limit}, orderBy: updatedAt) {{ nodes {{ {meta_fields()} }} }} }}`
   let data = try client::graphql(api_key, query)
   let nodes = decode::run(
     data,
@@ -79,7 +79,7 @@ fn fetch_recent(api_key: Str, limit: Int) [DocMeta]!Str {
 fn search(api_key: Str, term: Str) [DocMeta]!Str {
   mut q_bytes = json::Marshal(term).expect("encode search term")
   let q = Str::from(q_bytes)
-  let query = "query \{ searchDocuments(term: {q}, first: 20) \{ nodes \{ {meta_fields()} \} \} \}"
+  let query = `query {{ searchDocuments(term: {q}, first: 20) {{ nodes {{ {meta_fields()} }} }} }}`
   let data = try client::graphql(api_key, query)
   let nodes = decode::run(
     data,
@@ -97,7 +97,7 @@ fn search(api_key: Str, term: Str) [DocMeta]!Str {
 fn fetch_single(api_key: Str, slug_id: Str) Doc!Str {
   mut id_bytes = json::Marshal(slug_id).expect("encode document id")
   let id = Str::from(id_bytes)
-  let query = "query \{ document(id: {id}) \{ {meta_fields()} content \} \}"
+  let query = `query {{ document(id: {id}) {{ {meta_fields()} content }} }}`
   let data = try client::graphql(api_key, query)
   let raw = decode::run(data, decode::field("document", decode::any)).expect("Missing document")
   Result::ok(decode_doc(raw))
