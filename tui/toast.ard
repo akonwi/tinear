@@ -73,7 +73,9 @@ fn reveal_width(progress: Float64, max_width: Int) Int {
 // only variant signal.
 fn render_body(theme: ui::Theme, toast: Toast) ui::Widget {
   let border_color = variant_color(theme, toast.variant)
-  let col_children: mut [ui::Widget] = mut [ui::Text{Value: toast.title, Style: ui::Style{Foreground: theme.Foreground}}]
+  let col_children: mut [ui::Widget] = mut [
+    ui::Text{Value: toast.title, Style: ui::Style{Foreground: theme.Foreground}},
+  ]
   if not toast.description.is_empty() {
     col_children.push(
       ui::Text{
@@ -86,7 +88,7 @@ fn render_body(theme: ui::Theme, toast: Toast) ui::Widget {
     Axis: ui::Vertical,
     MainAxisSize: ui::MainAxisSizeMin,
     CrossAxisAlignment: ui::CrossAxisStart,
-    Children: deref col_children,
+    Children: col_children.@,
   }
 
   // Interior padding: horizontal 2 gives the title breathing room from
@@ -148,6 +150,6 @@ fn render_stack(theme: ui::Theme, toasts: [Toast]) ui::Widget {
     Axis: ui::Vertical,
     MainAxisSize: ui::MainAxisSizeMin,
     CrossAxisAlignment: ui::CrossAxisEnd,
-    Children: deref children,
+    Children: children.@,
   }
 }

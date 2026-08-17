@@ -5,12 +5,18 @@ use tinear/tui/picker
 fn props(labels: [Str]) picker::Props {
   let options: mut [picker::Option] = mut []
   for label in labels {
-    options.push(picker::Option{id: label, label: label, current: false})
+    options.push(
+      picker::Option{
+        id: label,
+        label: label,
+        current: false,
+      },
+    )
   }
   picker::Props{
     key: "test",
     title: "Test",
-    options: deref options,
+    options: options.@,
     width: Maybe::new(),
     on_confirm: fn(opt: picker::Option) {},
   }
@@ -32,7 +38,10 @@ test fn visible_options_filters_case_insensitively() Void!Str {
   let matched = picker::visible_options(p, "CARE")
   try testing::assert(matched.size() == 2, "substring should match case-insensitively")
   try testing::assert(matched.at(0).expect("bounds").label == "Focused Care", "original order kept")
-  testing::assert(matched.at(1).expect("bounds").label == "care packages", "lowercase label matches")
+  testing::assert(
+    matched.at(1).expect("bounds").label == "care packages",
+    "lowercase label matches",
+  )
 }
 
 test fn empty_filter_matches_everything() Void!Str {

@@ -1,5 +1,5 @@
-use go:encoding/json
 use decode
+use go:encoding/json
 use tinear/linear/client
 use tinear/tui/state
 
@@ -14,7 +14,7 @@ fn replace_common_mojibake(value: Str) Str {
   normalized = normalized.replace_all("â\u0080\u009d", "\"")
   normalized = normalized.replace_all("â\u0080¦", "...")
   normalized = normalized.replace_all("â\u0080¢", "*")
-
+  
   // Same mojibake after further Windows-1252-ish display/clipboard conversion.
   normalized = normalized.replace_all("â€”", "-")
   normalized = normalized.replace_all("â€“", "-")
@@ -24,7 +24,7 @@ fn replace_common_mojibake(value: Str) Str {
   normalized = normalized.replace_all("â€�", "\"")
   normalized = normalized.replace_all("â€¦", "...")
   normalized = normalized.replace_all("â€¢", "*")
-
+  
   // macOS/NS-style mojibake variants.
   normalized = normalized.replace_all("‚Äî", "-")
   normalized = normalized.replace_all("‚Äì", "-")
@@ -34,7 +34,7 @@ fn replace_common_mojibake(value: Str) Str {
   normalized = normalized.replace_all("‚Äù", "\"")
   normalized = normalized.replace_all("‚Ä¶", "...")
   normalized = normalized.replace_all("‚Ä¢", "*")
-
+  
   normalized.replace_all("\u00a0", " ")
 }
 
@@ -257,7 +257,7 @@ fn decode_column(raw: state::BoardColumn) BoardColumn {
     name: normalize_text(raw.name),
     state_type: raw.state_type,
     position: raw.position,
-    issues: deref issues,
+    issues: issues.@,
   }
 }
 
@@ -292,12 +292,12 @@ fn thread_comments(comments: [Comment]) [Comment] {
         if candidate.parent_id == comment.id {
           let reply = mut candidate
           reply.depth = 1
-          ordered.push(deref reply)
+          ordered.push(reply.@)
         }
       }
     }
   }
-  deref ordered
+  ordered.@
 }
 
 fn decode_workflow_state(raw: Any) WorkflowState {
@@ -415,17 +415,17 @@ fn fetch_team_cycles(api_key: Str, team_id: Str) TeamCyclesResult!Str {
     team_obj,
     decode::path(["cycles", "nodes"], decode::list(decode::any)),
   ).expect("Missing team.cycles.nodes")
-
+  
   let active_number = match decode::run(team_obj, decode::path(["activeCycle", "number"], decode::nullable(decode::int))) {
     ok(value) => value,
     err(_) => Maybe::new(),
   }
-
+  
   let cycles: mut [Cycle] = mut []
   for raw in nodes {
     cycles.push(decode_cycle(raw))
   }
-  Result::ok(TeamCyclesResult{active_cycle_number: active_number, cycles: deref cycles})
+  Result::ok(TeamCyclesResult{active_cycle_number: active_number, cycles: cycles.@})
 }
 
 fn issue_fields() Str {
@@ -473,7 +473,7 @@ fn sort_columns_by_position(cols: [state::BoardColumn]) [state::BoardColumn] {
         }
       }
     }
-    deref result
+    result.@
   }
 }
 
@@ -507,7 +507,7 @@ fn fetch_board(api_key: Str, my_id: Str) [state::BoardColumn]!Str {
     data,
     decode::path(["issues", "nodes"], decode::list(decode::any)),
   ).expect("Missing issues.nodes")
-
+  
   let state_names: mut [Str] = mut []
   let state_types: mut [Str] = mut []
   let state_positions: mut [Float64] = mut []
@@ -523,14 +523,16 @@ fn fetch_board(api_key: Str, my_id: Str) [state::BoardColumn]!Str {
       }
       if not seen {
         state_names.push(sname)
-        state_types.push(decode::run(s, decode::field("type", decode::string)).expect("Missing state.type"))
+        state_types.push(
+          decode::run(s, decode::field("type", decode::string)).expect("Missing state.type"),
+        )
         state_positions.push(
           decode::run(s, decode::field("position", decode::float)).expect("Missing state.position"),
         )
       }
     }
   }
-
+  
   let columns: mut [state::BoardColumn] = mut []
   for sname, idx in state_names {
     let is_completed = state_types.at(idx).expect("parallel list") == "completed"
@@ -555,12 +557,12 @@ fn fetch_board(api_key: Str, my_id: Str) [state::BoardColumn]!Str {
         name: sname,
         state_type: state_types.at(idx).expect("parallel list"),
         position: state_positions.at(idx).expect("parallel list"),
-        issues: deref col_issues,
+        issues: col_issues.@,
       },
     )
   }
-
-  Result::ok(sort_columns_by_position(deref columns))
+  
+  Result::ok(sort_columns_by_position(columns.@))
 }
 
 fn load_comments(api_key: Str, issue_id: Str) [Comment]!Str {
@@ -569,7 +571,7 @@ fn load_comments(api_key: Str, issue_id: Str) [Comment]!Str {
   for raw in raw_comments {
     comments.push(decode_comment(raw))
   }
-  Result::ok(thread_comments(deref comments))
+  Result::ok(thread_comments(comments.@))
 }
 
 fn load_team_states(api_key: Str, team_id: Str) [WorkflowState]!Str {
@@ -578,7 +580,7 @@ fn load_team_states(api_key: Str, team_id: Str) [WorkflowState]!Str {
   for raw in raw_states {
     states.push(decode_workflow_state(raw))
   }
-  Result::ok(deref states)
+  Result::ok(states.@)
 }
 
 fn load_team_cycles(api_key: Str, team_id: Str) TeamCyclesResult!Str {
@@ -596,27 +598,27 @@ fn search(api_key: Str, term: Str) [Issue]!Str {
   for raw in raw_issues {
     results.push(decode_issue(raw))
   }
-  Result::ok(deref results)
+  Result::ok(results.@)
 }
 
 fn load(api_key: Str) [BoardColumn]!Str {
   let viewer = try fetch_viewer(api_key)
-  let viewer_id = decode::run(viewer, decode::field("id", decode::string)).expect("Missing viewer id")
+  let viewer_id = decode::run(
+    viewer,
+    decode::field("id", decode::string),
+  ).expect("Missing viewer id")
   let raw_columns = try fetch_board(api_key, viewer_id)
   let columns: mut [BoardColumn] = mut []
   for col in raw_columns {
     columns.push(decode_column(col))
   }
-  Result::ok(deref columns)
+  Result::ok(columns.@)
 }
 
 fn update_priority(api_key: Str, issue_id: Str, priority: Int) Void!Str {
   let mutation = `mutation {{ issueUpdate(id: "{issue_id}", input: {{ priority: {priority} }}) {{ success }} }}`
   let data = try client::graphql(api_key, mutation)
-  let success = try decode::run(
-    data,
-    decode::path(["issueUpdate", "success"], decode::boolean),
-  ) -> e {
+  let success = try decode::run(data, decode::path(["issueUpdate", "success"], decode::boolean)) -> e {
     Result::err(e.to_str())
   }
   match success {
@@ -633,10 +635,7 @@ fn update_assignee(api_key: Str, issue_id: Str, assignee_id: Str) Void!Str {
   }
   let mutation = `mutation {{ issueUpdate(id: "{issue_id}", input: {{ assigneeId: {value} }}) {{ success }} }}`
   let data = try client::graphql(api_key, mutation)
-  let success = try decode::run(
-    data,
-    decode::path(["issueUpdate", "success"], decode::boolean),
-  ) -> e {
+  let success = try decode::run(data, decode::path(["issueUpdate", "success"], decode::boolean)) -> e {
     Result::err(e.to_str())
   }
   match success {
@@ -653,10 +652,7 @@ fn update_project(api_key: Str, issue_id: Str, project_id: Str) Void!Str {
   }
   let mutation = `mutation {{ issueUpdate(id: "{issue_id}", input: {{ projectId: {value} }}) {{ success }} }}`
   let data = try client::graphql(api_key, mutation)
-  let success = try decode::run(
-    data,
-    decode::path(["issueUpdate", "success"], decode::boolean),
-  ) -> e {
+  let success = try decode::run(data, decode::path(["issueUpdate", "success"], decode::boolean)) -> e {
     Result::err(e.to_str())
   }
   match success {
@@ -674,23 +670,18 @@ struct Member {
 fn fetch_team_members(api_key: Str, team_id: Str) [Member]!Str {
   let query = `query {{ team(id: "{team_id}") {{ members(first: 250) {{ nodes {{ id name displayName active }} }} }} }}`
   let data = try client::graphql(api_key, query)
-  let nodes = try decode::run(
-    data,
-    decode::path(["team", "members", "nodes"], decode::list(decode::any)),
-  ) -> e {
+  let nodes = try decode::run(data, decode::path(["team", "members", "nodes"], decode::list(decode::any))) -> e {
     Result::err(e.to_str())
   }
   let members: mut [Member] = mut []
   for node in nodes {
     let active = decode::run(node, decode::field("active", decode::boolean)).or(true)
     if active {
-      let id = try decode::run(node, decode::field("id", decode::string)) -> e {
-        Result::err(e.to_str())
-      }
+      let id = try decode::run(node, decode::field("id", decode::string)) -> e { Result::err(e.to_str()) }
       members.push(Member{id: id, name: normalize_text(user_display_name_opt_self(node))})
     }
   }
-  Result::ok(deref members)
+  Result::ok(members.@)
 }
 
 // displayName with name fallback for a user node itself (not nested).
@@ -711,27 +702,20 @@ struct Project {
 fn fetch_team_projects(api_key: Str, team_id: Str) [Project]!Str {
   let query = `query {{ team(id: "{team_id}") {{ projects(first: 250) {{ nodes {{ id name state }} }} }} }}`
   let data = try client::graphql(api_key, query)
-  let nodes = try decode::run(
-    data,
-    decode::path(["team", "projects", "nodes"], decode::list(decode::any)),
-  ) -> e {
+  let nodes = try decode::run(data, decode::path(["team", "projects", "nodes"], decode::list(decode::any))) -> e {
     Result::err(e.to_str())
   }
   let projects: mut [Project] = mut []
   for node in nodes {
     // Hide finished projects; issues shouldn't be filed into them.
     let project_state = decode::run(node, decode::field("state", decode::string)).or("")
-    if not (project_state == "completed" or project_state == "canceled") {
-      let id = try decode::run(node, decode::field("id", decode::string)) -> e {
-        Result::err(e.to_str())
-      }
-      let name = try decode::run(node, decode::field("name", decode::string)) -> e {
-        Result::err(e.to_str())
-      }
+    if not project_state == "completed" or project_state == "canceled" {
+      let id = try decode::run(node, decode::field("id", decode::string)) -> e { Result::err(e.to_str()) }
+      let name = try decode::run(node, decode::field("name", decode::string)) -> e { Result::err(e.to_str()) }
       projects.push(Project{id: id, name: normalize_text(name)})
     }
   }
-  Result::ok(deref projects)
+  Result::ok(projects.@)
 }
 
 fn update_description(api_key: Str, issue_id: Str, description: Str) Void!Str {
@@ -741,10 +725,7 @@ fn update_description(api_key: Str, issue_id: Str, description: Str) Void!Str {
   let id_json = Str::from(id_bytes)
   let mutation = `mutation {{ issueUpdate(id: {id_json}, input: {{ description: {desc_json} }}) {{ success }} }}`
   let data = try client::graphql(api_key, mutation)
-  let success = try decode::run(
-    data,
-    decode::path(["issueUpdate", "success"], decode::boolean),
-  ) -> e {
+  let success = try decode::run(data, decode::path(["issueUpdate", "success"], decode::boolean)) -> e {
     Result::err(e.to_str())
   }
   match success {
@@ -766,26 +747,23 @@ fn fetch_teams(api_key: Str) [Team]!Str {
   // pagination (unlikely for now, but the default page is smaller).
   let query = `query {{ teams(first: 250) {{ nodes {{ id name key }} }} }}`
   let data = try client::graphql(api_key, query)
-  let nodes = try decode::run(
-    data,
-    decode::path(["teams", "nodes"], decode::list(decode::any)),
-  ) -> e {
+  let nodes = try decode::run(data, decode::path(["teams", "nodes"], decode::list(decode::any))) -> e {
     Result::err(e.to_str())
   }
   let teams: mut [Team] = mut []
   for node in nodes {
-    let id = try decode::run(node, decode::field("id", decode::string)) -> e {
-      Result::err(e.to_str())
-    }
-    let name = try decode::run(node, decode::field("name", decode::string)) -> e {
-      Result::err(e.to_str())
-    }
-    let key = try decode::run(node, decode::field("key", decode::string)) -> e {
-      Result::err(e.to_str())
-    }
-    teams.push(Team{id: id, name: normalize_text(name), key: key})
+    let id = try decode::run(node, decode::field("id", decode::string)) -> e { Result::err(e.to_str()) }
+    let name = try decode::run(node, decode::field("name", decode::string)) -> e { Result::err(e.to_str()) }
+    let key = try decode::run(node, decode::field("key", decode::string)) -> e { Result::err(e.to_str()) }
+    teams.push(
+      Team{
+        id: id,
+        name: normalize_text(name),
+        key: key,
+      },
+    )
   }
-  Result::ok(deref teams)
+  Result::ok(teams.@)
 }
 
 // Create an issue and report the new identifier (e.g. "CCA-123") so the
@@ -803,25 +781,19 @@ fn create_issue(api_key: Str, team_id: Str, title: Str, description: Str) Str!St
   }
   let mutation = `mutation {{ issueCreate(input: {{ {input} }}) {{ success issue {{ identifier }} }} }}`
   let data = try client::graphql(api_key, mutation)
-  let success = try decode::run(
-    data,
-    decode::path(["issueCreate", "success"], decode::boolean),
-  ) -> e {
+  let success = try decode::run(data, decode::path(["issueCreate", "success"], decode::boolean)) -> e {
     Result::err(e.to_str())
   }
   match success {
+    // Linear surfaces real failures (permissions, validation) as
+    // GraphQL errors, which client::graphql already extracts; a bare
+    // success=false without one is unexpected.
     true => {
-      let identifier = try decode::run(
-        data,
-        decode::path(["issueCreate", "issue", "identifier"], decode::string),
-      ) -> e {
+      let identifier = try decode::run(data, decode::path(["issueCreate", "issue", "identifier"], decode::string)) -> e {
         Result::err(e.to_str())
       }
       Result::ok(identifier)
     },
-    // Linear surfaces real failures (permissions, validation) as
-    // GraphQL errors, which client::graphql already extracts; a bare
-    // success=false without one is unexpected.
     false => Result::err("Linear rejected the issue (no error detail returned)"),
   }
 }

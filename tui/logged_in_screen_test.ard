@@ -8,7 +8,7 @@ fn model(tab_index: Int, identifiers: [Str]) shell::Model {
   for identifier in identifiers {
     refs.push(tabs::issue_tab(identifier))
   }
-  shell::Model{tab_index: tab_index, tabs: deref refs}
+  shell::Model{tab_index: tab_index, tabs: refs.@}
 }
 
 test fn cycle_wraps_around_all_tabs() Void!Str {

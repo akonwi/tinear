@@ -71,7 +71,7 @@ fn show_modal(
     CrossAxisAlignment: ui::CrossAxisStretch,
     Children: content_children,
   }
-
+  
   let bordered = ui::DecoratedBox(
     ui::Decoration{
       Style: ui::Style{Background: theme.Surface},

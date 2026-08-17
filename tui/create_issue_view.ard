@@ -43,52 +43,46 @@ struct Flow {
 
 // ── Async work (all scoped to the flow widget's ctx) ─────────────────
 
-fn load_teams(c: mut ffi::StateCtx, api_key: Str, notify: fn(Str, Str, toast::ToastVariant), close: fn()) {
-  async::start(
-    fn() {
-      let result = issues::fetch_teams(api_key)
-      // Dispatch on the flow ctx: if the modal was dismissed while
-      // fetching, this is a no-op and nothing reopens.
-      ffi::Dispatch(
-        c,
-        fn() {
-          match result {
-            ok(teams) => {
-              match {
-                teams.size() == 0 => {
-                  notify("New issue", "No teams found in this workspace", toast::ToastVariant::error)
-                  close()
-                },
-                teams.size() == 1 => {
-                  ffi::Update<Flow>(
-                    c,
-                    fn(s: mut Flow) {
-                      s.teams = teams
-                      s.team = teams.at(0)
-                      s.stage = STAGE_FORM
-                    },
-                  )
-                },
-                _ => {
-                  ffi::Update<Flow>(
-                    c,
-                    fn(s: mut Flow) {
-                      s.teams = teams
-                      s.stage = STAGE_PICK_TEAM
-                    },
-                  )
-                },
-              }
-            },
-            err(e) => {
-              notify("New issue", e, toast::ToastVariant::error)
+fn load_teams(
+  c: mut ffi::StateCtx,
+  api_key: Str,
+  notify: fn(Str, Str, toast::ToastVariant),
+  close: fn(),
+) {
+  async::start(fn() {
+    let result = issues::fetch_teams(api_key)
+    // Dispatch on the flow ctx: if the modal was dismissed while
+    // fetching, this is a no-op and nothing reopens.
+    ffi::Dispatch(c, fn() {
+      match result {
+        ok(teams) => {
+          match {
+            teams.size() == 0 => {
+              notify("New issue", "No teams found in this workspace", toast::ToastVariant::error)
               close()
+            },
+            teams.size() == 1 => {
+              ffi::Update<Flow>(c, fn(s: mut Flow) {
+                s.teams = teams
+                s.team = teams.at(0)
+                s.stage = STAGE_FORM
+              })
+            },
+            _ => {
+              ffi::Update<Flow>(c, fn(s: mut Flow) {
+                s.teams = teams
+                s.stage = STAGE_PICK_TEAM
+              })
             },
           }
         },
-      )
-    },
-  )
+        err(e) => {
+          notify("New issue", e, toast::ToastVariant::error)
+          close()
+        },
+      }
+    })
+  })
 }
 
 fn submit(
@@ -104,52 +98,38 @@ fn submit(
     current.sending => (),
     current.team.is_none() => (),
     title.is_empty() => {
-      ffi::Update<Flow>(
-        c,
-        fn(s: mut Flow) {
-          s.error = "Title is required"
-        },
-      )
+      ffi::Update<Flow>(c, fn(s: mut Flow) {
+        s.error = "Title is required"
+      })
     },
     _ => {
       let team = current.team.expect("guarded above")
       let description = current.description
-      ffi::Update<Flow>(
-        c,
-        fn(s: mut Flow) {
-          s.sending = true
-          s.error = ""
-        },
-      )
-      async::start(
-        fn() {
-          let result = issues::create_issue(api_key, team.id, title, description)
-          // Same lifecycle scoping as load_teams: Esc is swallowed
-          // while sending, so a live ctx here means this modal is
-          // still the active one.
-          ffi::Dispatch(
-            c,
-            fn() {
-              match result {
-                ok(identifier) => {
-                  notify("Issue created", identifier, toast::ToastVariant::success)
-                  on_created(identifier)
-                  close()
-                },
-                err(e) => {
-                  ffi::Update<Flow>(
-                    c,
-                    fn(s: mut Flow) {
-                      s.sending = false
-                      s.error = e
-                    },
-                  )
-                },
-              }
+      ffi::Update<Flow>(c, fn(s: mut Flow) {
+        s.sending = true
+        s.error = ""
+      })
+      async::start(fn() {
+        let result = issues::create_issue(api_key, team.id, title, description)
+        // Same lifecycle scoping as load_teams: Esc is swallowed
+        // while sending, so a live ctx here means this modal is
+        // still the active one.
+        ffi::Dispatch(c, fn() {
+          match result {
+            ok(identifier) => {
+              notify("Issue created", identifier, toast::ToastVariant::success)
+              on_created(identifier)
+              close()
             },
-          )
-        },
-      )
+            err(e) => {
+              ffi::Update<Flow>(c, fn(s: mut Flow) {
+                s.sending = false
+                s.error = e
+              })
+            },
+          }
+        })
+      })
     },
   }
 }
@@ -170,7 +150,13 @@ fn loading_body(theme: ui::Theme) ui::Widget {
 fn team_pick_body(c: mut ffi::StateCtx, flow: Flow) ui::Widget {
   let options: mut [picker::Option] = mut []
   for team in flow.teams {
-    options.push(picker::Option{id: team.id, label: "{team.name} ({team.key})", current: false})
+    options.push(
+      picker::Option{
+        id: team.id,
+        label: "{team.name} ({team.key})",
+        current: false,
+      },
+    )
   }
   let teams = flow.teams
   // The embedded picker's `close` is a no-op: confirming advances the
@@ -180,7 +166,7 @@ fn team_pick_body(c: mut ffi::StateCtx, flow: Flow) ui::Widget {
     picker::Props{
       key: "create-issue-team",
       title: "New issue",
-      options: deref options,
+      options: options.@,
       width: Maybe::new(),
       on_confirm: fn(picked: picker::Option) {
         mut chosen: issues::Team? = Maybe::new()
@@ -190,24 +176,17 @@ fn team_pick_body(c: mut ffi::StateCtx, flow: Flow) ui::Widget {
           }
         }
         let chosen_snapshot = chosen
-        ffi::Update<Flow>(
-          c,
-          fn(s: mut Flow) {
-            s.team = chosen_snapshot
-            s.stage = STAGE_FORM
-          },
-        )
+        ffi::Update<Flow>(c, fn(s: mut Flow) {
+          s.team = chosen_snapshot
+          s.stage = STAGE_FORM
+        })
       },
     },
     fn() {},
   )
 }
 
-fn form_body(
-  c: mut ffi::StateCtx,
-  theme: ui::Theme,
-  flow: Flow,
-) ui::Widget {
+fn form_body(c: mut ffi::StateCtx, theme: ui::Theme, flow: Flow) ui::Widget {
   // Stable slots for error/sending so the widget shape doesn't change
   // across state transitions (reconciliation pitfall).
   let error_widget: ui::Widget = match flow.error.is_empty() {
@@ -228,7 +207,7 @@ fn form_body(
     },
     false => ui::SizedBox{},
   }
-
+  
   mut body_children: [ui::Widget] = [
     error_widget,
     ui::Text{Value: "Title", Style: ui::Style{Foreground: theme.MutedForeground}},
@@ -239,13 +218,10 @@ fn form_body(
         Placeholder: "Issue title…",
         MinWidth: 66,
         OnChanged: fn(ev: ui::EventContext, value: Str) {
-          ffi::Update<Flow>(
-            c,
-            fn(s: mut Flow) {
-              s.title = value
-              s.error = ""
-            },
-          )
+          ffi::Update<Flow>(c, fn(s: mut Flow) {
+            s.title = value
+            s.error = ""
+          })
         },
       },
     },
@@ -258,12 +234,9 @@ fn form_body(
       MinHeight: 8,
       SoftWrap: true,
       OnChanged: fn(ev: ui::EventContext, value: Str) {
-        ffi::Update<Flow>(
-          c,
-          fn(s: mut Flow) {
-            s.description = value
-          },
-        )
+        ffi::Update<Flow>(c, fn(s: mut Flow) {
+          s.description = value
+        })
       },
     },
     sending_widget,
@@ -318,11 +291,7 @@ fn stage_width(flow: Flow) Int {
 }
 
 // Modal builder for the whole flow. Hand to show_modal.
-fn flow_builder(
-  api_key: Str,
-  notify: fn(Str, Str, toast::ToastVariant),
-  on_created: fn(Str),
-) fn(ui::Theme, fn()) ui::Widget {
+fn flow_builder(api_key: Str, notify: fn(Str, Str, toast::ToastVariant), on_created: fn(Str)) fn(ui::Theme, fn()) ui::Widget {
   fn(theme: ui::Theme, close: fn()) ui::Widget {
     ffi::Stateful{
       Key: "create_issue.flow",
@@ -345,13 +314,13 @@ fn flow_builder(
           load_teams(c, api_key, notify, close)
         }
         let flow = ffi::StateValue<Flow>(c)
-
+        
         let body: ui::Widget = match flow.stage {
           1 => team_pick_body(c, flow),
           2 => form_body(c, theme, flow),
           _ => loading_body(theme),
         }
-
+        
         // Dismiss (Esc) is intercepted here, before the modal frame's
         // handler: swallowed while a create is in flight so the flow
         // ctx stays alive until the mutation resolves.
@@ -385,7 +354,7 @@ fn flow_builder(
             Child: body,
           },
         }
-
+        
         modal::show_modal(
           theme,
           stage_title(flow),

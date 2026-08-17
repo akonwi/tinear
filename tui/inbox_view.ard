@@ -57,35 +57,27 @@ fn clamp_cursor(cursor: Int, count: Int) Int {
 // Errors are surfaced inline in the detail pane (no toast — the pane
 // itself is the dedicated slot for that failure mode).
 fn fetch_detail(c: mut ffi::StateCtx, api_key: Str, target_id: Str) {
-  async::start(
-    fn() {
-      let result = inbox::load_detail(api_key, target_id)
-      ffi::Dispatch(
-        c,
-        fn() {
-          if ffi::StateValue<View>(c).detail_request_id == target_id {
-            ffi::Update<View>(
-              c,
-              fn(s: mut View) {
-                match result {
-                  ok(d) => {
-                    s.detail = Maybe::new(d)
-                    s.detail_loaded_id = target_id
-                    s.detail_loading = false
-                    s.detail_error = ""
-                  },
-                  err(e) => {
-                    s.detail_loading = false
-                    s.detail_error = e
-                  },
-                }
-              },
-            )
+  async::start(fn() {
+    let result = inbox::load_detail(api_key, target_id)
+    ffi::Dispatch(c, fn() {
+      if ffi::StateValue<View>(c).detail_request_id == target_id {
+        ffi::Update<View>(c, fn(s: mut View) {
+          match result {
+            ok(d) => {
+              s.detail = Maybe::new(d)
+              s.detail_loaded_id = target_id
+              s.detail_loading = false
+              s.detail_error = ""
+            },
+            err(e) => {
+              s.detail_loading = false
+              s.detail_error = e
+            },
           }
-        },
-      )
-    },
-  )
+        })
+      }
+    })
+  })
 }
 
 // Request the detail for whatever item the cursor is currently on, if it
@@ -98,15 +90,12 @@ fn request_detail_for_cursor(c: mut ffi::StateCtx, api_key: Str) {
     let already_requested = s.detail_request_id == target_id
     let already_loaded = s.detail_loaded_id == target_id
     if not target_id.is_empty() and not already_requested and not already_loaded {
-      ffi::Update<View>(
-        c,
-        fn(live: mut View) {
-          live.detail_request_id = target_id
-          live.detail_loading = true
-          live.detail_error = ""
-          live.detail = Maybe::new()
-        },
-      )
+      ffi::Update<View>(c, fn(live: mut View) {
+        live.detail_request_id = target_id
+        live.detail_loading = true
+        live.detail_error = ""
+        live.detail = Maybe::new()
+      })
       fetch_detail(c, api_key, target_id)
     }
   }
@@ -117,75 +106,59 @@ fn request_detail_for_cursor(c: mut ffi::StateCtx, api_key: Str) {
 // Failures are ignored — the previous list is still fine and the next
 // tick will retry.
 fn refresh_inbox(c: mut ffi::StateCtx, api_key: Str) {
-  async::start(
-    fn() {
-      let result = inbox::load(api_key)
-      ffi::Dispatch(
-        c,
-        fn() {
-          match result {
-            ok(items) => {
-              let previous = ffi::StateValue<View>(c)
-              mut next_cursor = 0
-              match previous.items.at(previous.cursor) {
-                cursored => {
-                  for item, idx in items {
-                    if item.notification_id == cursored.notification_id {
-                      next_cursor = idx
-                    }
-                  }
-                },
-                _ => (),
+  async::start(fn() {
+    let result = inbox::load(api_key)
+    ffi::Dispatch(c, fn() {
+      match result {
+        ok(items) => {
+          let previous = ffi::StateValue<View>(c)
+          mut next_cursor = 0
+          match previous.items.at(previous.cursor) {
+            cursored => {
+              for item, idx in items {
+                if item.notification_id == cursored.notification_id {
+                  next_cursor = idx
+                }
               }
-              let cursor_snapshot = next_cursor
-              ffi::Update<View>(
-                c,
-                fn(s: mut View) {
-                  s.items = items
-                  s.error = ""
-                  s.cursor = clamp_cursor(cursor_snapshot, items.size())
-                },
-              )
             },
-            err(_) => (),
+            _ => (),
           }
+          let cursor_snapshot = next_cursor
+          ffi::Update<View>(c, fn(s: mut View) {
+            s.items = items
+            s.error = ""
+            s.cursor = clamp_cursor(cursor_snapshot, items.size())
+          })
         },
-      )
-    },
-  )
+        err(_) => (),
+      }
+    })
+  })
 }
 
 // Errors are surfaced inline via the error_pane the body renders when
 // `view.error` is non-empty — no toast for load failures since the pane
 // itself is the dedicated UI slot for that.
 fn load_inbox(c: mut ffi::StateCtx, api_key: Str) {
-  async::start(
-    fn() {
-      let result = inbox::load(api_key)
-      ffi::Dispatch(
-        c,
-        fn() {
-          ffi::Update<View>(
-            c,
-            fn(s: mut View) {
-              match result {
-                ok(items) => {
-                  s.items = items
-                  s.error = ""
-                  s.cursor = clamp_cursor(s.cursor, items.size())
-                },
-                err(e) => { s.error = e },
-              }
-              s.loading = false
-            },
-          )
-          // After the inbox lands, kick off a detail fetch for whatever item
-          // ends up under the cursor (cursor 0 on first load).
-          request_detail_for_cursor(c, api_key)
-        },
-      )
-    },
-  )
+  async::start(fn() {
+    let result = inbox::load(api_key)
+    ffi::Dispatch(c, fn() {
+      ffi::Update<View>(c, fn(s: mut View) {
+        match result {
+          ok(items) => {
+            s.items = items
+            s.error = ""
+            s.cursor = clamp_cursor(s.cursor, items.size())
+          },
+          err(e) => { s.error = e },
+        }
+        s.loading = false
+      })
+      // After the inbox lands, kick off a detail fetch for whatever item
+      // ends up under the cursor (cursor 0 on first load).
+      request_detail_for_cursor(c, api_key)
+    })
+  })
 }
 
 // ── List rendering ────────────────────────────────────────────────────
@@ -199,12 +172,12 @@ fn render_row(theme: ui::Theme, item: inbox::Item, selected: Bool) ui::Widget {
     Overflow: ui::TextOverflowEllipsis,
     MaxLines: 1,
   }
-
+  
   let subtitle = ui::Text{
     Value: "{item.actor_name} {item.type_label}",
     Style: ui::Style{Foreground: theme.MutedForeground},
   }
-
+  
   ui::ListTile{
     Title: title,
     Subtitle: subtitle,
@@ -217,7 +190,7 @@ fn list_rows(theme: ui::Theme, model: View) [ui::Widget] {
   for item, idx in model.items {
     rows.push(render_row(theme, item, idx == model.cursor))
   }
-  deref rows
+  rows.@
 }
 
 // Width of the list pane (left side) in the split. Fixed at 36 cols for
@@ -379,7 +352,11 @@ fn render_detail(
   // specific comment/mention if present, else the issue description).
   // For comment/mention notifications the user wants to see THAT comment
   // immediately, not scroll past the whole issue body to find it.
-  let children: mut [ui::Widget] = mut [detail_header(theme, item, d), section_divider(theme, "Details"), detail_meta(theme, d)]
+  let children: mut [ui::Widget] = mut [
+    detail_header(theme, item, d),
+    section_divider(theme, "Details"),
+    detail_meta(theme, d),
+  ]
   match d.triggering_comment {
     comment => {
       children.push(section_divider(theme, "Comment"))
@@ -400,7 +377,7 @@ fn render_detail(
   // bounded so SoftWrap can actually wrap title and comment text.
   // ScrollPane would unbound both axes and the wrapped text would
   // render on a single very long line.
-  ui::ScrollView{Controller: scroll, Child: min_column(deref children, true)}
+  ui::ScrollView{Controller: scroll, Child: min_column(children.@, true)}
 }
 
 fn detail_pane(theme: ui::Theme, model: View) ui::Widget {
@@ -444,7 +421,7 @@ fn render_split(theme: ui::Theme, model: View) ui::Widget {
       ui::Text{Value: ""},
     ),
   }
-
+  
   // CrossAxisStretch is critical here: a row defaults to centering
   // children vertically at intrinsic size, which would leave the list
   // and detail floating in the middle of the body. We want both panes
@@ -496,15 +473,12 @@ fn body(theme: ui::Theme, model: View) ui::Widget {
 // ── Actions ───────────────────────────────────────────────────────────
 
 fn move_cursor(c: mut ffi::StateCtx, api_key: Str, delta: Int) {
-  ffi::Update<View>(
-    c,
-    fn(s: mut View) {
-      let next_cursor = clamp_cursor(s.cursor + delta, s.items.size())
-      s.cursor = next_cursor
-      s.list_scroll.ScrollTo(0, next_cursor)
-      s.detail_scroll.ScrollToStart()
-    },
-  )
+  ffi::Update<View>(c, fn(s: mut View) {
+    let next_cursor = clamp_cursor(s.cursor + delta, s.items.size())
+    s.cursor = next_cursor
+    s.list_scroll.ScrollTo(0, next_cursor)
+    s.detail_scroll.ScrollToStart()
+  })
   request_detail_for_cursor(c, api_key)
 }
 
@@ -516,45 +490,40 @@ fn delete_current(c: mut ffi::StateCtx, api_key: Str, notify: fn(Str, Str)) {
     // Fire-and-forget archive; on failure surface a toast. A failed
     // archive will also reappear on the next manual refresh since we
     // removed it locally.
-    async::start(
-      fn() {
-        match inbox::archive(api_key, id) {
-          ok(_) => (),
-          err(e) => notify("Couldn't archive notification", e),
-        }
-      },
-    )
+    async::start(fn() {
+      match inbox::archive(api_key, id) {
+        ok(_) => (),
+        err(e) => notify("Couldn't archive notification", e),
+      }
+    })
     // Batch every post-delete mutation into one pass so the optimistic
     // update is a single rebuild: drop the row, clamp the cursor, and
     // update the detail-pane tracking fields for the new cursor target.
-    ffi::Update<View>(
-      c,
-      fn(s: mut View) {
-        let remaining: mut [inbox::Item] = mut []
-        for it, idx in before.items {
-          if not idx == before.cursor {
-            remaining.push(it)
-          }
+    ffi::Update<View>(c, fn(s: mut View) {
+      let remaining: mut [inbox::Item] = mut []
+      for it, idx in before.items {
+        if not idx == before.cursor {
+          remaining.push(it)
         }
-        s.items = deref remaining
-        s.cursor = clamp_cursor(before.cursor, remaining.size())
-        if remaining.size() == 0 {
+      }
+      s.items = remaining.@
+      s.cursor = clamp_cursor(before.cursor, remaining.size())
+      if remaining.size() == 0 {
+        s.detail = Maybe::new()
+        s.detail_loaded_id = ""
+        s.detail_request_id = ""
+        s.detail_loading = false
+        s.detail_error = ""
+      } else {
+        let new_target = remaining.at(s.cursor).expect("clamped").notification_id
+        if not s.detail_loaded_id == new_target {
           s.detail = Maybe::new()
-          s.detail_loaded_id = ""
-          s.detail_request_id = ""
-          s.detail_loading = false
+          s.detail_request_id = new_target
+          s.detail_loading = true
           s.detail_error = ""
-        } else {
-          let new_target = remaining.at(s.cursor).expect("clamped").notification_id
-          if not s.detail_loaded_id == new_target {
-            s.detail = Maybe::new()
-            s.detail_request_id = new_target
-            s.detail_loading = true
-            s.detail_error = ""
-          }
         }
-      },
-    )
+      }
+    })
     // After the single state mutation, kick off a fetch for the new
     // cursor target if that detail isn't already cached.
     let after = ffi::StateValue<View>(c)
@@ -577,7 +546,7 @@ fn build(
 ) ui::Widget {
   let theme = ui::MustDepend<ui::Theme>(ctx)
   let model = ffi::StateValue<View>(c)
-
+  
   // Only the active tab's focus scope participates in auto_focus and
   // reclaim. Hidden tabs (kept mounted by IndexedStack) must not pull
   // focus onto themselves, or keystrokes would route to a tab the user
@@ -615,13 +584,10 @@ fn build(
         ui::EventHandled
       },
       "inbox.refresh": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
-        ffi::Update<View>(
-          c,
-          fn(s: mut View) {
-            s.loading = true
-            s.error = ""
-          },
-        )
+        ffi::Update<View>(c, fn(s: mut View) {
+          s.loading = true
+          s.error = ""
+        })
         load_inbox(c, api_key)
         ui::EventHandled
       },
@@ -697,13 +663,9 @@ fn new(api_key: Str, on_open: fn(inbox::Item), notify: fn(Str, Str), active: Boo
       if not s.started {
         s.started = true
         load_inbox(c, api_key)
-        refresh::schedule_periodic(
-          s.refresh_stop,
-          5 * 60 * 1000,
-          fn() {
-            refresh_inbox(c, api_key)
-          },
-        )
+        refresh::schedule_periodic(s.refresh_stop, 5 * 60 * 1000, fn() {
+          refresh_inbox(c, api_key)
+        })
       }
       // Reflect the notification count in the terminal title. Runs as
       // a build side effect (BuildContext.EventContext exists for

@@ -57,7 +57,9 @@ fn selected_hit(model: Search) Hit? {
   match model.results.size() == 0 {
     true => Maybe::new(),
     false => {
-      Maybe::new(model.results.at(clamp_cursor(model.cursor, model.results.size())).expect("clamped"))
+      Maybe::new(
+        model.results.at(clamp_cursor(model.cursor, model.results.size())).expect("clamped"),
+      )
     },
   }
 }
@@ -100,7 +102,7 @@ fn combined_search(api_key: Str, term: Str) SearchOutcome!Str {
         err(e) => Result::err(e),
       }
     },
-    false => Result::ok(SearchOutcome{hits: deref hits, warning: warning}),
+    false => Result::ok(SearchOutcome{hits: hits.@, warning: warning}),
   }
 }
 
@@ -113,56 +115,43 @@ fn combined_search(api_key: Str, term: Str) SearchOutcome!Str {
 // result so a long-running request from an older query can't
 // overwrite newer results.
 fn start_search(c: mut ffi::StateCtx, api_key: Str, query: Str, generation: Int) {
-  async::start(
-    fn() {
-      time::Sleep(300 * time::Millisecond)
-      let trimmed = query.trim()
-      ffi::Dispatch(
-        c,
-        fn() {
-          let current = ffi::StateValue<Search>(c)
-          let still_current = current.generation == generation and current.query.trim() == trimmed and (not trimmed.is_empty())
-          if still_current {
-            async::start(
-              fn() {
-                let result = combined_search(api_key, trimmed)
-                ffi::Dispatch(
-                  c,
-                  fn() {
-                    let current2 = ffi::StateValue<Search>(c)
-                    if current2.generation == generation and current2.query.trim() == trimmed {
-                      ffi::Update<Search>(
-                        c,
-                        fn(next: mut Search) {
-                          match result {
-                            ok(outcome) => {
-                              next.results = outcome.hits
-                              next.warning = outcome.warning
-                              next.cursor = 0
-                              next.error = ""
-                            },
-                            err(e) => {
-                              let empty: [Hit] = []
-                              next.results = empty
-                              next.warning = ""
-                              next.cursor = 0
-                              next.error = e
-                            },
-                          }
-                          next.loading = false
-                          next.searched = true
-                        },
-                      )
-                    }
+  async::start(fn() {
+    time::Sleep(300 * time::Millisecond)
+    let trimmed = query.trim()
+    ffi::Dispatch(c, fn() {
+      let current = ffi::StateValue<Search>(c)
+      let still_current = current.generation == generation and current.query.trim() == trimmed and (not trimmed.is_empty())
+      if still_current {
+        async::start(fn() {
+          let result = combined_search(api_key, trimmed)
+          ffi::Dispatch(c, fn() {
+            let current2 = ffi::StateValue<Search>(c)
+            if current2.generation == generation and current2.query.trim() == trimmed {
+              ffi::Update<Search>(c, fn(next: mut Search) {
+                match result {
+                  ok(outcome) => {
+                    next.results = outcome.hits
+                    next.warning = outcome.warning
+                    next.cursor = 0
+                    next.error = ""
                   },
-                )
-              },
-            )
-          }
-        },
-      )
-    },
-  )
+                  err(e) => {
+                    let empty: [Hit] = []
+                    next.results = empty
+                    next.warning = ""
+                    next.cursor = 0
+                    next.error = e
+                  },
+                }
+                next.loading = false
+                next.searched = true
+              })
+            }
+          })
+        })
+      }
+    })
+  })
 }
 
 // ── Result rows ──────────────────────────────────────────────────────
@@ -170,12 +159,7 @@ fn start_search(c: mut ffi::StateCtx, api_key: Str, query: Str, generation: Int)
 // Single row: identifier (10 cols) | title (flex, clipped with
 // ellipsis) | state name (12 cols). ListTile.Selected gives the cursor
 // row its theme.Primary chrome.
-fn result_row(
-  theme: ui::Theme,
-  hit: Hit,
-  selected: Bool,
-  on_press: fn(ui::EventContext),
-) ui::Widget {
+fn result_row(theme: ui::Theme, hit: Hit, selected: Bool, on_press: fn(ui::EventContext)) ui::Widget {
   // Issue rows: identifier | title | state. Doc rows: "doc" tag |
   // title | container. Same three-column shape so the list reads as
   // one aligned table.
@@ -274,47 +258,35 @@ fn results_body(theme: ui::Theme, model: Search, on_pick: fn(Int)) ui::Widget {
 fn on_query_changed(c: mut ffi::StateCtx, api_key: Str, value: Str) {
   let trimmed = value.trim()
   let generation = ffi::StateValue<Search>(c).generation + 1
-  ffi::Update<Search>(
-    c,
-    fn(next: mut Search) {
-      let empty: [Hit] = []
-      next.query = value
-      next.generation = generation
-      next.results = empty
-      next.warning = ""
-      next.cursor = 0
-      next.error = ""
-      if trimmed.is_empty() {
-        next.loading = false
-        next.searched = false
-      } else {
-        next.loading = true
-      }
-    },
-  )
+  ffi::Update<Search>(c, fn(next: mut Search) {
+    let empty: [Hit] = []
+    next.query = value
+    next.generation = generation
+    next.results = empty
+    next.warning = ""
+    next.cursor = 0
+    next.error = ""
+    if trimmed.is_empty() {
+      next.loading = false
+      next.searched = false
+    } else {
+      next.loading = true
+    }
+  })
   if not trimmed.is_empty() {
     start_search(c, api_key, value, generation)
   }
 }
 
-fn body(
-  c: mut ffi::StateCtx,
-  api_key: Str,
-  theme: ui::Theme,
-  model: Search,
-  on_open: fn(Hit),
-) ui::Widget {
+fn body(c: mut ffi::StateCtx, api_key: Str, theme: ui::Theme, model: Search, on_open: fn(Hit)) ui::Widget {
   let on_pick = fn(idx: Int) {
     // Click handler: move cursor to the picked row and open it (same
     // UX as the picker option click).
     let safe = clamp_cursor(idx, model.results.size())
     if model.results.size() > 0 {
-      ffi::Update<Search>(
-        c,
-        fn(next: mut Search) {
-          next.cursor = safe
-        },
-      )
+      ffi::Update<Search>(c, fn(next: mut Search) {
+        next.cursor = safe
+      })
       on_open(model.results.at(safe).expect("clamped"))
     }
   }
@@ -345,13 +317,15 @@ fn body(
     ui::SizedBox{Height: 8, Child: results_body(theme, model, on_pick)},
   ]
   if not model.warning.is_empty() {
-    children.push(ui::Text{Value: " {model.warning}", Style: ui::Style{Foreground: theme.MutedForeground}})
+    children.push(
+      ui::Text{Value: " {model.warning}", Style: ui::Style{Foreground: theme.MutedForeground}},
+    )
   }
   ui::Flex{
     Axis: ui::Vertical,
     MainAxisSize: ui::MainAxisSizeMin,
     CrossAxisAlignment: ui::CrossAxisStretch,
-    Children: deref children,
+    Children: children.@,
   }
 }
 
@@ -392,22 +366,19 @@ fn new(api_key: Str, on_open_issue: fn(issues::Issue), on_open_doc: fn(documents
     Build: fn(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
       let theme = ui::MustDepend<ui::Theme>(ctx)
       let model = ffi::StateValue<Search>(c)
-
+      
       let move_cursor = fn(delta: Int) {
         let current = ffi::StateValue<Search>(c)
         let count = current.results.size()
         if count > 0 {
           let next_cursor = clamp_cursor(current.cursor + delta, count)
-          ffi::Update<Search>(
-            c,
-            fn(next: mut Search) {
-              next.cursor = next_cursor
-            },
-          )
+          ffi::Update<Search>(c, fn(next: mut Search) {
+            next.cursor = next_cursor
+          })
           current.list_scroll.RevealIndex(next_cursor)
         }
       }
-
+      
       // Up / Down / Enter intercepted during the capture phase before
       // TextField's target phase consumes them. Other keys (typing)
       // aren't bound here, so they pass through to the field

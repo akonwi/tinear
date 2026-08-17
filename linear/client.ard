@@ -1,9 +1,9 @@
+use decode
 use go:encoding/json
 use go:io
 use go:net/http
 use go:strings
 use go:time
-use decode
 
 // Shared GraphQL client for the Linear API.
 //
@@ -13,14 +13,14 @@ private fn post(api_key: Str, body: Str) Str!Str {
   let req = try http::NewRequest("POST", "https://api.linear.app/graphql", strings::NewReader(body))
   req.Header.Set("Content-Type", "application/json")
   req.Header.Set("Authorization", api_key)
-
+  
   let client = mut http::Client{Timeout: 30 * time::Second}
   let res = try client.Do(req)
   defer res.Body.Close()
-
+  
   mut bytes = try io::ReadAll(res.Body)
   let text = Str::from(bytes)
-
+  
   match res.StatusCode >= 200 and res.StatusCode < 300 {
     true => Result::ok(text),
     false => Result::err("HTTP {res.StatusCode}: {text}"),
@@ -29,7 +29,7 @@ private fn post(api_key: Str, body: Str) Str!Str {
 
 private fn extract_data(res_body: Str) Any!Str {
   let parsed = try decode::from_json(res_body)
-
+  
   // Check for GraphQL errors — if "errors" field exists, report it
   match decode::run(parsed, decode::field("errors", decode::any)) {
     ok(errs) => {

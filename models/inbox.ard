@@ -10,14 +10,14 @@ struct Item {
   title: Str,
   // URL the `open` action launches in the browser when there's no
   // in-app destination (PR / project notifications, primarily).
-  //
+  // 
   // For PR notifications this is `pullRequest.url` (the GitHub /
   // GitLab PR page) so the user lands directly on the hosting
   // provider. We deliberately do NOT use `notification.url` for PRs
   // even though it includes a `#comment-...` fragment, because that
   // fragment is Linear's internal review-UI link, not a GitHub deep
   // link.
-  //
+  // 
   // For other types we use `notification.url`, which is Linear's
   // deep-link to the activity.
   url: Str,
@@ -104,12 +104,18 @@ private fn dynamic_id_and_title(notif: Any, n_type: Str) IdTitle {
 }
 
 fn decode_item(notif: Any) Item {
-  let notification_id = decode::run(notif, decode::field("id", decode::string)).expect("Missing notification id")
-  let n_type = decode::run(notif, decode::field("type", decode::string)).expect("Missing notification type")
+  let notification_id = decode::run(
+    notif,
+    decode::field("id", decode::string),
+  ).expect("Missing notification id")
+  let n_type = decode::run(
+    notif,
+    decode::field("type", decode::string),
+  ).expect("Missing notification type")
   let type_label = format_type(n_type)
-
+  
   let actor_name = user_display_name_at(notif, "actor")
-
+  
   let info = dynamic_id_and_title(notif, n_type)
   let url = match is_pr_type(n_type) {
     true => optional_nested_str(notif, "pullRequest", "url", ""),
@@ -216,7 +222,10 @@ fn fetch_notification_detail(api_key: Str, notification_id: Str) Any!Str {
     }}
     `
   let data = try client::graphql(api_key, query)
-  let notification = decode::run(data, decode::field("notification", decode::any)).expect("Missing notification")
+  let notification = decode::run(
+    data,
+    decode::field("notification", decode::any),
+  ).expect("Missing notification")
   Result::ok(notification)
 }
 
@@ -232,7 +241,7 @@ fn load(api_key: Str) [Item]!Str {
   for node in nodes {
     items.push(decode_item(node))
   }
-  Result::ok(deref items)
+  Result::ok(items.@)
 }
 
 fn archive(api_key: Str, notification_id: Str) Void!Str {
@@ -324,14 +333,14 @@ fn path_str3(data: Any, k1: Str, k2: Str, k3: Str, fallback: Str) Str {
 fn path_dynamic1(data: Any, k: Str) Any {
   match decode::run(data, decode::field(k, decode::any)) {
     ok(d) => d,
-    err(_) => "\{\}",
+    err(_) => "{{}}",
   }
 }
 
 fn path_dynamic2(data: Any, k1: Str, k2: Str) Any {
   match decode::run(data, decode::field(k1, decode::field(k2, decode::any))) {
     ok(d) => d,
-    err(_) => "\{\}",
+    err(_) => "{{}}",
   }
 }
 
@@ -453,13 +462,16 @@ fn decode_issue_detail(notif: Any) Detail {
     project_name: path_str3(notif, "issue", "project", "name", ""),
     url: path_str2(notif, "issue", "url", ""),
     triggering_comment: decode_triggering_comment(notif),
-    comments: deref comments,
-    history: deref history,
+    comments: comments.@,
+    history: history.@,
   }
 }
 
 fn decode_detail(notif: Any) Detail {
-  let n_type = decode::run(notif, decode::field("type", decode::string)).expect("Missing notification type")
+  let n_type = decode::run(
+    notif,
+    decode::field("type", decode::string),
+  ).expect("Missing notification type")
   match is_pr_type(n_type) {
     true => decode_pr_detail(notif),
     false => decode_issue_detail(notif),

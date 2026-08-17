@@ -30,7 +30,7 @@ struct Compose {
 }
 
 fn submit(
-  c: mut ffi::StateCtx,
+  ctx: mut ffi::StateCtx,
   api_key: Str,
   issue: issues::Issue,
   parent_id: Str,
@@ -42,41 +42,30 @@ fn submit(
   if trimmed.is_empty() {
     {}
   } else {
-    ffi::Update<Compose>(
-      c,
-      fn(s: mut Compose) {
-        s.sending = true
-        s.error = ""
-      },
-    )
-    async::start(
-      fn() {
-        let result = issues::create_comment(api_key, issue.id, trimmed, parent_id)
-        match result {
-          ok(_) => {
-            // Reload the host's comments, then close. refresh_comments
-            // dispatches onto the host's UI state internally, so it's
-            // safe to call from this background fiber. So is close.
-            refresh_comments()
-            close()
-          },
-          err(e) => {
-            ffi::Dispatch(
-              c,
-              fn() {
-                ffi::Update<Compose>(
-                  c,
-                  fn(s: mut Compose) {
-                    s.sending = false
-                    s.error = e
-                  },
-                )
-              },
-            )
-          },
-        }
-      },
-    )
+    ffi::Update<Compose>(ctx, fn(state) {
+      state.sending = true
+      state.error = ""
+    })
+    async::start(fn() {
+      let result = issues::create_comment(api_key, issue.id, trimmed, parent_id)
+      match result {
+        ok(_) => {
+          // Reload the host's comments, then close. refresh_comments
+          // dispatches onto the host's UI state internally, so it's
+          // safe to call from this background fiber. So is close.
+          refresh_comments()
+          close()
+        },
+        err(e) => {
+          ffi::Dispatch(ctx, fn() {
+            ffi::Update<Compose>(ctx, fn(state) {
+              state.sending = false
+              state.error = e
+            })
+          })
+        },
+      }
+    })
   }
 }
 
@@ -142,13 +131,10 @@ fn new(api_key: Str, issue: issues::Issue, parent_id: Str, refresh_comments: fn(
             MinHeight: 6,
             SoftWrap: true,
             OnChanged: fn(ev: ui::EventContext, value: Str) {
-              ffi::Update<Compose>(
-                c,
-                fn(s: mut Compose) {
-                  s.text = value
-                  s.error = ""
-                },
-              )
+              ffi::Update<Compose>(c, fn(state) {
+                state.text = value
+                state.error = ""
+              })
             },
           },
         },

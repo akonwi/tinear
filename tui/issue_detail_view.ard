@@ -38,7 +38,7 @@ let SECTION_COMMENTS: Int = 1
 
 struct Detail {
   started: Bool,
-
+  
   // Loaded issue (populated on first fetch). Identifier is held
   // separately so we can show "Loading {identifier}…" until the first
   // fetch completes.
@@ -46,7 +46,7 @@ struct Detail {
   issue: issues::Issue?,
   issue_loading: Bool,
   issue_error: Str,
-
+  
   // Comments.
   comments: [issues::Comment],
   comments_loading: Bool,
@@ -55,13 +55,13 @@ struct Detail {
   // move it; the cursored card is focused so the enclosing ScrollView
   // auto-reveals it (variable-height cards — no ItemExtent tricks).
   comment_cursor: Int,
-
+  
   // Guards stale issue snapshots: loads capture the generation when
   // they start and only apply if it hasn't moved (a successful save
   // bumps it, so an older periodic refresh can't reinstall the
   // pre-save description).
   issue_generation: Int,
-
+  
   // In-place description editing (Description section only). The
   // draft is separate from the issue so a background refresh can't
   // clobber unsaved edits.
@@ -69,13 +69,13 @@ struct Detail {
   description_draft: Str,
   description_saving: Bool,
   description_error: Str,
-
+  
   // Stops the per-tab periodic refresh loop on dispose.
   refresh_stop: Chan<Bool>,
-
+  
   // Body scroll controller.
   scroll: mut ui::ScrollController,
-
+  
   // Active section in the description/comments tab bar.
   active_section: Int,
 }
@@ -84,58 +84,42 @@ struct Detail {
 
 fn load_issue(c: mut ffi::StateCtx, api_key: Str, identifier: Str) {
   let generation = ffi::StateValue<Detail>(c).issue_generation
-  async::start(
-    fn() {
-      let result = issues::load_issue(api_key, identifier)
-      ffi::Dispatch(
-        c,
-        fn() {
-          if ffi::StateValue<Detail>(c).issue_generation == generation {
-            ffi::Update<Detail>(
-              c,
-              fn(v: mut Detail) {
-                match result {
-                  ok(issue) => {
-                    v.issue = Maybe::new(issue)
-                    v.issue_error = ""
-                  },
-                  err(e) => { v.issue_error = e },
-                }
-                v.issue_loading = false
-              },
-            )
+  async::start(fn() {
+    let result = issues::load_issue(api_key, identifier)
+    ffi::Dispatch(c, fn() {
+      if ffi::StateValue<Detail>(c).issue_generation == generation {
+        ffi::Update<Detail>(c, fn(v: mut Detail) {
+          match result {
+            ok(issue) => {
+              v.issue = Maybe::new(issue)
+              v.issue_error = ""
+            },
+            err(e) => { v.issue_error = e },
           }
-        },
-      )
-    },
-  )
+          v.issue_loading = false
+        })
+      }
+    })
+  })
 }
 
 fn load_comments(c: mut ffi::StateCtx, api_key: Str, identifier: Str) {
-  async::start(
-    fn() {
-      let result = issues::load_comments(api_key, identifier)
-      ffi::Dispatch(
-        c,
-        fn() {
-          ffi::Update<Detail>(
-            c,
-            fn(v: mut Detail) {
-              match result {
-                ok(comments) => {
-                  v.comments = comments
-                  v.comments_error = ""
-                  v.comment_cursor = clamp_comment_cursor(v.comment_cursor, comments.size())
-                },
-                err(e) => { v.comments_error = e },
-              }
-              v.comments_loading = false
-            },
-          )
-        },
-      )
-    },
-  )
+  async::start(fn() {
+    let result = issues::load_comments(api_key, identifier)
+    ffi::Dispatch(c, fn() {
+      ffi::Update<Detail>(c, fn(v: mut Detail) {
+        match result {
+          ok(comments) => {
+            v.comments = comments
+            v.comments_error = ""
+            v.comment_cursor = clamp_comment_cursor(v.comment_cursor, comments.size())
+          },
+          err(e) => { v.comments_error = e },
+        }
+        v.comments_loading = false
+      })
+    })
+  })
 }
 
 // Dispatched by the compose modal after a successful create_comment.
@@ -143,30 +127,22 @@ fn load_comments(c: mut ffi::StateCtx, api_key: Str, identifier: Str) {
 // visible. The fetch stays on a background fiber so the modal can
 // close immediately.
 fn refresh_comments_after_post(c: mut ffi::StateCtx, api_key: Str, identifier: Str) {
-  async::start(
-    fn() {
-      let refreshed = issues::load_comments(api_key, identifier)
-      ffi::Dispatch(
-        c,
-        fn() {
-          ffi::Update<Detail>(
-            c,
-            fn(v: mut Detail) {
-              match refreshed {
-                ok(comments) => {
-                  v.comments = comments
-                  v.comments_error = ""
-                  v.comment_cursor = clamp_comment_cursor(v.comment_cursor, comments.size())
-                },
-                err(e) => { v.comments_error = e },
-              }
-              v.scroll.ScrollToEnd()
-            },
-          )
-        },
-      )
-    },
-  )
+  async::start(fn() {
+    let refreshed = issues::load_comments(api_key, identifier)
+    ffi::Dispatch(c, fn() {
+      ffi::Update<Detail>(c, fn(v: mut Detail) {
+        match refreshed {
+          ok(comments) => {
+            v.comments = comments
+            v.comments_error = ""
+            v.comment_cursor = clamp_comment_cursor(v.comment_cursor, comments.size())
+          },
+          err(e) => { v.comments_error = e },
+        }
+        v.scroll.ScrollToEnd()
+      })
+    })
+  })
 }
 
 // Silent refresh of both the issue and its comments. Used by the
@@ -179,54 +155,38 @@ fn refresh_detail(
   notify: fn(Str, Str, toast::ToastVariant),
 ) {
   let generation = ffi::StateValue<Detail>(c).issue_generation
-  async::start(
-    fn() {
-      let issue_result = issues::load_issue(api_key, identifier)
-      match issue_result {
-        ok(issue) => {
-          ffi::Dispatch(
-            c,
-            fn() {
-              // Discard snapshots that started before a save landed.
-              if ffi::StateValue<Detail>(c).issue_generation == generation {
-                ffi::Update<Detail>(
-                  c,
-                  fn(v: mut Detail) {
-                    v.issue = Maybe::new(issue)
-                    v.issue_error = ""
-                  },
-                )
-              }
-            },
-          )
-        },
-        err(e) => notify("Issue refresh", e, toast::ToastVariant::error),
-      }
-    },
-  )
-  async::start(
-    fn() {
-      let comments_result = issues::load_comments(api_key, identifier)
-      match comments_result {
-        ok(comments) => {
-          ffi::Dispatch(
-            c,
-            fn() {
-              ffi::Update<Detail>(
-                c,
-                fn(v: mut Detail) {
-                  v.comments = comments
-                  v.comments_error = ""
-                  v.comment_cursor = clamp_comment_cursor(v.comment_cursor, comments.size())
-                },
-              )
-            },
-          )
-        },
-        err(e) => notify("Comments refresh", e, toast::ToastVariant::error),
-      }
-    },
-  )
+  async::start(fn() {
+    let issue_result = issues::load_issue(api_key, identifier)
+    match issue_result {
+      ok(issue) => {
+        ffi::Dispatch(c, fn() {
+          // Discard snapshots that started before a save landed.
+          if ffi::StateValue<Detail>(c).issue_generation == generation {
+            ffi::Update<Detail>(c, fn(v: mut Detail) {
+              v.issue = Maybe::new(issue)
+              v.issue_error = ""
+            })
+          }
+        })
+      },
+      err(e) => notify("Issue refresh", e, toast::ToastVariant::error),
+    }
+  })
+  async::start(fn() {
+    let comments_result = issues::load_comments(api_key, identifier)
+    match comments_result {
+      ok(comments) => {
+        ffi::Dispatch(c, fn() {
+          ffi::Update<Detail>(c, fn(v: mut Detail) {
+            v.comments = comments
+            v.comments_error = ""
+            v.comment_cursor = clamp_comment_cursor(v.comment_cursor, comments.size())
+          })
+        })
+      },
+      err(e) => notify("Comments refresh", e, toast::ToastVariant::error),
+    }
+  })
 }
 
 // ── Layout helpers ───────────────────────────────────────────────────
@@ -371,12 +331,9 @@ fn move_comment_cursor(c: mut ffi::StateCtx, delta: Int, nodes: [mut ui::FocusNo
   let count = current.comments.size()
   if count > 0 {
     let next = clamp_comment_cursor(current.comment_cursor + delta, count)
-    ffi::Update<Detail>(
-      c,
-      fn(v: mut Detail) {
-        v.comment_cursor = next
-      },
-    )
+    ffi::Update<Detail>(c, fn(v: mut Detail) {
+      v.comment_cursor = next
+    })
     // Focusing the card makes the enclosing ScrollView reveal it.
     match nodes.at(next) {
       node => node.RequestFocus(),
@@ -387,15 +344,12 @@ fn move_comment_cursor(c: mut ffi::StateCtx, delta: Int, nodes: [mut ui::FocusNo
 
 fn switch_section(c: mut ffi::StateCtx, target: Int) {
   if not ffi::StateValue<Detail>(c).active_section == target {
-    ffi::Update<Detail>(
-      c,
-      fn(v: mut Detail) {
-        v.active_section = target
-        // Reset scroll so the new section starts at the top — the previous
-        // section's offset would otherwise be applied to unrelated content.
-        v.scroll.ScrollToStart()
-      },
-    )
+    ffi::Update<Detail>(c, fn(v: mut Detail) {
+      v.active_section = target
+      // Reset scroll so the new section starts at the top — the previous
+      // section's offset would otherwise be applied to unrelated content.
+      v.scroll.ScrollToStart()
+    })
   }
 }
 
@@ -403,29 +357,23 @@ fn start_editing_description(c: mut ffi::StateCtx) {
   let current = ffi::StateValue<Detail>(c)
   match current.issue {
     issue => {
-      ffi::Update<Detail>(
-        c,
-        fn(v: mut Detail) {
-          v.active_section = SECTION_DESCRIPTION
-          v.editing_description = true
-          v.description_draft = issue.description.or("")
-          v.description_error = ""
-        },
-      )
+      ffi::Update<Detail>(c, fn(v: mut Detail) {
+        v.active_section = SECTION_DESCRIPTION
+        v.editing_description = true
+        v.description_draft = issue.description.or("")
+        v.description_error = ""
+      })
     },
     _ => (),
   }
 }
 
 fn cancel_editing_description(c: mut ffi::StateCtx) {
-  ffi::Update<Detail>(
-    c,
-    fn(v: mut Detail) {
-      v.editing_description = false
-      v.description_saving = false
-      v.description_error = ""
-    },
-  )
+  ffi::Update<Detail>(c, fn(v: mut Detail) {
+    v.editing_description = false
+    v.description_saving = false
+    v.description_error = ""
+  })
 }
 
 fn save_description(
@@ -439,58 +387,44 @@ fn save_description(
     issue => {
       if not current.description_saving {
         let text = current.description_draft
-        ffi::Update<Detail>(
-          c,
-          fn(v: mut Detail) {
-            v.description_saving = true
-            v.description_error = ""
-          },
-        )
-        async::start(
-          fn() {
-            let result = issues::update_description(api_key, issue.id, text)
-            ffi::Dispatch(
-              c,
-              fn() {
-                match result {
-                  ok(_) => {
-                    // No success toast: the re-rendered description IS
-                    // the feedback (applied optimistically from the
-                    // draft). Bumping the generation invalidates any
-                    // in-flight pre-save refresh; the follow-up load
-                    // reconciles with the server. Errors surface inline.
-                    ffi::Update<Detail>(
-                      c,
-                      fn(v: mut Detail) {
-                        v.editing_description = false
-                        v.description_saving = false
-                        v.issue_generation = v.issue_generation + 1
-                        match v.issue {
-                          loaded => {
-                            let updated = mut loaded
-                            updated.description = Maybe::new(text)
-                            v.issue = Maybe::new(deref updated)
-                          },
-                          _ => (),
-                        }
-                      },
-                    )
-                    load_issue(c, api_key, identifier)
-                  },
-                  err(e) => {
-                    ffi::Update<Detail>(
-                      c,
-                      fn(v: mut Detail) {
-                        v.description_saving = false
-                        v.description_error = e
-                      },
-                    )
-                  },
-                }
+        ffi::Update<Detail>(c, fn(v: mut Detail) {
+          v.description_saving = true
+          v.description_error = ""
+        })
+        async::start(fn() {
+          let result = issues::update_description(api_key, issue.id, text)
+          ffi::Dispatch(c, fn() {
+            match result {
+              ok(_) => {
+                // No success toast: the re-rendered description IS
+                // the feedback (applied optimistically from the
+                // draft). Bumping the generation invalidates any
+                // in-flight pre-save refresh; the follow-up load
+                // reconciles with the server. Errors surface inline.
+                ffi::Update<Detail>(c, fn(v: mut Detail) {
+                  v.editing_description = false
+                  v.description_saving = false
+                  v.issue_generation = v.issue_generation + 1
+                  match v.issue {
+                    loaded => {
+                      let updated = mut loaded
+                      updated.description = Maybe::new(text)
+                      v.issue = Maybe::new(updated.@)
+                    },
+                    _ => (),
+                  }
+                })
+                load_issue(c, api_key, identifier)
               },
-            )
-          },
-        )
+              err(e) => {
+                ffi::Update<Detail>(c, fn(v: mut Detail) {
+                  v.description_saving = false
+                  v.description_error = e
+                })
+              },
+            }
+          })
+        })
       }
     },
     _ => (),
@@ -547,11 +481,15 @@ fn description_editor(c: mut ffi::StateCtx, theme: ui::Theme, model: Detail) ui:
   // there's nothing to say) so reconciliation never sees a type swap.
   let error_widget: ui::Widget = match model.description_error.is_empty() {
     true => ui::Text{Value: ""},
-    false => ui::Text{Value: "⚠ {model.description_error}", Style: ui::Style{Foreground: theme.DangerText}},
+    false => {
+      ui::Text{Value: "⚠ {model.description_error}", Style: ui::Style{Foreground: theme.DangerText}}
+    },
   }
   let status_widget: ui::Widget = match model.description_saving {
     true => ui::Text{Value: "Saving…", Style: ui::Style{Foreground: theme.MutedForeground}},
-    false => ui::Text{Value: "Ctrl+↵ save · Esc cancel", Style: ui::Style{Foreground: theme.MutedForeground}},
+    false => {
+      ui::Text{Value: "Ctrl+↵ save · Esc cancel", Style: ui::Style{Foreground: theme.MutedForeground}}
+    },
   }
   mut children: [ui::Widget] = [
     error_widget,
@@ -564,13 +502,10 @@ fn description_editor(c: mut ffi::StateCtx, theme: ui::Theme, model: Detail) ui:
         MinHeight: 12,
         SoftWrap: true,
         OnChanged: fn(ev: ui::EventContext, value: Str) {
-          ffi::Update<Detail>(
-            c,
-            fn(v: mut Detail) {
-              v.description_draft = value
-              v.description_error = ""
-            },
-          )
+          ffi::Update<Detail>(c, fn(v: mut Detail) {
+            v.description_draft = value
+            v.description_error = ""
+          })
         },
       },
     },
@@ -589,7 +524,10 @@ fn comment_card(theme: ui::Theme, comment: issues::Comment, selected: Bool) ui::
   )
   header_children.push(muted(theme, " · "))
   header_children.push(muted(theme, text::format_date(comment.created_at)))
-  mut children: [ui::Widget] = [ui::Flex{Axis: ui::Horizontal, Children: deref header_children}, markdown::render(theme, comment.body)]
+  mut children: [ui::Widget] = [
+    ui::Flex{Axis: ui::Horizontal, Children: header_children.@},
+    markdown::render(theme, comment.body),
+  ]
   let card = min_column(children, true)
   // Replies indent under their parent; Linear threads are one level
   // deep, so a single indent step is all there is.
@@ -645,7 +583,7 @@ fn comments_body(
           rows.push(ui::Padding(ui::Symmetric(0, 1), divider(theme)))
         }
       }
-      min_column(deref rows, true)
+      min_column(rows.@, true)
     },
   }
 }
@@ -662,14 +600,16 @@ fn active_body(
   nodes: [mut ui::FocusNode],
 ) ui::Widget {
   let inner = match {
-    model.active_section == SECTION_COMMENTS => comments_body(
-      theme,
-      model.comments,
-      model.comments_loading,
-      model.comments_error,
-      model.comment_cursor,
-      nodes,
-    ),
+    model.active_section == SECTION_COMMENTS => {
+      comments_body(
+        theme,
+        model.comments,
+        model.comments_loading,
+        model.comments_error,
+        model.comment_cursor,
+        nodes,
+      )
+    },
     model.editing_description => description_editor(c, theme, model),
     _ => description_body_widget(theme, issue),
   }
@@ -689,14 +629,16 @@ fn loaded_layout(
     ui::Padding(ui::Symmetric(1, 0), metadata_header(theme, issue)),
     divider(theme),
     ui::Padding(ui::Symmetric(1, 0), section_tabs(c, theme, model)),
-    ui::Expanded(ui::ScrollView{Controller: model.scroll, Child: active_body(c, theme, issue, model, nodes)}),
+    ui::Expanded(
+      ui::ScrollView{Controller: model.scroll, Child: active_body(c, theme, issue, model, nodes)},
+    ),
   ]
   let content = ui::Flex{
     Axis: ui::Vertical,
     CrossAxisAlignment: ui::CrossAxisStretch,
     Children: children,
   }
-
+  
   // One SelectionArea wraps the whole tab so mouse-drag selection spans
   // the sticky header (id, title, field grid) and the scrollable body
   // alike. Interactive children (the section tab chips) still click:
@@ -729,28 +671,32 @@ fn error_placeholder(theme: ui::Theme, identifier: Str, error: Str) ui::Widget {
 
 fn shortcut_bindings(editing: Bool) [Str: ui::Intent] {
   match editing {
-    true => [
-      "Ctrl+Enter": ffi::Intent("issue_detail.save_description"),
-      "Ctrl+m": ffi::Intent("issue_detail.save_description"),
-      "Ctrl+j": ffi::Intent("issue_detail.save_description"),
-    ],
-    false => [
-      "j": ffi::Intent("issue_detail.nav_down"),
-      "Down": ffi::Intent("issue_detail.scroll_down"),
-      "k": ffi::Intent("issue_detail.nav_up"),
-      "Up": ffi::Intent("issue_detail.scroll_up"),
-      "d": ffi::Intent("issue_detail.section_description"),
-      "e": ffi::Intent("issue_detail.edit_description"),
-      "c": ffi::Intent("issue_detail.section_comments"),
-      "n": ffi::Intent("issue_detail.compose"),
-      "r": ffi::Intent("issue_detail.reply"),
-      "o": ffi::Intent("issue_detail.open_in_browser"),
-      "s": ffi::Intent("issue_detail.state_picker"),
-      "y": ffi::Intent("issue_detail.cycle_picker"),
-      "p": ffi::Intent("issue_detail.priority_picker"),
-      "a": ffi::Intent("issue_detail.assignee_picker"),
-      "Shift+p": ffi::Intent("issue_detail.project_picker"),
-    ],
+    true => {
+      [
+        "Ctrl+Enter": ffi::Intent("issue_detail.save_description"),
+        "Ctrl+m": ffi::Intent("issue_detail.save_description"),
+        "Ctrl+j": ffi::Intent("issue_detail.save_description"),
+      ]
+    },
+    false => {
+      [
+        "j": ffi::Intent("issue_detail.nav_down"),
+        "Down": ffi::Intent("issue_detail.scroll_down"),
+        "k": ffi::Intent("issue_detail.nav_up"),
+        "Up": ffi::Intent("issue_detail.scroll_up"),
+        "d": ffi::Intent("issue_detail.section_description"),
+        "e": ffi::Intent("issue_detail.edit_description"),
+        "c": ffi::Intent("issue_detail.section_comments"),
+        "n": ffi::Intent("issue_detail.compose"),
+        "r": ffi::Intent("issue_detail.reply"),
+        "o": ffi::Intent("issue_detail.open_in_browser"),
+        "s": ffi::Intent("issue_detail.state_picker"),
+        "y": ffi::Intent("issue_detail.cycle_picker"),
+        "p": ffi::Intent("issue_detail.priority_picker"),
+        "a": ffi::Intent("issue_detail.assignee_picker"),
+        "Shift+p": ffi::Intent("issue_detail.project_picker"),
+      ]
+    },
   }
 }
 
@@ -778,12 +724,12 @@ fn build(
     mut node = ui::FocusNode{}
     comment_nodes.push(mut node)
   }
-
+  
   // Body chooses between loading / error / loaded layouts, wrapped in
   // a stable outer column so the widget type at this slot never
   // changes between rebuilds (widget-reconciliation trap).
   let body_widget = match model.issue {
-    issue => loaded_layout(c, theme, issue, model, deref comment_nodes),
+    issue => loaded_layout(c, theme, issue, model, comment_nodes.@),
     _ => {
       match {
         not model.issue_error.is_empty() => error_placeholder(theme, identifier, model.issue_error),
@@ -799,7 +745,7 @@ fn build(
     CrossAxisAlignment: ui::CrossAxisStretch,
     Children: children,
   }
-
+  
   // While editing, an extra Actions layer shadows intents that must
   // not escape to the shell. Actions lookup stops at the FIRST
   // registered handler (Ignored does not forward to outer Actions),
@@ -846,7 +792,7 @@ fn build(
     },
   ]
   let no_bindings: [ui::IntentType: ui::ActionFunc] = [:]
-
+  
   // Only the active issue tab participates in focus management (see
   // the shell's IndexedStack note).
   ui::Actions{
@@ -854,6 +800,8 @@ fn build(
       // `n` opens the compose modal. If the user is on the Description
       // section we also switch to Comments first so the freshly-posted
       // comment will show up in context once we re-render.
+      // j/k: comment cursor in the Comments section, line scroll in
+      // Description. Up/Down always line-scroll (bound separately).
       "issue_detail.scroll_up": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
         model.scroll.ScrollByLines(-1)
         ui::EventHandled
@@ -862,11 +810,9 @@ fn build(
         model.scroll.ScrollByLines(1)
         ui::EventHandled
       },
-      // j/k: comment cursor in the Comments section, line scroll in
-      // Description. Up/Down always line-scroll (bound separately).
       "issue_detail.nav_up": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
         match ffi::StateValue<Detail>(c).active_section == SECTION_COMMENTS {
-          true => move_comment_cursor(c, -1, deref comment_nodes),
+          true => move_comment_cursor(c, -1, comment_nodes.@),
           false => {
             let _ = model.scroll.ScrollByLines(-1)
           },
@@ -875,7 +821,7 @@ fn build(
       },
       "issue_detail.nav_down": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
         match ffi::StateValue<Detail>(c).active_section == SECTION_COMMENTS {
-          true => move_comment_cursor(c, 1, deref comment_nodes),
+          true => move_comment_cursor(c, 1, comment_nodes.@),
           false => {
             let _ = model.scroll.ScrollByLines(1)
           },
@@ -908,23 +854,24 @@ fn build(
             let refresh_cb = fn() {
               refresh_comments_after_post(c, api_key, identifier)
             }
-            show_modal(
-              fn(theme_inner: ui::Theme, close: fn()) ui::Widget {
-                modal::show_modal(
+            show_modal(fn(theme_inner: ui::Theme, close: fn()) ui::Widget {
+              modal::show_modal(
+                theme_inner,
+                "New comment — {issue.identifier}",
+                compose_view::new(api_key, issue, "", refresh_cb, close),
+                hints_bar::row(
                   theme_inner,
-                  "New comment — {issue.identifier}",
-                  compose_view::new(api_key, issue, "", refresh_cb, close),
-                  hints_bar::row(
-                    theme_inner,
-                    [hints_bar::Hint{key: "Ctrl+↵", label: "send"}, hints_bar::Hint{key: "Esc", label: "cancel"}],
-                  ),
-                  Maybe::new(70),
-                  fn(ev2: ui::EventContext) {
-                    close()
-                  },
-                )
-              },
-            )
+                  [
+                    hints_bar::Hint{key: "Ctrl+↵", label: "send"},
+                    hints_bar::Hint{key: "Esc", label: "cancel"},
+                  ],
+                ),
+                Maybe::new(70),
+                fn(ev2: ui::EventContext) {
+                  close()
+                },
+              )
+            })
           },
           _ => (),
         }
@@ -949,23 +896,24 @@ fn build(
                     let refresh_cb = fn() {
                       refresh_comments_after_post(c, api_key, identifier)
                     }
-                    show_modal(
-                      fn(theme_inner: ui::Theme, close: fn()) ui::Widget {
-                        modal::show_modal(
+                    show_modal(fn(theme_inner: ui::Theme, close: fn()) ui::Widget {
+                      modal::show_modal(
+                        theme_inner,
+                        "Reply to {author} — {issue.identifier}",
+                        compose_view::new(api_key, issue, parent_id, refresh_cb, close),
+                        hints_bar::row(
                           theme_inner,
-                          "Reply to {author} — {issue.identifier}",
-                          compose_view::new(api_key, issue, parent_id, refresh_cb, close),
-                          hints_bar::row(
-                            theme_inner,
-                            [hints_bar::Hint{key: "Ctrl+↵", label: "send"}, hints_bar::Hint{key: "Esc", label: "cancel"}],
-                          ),
-                          Maybe::new(70),
-                          fn(ev2: ui::EventContext) {
-                            close()
-                          },
-                        )
-                      },
-                    )
+                          [
+                            hints_bar::Hint{key: "Ctrl+↵", label: "send"},
+                            hints_bar::Hint{key: "Esc", label: "cancel"},
+                          ],
+                        ),
+                        Maybe::new(70),
+                        fn(ev2: ui::EventContext) {
+                          close()
+                        },
+                      )
+                    })
                     ui::EventHandled
                   },
                   _ => ui::EventIgnored,
@@ -1002,20 +950,15 @@ fn build(
               close_modal,
               notify,
               fn(new_state_id: Str) {
-                async::start(
-                  fn() {
-                    let r = issues::update_state(api_key, issue_id, new_state_id)
-                    ffi::Dispatch(
-                      c,
-                      fn() {
-                        match r {
-                          ok(_) => load_issue(c, api_key, identifier),
-                          err(e) => notify("Update state", e, toast::ToastVariant::error),
-                        }
-                      },
-                    )
-                  },
-                )
+                async::start(fn() {
+                  let r = issues::update_state(api_key, issue_id, new_state_id)
+                  ffi::Dispatch(c, fn() {
+                    match r {
+                      ok(_) => load_issue(c, api_key, identifier),
+                      err(e) => notify("Update state", e, toast::ToastVariant::error),
+                    }
+                  })
+                })
               },
             )
           },
@@ -1027,26 +970,17 @@ fn build(
         match ffi::StateValue<Detail>(c).issue {
           issue => {
             let issue_id = issue.id
-            issue_pickers::open_priority_picker(
-              issue,
-              show_modal,
-              fn(new_priority: Int) {
-                async::start(
-                  fn() {
-                    let r = issues::update_priority(api_key, issue_id, new_priority)
-                    ffi::Dispatch(
-                      c,
-                      fn() {
-                        match r {
-                          ok(_) => load_issue(c, api_key, identifier),
-                          err(e) => notify("Update priority", e, toast::ToastVariant::error),
-                        }
-                      },
-                    )
-                  },
-                )
-              },
-            )
+            issue_pickers::open_priority_picker(issue, show_modal, fn(new_priority: Int) {
+              async::start(fn() {
+                let r = issues::update_priority(api_key, issue_id, new_priority)
+                ffi::Dispatch(c, fn() {
+                  match r {
+                    ok(_) => load_issue(c, api_key, identifier),
+                    err(e) => notify("Update priority", e, toast::ToastVariant::error),
+                  }
+                })
+              })
+            })
           },
           _ => (),
         }
@@ -1063,20 +997,15 @@ fn build(
               close_modal,
               notify,
               fn(new_assignee_id: Str) {
-                async::start(
-                  fn() {
-                    let r = issues::update_assignee(api_key, issue_id, new_assignee_id)
-                    ffi::Dispatch(
-                      c,
-                      fn() {
-                        match r {
-                          ok(_) => load_issue(c, api_key, identifier),
-                          err(e) => notify("Assign", e, toast::ToastVariant::error),
-                        }
-                      },
-                    )
-                  },
-                )
+                async::start(fn() {
+                  let r = issues::update_assignee(api_key, issue_id, new_assignee_id)
+                  ffi::Dispatch(c, fn() {
+                    match r {
+                      ok(_) => load_issue(c, api_key, identifier),
+                      err(e) => notify("Assign", e, toast::ToastVariant::error),
+                    }
+                  })
+                })
               },
             )
           },
@@ -1095,20 +1024,15 @@ fn build(
               close_modal,
               notify,
               fn(new_project_id: Str) {
-                async::start(
-                  fn() {
-                    let r = issues::update_project(api_key, issue_id, new_project_id)
-                    ffi::Dispatch(
-                      c,
-                      fn() {
-                        match r {
-                          ok(_) => load_issue(c, api_key, identifier),
-                          err(e) => notify("Update project", e, toast::ToastVariant::error),
-                        }
-                      },
-                    )
-                  },
-                )
+                async::start(fn() {
+                  let r = issues::update_project(api_key, issue_id, new_project_id)
+                  ffi::Dispatch(c, fn() {
+                    match r {
+                      ok(_) => load_issue(c, api_key, identifier),
+                      err(e) => notify("Update project", e, toast::ToastVariant::error),
+                    }
+                  })
+                })
               },
             )
           },
@@ -1127,20 +1051,15 @@ fn build(
               close_modal,
               notify,
               fn(new_cycle_id: Str) {
-                async::start(
-                  fn() {
-                    let r = issues::update_cycle(api_key, issue_id, new_cycle_id)
-                    ffi::Dispatch(
-                      c,
-                      fn() {
-                        match r {
-                          ok(_) => load_issue(c, api_key, identifier),
-                          err(e) => notify("Update cycle", e, toast::ToastVariant::error),
-                        }
-                      },
-                    )
-                  },
-                )
+                async::start(fn() {
+                  let r = issues::update_cycle(api_key, issue_id, new_cycle_id)
+                  ffi::Dispatch(c, fn() {
+                    match r {
+                      ok(_) => load_issue(c, api_key, identifier),
+                      err(e) => notify("Update cycle", e, toast::ToastVariant::error),
+                    }
+                  })
+                })
               },
             )
           },
@@ -1211,13 +1130,9 @@ fn new(
         s.started = true
         load_issue(c, api_key, identifier)
         load_comments(c, api_key, identifier)
-        refresh::schedule_periodic(
-          s.refresh_stop,
-          5 * 60 * 1000,
-          fn() {
-            refresh_detail(c, api_key, identifier, notify)
-          },
-        )
+        refresh::schedule_periodic(s.refresh_stop, 5 * 60 * 1000, fn() {
+          refresh_detail(c, api_key, identifier, notify)
+        })
       }
       build(c, ctx, api_key, identifier, notify, show_modal, close_modal, active)
     },

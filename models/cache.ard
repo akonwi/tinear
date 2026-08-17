@@ -1,7 +1,6 @@
+use decode
 use go:encoding/json
 use go:os
-use decode
-
 use tinear/config
 use tinear/models/tabs
 
@@ -82,38 +81,51 @@ private fn decode_tab_ref(raw: Any) tabs::TabRef!decode::Err {
   let id = try decode::run(raw, decode::field("id", decode::string))
   let title = try decode::run(raw, decode::field("title", decode::string))
   match tabs::Kind::from(kind_name) {
-    kind => Result::ok(tabs::TabRef{kind: kind, id: id, title: title}),
+    kind => {
+      Result::ok(
+        tabs::TabRef{
+          kind: kind,
+          id: id,
+          title: title,
+        },
+      )
+    },
     _ => Result::err(decode::Err{expected: "a known tab kind", path: ["kind"]}),
   }
 }
 
 private fn parse(content: Str) DataCache!Str {
-  decode::unmarshal(content, decode_cache).map_err(fn(e) { e.error() })
+  decode::unmarshal(
+    content,
+    decode_cache,
+  ).map_err(fn(e) {
+    e.error()
+  })
 }
 
 private fn decode_cache(data: Any) DataCache!decode::Err {
   let parsed_version = try decode::run(data, decode::field("version", decode::int))
   let tab_index = try decode::run(data, decode::path(["logged_in", "tab_index"], decode::int))
-  let tab_refs = try decode::run(
-    data,
-    decode::path(["logged_in", "tabs"], decode::list(decode_tab_ref)),
-  )
+  let tab_refs = try decode::run(data, decode::path(["logged_in", "tabs"], decode::list(decode_tab_ref)))
   Result::ok(
-    DataCache{
-      version: parsed_version,
-      logged_in: LoggedInCache{tab_index: tab_index, tabs: tab_refs},
-    },
+    DataCache{version: parsed_version, logged_in: LoggedInCache{tab_index: tab_index, tabs: tab_refs}},
   )
 }
 
 fn encode(cache: DataCache) Str!Str {
   let tab_dtos: mut [TabRefDto] = mut []
   for tab in cache.logged_in.tabs {
-    tab_dtos.push(TabRefDto{kind: tab.kind.to_str(), id: tab.id, title: tab.title})
+    tab_dtos.push(
+      TabRefDto{
+        kind: tab.kind.to_str(),
+        id: tab.id,
+        title: tab.title,
+      },
+    )
   }
   let dto = DataDto{
     version: version(),
-    logged_in: LoggedInDto{tab_index: cache.logged_in.tab_index, tabs: deref tab_dtos},
+    logged_in: LoggedInDto{tab_index: cache.logged_in.tab_index, tabs: tab_dtos.@},
   }
   mut bytes = try json::Marshal(dto)
   Result::ok(Str::from(bytes))
@@ -163,5 +175,5 @@ fn save_logged_in(logged_in: LoggedInCache) Void!Str {
   }
   let cache = mut base
   cache.logged_in = logged_in
-  save(deref cache)
+  save(cache.@)
 }

@@ -27,72 +27,55 @@ impl AppState {
 }
 
 fn set_api_key(c: mut ffi::StateCtx, api_key: Str) {
-  ffi::Update<AppState>(
-    c,
-    fn(s: mut AppState) {
-      s.api_key = api_key
-    },
-  )
+  ffi::Update<AppState>(c, fn(state) {
+    state.api_key = api_key
+  })
 }
 
 // Append a new toast and schedule its removal once the TTL elapses.
 // Safe to call from event handlers and from background fibers
 // (ffi::Dispatch lands the state mutation on the UI thread).
 fn dispatch_toast(
-  c: mut ffi::StateCtx,
+  ctx: mut ffi::StateCtx,
   title: Str,
   description: Str,
   variant: toast::ToastVariant,
   ttl_ms: Int,
 ) {
-  ffi::Dispatch(
-    c,
-    fn() {
-      let toast_id = ffi::StateValue<AppState>(c).next_toast_id + 1
-      ffi::Update<AppState>(
-        c,
-        fn(s: mut AppState) {
-          s.next_toast_id = toast_id
-          let next_toasts: mut [toast::Toast] = mut []
+  ffi::Dispatch(ctx, fn() {
+    let toast_id = ffi::StateValue<AppState>(ctx).next_toast_id + 1
+    ffi::Update<AppState>(ctx, fn(state) {
+      state.next_toast_id = toast_id
+      let next_toasts: mut [toast::Toast] = mut []
+      for t in state.toasts {
+        next_toasts.push(t)
+      }
+      next_toasts.push(
+        toast::Toast{
+          id: toast_id,
+          title: title,
+          description: description,
+          variant: variant,
+          ttl_ms: ttl_ms,
+        },
+      )
+      state.toasts = next_toasts.@
+    })
+    async::start(fn() {
+      time::Sleep(time::Duration::from(ttl_ms) * time::Millisecond)
+      ffi::Dispatch(ctx, fn() {
+        ffi::Update<AppState>(ctx, fn(s: mut AppState) {
+          let remaining: mut [toast::Toast] = mut []
           for t in s.toasts {
-            next_toasts.push(t)
+            if not t.id == toast_id {
+              remaining.push(t)
+            }
           }
-          next_toasts.push(
-            toast::Toast{
-              id: toast_id,
-              title: title,
-              description: description,
-              variant: variant,
-              ttl_ms: ttl_ms,
-            },
-          )
-          s.toasts = deref next_toasts
-        },
-      )
-      async::start(
-        fn() {
-          time::Sleep(time::Duration::from(ttl_ms) * time::Millisecond)
-          ffi::Dispatch(
-            c,
-            fn() {
-              ffi::Update<AppState>(
-                c,
-                fn(s: mut AppState) {
-                  let remaining: mut [toast::Toast] = mut []
-                  for t in s.toasts {
-                    if not t.id == toast_id {
-                      remaining.push(t)
-                    }
-                  }
-                  s.toasts = deref remaining
-                },
-              )
-            },
-          )
-        },
-      )
-    },
-  )
+          s.toasts = remaining.@
+        })
+      })
+    })
+  })
 }
 
 // Modal lifecycle helpers. close_modal clears the slot; show_modal
@@ -100,31 +83,19 @@ fn dispatch_toast(
 // state mutation on the UI thread) so callers can invoke them from
 // event handlers or background fibers.
 fn close_modal(c: mut ffi::StateCtx) {
-  ffi::Dispatch(
-    c,
-    fn() {
-      ffi::Update<AppState>(
-        c,
-        fn(s: mut AppState) {
-          s.current_modal = Maybe::new()
-        },
-      )
-    },
-  )
+  ffi::Dispatch(c, fn() {
+    ffi::Update<AppState>(c, fn(s: mut AppState) {
+      s.current_modal = Maybe::new()
+    })
+  })
 }
 
 fn show_modal(c: mut ffi::StateCtx, builder: fn(ui::Theme, fn()) ui::Widget) {
-  ffi::Dispatch(
-    c,
-    fn() {
-      ffi::Update<AppState>(
-        c,
-        fn(s: mut AppState) {
-          s.current_modal = Maybe::new(modal::ModalDef{build: builder})
-        },
-      )
-    },
-  )
+  ffi::Dispatch(c, fn() {
+    ffi::Update<AppState>(c, fn(s: mut AppState) {
+      s.current_modal = Maybe::new(modal::ModalDef{build: builder})
+    })
+  })
 }
 
 fn body(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
@@ -154,11 +125,9 @@ fn body(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
       ui::Center(
         ui::Padding(
           ui::Symmetric(1, 0),
-          welcome_screen::new(
-            fn(api_key: Str) {
-              set_api_key(c, api_key)
-            },
-          ),
+          welcome_screen::new(fn(api_key: Str) {
+            set_api_key(c, api_key)
+          }),
         ),
       )
     },
@@ -192,22 +161,16 @@ fn body(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
   match model.current_modal {
     def => {
       entries.push(
-        ui::OverlayEntry{
-          Child: ui::Center(
-            def.build(
-              theme,
-              fn() {
-                close_modal(c)
-              },
-            ),
-          ),
-          Modal: true,
-        },
+        ui::OverlayEntry{Child: ui::Center(
+          def.build(theme, fn() {
+            close_modal(c)
+          }),
+        ), Modal: true},
       )
     },
     _ => (),
   }
-  let layered = ui::Overlay{Child: content, Entries: deref entries}
+  let layered = ui::Overlay{Child: content, Entries: entries.@}
   ui::DecoratedBox(
     ui::Decoration{Style: ui::Style{Foreground: theme.Foreground, Background: theme.Background}},
     layered,

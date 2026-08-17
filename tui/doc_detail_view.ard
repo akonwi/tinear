@@ -26,17 +26,17 @@ use tinear/tui/toast
 
 struct DocView {
   started: Bool,
-
+  
   // slugId identifies the document; the title arrives with the fetch
   // (a cached title from the tab ref paints the header until then).
   slug_id: Str,
   title: Str,
   doc: documents::Doc?,
   error: Str,
-
+  
   // Stops the per-tab periodic refresh loop on dispose.
   refresh_stop: Chan<Bool>,
-
+  
   // Body scroll controller.
   scroll: mut ui::ScrollController,
 }
@@ -44,35 +44,27 @@ struct DocView {
 // ── Async loads ──────────────────────────────────────────────────────
 
 fn load_doc(c: mut ffi::StateCtx, api_key: Str, slug_id: Str, on_title: fn(Str)) {
-  async::start(
-    fn() {
-      let result = documents::fetch_single(api_key, slug_id)
-      ffi::Dispatch(
-        c,
-        fn() {
-          ffi::Update<DocView>(
-            c,
-            fn(v: mut DocView) {
-              match result {
-                ok(doc) => {
-                  v.doc = Maybe::new(doc)
-                  v.title = doc.meta.title
-                  v.error = ""
-                },
-                err(e) => { v.error = e },
-              }
-            },
-          )
-          // Report the (possibly renamed) title so the shell can
-          // refresh the tab label and persisted cache.
-          match result {
-            ok(doc) => on_title(doc.meta.title),
-            err(_) => (),
-          }
-        },
-      )
-    },
-  )
+  async::start(fn() {
+    let result = documents::fetch_single(api_key, slug_id)
+    ffi::Dispatch(c, fn() {
+      ffi::Update<DocView>(c, fn(v: mut DocView) {
+        match result {
+          ok(doc) => {
+            v.doc = Maybe::new(doc)
+            v.title = doc.meta.title
+            v.error = ""
+          },
+          err(e) => { v.error = e },
+        }
+      })
+      // Report the (possibly renamed) title so the shell can
+      // refresh the tab label and persisted cache.
+      match result {
+        ok(doc) => on_title(doc.meta.title),
+        err(_) => (),
+      }
+    })
+  })
 }
 
 // Background refresh: silent (no loading flash) — just re-fetch and
@@ -85,30 +77,22 @@ fn refresh_doc(
   on_title: fn(Str),
   notify: fn(Str, Str, toast::ToastVariant),
 ) {
-  async::start(
-    fn() {
-      let result = documents::fetch_single(api_key, slug_id)
-      ffi::Dispatch(
-        c,
-        fn() {
-          match result {
-            ok(doc) => {
-              ffi::Update<DocView>(
-                c,
-                fn(v: mut DocView) {
-                  v.doc = Maybe::new(doc)
-                  v.title = doc.meta.title
-                  v.error = ""
-                },
-              )
-              on_title(doc.meta.title)
-            },
-            err(e) => notify("Refresh document", e, toast::ToastVariant::error),
-          }
+  async::start(fn() {
+    let result = documents::fetch_single(api_key, slug_id)
+    ffi::Dispatch(c, fn() {
+      match result {
+        ok(doc) => {
+          ffi::Update<DocView>(c, fn(v: mut DocView) {
+            v.doc = Maybe::new(doc)
+            v.title = doc.meta.title
+            v.error = ""
+          })
+          on_title(doc.meta.title)
         },
-      )
-    },
-  )
+        err(e) => notify("Refresh document", e, toast::ToastVariant::error),
+      }
+    })
+  })
 }
 
 // ── Layout helpers ───────────────────────────────────────────────────
@@ -180,10 +164,7 @@ fn metadata_header(theme: ui::Theme, meta: documents::DocMeta) ui::Widget {
     field_pair(theme, "Creator", meta.creator, 24),
   ]
   mut children: [ui::Widget] = [
-    ui::Text{
-      Value: meta.title,
-      Style: ui::Style{Foreground: theme.Foreground, Attribute: ui::AttrBold},
-    },
+    ui::Text{Value: meta.title, Style: ui::Style{Foreground: theme.Foreground, Attribute: ui::AttrBold}},
     blank_line(),
     ui::Flex{Axis: ui::Horizontal, Children: field_children},
     field_pair(theme, "Updated", text::format_date(meta.updated_at), 24),
@@ -252,7 +233,7 @@ fn error_placeholder(theme: ui::Theme, title: Str, error: Str) ui::Widget {
 fn build(c: mut ffi::StateCtx, ctx: ui::BuildContext, active: Bool) ui::Widget {
   let theme = ui::MustDepend<ui::Theme>(ctx)
   let model = ffi::StateValue<DocView>(c)
-
+  
   // Stable outer column across loading / error / loaded so the widget
   // type at this slot never changes between rebuilds.
   let body_widget = match model.doc {
@@ -270,7 +251,7 @@ fn build(c: mut ffi::StateCtx, ctx: ui::BuildContext, active: Bool) ui::Widget {
     CrossAxisAlignment: ui::CrossAxisStretch,
     Children: children,
   }
-
+  
   ui::Actions{
     Bindings: [
       "doc_detail.scroll_up": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
@@ -339,13 +320,9 @@ fn new(
       if not s.started {
         s.started = true
         load_doc(c, api_key, slug_id, on_title)
-        refresh::schedule_periodic(
-          s.refresh_stop,
-          5 * 60 * 1000,
-          fn() {
-            refresh_doc(c, api_key, slug_id, on_title, notify)
-          },
-        )
+        refresh::schedule_periodic(s.refresh_stop, 5 * 60 * 1000, fn() {
+          refresh_doc(c, api_key, slug_id, on_title, notify)
+        })
       }
       build(c, ctx, active)
     },

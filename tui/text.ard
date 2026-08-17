@@ -75,7 +75,7 @@ fn wrap_line(s: Str, width: Int) [Str] {
       false => width,
     }
     let skip_break = last_space >= 0
-
+    
     mut line = ""
     mut new_remainder = ""
     mut idx = 0
@@ -96,7 +96,7 @@ fn wrap_line(s: Str, width: Int) [Str] {
   if (not remainder.is_empty()) or lines.size() == 0 {
     lines.push(remainder)
   }
-  deref lines
+  lines.@
 }
 
 // Wraps multi-line text to fit within `width` columns. Preserves
@@ -115,7 +115,7 @@ fn wrap_text(s: Str, width: Int) [Str] {
     }
   }
   segments.push(current)
-
+  
   let out: mut [Str] = mut []
   for seg in segments {
     let lines = wrap_line(seg, width)
@@ -123,7 +123,7 @@ fn wrap_text(s: Str, width: Int) [Str] {
       out.push(line)
     }
   }
-  deref out
+  out.@
 }
 
 // Wraps a title onto at most two lines of `width` characters each.
@@ -144,14 +144,14 @@ fn wrap_title(title: Str, width: Int) TitleLines {
         }
         i = i + 1
       }
-
+      
       // Use the word boundary if we found one; otherwise hard break.
       let break_at = match last_space >= 0 {
         true => last_space,
         false => width,
       }
       let skip_break_char = last_space >= 0
-
+      
       // Second pass: distribute chars between the two lines.
       mut line1 = ""
       mut line2 = ""
@@ -167,7 +167,7 @@ fn wrap_title(title: Str, width: Int) TitleLines {
         }
         idx = idx + 1
       }
-
+      
       TitleLines{line1: line1, line2: truncate_with_ellipsis(line2, width)}
     },
   }

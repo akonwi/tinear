@@ -16,11 +16,19 @@ struct TabRef {
 }
 
 fn issue_tab(identifier: Str) TabRef {
-  TabRef{kind: Kind::issue, id: identifier, title: identifier}
+  TabRef{
+    kind: Kind::issue,
+    id: identifier,
+    title: identifier,
+  }
 }
 
 fn doc_tab(slug_id: Str, title: Str) TabRef {
-  TabRef{kind: Kind::doc, id: slug_id, title: title}
+  TabRef{
+    kind: Kind::doc,
+    id: slug_id,
+    title: title,
+  }
 }
 
 // Two refs address the same tab when kind and id match; the title is

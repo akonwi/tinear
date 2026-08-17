@@ -55,10 +55,12 @@ fn tab_label_at(s: Model, i: Int) Str {
     _ => {
       let tab_idx = i - 2
       match tab_idx >= 0 and tab_idx < s.tabs.size() {
-        true => text::truncate_with_ellipsis(
-          s.tabs.at(tab_idx).expect("bounds checked").title,
-          MAX_TAB_LABEL_WIDTH,
-        ),
+        true => {
+          text::truncate_with_ellipsis(
+            s.tabs.at(tab_idx).expect("bounds checked").title,
+            MAX_TAB_LABEL_WIDTH,
+          )
+        },
         false => "?",
       }
     },
@@ -94,10 +96,10 @@ fn close_current_tab(s: Model) Model {
         remaining.push(tab)
       }
     }
-    next.tabs = deref remaining
+    next.tabs = remaining.@
     next.tab_index = 1
   }
-  deref next
+  next.@
 }
 
 // Open `ref` as a dynamic tab. If a tab with the same identity (kind +
@@ -119,10 +121,10 @@ fn open_tab(s: Model, ref: tabs::TabRef) Model {
       new_tabs.push(tab)
     }
     new_tabs.push(ref)
-    next.tabs = deref new_tabs
+    next.tabs = new_tabs.@
     next.tab_index = 2 + new_tabs.size() - 1
   }
-  deref next
+  next.@
 }
 
 // Current title of an open tab, if present. Used to skip no-op
@@ -144,12 +146,20 @@ fn retitle_tab(s: Model, ref: tabs::TabRef, title: Str) Model {
   let new_tabs: mut [tabs::TabRef] = mut []
   for tab in s.tabs {
     match tabs::same(tab, ref) {
-      true => new_tabs.push(tabs::TabRef{kind: tab.kind, id: tab.id, title: title}),
+      true => {
+        new_tabs.push(
+          tabs::TabRef{
+            kind: tab.kind,
+            id: tab.id,
+            title: title,
+          },
+        )
+      },
       false => new_tabs.push(tab),
     }
   }
-  next.tabs = deref new_tabs
-  deref next
+  next.tabs = new_tabs.@
+  next.@
 }
 
 // ── State updates ─────────────────────────────────────────────────────
@@ -160,31 +170,23 @@ fn retitle_tab(s: Model, ref: tabs::TabRef, title: Str) Model {
 // break the session.
 fn persist(c: mut ffi::StateCtx) {
   let snap = ffi::StateValue<Model>(c)
-  async::start(
-    fn() {
-      let _ = cache::save_logged_in(cache::LoggedInCache{tab_index: snap.tab_index, tabs: snap.tabs})
-    },
-  )
+  async::start(fn() {
+    let _ = cache::save_logged_in(cache::LoggedInCache{tab_index: snap.tab_index, tabs: snap.tabs})
+  })
 }
 
 fn select_tab(c: mut ffi::StateCtx, idx: Int) {
-  ffi::Update<Model>(
-    c,
-    fn(s: mut Model) {
-      s.tab_index = idx
-    },
-  )
+  ffi::Update<Model>(c, fn(s: mut Model) {
+    s.tab_index = idx
+  })
   persist(c)
 }
 
 fn replace_model(c: mut ffi::StateCtx, next: Model) {
-  ffi::Update<Model>(
-    c,
-    fn(s: mut Model) {
-      s.tab_index = next.tab_index
-      s.tabs = next.tabs
-    },
-  )
+  ffi::Update<Model>(c, fn(s: mut Model) {
+    s.tab_index = next.tab_index
+    s.tabs = next.tabs
+  })
   persist(c)
 }
 
@@ -232,19 +234,14 @@ fn tab_bar(c: mut ffi::StateCtx, theme: ui::Theme, s: Model) ui::Widget {
       // `for` binds an immutable per-iteration `i`, captured by value
       // by the closure below — no loop-closure trap.
       chips.push(
-        tab_chip(
-          theme,
-          tab_label_at(s, i),
-          i == s.tab_index,
-          fn(ev: ui::EventContext) {
-            select_tab(c, i)
-          },
-        ),
+        tab_chip(theme, tab_label_at(s, i), i == s.tab_index, fn(ev: ui::EventContext) {
+          select_tab(c, i)
+        }),
       )
     }
   }
   mut children: [ui::Widget] = [
-    ui::Flex{Axis: ui::Horizontal, Children: deref chips},
+    ui::Flex{Axis: ui::Horizontal, Children: chips.@},
     ui::Divider{Style: ui::Style{Foreground: theme.Border, Background: theme.Background}},
   ]
   ui::Flex{
@@ -312,42 +309,46 @@ fn body_for(
   ]
   for tab, idx in s.tabs {
     let body: ui::Widget = match tab.kind {
-      tabs::Kind::issue => issue_detail_view::new(
-        api_key,
-        tab.id,
-        notify,
-        show_modal,
-        close_modal,
-        s.tab_index == idx + 2,
-      ),
-      tabs::Kind::doc => doc_detail_view::new(
-        api_key,
-        tab.id,
-        tab.title,
-        fn(title: Str) {
-          // Skip no-op retitles: every 5-minute doc refresh reports its
-          // title, and an unchanged one shouldn't rebuild the shell or
-          // rewrite the cache.
-          let current = ffi::StateValue<Model>(c)
-          match tab_title(current, tab) {
-            existing => {
-              if not existing == title {
-                replace_model(c, retitle_tab(current, tab, title))
-              }
-            },
-            _ => (),
-          }
-        },
-        notify,
-        s.tab_index == idx + 2,
-      ),
+      tabs::Kind::issue => {
+        issue_detail_view::new(
+          api_key,
+          tab.id,
+          notify,
+          show_modal,
+          close_modal,
+          s.tab_index == idx + 2,
+        )
+      },
+      tabs::Kind::doc => {
+        doc_detail_view::new(
+          api_key,
+          tab.id,
+          tab.title,
+          fn(title: Str) {
+            // Skip no-op retitles: every 5-minute doc refresh reports its
+            // title, and an unchanged one shouldn't rebuild the shell or
+            // rewrite the cache.
+            let current = ffi::StateValue<Model>(c)
+            match tab_title(current, tab) {
+              existing => {
+                if not existing == title {
+                  replace_model(c, retitle_tab(current, tab, title))
+                }
+              },
+              _ => (),
+            }
+          },
+          notify,
+          s.tab_index == idx + 2,
+        )
+      },
     }
     children.push(body)
   }
   ui::IndexedStack{
     Index: s.tab_index,
     Alignment: ui::TopLeft,
-    Children: deref children,
+    Children: children.@,
   }
 }
 
@@ -503,20 +504,17 @@ fn build(
           true => ui::EventIgnored,
           false => {
             create_issue_view::open(
+              // Called from the create flow's background fiber, so
+              // re-enter the UI thread before touching shell state
+              // (notify/close_modal are dispatch-safe; this must be too).
               api_key,
               show_modal,
               close_modal,
               notify,
-              // Called from the create flow's background fiber, so
-              // re-enter the UI thread before touching shell state
-              // (notify/close_modal are dispatch-safe; this must be too).
               fn(identifier: Str) {
-                ffi::Dispatch(
-                  c,
-                  fn() {
-                    replace_model(c, open_tab(ffi::StateValue<Model>(c), tabs::issue_tab(identifier)))
-                  },
-                )
+                ffi::Dispatch(c, fn() {
+                  replace_model(c, open_tab(ffi::StateValue<Model>(c), tabs::issue_tab(identifier)))
+                })
               },
             )
             ui::EventHandled
@@ -535,27 +533,25 @@ fn build(
               replace_model(c, open_tab(ffi::StateValue<Model>(c), tabs::doc_tab(doc.slug_id, doc.title)))
               close_modal()
             }
-            show_modal(
-              fn(theme_inner: ui::Theme, close: fn()) ui::Widget {
-                modal::show_modal(
+            show_modal(fn(theme_inner: ui::Theme, close: fn()) ui::Widget {
+              modal::show_modal(
+                theme_inner,
+                "Search",
+                search_view::new(api_key, on_open_issue, on_open_doc),
+                hints_bar::row(
                   theme_inner,
-                  "Search",
-                  search_view::new(api_key, on_open_issue, on_open_doc),
-                  hints_bar::row(
-                    theme_inner,
-                    [
-                      hints_bar::Hint{key: "↑↓", label: "select"},
-                      hints_bar::Hint{key: "↵", label: "open"},
-                      hints_bar::Hint{key: "Esc", label: "close"},
-                    ],
-                  ),
-                  Maybe::new(60),
-                  fn(ev2: ui::EventContext) {
-                    close()
-                  },
-                )
-              },
-            )
+                  [
+                    hints_bar::Hint{key: "↑↓", label: "select"},
+                    hints_bar::Hint{key: "↵", label: "open"},
+                    hints_bar::Hint{key: "Esc", label: "close"},
+                  ],
+                ),
+                Maybe::new(60),
+                fn(ev2: ui::EventContext) {
+                  close()
+                },
+              )
+            })
             ui::EventHandled
           },
         }

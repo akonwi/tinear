@@ -1,6 +1,5 @@
 use decode
 use go:encoding/json
-
 use tinear/linear/client
 use tinear/models/issues
 
@@ -27,7 +26,16 @@ struct Doc {
 }
 
 fn meta_fields() Str {
-  "id slugId title updatedAt url project \{ name \} initiative \{ name \} creator \{ displayName name \}"
+  `
+    id
+    slugId
+    title
+    updatedAt
+    url
+    project {{ name }}
+    initiative {{ name }}
+    creator {{ displayName name }}
+    `
 }
 
 fn decode_meta(raw: Any) DocMeta {
@@ -35,9 +43,11 @@ fn decode_meta(raw: Any) DocMeta {
   let initiative = issues::nested_str(raw, "initiative", "name", "")
   let container = match project.is_empty() {
     false => project,
-    true => match initiative.is_empty() {
-      false => initiative,
-      true => "—",
+    true => {
+      match initiative.is_empty() {
+        false => initiative,
+        true => "—",
+      }
     },
   }
   DocMeta{
@@ -72,7 +82,7 @@ fn fetch_recent(api_key: Str, limit: Int) [DocMeta]!Str {
   for node in nodes {
     out.push(decode_meta(node))
   }
-  Result::ok(deref out)
+  Result::ok(out.@)
 }
 
 // Full-text search over documents.
@@ -89,7 +99,7 @@ fn search(api_key: Str, term: Str) [DocMeta]!Str {
   for node in nodes {
     out.push(decode_meta(node))
   }
-  Result::ok(deref out)
+  Result::ok(out.@)
 }
 
 // Fetch one document with content. `document(id:)` accepts the slugId.

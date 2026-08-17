@@ -44,7 +44,7 @@ fn row(theme: ui::Theme, items: [Hint]) ui::Widget {
     }
     children.push(render_hint(theme, hint))
   }
-  ui::Flex{Axis: ui::Horizontal, Children: deref children}
+  ui::Flex{Axis: ui::Horizontal, Children: children.@}
 }
 
 fn new(theme: ui::Theme, items: [Hint]) ui::Widget {

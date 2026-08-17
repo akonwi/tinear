@@ -47,14 +47,15 @@ fn span_for(theme: ui::Theme, run: markdown::Run) ui::TextSpan {
     run.Code => {
       ui::TextSpan{
         Text: run.Text,
-        Style: ui::Style{Foreground: theme.WarningText, Background: theme.Surface, Attribute: attr_for(run)},
+        Style: ui::Style{
+          Foreground: theme.WarningText,
+          Background: theme.Surface,
+          Attribute: attr_for(run),
+        },
       }
     },
     _ => {
-      ui::TextSpan{
-        Text: run.Text,
-        Style: ui::Style{Foreground: theme.Foreground, Attribute: attr_for(run)},
-      }
+      ui::TextSpan{Text: run.Text, Style: ui::Style{Foreground: theme.Foreground, Attribute: attr_for(run)}}
     },
   }
 }
@@ -65,7 +66,7 @@ fn spans_for(theme: ui::Theme, block: markdown::Block) [ui::TextSpan] {
   for run in runs {
     spans.push(span_for(theme, run))
   }
-  deref spans
+  spans.@
 }
 
 fn wrapped(spans: [ui::TextSpan]) ui::Widget {
@@ -96,26 +97,26 @@ fn heading_widget(theme: ui::Theme, block: markdown::Block) ui::Widget {
       ui::TextSpan{Text: run.Text, Style: ui::Style{Foreground: color, Attribute: ui::AttrBold}},
     )
   }
-  wrapped(deref spans)
+  wrapped(spans.@)
 }
 
 fn quote_widget(theme: ui::Theme, block: markdown::Block) ui::Widget {
   let spans: mut [ui::TextSpan] = mut [
-    ui::TextSpan{
-      Text: "{indent_pad(block.Indent - 1)}▌ ",
-      Style: ui::Style{Foreground: theme.Border},
-    },
+    ui::TextSpan{Text: "{indent_pad(block.Indent - 1)}▌ ", Style: ui::Style{Foreground: theme.Border}},
   ]
   mut runs = block.Runs
   for run in runs {
     // Quoted text renders muted; inline emphasis still applies.
     mut span = span_for(theme, run)
     if not run.Code and run.Link.is_empty() {
-      span = ui::TextSpan{Text: run.Text, Style: ui::Style{Foreground: theme.MutedForeground, Attribute: attr_for(run)}}
+      span = ui::TextSpan{
+        Text: run.Text,
+        Style: ui::Style{Foreground: theme.MutedForeground, Attribute: attr_for(run)},
+      }
     }
     spans.push(span)
   }
-  wrapped(deref spans)
+  wrapped(spans.@)
 }
 
 fn list_item_widget(theme: ui::Theme, block: markdown::Block) ui::Widget {
@@ -133,7 +134,7 @@ fn list_item_widget(theme: ui::Theme, block: markdown::Block) ui::Widget {
   for span in spans_for(theme, block) {
     spans.push(span)
   }
-  wrapped(deref spans)
+  wrapped(spans.@)
 }
 
 fn code_widget(theme: ui::Theme, block: markdown::Block) ui::Widget {
@@ -150,12 +151,21 @@ fn code_widget(theme: ui::Theme, block: markdown::Block) ui::Widget {
   }
   if not tag.is_empty() {
     column.push(
-      ui::Text{Value: tag, Style: ui::Style{Foreground: theme.MutedForeground, Background: theme.Surface, Attribute: ui::AttrItalic}},
+      ui::Text{
+        Value: tag,
+        Style: ui::Style{
+          Foreground: theme.MutedForeground,
+          Background: theme.Surface,
+          Attribute: ui::AttrItalic,
+        },
+      },
     )
   }
   column.push(
     ui::RichText{
-      Spans: [ui::TextSpan{Text: text, Style: ui::Style{Foreground: theme.Foreground, Background: theme.Surface}}],
+      Spans: [
+        ui::TextSpan{Text: text, Style: ui::Style{Foreground: theme.Foreground, Background: theme.Surface}},
+      ],
       SoftWrap: true,
     },
   )
@@ -167,7 +177,7 @@ fn code_widget(theme: ui::Theme, block: markdown::Block) ui::Widget {
         Axis: ui::Vertical,
         MainAxisSize: ui::MainAxisSizeMin,
         CrossAxisAlignment: ui::CrossAxisStretch,
-        Children: deref column,
+        Children: column.@,
       },
     ),
   )
@@ -189,7 +199,7 @@ fn block_widget(theme: ui::Theme, block: markdown::Block) ui::Widget {
 // blank line): list items among themselves, table rows among
 // themselves, and consecutive quote lines.
 fn tight(prev: Str, next: Str) Bool {
-  (prev == "list_item" and next == "list_item") or (prev == "table_row" and next == "table_row") or (prev == "quote" and next == "quote")
+  prev == "list_item" and next == "list_item" or prev == "table_row" and next == "table_row" or prev == "quote" and next == "quote"
 }
 
 // Render markdown source as a column of themed widgets. The caller
@@ -212,6 +222,6 @@ fn render(theme: ui::Theme, source: Str) ui::Widget {
     Axis: ui::Vertical,
     MainAxisSize: ui::MainAxisSizeMin,
     CrossAxisAlignment: ui::CrossAxisStretch,
-    Children: deref children,
+    Children: children.@,
   }
 }

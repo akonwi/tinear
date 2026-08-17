@@ -1,6 +1,6 @@
+use decode
 use go:encoding/json
 use go:os
-use decode
 
 struct Config {
   api_key: Str,
@@ -33,18 +33,23 @@ fn write(api_key: Str) Str!Str {
   let config_dir = try get_config_dir()
   // 0o755: rwxr-xr-x. MkdirAll is a no-op when the directory exists.
   try os::MkdirAll(config_dir, 493)
-
+  
   let encoded = try json::Marshal(Config{api_key: api_key})
   let config_path = try get_config_path()
   // 0o600: rw------- — the config holds an API key.
   mut content = encoded
   try os::WriteFile(config_path, mut content, 384)
-
+  
   Result::ok(config_path)
 }
 
 fn parse(content: Str) Config!Str {
-  decode::unmarshal(content, decode_config).map_err(fn(e) { "invalid config: {e.error()}" })
+  decode::unmarshal(
+    content,
+    decode_config,
+  ).map_err(fn(e) {
+    "invalid config: {e.error()}"
+  })
 }
 
 private fn decode_config(data: Any) Config!decode::Err {

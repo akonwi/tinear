@@ -110,7 +110,7 @@ fn fresh_col_h_scrolls(columns: [issues::BoardColumn]) [mut ui::ScrollController
   for _ in columns {
     scrolls.push(mut ui::ScrollController{})
   }
-  deref scrolls
+  scrolls.@
 }
 
 fn fresh_col_list_scrolls(columns: [issues::BoardColumn]) [mut ui::SliverListController] {
@@ -118,60 +118,49 @@ fn fresh_col_list_scrolls(columns: [issues::BoardColumn]) [mut ui::SliverListCon
   for _ in columns {
     scrolls.push(mut ui::SliverListController{})
   }
-  deref scrolls
+  scrolls.@
 }
 
 fn apply_loaded(c: mut ffi::StateCtx, columns: [issues::BoardColumn]) {
-  ffi::Update<Board>(
-    c,
-    fn(v: mut Board) {
-      v.columns = columns
-      v.col_h_scrolls = fresh_col_h_scrolls(columns)
-      v.col_list_scrolls = fresh_col_list_scrolls(columns)
-      v.error = ""
-      v.loading = false
-      // Snap cursor onto the first non-empty column if the current one is
-      // gone or empty.
-      let first = next_non_empty(columns, 0)
-      if first < 0 {
-        v.cursor_col = 0
+  ffi::Update<Board>(c, fn(v: mut Board) {
+    v.columns = columns
+    v.col_h_scrolls = fresh_col_h_scrolls(columns)
+    v.col_list_scrolls = fresh_col_list_scrolls(columns)
+    v.error = ""
+    v.loading = false
+    // Snap cursor onto the first non-empty column if the current one is
+    // gone or empty.
+    let first = next_non_empty(columns, 0)
+    if first < 0 {
+      v.cursor_col = 0
+      v.cursor_row = 0
+    } else {
+      if v.cursor_col >= columns.size() or col_size(columns, v.cursor_col) == 0 {
+        v.cursor_col = first
         v.cursor_row = 0
       } else {
-        if v.cursor_col >= columns.size() or col_size(columns, v.cursor_col) == 0 {
-          v.cursor_col = first
-          v.cursor_row = 0
-        } else {
-          v.cursor_row = clamp(v.cursor_row, col_size(columns, v.cursor_col))
-        }
+        v.cursor_row = clamp(v.cursor_row, col_size(columns, v.cursor_col))
       }
-    },
-  )
+    }
+  })
 }
 
 fn load_board(c: mut ffi::StateCtx, api_key: Str, notify: fn(Str, Str, toast::ToastVariant)) {
-  async::start(
-    fn() {
-      let result = issues::load(api_key)
-      ffi::Dispatch(
-        c,
-        fn() {
-          match result {
-            ok(columns) => apply_loaded(c, columns),
-            err(e) => {
-              ffi::Update<Board>(
-                c,
-                fn(v: mut Board) {
-                  v.error = e
-                  v.loading = false
-                },
-              )
-              notify("My Issues", "Failed to load: {e}", toast::ToastVariant::error)
-            },
-          }
+  async::start(fn() {
+    let result = issues::load(api_key)
+    ffi::Dispatch(c, fn() {
+      match result {
+        ok(columns) => apply_loaded(c, columns),
+        err(e) => {
+          ffi::Update<Board>(c, fn(v: mut Board) {
+            v.error = e
+            v.loading = false
+          })
+          notify("My Issues", "Failed to load: {e}", toast::ToastVariant::error)
         },
-      )
-    },
-  )
+      }
+    })
+  })
 }
 
 // Background refresh. Re-fetches the board silently (no loading flash,
@@ -181,52 +170,44 @@ fn load_board(c: mut ffi::StateCtx, api_key: Str, notify: fn(Str, Str, toast::To
 // it disappeared, fall back to clamping the previous (col, row)
 // indices.
 fn refresh_board(c: mut ffi::StateCtx, api_key: Str, notify: fn(Str, Str, toast::ToastVariant)) {
-  async::start(
-    fn() {
-      let result = issues::load(api_key)
-      match result {
-        ok(columns) => {
-          ffi::Dispatch(
-            c,
-            fn() {
-              ffi::Update<Board>(
-                c,
-                fn(v: mut Board) {
-                  // Capture the id at the cursor before swapping columns.
-                  mut preserve_id = ""
-                  if v.cursor_col >= 0 and v.cursor_col < v.columns.size() {
-                    let col = v.columns.at(v.cursor_col).expect("bounds checked")
-                    if v.cursor_row >= 0 and v.cursor_row < col.issues.size() {
-                      preserve_id = col.issues.at(v.cursor_row).expect("bounds checked").id
-                    }
+  async::start(fn() {
+    let result = issues::load(api_key)
+    match result {
+      ok(columns) => {
+        ffi::Dispatch(c, fn() {
+          ffi::Update<Board>(c, fn(v: mut Board) {
+            // Capture the id at the cursor before swapping columns.
+            mut preserve_id = ""
+            if v.cursor_col >= 0 and v.cursor_col < v.columns.size() {
+              let col = v.columns.at(v.cursor_col).expect("bounds checked")
+              if v.cursor_row >= 0 and v.cursor_row < col.issues.size() {
+                preserve_id = col.issues.at(v.cursor_row).expect("bounds checked").id
+              }
+            }
+            v.columns = columns
+            v.error = ""
+            // Re-locate the previously-selected issue. Default to
+            // clamped previous indices if not found.
+            mut new_col = clamp(v.cursor_col, columns.size())
+            mut new_row = clamp(v.cursor_row, col_size(columns, new_col))
+            if not preserve_id.is_empty() {
+              for col, c_idx in columns {
+                for issue, r_idx in col.issues {
+                  if issue.id == preserve_id {
+                    new_col = c_idx
+                    new_row = r_idx
                   }
-                  v.columns = columns
-                  v.error = ""
-                  // Re-locate the previously-selected issue. Default to
-                  // clamped previous indices if not found.
-                  mut new_col = clamp(v.cursor_col, columns.size())
-                  mut new_row = clamp(v.cursor_row, col_size(columns, new_col))
-                  if not preserve_id.is_empty() {
-                    for col, c_idx in columns {
-                      for issue, r_idx in col.issues {
-                        if issue.id == preserve_id {
-                          new_col = c_idx
-                          new_row = r_idx
-                        }
-                      }
-                    }
-                  }
-                  v.cursor_col = new_col
-                  v.cursor_row = new_row
-                },
-              )
-            },
-          )
-        },
-        err(e) => notify("My Issues refresh", e, toast::ToastVariant::error),
-      }
-    },
-  )
+                }
+              }
+            }
+            v.cursor_col = new_col
+            v.cursor_row = new_row
+          })
+        })
+      },
+      err(e) => notify("My Issues refresh", e, toast::ToastVariant::error),
+    }
+  })
 }
 
 // ── Rendering ─────────────────────────────────────────────────────────
@@ -317,7 +298,7 @@ fn card_content(theme: ui::Theme, item: issues::Issue) ui::Widget {
     MaxLines: 2,
     SoftWrap: true,
   }
-
+  
   let indented: mut [ui::Widget] = mut [title]
   let meta = metadata_text(item)
   if not meta.is_empty() {
@@ -328,7 +309,7 @@ fn card_content(theme: ui::Theme, item: issues::Issue) ui::Widget {
       // Indent title and metadata 2 more cols so they hang under the
       // identifier text (which sits at col 2 after the glyph + space).
       id_line,
-      ui::Padding(ui::Insets{Left: 2}, min_column(deref indented, true)),
+      ui::Padding(ui::Insets{Left: 2}, min_column(indented.@, true)),
     ],
     true,
   )
@@ -435,7 +416,7 @@ fn render_column(
 ) ui::Widget {
   let is_active_col = col_idx == cursor_col
   let count = col.issues.size()
-
+  
   // Empty-column placeholder: no slivers needed, just show "No issues"
   // beneath the header. Wrapped in CustomScrollView anyway so the
   // height/scroll behaviour matches non-empty columns.
@@ -465,7 +446,7 @@ fn render_column(
       }
     },
   }
-
+  
   mut column_children: [ui::Widget] = [
     column_header(theme, col),
     ui::Expanded(ui::CustomScrollView{Controller: scroll, Slivers: [body_sliver]}),
@@ -523,7 +504,16 @@ fn render_board(theme: ui::Theme, v: Board, on_card_click: fn(Int, Int)) ui::Wid
       false => mut list_fallback,
     }
     row_children.push(
-      render_column(theme, col, idx, v.cursor_col, v.cursor_row, scroll, list_scroll, on_card_click),
+      render_column(
+        theme,
+        col,
+        idx,
+        v.cursor_col,
+        v.cursor_row,
+        scroll,
+        list_scroll,
+        on_card_click,
+      ),
     )
   }
   // True "is content scrolled off?" check, read from the outer
@@ -544,7 +534,7 @@ fn render_board(theme: ui::Theme, v: Board, on_card_click: fn(Int, Int)) ui::Wid
         Child: ui::Flex{
           Axis: ui::Horizontal,
           CrossAxisAlignment: ui::CrossAxisStretch,
-          Children: deref row_children,
+          Children: row_children.@,
         },
       },
     ),
@@ -586,37 +576,31 @@ fn body(theme: ui::Theme, v: Board, on_card_click: fn(Int, Int)) ui::Widget {
 // ── Actions ───────────────────────────────────────────────────────────
 
 fn move_row(c: mut ffi::StateCtx, delta: Int) {
-  ffi::Update<Board>(
-    c,
-    fn(v: mut Board) {
-      if v.columns.size() > 0 {
-        let count = col_size(v.columns, v.cursor_col)
-        if count > 0 {
-          v.cursor_row = clamp(v.cursor_row + delta, count)
-        }
+  ffi::Update<Board>(c, fn(v: mut Board) {
+    if v.columns.size() > 0 {
+      let count = col_size(v.columns, v.cursor_col)
+      if count > 0 {
+        v.cursor_row = clamp(v.cursor_row + delta, count)
       }
-    },
-  )
+    }
+  })
   scroll_cursor_into_view(ffi::StateValue<Board>(c))
 }
 
 fn move_col(c: mut ffi::StateCtx, forward: Bool) {
-  ffi::Update<Board>(
-    c,
-    fn(v: mut Board) {
-      if v.columns.size() > 0 {
-        let target = match forward {
-          true => next_non_empty(v.columns, v.cursor_col + 1),
-          false => prev_non_empty(v.columns, v.cursor_col - 1),
-        }
-        if target >= 0 {
-          v.cursor_col = target
-          v.cursor_row = clamp(v.cursor_row, col_size(v.columns, target))
-          v.board_h_scroll.ScrollToOffset(target * (COLUMN_WIDTH + COLUMN_GAP))
-        }
+  ffi::Update<Board>(c, fn(v: mut Board) {
+    if v.columns.size() > 0 {
+      let target = match forward {
+        true => next_non_empty(v.columns, v.cursor_col + 1),
+        false => prev_non_empty(v.columns, v.cursor_col - 1),
       }
-    },
-  )
+      if target >= 0 {
+        v.cursor_col = target
+        v.cursor_row = clamp(v.cursor_row, col_size(v.columns, target))
+        v.board_h_scroll.ScrollToOffset(target * (COLUMN_WIDTH + COLUMN_GAP))
+      }
+    }
+  })
   // After switching columns the new column's cursor row may be off-screen
   // vertically; reveal it in the new column's list.
   scroll_cursor_into_view(ffi::StateValue<Board>(c))
@@ -633,20 +617,15 @@ fn run_issue_mutation(
   failure_title: Str,
   mutate: fn() Void!Str,
 ) {
-  async::start(
-    fn() {
-      let r = mutate()
-      ffi::Dispatch(
-        c,
-        fn() {
-          match r {
-            ok(_) => load_board(c, api_key, notify),
-            err(e) => notify(failure_title, e, toast::ToastVariant::error),
-          }
-        },
-      )
-    },
-  )
+  async::start(fn() {
+    let r = mutate()
+    ffi::Dispatch(c, fn() {
+      match r {
+        ok(_) => load_board(c, api_key, notify),
+        err(e) => notify(failure_title, e, toast::ToastVariant::error),
+      }
+    })
+  })
 }
 
 // ── Entry point ───────────────────────────────────────────────────────
@@ -663,17 +642,14 @@ fn build(
 ) ui::Widget {
   let theme = ui::MustDepend<ui::Theme>(ctx)
   let model = ffi::StateValue<Board>(c)
-
+  
   // Click handler: select the card AND open the issue (same as moving
   // the cursor and pressing Enter).
   let on_card_click = fn(col: Int, row: Int) {
-    ffi::Update<Board>(
-      c,
-      fn(v: mut Board) {
-        v.cursor_col = col
-        v.cursor_row = row
-      },
-    )
+    ffi::Update<Board>(c, fn(v: mut Board) {
+      v.cursor_col = col
+      v.cursor_row = row
+    })
     if col < model.columns.size() {
       let column = model.columns.at(col).expect("click from current build")
       if row < column.issues.size() {
@@ -681,7 +657,7 @@ fn build(
       }
     }
   }
-
+  
   // Only the active tab participates in focus management (see the
   // shell's IndexedStack note).
   ui::Actions{
@@ -710,13 +686,10 @@ fn build(
         ui::EventHandled
       },
       "board.refresh": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
-        ffi::Update<Board>(
-          c,
-          fn(v: mut Board) {
-            v.loading = true
-            v.error = ""
-          },
-        )
+        ffi::Update<Board>(c, fn(v: mut Board) {
+          v.loading = true
+          v.error = ""
+        })
         load_board(c, api_key, notify)
         ui::EventHandled
       },
@@ -731,15 +704,9 @@ fn build(
               close_modal,
               notify,
               fn(new_state_id: Str) {
-                run_issue_mutation(
-                  c,
-                  api_key,
-                  notify,
-                  "Update state",
-                  fn() Void!Str {
-                    issues::update_state(api_key, issue_id, new_state_id)
-                  },
-                )
+                run_issue_mutation(c, api_key, notify, "Update state", fn() Void!Str {
+                  issues::update_state(api_key, issue_id, new_state_id)
+                })
               },
             )
           },
@@ -751,21 +718,11 @@ fn build(
         match selected_issue(ffi::StateValue<Board>(c)) {
           issue => {
             let issue_id = issue.id
-            issue_pickers::open_priority_picker(
-              issue,
-              show_modal,
-              fn(new_priority: Int) {
-                run_issue_mutation(
-                  c,
-                  api_key,
-                  notify,
-                  "Update priority",
-                  fn() Void!Str {
-                    issues::update_priority(api_key, issue_id, new_priority)
-                  },
-                )
-              },
-            )
+            issue_pickers::open_priority_picker(issue, show_modal, fn(new_priority: Int) {
+              run_issue_mutation(c, api_key, notify, "Update priority", fn() Void!Str {
+                issues::update_priority(api_key, issue_id, new_priority)
+              })
+            })
           },
           _ => (),
         }
@@ -782,15 +739,9 @@ fn build(
               close_modal,
               notify,
               fn(new_assignee_id: Str) {
-                run_issue_mutation(
-                  c,
-                  api_key,
-                  notify,
-                  "Assign",
-                  fn() Void!Str {
-                    issues::update_assignee(api_key, issue_id, new_assignee_id)
-                  },
-                )
+                run_issue_mutation(c, api_key, notify, "Assign", fn() Void!Str {
+                  issues::update_assignee(api_key, issue_id, new_assignee_id)
+                })
               },
             )
           },
@@ -809,15 +760,9 @@ fn build(
               close_modal,
               notify,
               fn(new_project_id: Str) {
-                run_issue_mutation(
-                  c,
-                  api_key,
-                  notify,
-                  "Update project",
-                  fn() Void!Str {
-                    issues::update_project(api_key, issue_id, new_project_id)
-                  },
-                )
+                run_issue_mutation(c, api_key, notify, "Update project", fn() Void!Str {
+                  issues::update_project(api_key, issue_id, new_project_id)
+                })
               },
             )
           },
@@ -836,15 +781,9 @@ fn build(
               close_modal,
               notify,
               fn(new_cycle_id: Str) {
-                run_issue_mutation(
-                  c,
-                  api_key,
-                  notify,
-                  "Update cycle",
-                  fn() Void!Str {
-                    issues::update_cycle(api_key, issue_id, new_cycle_id)
-                  },
-                )
+                run_issue_mutation(c, api_key, notify, "Update cycle", fn() Void!Str {
+                  issues::update_cycle(api_key, issue_id, new_cycle_id)
+                })
               },
             )
           },
@@ -911,13 +850,9 @@ fn new(
       if not s.started {
         s.started = true
         load_board(c, api_key, notify)
-        refresh::schedule_periodic(
-          s.refresh_stop,
-          5 * 60 * 1000,
-          fn() {
-            refresh_board(c, api_key, notify)
-          },
-        )
+        refresh::schedule_periodic(s.refresh_stop, 5 * 60 * 1000, fn() {
+          refresh_board(c, api_key, notify)
+        })
       }
       build(c, ctx, api_key, on_open_issue, notify, show_modal, close_modal, active)
     },
