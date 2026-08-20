@@ -4,6 +4,8 @@
 package ffi
 
 import (
+	"fmt"
+	"os"
 	"os/exec"
 	goruntime "runtime"
 )
@@ -24,4 +26,32 @@ func OpenURL(url string) error {
 		cmd = exec.Command("xdg-open", url)
 	}
 	return cmd.Start()
+}
+
+// Spawn starts a program with args without waiting for it to exit.
+// Exists because direct Go variadic calls from Ard accept at most one
+// trailing argument. The child's output goes to a log file — tinear
+// owns the terminal, so the child can't have it, but silent failures
+// are undebuggable.
+func Spawn(name string, args []string) error {
+	cmd := exec.Command(name, args...)
+	if f, err := os.OpenFile("/tmp/tinear-spawn.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
+		fmt.Fprintf(f, "--- spawn %s %v\n", name, args)
+		cmd.Stdout = f
+		cmd.Stderr = f
+	}
+	return cmd.Start()
+}
+
+// LookPath reports whether an executable is available on PATH.
+func LookPath(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
+}
+
+// CmdOutput runs a program and returns its combined output. Exists for
+// the same variadic reason as Spawn; used for cheap capability probes.
+func CmdOutput(name string, args []string) (string, error) {
+	out, err := exec.Command(name, args...).CombinedOutput()
+	return string(out), err
 }
