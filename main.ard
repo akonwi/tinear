@@ -195,7 +195,7 @@ fn root() ui::Widget {
       Bindings: ["Ctrl+c": ffi::Intent("tinear.quit"), "Super+c": ffi::Intent("vaxis.text.copy-selection")],
       Child: ffi::Stateful{
         Init: fn() Any {
-          let api_key = match config::load() {
+          let api_key: Str = match config::load() {
             ok(cfg) => cfg.api_key,
             err(_) => "",
           }

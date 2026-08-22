@@ -933,7 +933,7 @@ fn build(
           issue => {
             if not issue.url.is_empty() {
               let _ = os::open_url(issue.url)
-            }
+            } else {}
           },
           _ => (),
         }

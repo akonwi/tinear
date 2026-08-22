@@ -4,6 +4,10 @@ use go:os
 use tinear/config
 use tinear/models/tabs
 
+private fn error_message(error: Error) Str {
+  error.error()
+}
+
 // On-disk cache of UI state we want to survive across app launches.
 // Currently scoped to the logged-in shell's tab layout so the user
 // reopens to whatever they last had visible (active tab + the list
@@ -127,7 +131,7 @@ fn encode(cache: DataCache) Str!Str {
     version: version(),
     logged_in: LoggedInDto{tab_index: cache.logged_in.tab_index, tabs: tab_dtos.@},
   }
-  mut bytes = try json::Marshal(dto)
+  mut bytes = try json::Marshal(dto).map_err(error_message)
   Result::ok(Str::from(bytes))
 }
 
@@ -149,12 +153,12 @@ fn load() DataCache? {
 fn save(cache: DataCache) Void!Str {
   let dir = try config::get_config_dir()
   // 0o755: rwxr-xr-x. MkdirAll is a no-op when the directory exists.
-  try os::MkdirAll(dir, 493)
+  try os::MkdirAll(dir, 493).map_err(error_message)
   let content = try encode(cache)
   let path = try data_path()
   mut bytes = content.bytes()
   // 0o644: rw-r--r--
-  try os::WriteFile(path, mut bytes, 420)
+  try os::WriteFile(path, mut bytes, 420).map_err(error_message)
   Result::ok(())
 }
 
