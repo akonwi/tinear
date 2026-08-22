@@ -5,20 +5,28 @@ use go:net/http
 use go:strings
 use go:time
 
+private fn error_message(error: Error) Str {
+  error.error()
+}
+
 // Shared GraphQL client for the Linear API.
 //
 // Linear auth header is `Authorization: <raw key>` — no `Bearer` prefix.
 
 private fn post(api_key: Str, body: Str) Str!Str {
-  let req = try http::NewRequest("POST", "https://api.linear.app/graphql", strings::NewReader(body))
+  let req = try http::NewRequest(
+    "POST",
+    "https://api.linear.app/graphql",
+    strings::NewReader(body),
+  ).map_err(error_message)
   req.Header.Set("Content-Type", "application/json")
   req.Header.Set("Authorization", api_key)
   
   let client = mut http::Client{Timeout: 30 * time::Second}
-  let res = try client.Do(req)
+  let res = try client.Do(req).map_err(error_message)
   defer res.Body.Close()
   
-  mut bytes = try io::ReadAll(res.Body)
+  mut bytes = try io::ReadAll(res.Body).map_err(error_message)
   let text = Str::from(bytes)
   
   match res.StatusCode >= 200 and res.StatusCode < 300 {

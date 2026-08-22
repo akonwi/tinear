@@ -2,6 +2,10 @@ use decode
 use go:encoding/json
 use go:os
 
+private fn error_message(error: Error) Str {
+  error.error()
+}
+
 struct Config {
   api_key: Str,
 }
@@ -32,13 +36,13 @@ fn get_config_path() Str!Str {
 fn write(api_key: Str) Str!Str {
   let config_dir = try get_config_dir()
   // 0o755: rwxr-xr-x. MkdirAll is a no-op when the directory exists.
-  try os::MkdirAll(config_dir, 493)
+  try os::MkdirAll(config_dir, 493).map_err(error_message)
   
-  let encoded = try json::Marshal(Config{api_key: api_key})
+  let encoded = try json::Marshal(Config{api_key: api_key}).map_err(error_message)
   let config_path = try get_config_path()
   // 0o600: rw------- — the config holds an API key.
   mut content = encoded
-  try os::WriteFile(config_path, mut content, 384)
+  try os::WriteFile(config_path, mut content, 384).map_err(error_message)
   
   Result::ok(config_path)
 }

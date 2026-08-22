@@ -267,7 +267,7 @@ fn build(c: mut ffi::StateCtx, ctx: ui::BuildContext, active: Bool) ui::Widget {
           doc => {
             if not doc.meta.url.is_empty() {
               let _ = os::open_url(doc.meta.url)
-            }
+            } else {}
           },
           _ => (),
         }

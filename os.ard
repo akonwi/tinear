@@ -1,5 +1,9 @@
 use go:tinear/ffi
 
+private fn error_message(error: Error) Str {
+  error.error()
+}
+
 // OS-level utilities backed by tinear's Go FFI package (ffi/host.go).
 
 // Open a URL. Prefers terminal-browser (app mode, split pane beside
@@ -38,5 +42,5 @@ private fn supports_app_mode() Bool {
 // http(s), file viewer for file paths, etc.). Returns immediately; does
 // not wait for the launched process to exit.
 fn open_url_system(url: Str) Void!Str {
-  ffi::OpenURL(url)
+  ffi::OpenURL(url).map_err(error_message)
 }

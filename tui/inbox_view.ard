@@ -575,8 +575,8 @@ fn build(
           let item = s.items.at(s.cursor).expect("cursor clamped")
           if not item.url.is_empty() {
             let _ = os::open_url(item.url)
-          }
-        }
+          } else {}
+        } else {}
         ui::EventHandled
       },
       "inbox.delete": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
