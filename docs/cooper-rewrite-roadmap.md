@@ -1,0 +1,298 @@
+# Cooper Rewrite Parity Roadmap
+
+> Living implementation checklist for the Cooper rewrite on `rewrite/cooper`.
+>
+> Behavioral parity reference: `main` at `84ff69a`.
+>
+> Update this document as phases land, scope changes, or parity waivers are accepted.
+
+This roadmap tracks behavior that is reachable on `main`. Working principles,
+architectural guidance, and session-specific reasoning stay in the active Kit
+scratchpad; durable architectural decisions should be recorded as ADRs.
+
+## Parity ledger
+
+### Application, authentication, and platform behavior
+
+- [ ] One no-argument TUI entrypoint.
+- [ ] `$LINEAR_API_KEY` takes precedence over `~/.tinear/config.json`.
+- [ ] Missing credentials show the welcome/login form.
+- [ ] Login validates the key with Linear's `viewer` query, persists it, and transitions in place.
+- [ ] `Ctrl+C` cleanly destroys the application.
+- [ ] `Super+C` copies the current Cooper selection through OSC 52.
+- [ ] URLs prefer `terminal-browser open --split right --size 0.55` (with app mode where requested), then fall back to the system opener.
+- [ ] Semantic foreground/background, muted, accent, danger, warning, and success presentation is available.
+- [ ] Toasts support info/success/error variants and five-second expiry.
+- [ ] At most one modal is active; it blocks background input and restores focus on close.
+- [ ] Inbox count updates the terminal title, or receives an explicit temporary parity waiver until Cooper exposes a title API.
+
+### Logged-in shell and persistence
+
+- [ ] Permanent Inbox and My Issues tabs.
+- [ ] Dynamic issue and document tabs, deduplicated by `(kind, id)`.
+- [ ] Inactive tab controllers stay mounted and preserve local state.
+- [ ] `Tab` / `Shift+Tab` cycle tabs.
+- [ ] `1` and `2` jump to Inbox and My Issues.
+- [ ] Mouse activation selects tabs.
+- [ ] `Escape` closes the active dynamic tab and returns to My Issues.
+- [ ] Document tab titles are cached, truncated for display, and updated after fetch.
+- [ ] `~/.tinear/data.json` schema v2 persists active tab index plus issue/document `TabRef`s.
+- [ ] Corrupt, unknown-version, unknown-kind, or out-of-range cache data safely falls back.
+- [ ] Closing a dynamic tab disposes controls, listeners, requests, and periodic refresh work.
+
+### Inbox
+
+- [ ] Load Linear issue and pull-request notifications.
+- [ ] Render a navigable list pane and scrollable detail pane.
+- [ ] Preserve issue/PR-specific detail metadata, comments, history, and triggering-comment presentation used by `main`.
+- [ ] `j`/Down and `k`/Up move the cursor and reveal it.
+- [ ] `h`/Left, `l`/Right, Space, and Shift+Space scroll/page the detail pane.
+- [ ] Enter opens an issue tab or the external target for non-issue notifications.
+- [ ] `o` opens the selected item in the browser.
+- [ ] Backspace optimistically archives the notification and reports failure via toast.
+- [ ] `r` manually refreshes.
+- [ ] Detail requests reject stale responses after cursor changes.
+- [ ] Five-minute silent refresh preserves the selected notification by ID.
+- [ ] Empty, loading, and error states match current behavior.
+
+### My Issues board
+
+- [ ] Load the viewer and assigned issues, excluding canceled work.
+- [ ] Group and order columns by workflow rank/position.
+- [ ] Hide the Duplicate state and cap completed columns as `main` does.
+- [ ] Render horizontal columns with per-column vertical scrolling.
+- [ ] Render priority glyph, identifier, wrapped title, and cycle/project metadata.
+- [ ] `j`/Down, `k`/Up, `h`/Left, and `l`/Right navigate cards and skip empty columns.
+- [ ] Cursor movement reveals the active card and horizontally reveals its column.
+- [ ] Enter/mouse opens an issue tab.
+- [ ] `r` manually refreshes.
+- [ ] Five-minute silent refresh preserves the selected issue by ID.
+- [ ] `s`, `y`, `p`, `a`, and Shift+`p` edit state, cycle, priority, assignee, and project.
+- [ ] Successful mutations refresh the board without losing cursor identity.
+
+### Issue and document details
+
+- [ ] Issue header shows identifier/title, state, priority, assignee, cycle, project, and team.
+- [ ] Description and Comments sections are switchable by click and `d`/`c`.
+- [ ] Issue body scrolls and remains selectable.
+- [ ] Comments are threaded one level deep, preserve bot/user attribution, and expose a cursor.
+- [ ] `j`/`k` navigate comments when Comments is active; arrows scroll.
+- [ ] `n` composes a top-level comment.
+- [ ] `r` replies to the selected comment's thread root.
+- [ ] `e` edits the description in a multiline editor; Ctrl+Enter/Ctrl+M/Ctrl+J save.
+- [ ] Description save guards against stale periodic refresh results.
+- [ ] `o` opens the issue/document in the browser.
+- [ ] Issue details expose all five field pickers.
+- [ ] Issue and comment loads have independent loading/error handling.
+- [ ] Document tabs load metadata and markdown content, retitle themselves, and refresh silently every five minutes.
+- [ ] Closing an issue/document tab stops its refresh loop and suppresses late completions.
+
+### Markdown
+
+- [ ] Retain the Goldmark CommonMark+GFM semantic parser and Go tests.
+- [ ] Map headings, paragraphs, emphasis, strike, inline code, links, images, lists, task lists, quotes, rules, fenced code, tables, and mermaid labels to retained Cooper controls.
+- [ ] Preserve clickable OSC-8 links while intercepting activation when terminal-browser routing is required.
+- [ ] Preserve selection across rendered markdown text.
+- [ ] Keep syntax highlighting out of parity scope.
+
+### Pickers, search, comments, and issue creation
+
+- [ ] Reusable modal single-select picker starts on the current value.
+- [ ] Picker filtering appears above five options and is case-insensitive.
+- [ ] Picker viewport caps visible rows at 12 and reveals keyboard selection.
+- [ ] Picker supports keyboard and mouse activation plus null/unassigned options where applicable.
+- [ ] `?` opens global issue/document search from logged-in views.
+- [ ] Search debounces for 300 ms and rejects stale generations.
+- [ ] Issue results appear before document results.
+- [ ] One failed search source yields a warning with surviving results; both failing yields an error.
+- [ ] Search supports loading, empty-query, no-results, and error states.
+- [ ] Enter/mouse opens or reuses the correct dynamic tab and closes search.
+- [ ] `c` from Inbox/My Issues starts issue creation.
+- [ ] Creation loads teams: zero reports failure, one advances directly, many show team selection.
+- [ ] Creation requires a title, accepts an optional multiline markdown description, and blocks duplicate/dismissed in-flight submission.
+- [ ] Successful creation shows a toast and opens the new issue tab.
+
+## Delivery roadmap
+
+### Phase 0 — Contract and Cooper integration gates
+
+- [ ] Pin the exact Cooper revision used by the rewrite once it is remotely available; use the local path during active joint development.
+- [ ] Add an ADR superseding ADR 0002's vaxis/ui implementation decision with direct Cooper retained controls.
+- [ ] Decide app-local semantic palette behavior while retaining terminal-default foreground/background.
+- [ ] Decide terminal-title parity: add a Cooper capability or document a temporary waiver.
+- [ ] Prove modal layering, mouse barrier, focus restoration, hidden tab roots, nested two-axis scrolling, and selection copy in small TestApp fixtures.
+- [ ] Define common controller lifecycle and request-generation conventions in project guidance.
+
+**Exit criteria:** architectural gaps have explicit decisions; no unsupported Cooper API is required.
+
+### Phase 1 — Data and service foundation
+
+Candidate modules:
+
+```text
+config.ard
+linear/client.ard
+models/tabs.ard
+models/cache.ard
+models/inbox.ard
+models/issues.ard
+models/documents.ard
+platform/url.ard
+ffi/markdown/*
+```
+
+- [ ] Re-add `decode` as a direct Ard dependency.
+- [ ] Restore config path/load/write behavior.
+- [ ] Restore the Linear GraphQL client with timeout and GraphQL error extraction.
+- [ ] Restore typed tabs and shell cache v2.
+- [ ] Restore inbox, issue/comment/board/picker/create, and document models.
+- [ ] Move workflow/priority model helpers out of the old TUI dependency direction.
+- [ ] Restore the markdown parser as the only necessary Go-side app FFI.
+- [ ] Introduce injectable service closures for controller tests.
+- [ ] Encode all GraphQL string arguments safely rather than interpolating IDs.
+- [ ] Make config/cache writes private and cache replacement atomic/serialized.
+- [ ] Fix board/picker source defects while porting: fetch assignee/project IDs and exclude canceled projects correctly.
+
+**Exit criteria:** all model/cache/markdown tests from `main` are restored or replaced with equivalent coverage; model modules have no Cooper imports.
+
+### Phase 2 — Root, lifecycle, modal, toast, and command infrastructure
+
+Candidate modules:
+
+```text
+tui/app_controller.ard
+tui/lifecycle.ard
+tui/modal_host.ard
+tui/toast_host.ard
+tui/hints_bar.ard
+tui/theme.ard
+```
+
+- [ ] Build a permanent app root with content, modal, and toast planes.
+- [ ] Implement app-level key routing by active view and interaction mode.
+- [ ] Implement modal ticket/generation ownership, background mouse blocking, guarded dismiss, and focus restore.
+- [ ] Implement toast stacking, variants, TTL cancellation, and disposal.
+- [ ] Implement Super+C using `App.selection()` and `Context.clipboard.write()`.
+- [ ] Add TestApp coverage for modal isolation, toast expiry, selection copy, and teardown.
+
+**Exit criteria:** infrastructure can host either welcome or logged-in content without reconstructing the App.
+
+### Phase 3 — Welcome and authentication
+
+- [ ] Build retained logo, API-key Input, login action, loading state, and inline error.
+- [ ] Validate asynchronously without blocking the UI thread.
+- [ ] Persist a valid key and transition to the shell.
+- [ ] Ensure dismissal/quit during validation suppresses late completion.
+
+**Exit criteria:** TestApp covers missing config, env/config precedence, invalid key, valid key, and clean shutdown.
+
+### Phase 4 — Shell, tabs, focus, and shell cache
+
+Candidate modules:
+
+```text
+tui/shell_controller.ard
+tui/tab_bar.ard
+```
+
+- [ ] Restore pure tab reducers/tests first.
+- [ ] Construct Inbox and My Issues controllers once.
+- [ ] Add dynamic issue/document controller creation and identity reuse.
+- [ ] Toggle inactive roots with `Display::none` and focus the active view explicitly.
+- [ ] Implement keyboard/mouse tab navigation and dynamic close behavior.
+- [ ] Hydrate/persist shell cache, including document retitling.
+- [ ] Serialize/coalesce persistence so older snapshots cannot overwrite newer state.
+
+**Exit criteria:** TestApp covers open/reuse/switch/close/restore, hidden-state retention, focus restoration, malformed cache, and closed-tab disposal.
+
+### Phase 5 — Inbox vertical slice
+
+- [ ] Build retained list rows and split detail layout.
+- [ ] Implement loading/error/empty states and initial load.
+- [ ] Implement cursor navigation/reveal and detail scrolling.
+- [ ] Implement stale-safe detail requests.
+- [ ] Implement issue/PR opening, terminal-browser routing, optimistic archive, and manual refresh.
+- [ ] Add five-minute silent refresh with cursor-by-ID preservation.
+- [ ] Add terminal-title count behavior when the framework gate is resolved.
+
+**Exit criteria:** Inbox is a complete network-backed daily-use slice with deterministic tests for stale requests, deletion, refresh preservation, routing, and disposal.
+
+### Phase 6 — My Issues board and reusable pickers
+
+- [ ] Build an outer horizontal `ScrollBox` containing a retained row of columns.
+- [ ] Give each column its own vertical `ScrollBox` and retained card records.
+- [ ] Reconcile columns/cards by stable IDs and use `scroll_child_into_view`.
+- [ ] Restore card rendering, ordering, navigation, opening, manual refresh, and periodic refresh.
+- [ ] Build the app-local filterable picker controller.
+- [ ] Restore state, cycle, priority, assignee, and project pickers/mutations.
+- [ ] Benchmark the bounded 200-issue workload before considering app-local virtualization.
+
+**Exit criteria:** board navigation, nested scrolling, cursor preservation, every picker, and every mutation path pass TestApp coverage at narrow and wide sizes.
+
+### Phase 7 — Markdown, issue detail, comments, and document detail
+
+- [ ] Map parsed markdown blocks/runs to persistent Cooper Box/Text controls.
+- [ ] Build issue header, section tabs, body scrolling, and selection.
+- [ ] Load issue/comments independently with lifecycle guards.
+- [ ] Restore comment threading/cursor, top-level compose, and replies.
+- [ ] Restore description editing/saving with stale-refresh protection.
+- [ ] Wire issue field pickers and browser opening.
+- [ ] Build document metadata/content tabs, retitling, browser opening, and refresh.
+- [ ] Verify every per-tab worker stops on close.
+
+**Exit criteria:** Markdown parser/render fixtures and complete issue/document interaction flows pass TestApp coverage.
+
+### Phase 8 — Global search and issue creation
+
+- [ ] Build search modal Input/results viewport.
+- [ ] Restore debounce, generation checks, merged issue/document results, partial-failure warning, navigation, and open behavior.
+- [ ] Build issue creation as one modal-owned retained state machine.
+- [ ] Restore team selection, title/description form, submission chords, guarded dismissal, toasts, and tab opening.
+
+**Exit criteria:** deterministic tests cover stale search, all search states, zero/one/many teams, validation, duplicate submission prevention, dismissal races, and successful creation.
+
+### Phase 9 — Parity hardening and release gate
+
+- [ ] Port or replace all pure tests from `main`.
+- [ ] Add fake-Linear TestApp scenarios for every async state transition.
+- [ ] Add resize coverage for narrow, standard, and wide terminals.
+- [ ] Prove hidden/closed views receive no commands and apply no late results.
+- [ ] Add PTY coverage for startup/restoration, key normalization, mouse/wheel, multiline paste, OSC 52 copy, and clean quit.
+- [ ] Profile 50 notifications, 200 board issues, 50 comments, multiple dynamic tabs, and repeated refreshes.
+- [ ] Verify there are no `vaxis/ui`, `ffi/stateful`, or intent-shim imports.
+- [ ] Verify every post-start control mutation occurs inside a Cooper callback or `Context.dispatch`.
+- [ ] Run `ard check main.ard`, `ard build main.ard`, `ard test`, Go parser tests, and PTY smoke tests.
+- [ ] Restore/update native multi-platform CI and release tooling for Cooper's CGO requirements.
+- [ ] Update README/features docs and mark superseded implementation details accurately.
+
+**Final parity gate:** every item in the parity ledger is automated, manually verified, or has an explicit documented waiver.
+
+## Explicitly out of parity scope
+
+These are documented ideas, not behavior that the rewrite must reproduce before cutover:
+
+- [ ] Projects as a permanent tab
+- [ ] `:` command palette
+- [ ] Separate `login` CLI command / old `commands/*` architecture
+- [ ] Full inbox/board/offline cache from `docs/data-cache-plan.md`
+- [ ] Recent-documents list
+- [ ] Labels display/editing
+- [ ] Editing comments
+- [ ] Filtered boards
+- [ ] Syntax highlighting
+- [ ] Mark-all-read and snooze
+- [ ] Global `R` refresh
+- [ ] Issue relations
+- [ ] Document creation/editing
+
+## Known framework/app risks to track
+
+- [ ] Cooper has no public terminal-title API.
+- [ ] Cooper has no holistic terminal-derived semantic theme service.
+- [ ] Cooper has no general app-facing modal/focus-trap control; Tinear must own modal policy.
+- [ ] Cooper has no always-expanded ListBox/Combobox; Tinear needs a retained picker/search list.
+- [ ] Cooper has no built-in virtualization; use bounded eager retained rows first and profile.
+- [ ] Cooper has no animation/frame API; toast TTL parity comes before slide animation parity.
+- [ ] App-scoped dispatch outlives individual controllers; every late completion needs controller disposal/generation checks.
+- [ ] Automatic ScrollBox bars reserve cells and can change parity-sensitive wrapping/layout.
+- [ ] Current Cooper is locally pinned; shared development requires a remotely reachable commit/tag.
