@@ -1,14 +1,18 @@
 module tinear
 
-go 1.26.0
+go 1.27.0
 
-require go.rockorager.dev/vaxis v0.16.0
+replace github.com/akonwi/cooper => ../cooper
+
+// Ard source imports Cooper and Vaxis directly through the Go backend.
+require (
+	github.com/akonwi/cooper v0.0.0
+	go.rockorager.dev/vaxis v0.17.2-0.20260811162040-8a93a9a0e2e7
+)
 
 require (
+	github.com/AnatoleLucet/tess v1.0.0-rc.2.0.20260826145955-c76872ba8463 // indirect
 	github.com/rockorager/go-uucode v1.2.0 // indirect
-	github.com/yuin/goldmark v1.8.4 // indirect
 	golang.org/x/sys v0.10.0 // indirect
 	golang.org/x/term v0.10.0 // indirect
 )
-
-replace go.rockorager.dev/vaxis => ../vaxis

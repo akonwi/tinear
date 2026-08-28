@@ -1,219 +1,32 @@
-use ard/async
-
-use go:go.rockorager.dev/vaxis/ui
-use go:time
-use tinear/config
-use go:tinear/ffi
-use tinear/tui/logged_in_screen
-use tinear/tui/modal
-use tinear/tui/toast
-use tinear/tui/welcome_screen
-
-let DEFAULT_TOAST_TTL_MS: Int = 5000
-
-struct AppState {
-  api_key: Str,
-  toasts: [toast::Toast],
-  next_toast_id: Int,
-  // Currently-presented modal, if any. Setting to some / none drives
-  // the overlay slot in the app root.
-  current_modal: modal::ModalDef?,
-}
-
-impl AppState {
-  fn has_auth() Bool {
-    not self.api_key.is_empty()
-  }
-}
-
-fn set_api_key(c: mut ffi::StateCtx, api_key: Str) {
-  ffi::Update<AppState>(c, fn(state) {
-    state.api_key = api_key
-  })
-}
-
-// Append a new toast and schedule its removal once the TTL elapses.
-// Safe to call from event handlers and from background fibers
-// (ffi::Dispatch lands the state mutation on the UI thread).
-fn dispatch_toast(
-  ctx: mut ffi::StateCtx,
-  title: Str,
-  description: Str,
-  variant: toast::ToastVariant,
-  ttl_ms: Int,
-) {
-  ffi::Dispatch(ctx, fn() {
-    let toast_id = ffi::StateValue<AppState>(ctx).next_toast_id + 1
-    ffi::Update<AppState>(ctx, fn(state) {
-      state.next_toast_id = toast_id
-      let next_toasts: mut [toast::Toast] = mut []
-      for t in state.toasts {
-        next_toasts.push(t)
-      }
-      next_toasts.push(
-        toast::Toast{
-          id: toast_id,
-          title: title,
-          description: description,
-          variant: variant,
-          ttl_ms: ttl_ms,
-        },
-      )
-      state.toasts = next_toasts.@
-    })
-    async::start(fn() {
-      time::Sleep(time::Duration::from(ttl_ms) * time::Millisecond)
-      ffi::Dispatch(ctx, fn() {
-        ffi::Update<AppState>(ctx, fn(s: mut AppState) {
-          let remaining: mut [toast::Toast] = mut []
-          for t in s.toasts {
-            if not t.id == toast_id {
-              remaining.push(t)
-            }
-          }
-          s.toasts = remaining.@
-        })
-      })
-    })
-  })
-}
-
-// Modal lifecycle helpers. close_modal clears the slot; show_modal
-// installs a builder. Both are runtime-safe (ffi::Dispatch lands the
-// state mutation on the UI thread) so callers can invoke them from
-// event handlers or background fibers.
-fn close_modal(c: mut ffi::StateCtx) {
-  ffi::Dispatch(c, fn() {
-    ffi::Update<AppState>(c, fn(s: mut AppState) {
-      s.current_modal = Maybe::new()
-    })
-  })
-}
-
-fn show_modal(c: mut ffi::StateCtx, builder: fn(ui::Theme, fn()) ui::Widget) {
-  ffi::Dispatch(c, fn() {
-    ffi::Update<AppState>(c, fn(s: mut AppState) {
-      s.current_modal = Maybe::new(modal::ModalDef{build: builder})
-    })
-  })
-}
-
-fn body(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
-  let theme = ui::MustDepend<ui::Theme>(ctx)
-  let model = ffi::StateValue<AppState>(c)
-  let notify = fn(title: Str, description: Str, variant: toast::ToastVariant) {
-    dispatch_toast(c, title, description, variant, DEFAULT_TOAST_TTL_MS)
-  }
-  let content = match model.has_auth() {
-    true => {
-      ui::Padding(
-        ui::Symmetric(1, 0),
-        logged_in_screen::new(
-          model.api_key,
-          notify,
-          fn(builder: fn(ui::Theme, fn()) ui::Widget) {
-            show_modal(c, builder)
-          },
-          fn() {
-            close_modal(c)
-          },
-          model.current_modal.is_some(),
-        ),
-      )
-    },
-    false => {
-      ui::Center(
-        ui::Padding(
-          ui::Symmetric(1, 0),
-          welcome_screen::new(fn(api_key: Str) {
-            set_api_key(c, api_key)
-          }),
-        ),
-      )
-    },
-  }
-  // Toast overlay rides above the screen content, anchored
-  // bottom-right with 1 col of padding from the right edge and 2 rows
-  // from the bottom (above the hint bar). Modal: false so it doesn't
-  // trap focus.
-  //
-  // The widget type at this slot must be STABLE across rebuilds: if it
-  // flipped between `content` and `Overlay{...}` when toasts.size()
-  // crosses 0, the framework would treat it as a different widget type
-  // and unmount the entire subtree underneath — including the shell
-  // and inbox view, forcing refetches on every toast appear/disappear.
-  // Always use Overlay; pass an empty entries list when there's
-  // nothing to layer.
-  let entries: mut [ui::OverlayEntry] = mut []
-  if model.toasts.size() > 0 {
-    entries.push(
-      ui::OverlayEntry{
-        Child: ui::Padding(ui::Insets{Right: 1, Bottom: 2}, toast::render_stack(theme, model.toasts)),
-        Modal: false,
-        Alignment: ui::BottomRight,
-      },
-    )
-  }
-  // Modal entry. Modal: true inserts a barrier behind the entry so the
-  // body view stops responding to keys and clicks while the modal is
-  // presented. The modal's own FocusScope (inside show_modal) handles
-  // the focus trap.
-  match model.current_modal {
-    def => {
-      entries.push(
-        ui::OverlayEntry{Child: ui::Center(
-          def.build(theme, fn() {
-            close_modal(c)
-          }),
-        ), Modal: true},
-      )
-    },
-    _ => (),
-  }
-  let layered = ui::Overlay{Child: content, Entries: entries.@}
-  ui::DecoratedBox(
-    ui::Decoration{Style: ui::Style{Foreground: theme.Foreground, Background: theme.Background}},
-    layered,
-  )
-}
-
-fn root() ui::Widget {
-  ui::Actions{
-    // Quit on Ctrl+C (delivered as a key in raw mode, not SIGINT).
-    // Cmd+C (reported as Super+c where the terminal forwards it) copies
-    // the active selection: the binding invokes vaxis's
-    // copy-selection intent, which bubbles up from the focused element
-    // to whichever SelectionArea wraps it (the detail panes). With no
-    // selection on the focus path it's a harmless no-op.
-    Bindings: [
-      "tinear.quit": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
-        ev.Quit()
-        ui::EventHandled
-      },
-    ],
-    Child: ui::Shortcuts{
-      Bindings: ["Ctrl+c": ffi::Intent("tinear.quit"), "Super+c": ffi::Intent("vaxis.text.copy-selection")],
-      Child: ffi::Stateful{
-        Init: fn() Any {
-          let api_key: Str = match config::load() {
-            ok(cfg) => cfg.api_key,
-            err(_) => "",
-          }
-          AppState{
-            api_key: api_key,
-            toasts: [],
-            next_toast_id: 0,
-            current_modal: Maybe::new(),
-          }
-        },
-        Build: body,
-      },
-    },
-  }
-}
+use cooper/app
+use cooper/event
+use cooper/style
+use cooper/ui
 
 fn main() {
-  // No explicit theme: vaxis derives one from the terminal's own
-  // colors (OSC 10/11 foreground and background, OSC 4 palette).
-  ui::Run(root()).expect("Failed to start UI")
+  let application = app::new().expect("create tinear")
+  let ctx = application.context
+
+  let screen = ui::box(
+    ctx,
+    styles: style::new(
+      width: style::percent(100.0),
+      height: style::percent(100.0),
+      padding: style::edges(style::cells(1)),
+      flex_direction: style::FlexDirection::column,
+      gap: style::cells(1),
+    ),
+  )
+  screen.add(ui::text(ctx, content: "tinear", text_style: ui::text_style(bold: true)))
+  screen.add(ui::text(ctx, content: "Cooper rewrite in progress"))
+  screen.add(ui::text(ctx, content: "q quit", text_style: ui::text_style(dim: true)))
+  application.root.add(screen)
+
+  let _ = application.on_key(fn(received: mut event::KeyEvent) {
+    if received.event_type != event::KeyEventType::release and received.matches("q") {
+      application.destroy()
+    }
+  })
+
+  application.run().expect("run tinear")
 }
