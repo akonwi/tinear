@@ -1,0 +1,83 @@
+use decode
+use go:encoding/json
+use go:os
+
+private fn error_message(error: Error) Str {
+  error.error()
+}
+
+struct Config {
+  api_key: Str,
+}
+
+impl Config {
+  fn has_auth() Bool {
+    not self.api_key.is_empty()
+  }
+}
+
+fn get_home_dir() Str!Str {
+  match os::LookupEnv("HOME") {
+    h => Result::ok(h),
+    _ => Result::err("HOME is not set"),
+  }
+}
+
+fn get_config_dir() Str!Str {
+  let home = try get_home_dir()
+  Result::ok("{home}/.tinear")
+}
+
+fn get_config_path() Str!Str {
+  let dir = try get_config_dir()
+  Result::ok("{dir}/config.json")
+}
+
+fn write(api_key: Str) Str!Str {
+  let config_dir = try get_config_dir()
+  // Keep the credential directory and file private to the current user.
+  try os::MkdirAll(config_dir, 448).map_err(error_message)
+  try os::Chmod(config_dir, 448).map_err(error_message)
+
+  let encoded = try json::Marshal(Config{api_key: api_key}).map_err(error_message)
+  let config_path = try get_config_path()
+  let temp_path = "{config_path}.tmp"
+  mut content = encoded
+  try os::WriteFile(temp_path, mut content, 384).map_err(error_message)
+  try os::Rename(temp_path, config_path).map_err(error_message)
+  try os::Chmod(config_path, 384).map_err(error_message)
+
+  Result::ok(config_path)
+}
+
+fn parse(content: Str) Config!Str {
+  decode::unmarshal(
+    content,
+    decode_config,
+  ).map_err(fn(e) {
+    "invalid config: {e.error()}"
+  })
+}
+
+private fn decode_config(data: Any) Config!decode::Err {
+  let api_key = try decode::run(data, decode::field("api_key", decode::string))
+  Result::ok(Config{api_key: api_key})
+}
+
+fn load() Config!Str {
+  // Try env var first
+  match os::LookupEnv("LINEAR_API_KEY") {
+    key => Result::ok(Config{api_key: key}),
+    _ => {
+      // Fall back to config file
+      let config_path = try get_config_path()
+      match os::ReadFile(config_path) {
+        ok(bytes) => {
+          mut copy = bytes
+          parse(Str::from(copy))
+        },
+        err(_) => Result::ok(Config{api_key: ""}),
+      }
+    },
+  }
+}

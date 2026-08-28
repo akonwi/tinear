@@ -1,0 +1,60 @@
+use ard/testing
+
+use decode
+use tinear/models/documents
+
+fn sample_doc_json() Str {
+  "{{\"id\": \"uuid-1\", \"slugId\": \"e234753fe971\", \"title\": \"Video Call \\u00e2\\u0080\\u0094 Database Schema\", \"updatedAt\": \"2026-07-09T14:56:52.499Z\", \"url\": \"https://linear.app/x/document/video-call-database-schema-e234753fe971\", \"project\": {{\"name\": \"Zoom Replacement\"}}, \"initiative\": null, \"creator\": {{\"displayName\": \"eugene\"}}, \"content\": \"Schema reference.\\n\\n## Tables\"}}"
+}
+
+test fn decodes_document_meta() Void!Str {
+  let raw = decode::from_json(sample_doc_json()).expect("parse")
+  let meta = documents::decode_meta(raw)
+  try testing::assert(meta.slug_id == "e234753fe971", "slug_id should decode")
+  try testing::assert(
+    meta.title == "Video Call - Database Schema",
+    "title should decode with mojibake normalized",
+  )
+  try testing::assert(meta.container == "Zoom Replacement", "project name should win as container")
+  try testing::assert(meta.creator == "eugene", "creator displayName should decode")
+  testing::assert(meta.url.starts_with("https://linear.app"), "url should decode")
+}
+
+test fn decodes_document_content() Void!Str {
+  let raw = decode::from_json(sample_doc_json()).expect("parse")
+  let doc = documents::decode_doc(raw)
+  try testing::assert(doc.content.is_some(), "content should be present")
+  testing::assert(
+    doc.content.or("").starts_with("Schema reference."),
+    "content should decode as markdown text",
+  )
+}
+
+test fn container_falls_back_to_initiative_then_dash() Void!Str {
+  let with_initiative = decode::from_json(
+    "{{\"id\": \"u\", \"slugId\": \"s\", \"title\": \"T\", \"updatedAt\": \"\", \"url\": \"\", \"project\": null, \"initiative\": {{\"name\": \"Big Bet\"}}, \"creator\": null}}",
+  ).expect("parse")
+  try testing::assert(
+    documents::decode_meta(with_initiative).container == "Big Bet",
+    "initiative should be the fallback container",
+  )
+
+  let with_neither = decode::from_json(
+    "{{\"id\": \"u\", \"slugId\": \"s\", \"title\": \"T\", \"updatedAt\": \"\", \"url\": \"\", \"project\": null, \"initiative\": null, \"creator\": null}}",
+  ).expect("parse")
+  try testing::assert(
+    documents::decode_meta(with_neither).container == "—",
+    "container should fall back to a dash",
+  )
+  testing::assert(
+    documents::decode_meta(with_neither).creator == "—",
+    "creator should fall back like issue assignees do",
+  )
+}
+
+test fn missing_content_decodes_to_none() Void!Str {
+  let raw = decode::from_json(
+    "{{\"id\": \"u\", \"slugId\": \"s\", \"title\": \"T\", \"updatedAt\": \"\", \"url\": \"\", \"project\": null, \"initiative\": null, \"creator\": null, \"content\": null}}",
+  ).expect("parse")
+  testing::assert(documents::decode_doc(raw).content.is_none(), "null content should be none")
+}

@@ -1,0 +1,43 @@
+use ard/async
+
+use cooper/context
+use go:time
+
+// Schedule an action and return an idempotent cancellation function.
+type Schedule = fn(Int, fn()) fn()
+
+private struct TimerState {
+  cancelled: Bool,
+}
+
+fn for_context(ctx: mut context::Context) Schedule {
+  let app_cancellation = ctx.cancellation
+  let dispatch = ctx.dispatch
+  fn(milliseconds: Int, action: fn()) fn() {
+    if milliseconds < 0 {
+      panic("scheduled delay must be non-negative")
+    }
+    let timer_cancellation = Chan::new<Bool>()
+    let state = mut TimerState{cancelled: false}
+    async::start(fn() {
+      let stopped = select {
+        app_cancellation.recv() => true,
+        timer_cancellation.recv() => true,
+        time::After(time::Duration::from(milliseconds) * time::Millisecond).recv() => false,
+      }
+      if not stopped {
+        let _ = dispatch(fn() {
+          if not state.cancelled {
+            action()
+          }
+        })
+      }
+    })
+    fn() {
+      if not state.cancelled {
+        state.cancelled = true
+        timer_cancellation.close()
+      }
+    }
+  }
+}

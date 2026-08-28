@@ -1,0 +1,768 @@
+use decode
+use tinear/linear/client
+use tinear/models/issue_state as state
+
+fn replace_common_mojibake(value: Str) Str {
+  mut normalized = value
+  // UTF-8 punctuation decoded as Windows-1252/C1 controls.
+  normalized = normalized.replace_all("â\u0080\u0094", "-")
+  normalized = normalized.replace_all("â\u0080\u0093", "-")
+  normalized = normalized.replace_all("â\u0080\u0098", "'")
+  normalized = normalized.replace_all("â\u0080\u0099", "'")
+  normalized = normalized.replace_all("â\u0080\u009c", "\"")
+  normalized = normalized.replace_all("â\u0080\u009d", "\"")
+  normalized = normalized.replace_all("â\u0080¦", "...")
+  normalized = normalized.replace_all("â\u0080¢", "*")
+
+  // Same mojibake after further Windows-1252-ish display/clipboard conversion.
+  normalized = normalized.replace_all("â€”", "-")
+  normalized = normalized.replace_all("â€“", "-")
+  normalized = normalized.replace_all("â€˜", "'")
+  normalized = normalized.replace_all("â€™", "'")
+  normalized = normalized.replace_all("â€œ", "\"")
+  normalized = normalized.replace_all("â€�", "\"")
+  normalized = normalized.replace_all("â€¦", "...")
+  normalized = normalized.replace_all("â€¢", "*")
+
+  // macOS/NS-style mojibake variants.
+  normalized = normalized.replace_all("‚Äî", "-")
+  normalized = normalized.replace_all("‚Äì", "-")
+  normalized = normalized.replace_all("‚Äò", "'")
+  normalized = normalized.replace_all("‚Äô", "'")
+  normalized = normalized.replace_all("‚Äú", "\"")
+  normalized = normalized.replace_all("‚Äù", "\"")
+  normalized = normalized.replace_all("‚Ä¶", "...")
+  normalized = normalized.replace_all("‚Ä¢", "*")
+
+  normalized.replace_all("\u00a0", " ")
+}
+
+fn normalize_degraded_mojibake(value: Str) Str {
+  mut normalized = ""
+  for ch in value {
+    match ch {
+      'Â' => (),
+      '�' => (),
+      '¢' => { normalized = normalized + "-" },
+      'â' => { normalized = normalized + "-" },
+      _ => { normalized = normalized + ch.to_str() },
+    }
+  }
+  normalized
+}
+
+fn normalize_text(value: Str) Str {
+  normalize_degraded_mojibake(replace_common_mojibake(value))
+}
+
+// Typed issue model shared by the retained controllers.
+struct Issue {
+  id: Str,
+  identifier: Str,
+  title: Str,
+  description: Str?,
+  priority: Int?,
+  state_id: Str,
+  state_name: Str,
+  state_type: Str,
+  state_position: Float64,
+  team_id: Str,
+  team_name: Str,
+  team_key: Str,
+  project_id: Str,
+  project_name: Str,
+  assignee_id: Str,
+  assignee_name: Str,
+  cycle_id: Str,
+  cycle_label: Str,
+  url: Str,
+}
+
+// A column on the My Issues board: a workflow state name + the issues currently
+// in it. Issues are decoded into typed `Issue` structs at this model boundary.
+struct BoardColumn {
+  name: Str,
+  state_type: Str,
+  position: Float64,
+  issues: [Issue],
+}
+
+struct Comment {
+  id: Str,
+  author: Str,
+  created_at: Str,
+  body: Str,
+  // Parent comment id for replies; empty for top-level comments.
+  // Linear threads are one level deep (replies can't have replies).
+  parent_id: Str,
+  // Display depth computed by thread_comments: 0 top-level, 1 reply.
+  depth: Int,
+}
+
+struct WorkflowState {
+  id: Str,
+  name: Str,
+  state_type: Str,
+  position: Float64,
+}
+
+struct Cycle {
+  id: Str,
+  number: Int,
+  name: Str,
+  starts_at: Str,
+}
+
+struct TeamCyclesResult {
+  active_cycle_number: Int?,
+  cycles: [Cycle],
+}
+
+fn optional_str(data: Any, name: Str, fallback: Str) Str {
+  match decode::run(data, decode::field(name, decode::nullable(decode::string))) {
+    ok(value) => {
+      match value {
+        v => v,
+        _ => fallback,
+      }
+    },
+    err(_) => fallback,
+  }
+}
+
+fn nullable_str(data: Any, name: Str) Str? {
+  decode::run(
+    data,
+    decode::field(name, decode::nullable(decode::string)),
+  ).expect("nullable string field missing")
+}
+
+fn normalize_nullable_str(value: Str?) Str? {
+  match value {
+    v => Maybe::new(normalize_text(v)),
+    _ => Maybe::new(),
+  }
+}
+
+fn nullable_int(data: Any, name: Str) Int? {
+  decode::run(
+    data,
+    decode::field(name, decode::nullable(decode::int)),
+  ).expect("nullable int field missing")
+}
+
+fn nested_str(data: Any, name: Str, nested: Str, fallback: Str) Str {
+  match decode::run(data, decode::path([name, nested], decode::nullable(decode::string))) {
+    ok(value) => {
+      match value {
+        v => v,
+        _ => fallback,
+      }
+    },
+    err(_) => fallback,
+  }
+}
+
+// Comment authors are not always users: integration comments (GitHub
+// sync, Slack, OAuth apps) have user: null and a botActor instead, and
+// deleted users can be missing fields. Never panic — walk the
+// fallbacks and settle on a dash. (Fixes #16.)
+fn comment_author(raw: Any) Str {
+  let user_display = nested_str(raw, "user", "displayName", "")
+  match user_display.is_empty() {
+    false => user_display,
+    true => {
+      let user_name = nested_str(raw, "user", "name", "")
+      match user_name.is_empty() {
+        false => user_name,
+        true => {
+          let bot_name = nested_str(raw, "botActor", "name", "")
+          match bot_name.is_empty() {
+            false => bot_name,
+            true => "—",
+          }
+        },
+      }
+    },
+  }
+}
+
+fn user_display_name_opt(data: Any, name: Str) Str {
+  let display_name = nested_str(data, name, "displayName", "")
+  match display_name.is_empty() {
+    true => nested_str(data, name, "name", "—"),
+    false => display_name,
+  }
+}
+
+fn cycle_id(raw: Any) Str {
+  nested_str(raw, "cycle", "id", "")
+}
+
+fn cycle_label(raw: Any) Str {
+  let number = match decode::run(raw, decode::path(["cycle", "number"], decode::nullable(decode::int))) {
+    ok(value) => value,
+    err(_) => Maybe::new(),
+  }
+  match number {
+    n => {
+      let name = nested_str(raw, "cycle", "name", "")
+      match name.is_empty() {
+        true => "Cycle {n}",
+        false => normalize_text(name),
+      }
+    },
+    _ => "—",
+  }
+}
+
+fn decode_issue(raw: Any) Issue {
+  let state = decode::run(raw, decode::field("state", decode::any)).expect("Missing state")
+  let team = decode::run(raw, decode::field("team", decode::any)).expect("Missing team")
+  Issue{
+    id: decode::run(raw, decode::field("id", decode::string)).expect("Missing issue.id"),
+    identifier: decode::run(raw, decode::field("identifier", decode::string)).expect("Missing issue.identifier"),
+    title: normalize_text(
+      decode::run(raw, decode::field("title", decode::string)).expect("Missing issue.title"),
+    ),
+    description: normalize_nullable_str(nullable_str(raw, "description")),
+    priority: nullable_int(raw, "priority"),
+    state_id: decode::run(state, decode::field("id", decode::string)).expect("Missing state.id"),
+    state_name: normalize_text(
+      decode::run(state, decode::field("name", decode::string)).expect("Missing state.name"),
+    ),
+    state_type: decode::run(state, decode::field("type", decode::string)).expect("Missing state.type"),
+    state_position: decode::run(state, decode::field("position", decode::float)).expect("Missing state.position"),
+    team_id: decode::run(team, decode::field("id", decode::string)).expect("Missing team.id"),
+    team_name: normalize_text(decode::run(team, decode::field("name", decode::string)).expect("Missing team.name")),
+    team_key: decode::run(team, decode::field("key", decode::string)).expect("Missing team.key"),
+    project_id: nested_str(raw, "project", "id", ""),
+    project_name: normalize_text(nested_str(raw, "project", "name", "—")),
+    assignee_id: nested_str(raw, "assignee", "id", ""),
+    assignee_name: normalize_text(user_display_name_opt(raw, "assignee")),
+    cycle_id: cycle_id(raw),
+    cycle_label: cycle_label(raw),
+    url: optional_str(raw, "url", ""),
+  }
+}
+
+fn decode_column(raw: state::BoardColumn) BoardColumn {
+  let issues: mut [Issue] = mut []
+  for issue in raw.issues {
+    issues.push(decode_issue(issue))
+  }
+  BoardColumn{
+    name: normalize_text(raw.name),
+    state_type: raw.state_type,
+    position: raw.position,
+    issues: issues.@,
+  }
+}
+
+fn decode_comment(raw: Any) Comment {
+  Comment{
+    id: decode::run(raw, decode::field("id", decode::string)).expect("Missing comment.id"),
+    author: normalize_text(comment_author(raw)),
+    created_at: decode::run(raw, decode::field("createdAt", decode::string)).expect("Missing comment.createdAt"),
+    body: normalize_text(
+      decode::run(raw, decode::field("body", decode::string)).expect("Missing comment.body"),
+    ),
+    parent_id: nested_str(raw, "parent", "id", ""),
+    depth: 0,
+  }
+}
+
+// Arrange comments into threaded display order: each top-level comment
+// (in its original relative order) followed by its replies (in theirs),
+// with depth set for indentation. Replies whose parent isn't present
+// (deleted, or beyond the fetch page) degrade to top-level.
+fn thread_comments(comments: [Comment]) [Comment] {
+  let present: mut [Str: Bool] = mut [:]
+  for comment in comments {
+    present.set(comment.id, true)
+  }
+  let ordered: mut [Comment] = mut []
+  for comment in comments {
+    let is_reply = (not comment.parent_id.is_empty()) and present.get(comment.parent_id).or(false)
+    if not is_reply {
+      ordered.push(comment)
+      for candidate in comments {
+        if candidate.parent_id == comment.id {
+          let reply = mut candidate
+          reply.depth = 1
+          ordered.push(reply.@)
+        }
+      }
+    }
+  }
+  ordered.@
+}
+
+fn decode_workflow_state(raw: Any) WorkflowState {
+  WorkflowState{
+    id: decode::run(raw, decode::field("id", decode::string)).expect("Missing workflow state.id"),
+    name: normalize_text(
+      decode::run(raw, decode::field("name", decode::string)).expect("Missing workflow state.name"),
+    ),
+    state_type: decode::run(raw, decode::field("type", decode::string)).expect("Missing workflow state.type"),
+    position: decode::run(raw, decode::field("position", decode::float)).expect("Missing workflow state.position"),
+  }
+}
+
+fn decode_cycle(raw: Any) Cycle {
+  let name = decode::run(
+    raw,
+    decode::field("name", decode::nullable(decode::string)),
+  ).expect("Missing cycle.name")
+  Cycle{
+    id: decode::run(raw, decode::field("id", decode::string)).expect("Missing cycle.id"),
+    number: decode::run(raw, decode::field("number", decode::int)).expect("Missing cycle.number"),
+    name: match name {
+      n => normalize_text(n),
+      _ => "",
+    },
+    starts_at: optional_str(raw, "startsAt", ""),
+  }
+}
+
+fn fetch_viewer(api_key: Str) Any!Str {
+  let data = try client::graphql(api_key, `query {{ viewer {{ id name displayName email }} }}`)
+  let viewer = decode::run(data, decode::field("viewer", decode::any)).expect("Missing viewer")
+  Result::ok(viewer)
+}
+
+fn update_state(api_key: Str, issue_id: Str, state_id: Str) Void!Str {
+  let mutation = `mutation {{ issueUpdate(id: {client::string_literal(issue_id)}, input: {{ stateId: {client::string_literal(state_id)} }}) {{ success }} }}`
+  let data = try client::graphql(api_key, mutation)
+  let success = decode::run(
+    data,
+    decode::path(["issueUpdate", "success"], decode::boolean),
+  ).expect("Missing issueUpdate.success")
+  match success {
+    true => Result::ok(()),
+    false => Result::err("issueUpdate returned success=false"),
+  }
+}
+
+fn update_cycle(api_key: Str, issue_id: Str, cycle_id: Str) Void!Str {
+  let cycle_value = client::nullable_string_literal(cycle_id)
+  let mutation = `mutation {{ issueUpdate(id: {client::string_literal(issue_id)}, input: {{ cycleId: {cycle_value} }}) {{ success }} }}`
+  let data = try client::graphql(api_key, mutation)
+  let success = decode::run(
+    data,
+    decode::path(["issueUpdate", "success"], decode::boolean),
+  ).expect("Missing issueUpdate.success")
+  match success {
+    true => Result::ok(()),
+    false => Result::err("issueUpdate returned success=false"),
+  }
+}
+
+// Empty parent_id posts a top-level comment; otherwise a threaded
+// reply. Linear threads are one level deep, so parent_id must be a
+// top-level comment's id.
+fn create_comment(api_key: Str, issue_id: Str, body: Str, parent_id: Str) Void!Str {
+  mut input = "issueId: {client::string_literal(issue_id)}, body: {client::string_literal(body)}"
+  if not parent_id.is_empty() {
+    input = "{input}, parentId: {client::string_literal(parent_id)}"
+  }
+  let mutation = `mutation {{ commentCreate(input: {{ {input} }}) {{ success }} }}`
+  let data = try client::graphql(api_key, mutation)
+  let success = decode::run(
+    data,
+    decode::path(["commentCreate", "success"], decode::boolean),
+  ).expect("Missing commentCreate.success")
+  match success {
+    true => Result::ok(()),
+    false => Result::err("commentCreate returned success=false"),
+  }
+}
+
+fn fetch_issue_comments(api_key: Str, issue_id: Str) [Any]!Str {
+  let query = `query {{ issue(id: {client::string_literal(issue_id)}) {{ comments(first: 50) {{ nodes {{ id body createdAt parent {{ id }} user {{ name displayName }} botActor {{ name }} }} }} }} }}`
+  let data = try client::graphql(api_key, query)
+  let nodes = decode::run(
+    data,
+    decode::path(["issue", "comments", "nodes"], decode::list(decode::any)),
+  ).expect("Missing issue.comments.nodes")
+  Result::ok(nodes)
+}
+
+fn fetch_team_states(api_key: Str, team_id: Str) [Any]!Str {
+  let query = `query {{ team(id: {client::string_literal(team_id)}) {{ states {{ nodes {{ id name type position }} }} }} }}`
+  let data = try client::graphql(api_key, query)
+  let nodes = decode::run(
+    data,
+    decode::path(["team", "states", "nodes"], decode::list(decode::any)),
+  ).expect("Missing team.states.nodes")
+  Result::ok(nodes)
+}
+
+fn fetch_team_cycles(api_key: Str, team_id: Str) TeamCyclesResult!Str {
+  let query = `query {{ team(id: {client::string_literal(team_id)}) {{ activeCycle {{ number }} cycles(first: 50) {{ nodes {{ id number name startsAt }} }} }} }}`
+  let data = try client::graphql(api_key, query)
+  let team_obj = decode::run(data, decode::field("team", decode::any)).expect("Missing team")
+  let nodes = decode::run(
+    team_obj,
+    decode::path(["cycles", "nodes"], decode::list(decode::any)),
+  ).expect("Missing team.cycles.nodes")
+
+  let active_number = match decode::run(team_obj, decode::path(["activeCycle", "number"], decode::nullable(decode::int))) {
+    ok(value) => value,
+    err(_) => Maybe::new(),
+  }
+
+  let cycles: mut [Cycle] = mut []
+  for raw in nodes {
+    cycles.push(decode_cycle(raw))
+  }
+  Result::ok(TeamCyclesResult{active_cycle_number: active_number, cycles: cycles.@})
+}
+
+fn issue_fields() Str {
+  `id identifier title description priority state {{ id name type position }} team {{ id name key }} project {{ id name }} assignee {{ id name displayName }} cycle {{ id number name }} url`
+}
+
+fn fetch_single_issue(api_key: Str, issue_id: Str) Any!Str {
+  let query = `query {{ issue(id: {client::string_literal(issue_id)}) {{ {issue_fields()} }} }}`
+  let data = try client::graphql(api_key, query)
+  let issue = decode::run(data, decode::field("issue", decode::any)).expect("Missing issue")
+  Result::ok(issue)
+}
+
+fn fetch_issue_search(api_key: Str, term: Str) [Any]!Str {
+  let query = `query {{ searchIssues(term: {client::string_literal(term)}, first: 20) {{ nodes {{ {issue_fields()} }} }} }}`
+  let data = try client::graphql(api_key, query)
+  let nodes = decode::run(
+    data,
+    decode::path(["searchIssues", "nodes"], decode::list(decode::any)),
+  ).expect("Missing searchIssues.nodes")
+  Result::ok(nodes)
+}
+
+fn sort_columns_by_position(cols: [state::BoardColumn]) [state::BoardColumn] {
+  let n = cols.size()
+  if n < 2 {
+    cols
+  } else {
+    let result = mut cols
+    for i in 0..n - 2 {
+      for j in 0..n - 2 - i {
+        let a = result.at(j).expect("bounds checked")
+        let b = result.at(j + 1).expect("bounds checked")
+        let ra = state::state_type_rank(a.state_type)
+        let rb = state::state_type_rank(b.state_type)
+        let swap = match ra == rb {
+          true => a.position > b.position,
+          false => ra > rb,
+        }
+        if swap {
+          result.set(j, b)
+          result.set(j + 1, a)
+        }
+      }
+    }
+    result.@
+  }
+}
+
+fn fetch_board(api_key: Str, my_id: Str) [state::BoardColumn]!Str {
+  let viewer_id = client::string_literal(my_id)
+  let query = `
+    query {{
+      issues(
+        first: 200
+        filter: {{
+          assignee: {{ id: {{ eq: {viewer_id} }} }}
+          state: {{ type: {{ nin: ["canceled"] }} }}
+        }}
+      ) {{
+        nodes {{
+          {issue_fields()}
+        }}
+      }}
+    }}
+    `
+  let data = try client::graphql(api_key, query)
+  let raw_issues = decode::run(
+    data,
+    decode::path(["issues", "nodes"], decode::list(decode::any)),
+  ).expect("Missing issues.nodes")
+
+  let state_names: mut [Str] = mut []
+  let state_types: mut [Str] = mut []
+  let state_positions: mut [Float64] = mut []
+  for issue in raw_issues {
+    let s = decode::run(issue, decode::field("state", decode::any)).expect("Missing state")
+    let sname = decode::run(s, decode::field("name", decode::string)).expect("Missing state.name")
+    if not state::is_hidden_state(sname) {
+      mut seen = false
+      for existing in state_names {
+        if existing == sname {
+          seen = true
+        }
+      }
+      if not seen {
+        state_names.push(sname)
+        state_types.push(
+          decode::run(s, decode::field("type", decode::string)).expect("Missing state.type"),
+        )
+        state_positions.push(
+          decode::run(s, decode::field("position", decode::float)).expect("Missing state.position"),
+        )
+      }
+    }
+  }
+
+  let columns: mut [state::BoardColumn] = mut []
+  for sname, idx in state_names {
+    let is_completed = state_types.at(idx).expect("parallel list") == "completed"
+    let cap = match is_completed {
+      true => 10,
+      false => 200,
+    }
+    let col_issues: mut [Any] = mut []
+    mut count = 0
+    for issue in raw_issues {
+      let iss_name = decode::run(
+        issue,
+        decode::path(["state", "name"], decode::string),
+      ).expect("Missing state.name on issue")
+      if iss_name == sname and count < cap {
+        col_issues.push(issue)
+        count = count + 1
+      }
+    }
+    columns.push(
+      state::BoardColumn{
+        name: sname,
+        state_type: state_types.at(idx).expect("parallel list"),
+        position: state_positions.at(idx).expect("parallel list"),
+        issues: col_issues.@,
+      },
+    )
+  }
+
+  Result::ok(sort_columns_by_position(columns.@))
+}
+
+fn load_comments(api_key: Str, issue_id: Str) [Comment]!Str {
+  let raw_comments = try fetch_issue_comments(api_key, issue_id)
+  let comments: mut [Comment] = mut []
+  for raw in raw_comments {
+    comments.push(decode_comment(raw))
+  }
+  Result::ok(thread_comments(comments.@))
+}
+
+fn load_team_states(api_key: Str, team_id: Str) [WorkflowState]!Str {
+  let raw_states = try fetch_team_states(api_key, team_id)
+  let states: mut [WorkflowState] = mut []
+  for raw in raw_states {
+    states.push(decode_workflow_state(raw))
+  }
+  Result::ok(states.@)
+}
+
+fn load_team_cycles(api_key: Str, team_id: Str) TeamCyclesResult!Str {
+  fetch_team_cycles(api_key, team_id)
+}
+
+fn load_issue(api_key: Str, issue_id: Str) Issue!Str {
+  let raw = try fetch_single_issue(api_key, issue_id)
+  Result::ok(decode_issue(raw))
+}
+
+fn search(api_key: Str, term: Str) [Issue]!Str {
+  let raw_issues = try fetch_issue_search(api_key, term)
+  let results: mut [Issue] = mut []
+  for raw in raw_issues {
+    results.push(decode_issue(raw))
+  }
+  Result::ok(results.@)
+}
+
+fn load(api_key: Str) [BoardColumn]!Str {
+  let viewer = try fetch_viewer(api_key)
+  let viewer_id = decode::run(
+    viewer,
+    decode::field("id", decode::string),
+  ).expect("Missing viewer id")
+  let raw_columns = try fetch_board(api_key, viewer_id)
+  let columns: mut [BoardColumn] = mut []
+  for col in raw_columns {
+    columns.push(decode_column(col))
+  }
+  Result::ok(columns.@)
+}
+
+fn update_priority(api_key: Str, issue_id: Str, priority: Int) Void!Str {
+  let mutation = `mutation {{ issueUpdate(id: {client::string_literal(issue_id)}, input: {{ priority: {priority} }}) {{ success }} }}`
+  let data = try client::graphql(api_key, mutation)
+  let success = try decode::run(data, decode::path(["issueUpdate", "success"], decode::boolean)) -> e {
+    Result::err(e.to_str())
+  }
+  match success {
+    true => Result::ok(()),
+    false => Result::err("issueUpdate returned success=false"),
+  }
+}
+
+// Empty assignee_id unassigns (GraphQL null).
+fn update_assignee(api_key: Str, issue_id: Str, assignee_id: Str) Void!Str {
+  let value = client::nullable_string_literal(assignee_id)
+  let mutation = `mutation {{ issueUpdate(id: {client::string_literal(issue_id)}, input: {{ assigneeId: {value} }}) {{ success }} }}`
+  let data = try client::graphql(api_key, mutation)
+  let success = try decode::run(data, decode::path(["issueUpdate", "success"], decode::boolean)) -> e {
+    Result::err(e.to_str())
+  }
+  match success {
+    true => Result::ok(()),
+    false => Result::err("issueUpdate returned success=false"),
+  }
+}
+
+// Empty project_id clears the project (GraphQL null).
+fn update_project(api_key: Str, issue_id: Str, project_id: Str) Void!Str {
+  let value = client::nullable_string_literal(project_id)
+  let mutation = `mutation {{ issueUpdate(id: {client::string_literal(issue_id)}, input: {{ projectId: {value} }}) {{ success }} }}`
+  let data = try client::graphql(api_key, mutation)
+  let success = try decode::run(data, decode::path(["issueUpdate", "success"], decode::boolean)) -> e {
+    Result::err(e.to_str())
+  }
+  match success {
+    true => Result::ok(()),
+    false => Result::err("issueUpdate returned success=false"),
+  }
+}
+
+struct Member {
+  id: Str,
+  name: Str,
+}
+
+// Active members of a team, for the assignee picker.
+fn fetch_team_members(api_key: Str, team_id: Str) [Member]!Str {
+  let query = `query {{ team(id: {client::string_literal(team_id)}) {{ members(first: 250) {{ nodes {{ id name displayName active }} }} }} }}`
+  let data = try client::graphql(api_key, query)
+  let nodes = try decode::run(data, decode::path(["team", "members", "nodes"], decode::list(decode::any))) -> e {
+    Result::err(e.to_str())
+  }
+  let members: mut [Member] = mut []
+  for node in nodes {
+    let active = decode::run(node, decode::field("active", decode::boolean)).or(true)
+    if active {
+      let id = try decode::run(node, decode::field("id", decode::string)) -> e { Result::err(e.to_str()) }
+      members.push(Member{id: id, name: normalize_text(user_display_name_opt_self(node))})
+    }
+  }
+  Result::ok(members.@)
+}
+
+// displayName with name fallback for a user node itself (not nested).
+private fn user_display_name_opt_self(node: Any) Str {
+  let display_name = decode::run(node, decode::field("displayName", decode::string)).or("")
+  match display_name.is_empty() {
+    true => decode::run(node, decode::field("name", decode::string)).or("—"),
+    false => display_name,
+  }
+}
+
+struct Project {
+  id: Str,
+  name: Str,
+}
+
+fn project_is_available(project_state: Str) Bool {
+  (not project_state == "completed") and not project_state == "canceled"
+}
+
+// Projects available to a team, for the project picker.
+fn fetch_team_projects(api_key: Str, team_id: Str) [Project]!Str {
+  let query = `query {{ team(id: {client::string_literal(team_id)}) {{ projects(first: 250) {{ nodes {{ id name state }} }} }} }}`
+  let data = try client::graphql(api_key, query)
+  let nodes = try decode::run(data, decode::path(["team", "projects", "nodes"], decode::list(decode::any))) -> e {
+    Result::err(e.to_str())
+  }
+  let projects: mut [Project] = mut []
+  for node in nodes {
+    // Hide finished projects; issues shouldn't be filed into them.
+    let project_state = decode::run(node, decode::field("state", decode::string)).or("")
+    if project_is_available(project_state) {
+      let id = try decode::run(node, decode::field("id", decode::string)) -> e { Result::err(e.to_str()) }
+      let name = try decode::run(node, decode::field("name", decode::string)) -> e { Result::err(e.to_str()) }
+      projects.push(Project{id: id, name: normalize_text(name)})
+    }
+  }
+  Result::ok(projects.@)
+}
+
+fn update_description(api_key: Str, issue_id: Str, description: Str) Void!Str {
+  let mutation = `mutation {{ issueUpdate(id: {client::string_literal(issue_id)}, input: {{ description: {client::string_literal(description)} }}) {{ success }} }}`
+  let data = try client::graphql(api_key, mutation)
+  let success = try decode::run(data, decode::path(["issueUpdate", "success"], decode::boolean)) -> e {
+    Result::err(e.to_str())
+  }
+  match success {
+    true => Result::ok(()),
+    false => Result::err("issueUpdate returned success=false"),
+  }
+}
+
+// ── Issue creation ───────────────────────────────────────────────────
+
+struct Team {
+  id: Str,
+  name: Str,
+  key: Str,
+}
+
+fn fetch_teams(api_key: Str) [Team]!Str {
+  // first: 250 is Linear's page-size cap; workspaces beyond that need
+  // pagination (unlikely for now, but the default page is smaller).
+  let query = `query {{ teams(first: 250) {{ nodes {{ id name key }} }} }}`
+  let data = try client::graphql(api_key, query)
+  let nodes = try decode::run(data, decode::path(["teams", "nodes"], decode::list(decode::any))) -> e {
+    Result::err(e.to_str())
+  }
+  let teams: mut [Team] = mut []
+  for node in nodes {
+    let id = try decode::run(node, decode::field("id", decode::string)) -> e { Result::err(e.to_str()) }
+    let name = try decode::run(node, decode::field("name", decode::string)) -> e { Result::err(e.to_str()) }
+    let key = try decode::run(node, decode::field("key", decode::string)) -> e { Result::err(e.to_str()) }
+    teams.push(
+      Team{
+        id: id,
+        name: normalize_text(name),
+        key: key,
+      },
+    )
+  }
+  Result::ok(teams.@)
+}
+
+// Create an issue and report the new identifier (e.g. "CCA-123") so the
+// caller can open it as a tab. Description may be empty.
+fn create_issue(api_key: Str, team_id: Str, title: Str, description: Str) Str!Str {
+  mut input = "teamId: {client::string_literal(team_id)}, title: {client::string_literal(title)}"
+  if not description.trim().is_empty() {
+    input = "{input}, description: {client::string_literal(description)}"
+  }
+  let mutation = `mutation {{ issueCreate(input: {{ {input} }}) {{ success issue {{ identifier }} }} }}`
+  let data = try client::graphql(api_key, mutation)
+  let success = try decode::run(data, decode::path(["issueCreate", "success"], decode::boolean)) -> e {
+    Result::err(e.to_str())
+  }
+  match success {
+    // Linear surfaces real failures (permissions, validation) as
+    // GraphQL errors, which client::graphql already extracts; a bare
+    // success=false without one is unexpected.
+    true => {
+      let identifier = try decode::run(data, decode::path(["issueCreate", "issue", "identifier"], decode::string)) -> e {
+        Result::err(e.to_str())
+      }
+      Result::ok(identifier)
+    },
+    false => Result::err("Linear rejected the issue (no error detail returned)"),
+  }
+}

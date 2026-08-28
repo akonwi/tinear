@@ -1,0 +1,59 @@
+use ard/testing as assertions
+
+use cooper/style
+use cooper/testing
+use tinear/tui/theme
+use tinear/tui/toast_host
+
+test fn toast_host_stacks_and_expires_entries() Void!Str {
+  let application = testing::new(80, 24)
+  defer application.destroy()
+  let actions = mut List::new<fn()>()
+  let delays = mut List::new<Int>()
+  mut cancellations = 0
+  let host = toast_host::new(application.context, theme::new(), fn(delay: Int, action: fn()) fn() {
+    delays.push(delay)
+    actions.push(action)
+    fn() {
+      cancellations =+ 1
+    }
+  })
+  application.root.add(host.root)
+
+  let first = host.show("Saved", "Issue updated", toast_host::Variant::success, 5000)
+  let second = host.show("Warning", "Partial results", toast_host::Variant::info, 2500)
+  application.render()
+  try assertions::assert(host.entries.size() == 2, "toasts should stack")
+  try assertions::assert(delays.at(0).or(0) == 5000, "first TTL should be scheduled")
+  try assertions::assert(delays.at(1).or(0) == 2500, "second TTL should be scheduled")
+  try testing::assert_contains(application.frame().text(), "Saved")
+  try testing::assert_contains(application.frame().text(), "Warning")
+
+  (actions.at(0).expect("first expiry"))()
+  application.render()
+  try assertions::assert(host.entries.size() == 1, "first expiry should remove one toast")
+  try assertions::assert(not host.dismiss(first), "expired toast should already be gone")
+  try assertions::assert(host.dismiss(second), "remaining toast should dismiss")
+  try assertions::assert(cancellations == 2, "expiry and dismissal should cancel both timers")
+  assertions::assert(host.root.style().display == style::Display::none, "empty host should hide")
+}
+
+test fn toast_host_disposal_suppresses_late_expiry() Void!Str {
+  let application = testing::new(60, 16)
+  defer application.destroy()
+  let actions = mut List::new<fn()>()
+  mut cancellations = 0
+  let host = toast_host::new(application.context, theme::new(), fn(delay: Int, action: fn()) fn() {
+    actions.push(action)
+    fn() {
+      cancellations =+ 1
+    }
+  })
+  application.root.add(host.root)
+  let _ = host.show("Error", "Network failed", toast_host::Variant::error, 5000)
+  host.dispose()
+  (actions.at(0).expect("expiry"))()
+  try assertions::assert(host.disposed, "host should remain disposed")
+  try assertions::assert(cancellations == 1, "disposal should cancel pending expiry")
+  assertions::assert(host.entries.size() == 0, "late expiry should not restore entries")
+}

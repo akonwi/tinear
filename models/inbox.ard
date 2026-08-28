@@ -1,0 +1,498 @@
+use decode
+use tinear/linear/client
+
+struct Item {
+  notification_id: Str,
+  notification_type: Str,
+  type_label: Str,
+  actor_name: Str,
+  target_id: Str,
+  title: Str,
+  // URL the `open` action launches in the browser when there's no
+  // in-app destination (PR / project notifications, primarily).
+  //
+  // For PR notifications this is `pullRequest.url` (the GitHub /
+  // GitLab PR page) so the user lands directly on the hosting
+  // provider. We deliberately do NOT use `notification.url` for PRs
+  // even though it includes a `#comment-...` fragment, because that
+  // fragment is Linear's internal review-UI link, not a GitHub deep
+  // link.
+  //
+  // For other types we use `notification.url`, which is Linear's
+  // deep-link to the activity.
+  url: Str,
+}
+
+fn format_type(n_type: Str) Str {
+  match n_type {
+    "issueAssignedToYou" => "assigned to you",
+    "issueNewComment" => "commented",
+    "issueCommentMention" => "mentioned you",
+    "issueMention" => "mentioned you",
+    "issueCommentReaction" => "reacted",
+    "issueEmojiReaction" => "reacted",
+    "issueStatusChanged" => "changed status",
+    "issueThreadResolved" => "resolved",
+    "issueUnassignedFromYou" => "unassigned you",
+    "pullRequestApproved" => "approved",
+    "pullRequestChangesRequested" => "requested changes",
+    "pullRequestChecksFailed" => "checks failed",
+    "pullRequestComment" => "commented",
+    "pullRequestCommented" => "commented",
+    "pullRequestCommentMention" => "mentioned you",
+    "pullRequestMention" => "mentioned you",
+    "pullRequestReviewRequested" => "requested review",
+    "pullRequestReviewRerequested" => "re-requested review",
+    "pullRequestRemovedFromMergeQueue" => "removed from queue",
+    _ => n_type,
+  }
+}
+
+fn is_pr_type(n_type: Str) Bool {
+  n_type.starts_with("pullRequest")
+}
+
+struct IdTitle {
+  id: Str,
+  title: Str,
+}
+
+fn optional_nested_str(data: Any, name: Str, nested: Str, fallback: Str) Str {
+  match decode::run(data, decode::path([name, nested], decode::nullable(decode::string))) {
+    ok(value) => {
+      match value {
+        v => v,
+        _ => fallback,
+      }
+    },
+    err(_) => fallback,
+  }
+}
+
+fn optional_nested_int(data: Any, name: Str, nested: Str) Int? {
+  match decode::run(data, decode::path([name, nested], decode::nullable(decode::int))) {
+    ok(value) => value,
+    err(_) => Maybe::new(),
+  }
+}
+
+fn user_display_name_at(data: Any, name: Str) Str {
+  let display_name = optional_nested_str(data, name, "displayName", "")
+  match display_name.is_empty() {
+    true => optional_nested_str(data, name, "name", "—"),
+    false => display_name,
+  }
+}
+
+private fn dynamic_id_and_title(notif: Any, n_type: Str) IdTitle {
+  match is_pr_type(n_type) {
+    true => {
+      let number = optional_nested_int(notif, "pullRequest", "number")
+      let id = match number {
+        n => "PR #{n.to_str()}",
+        _ => "—",
+      }
+      let title = optional_nested_str(notif, "pullRequest", "title", "")
+      IdTitle{id: id, title: title}
+    },
+    false => {
+      let id = optional_nested_str(notif, "issue", "identifier", "—")
+      let title = optional_nested_str(notif, "issue", "title", "")
+      IdTitle{id: id, title: title}
+    },
+  }
+}
+
+fn decode_item(notif: Any) Item {
+  let notification_id = decode::run(
+    notif,
+    decode::field("id", decode::string),
+  ).expect("Missing notification id")
+  let n_type = decode::run(
+    notif,
+    decode::field("type", decode::string),
+  ).expect("Missing notification type")
+  let type_label = format_type(n_type)
+
+  let actor_name = user_display_name_at(notif, "actor")
+
+  let info = dynamic_id_and_title(notif, n_type)
+  let url = match is_pr_type(n_type) {
+    true => optional_nested_str(notif, "pullRequest", "url", ""),
+    false => {
+      match decode::run(notif, decode::field("url", decode::nullable(decode::string))) {
+        ok(value) => {
+          match value {
+            v => v,
+            _ => "",
+          }
+        },
+        err(_) => "",
+      }
+    },
+  }
+  Item{
+    notification_id: notification_id,
+    notification_type: n_type,
+    type_label: type_label,
+    actor_name: actor_name,
+    target_id: info.id,
+    title: info.title,
+    url: url,
+  }
+}
+
+fn fetch_inbox(api_key: Str) [Any]!Str {
+  let query = `
+    query {{
+      notifications(first: 50) {{
+        nodes {{
+          id
+          type
+          createdAt
+          title
+          subtitle
+          url
+          ... on IssueNotification {{
+            comment {{ id body createdAt user {{ name displayName }} }}
+            issue {{
+              id
+              identifier
+              title
+              description
+              priority
+              state {{ name }}
+              team {{ name key }}
+              project {{ name }}
+              assignee {{ name displayName }}
+              comments(first: 30) {{ nodes {{ id body createdAt user {{ name displayName }} }} }}
+              history(first: 10) {{ nodes {{ id createdAt fromState {{ name }} toState {{ name }} }} }}
+            }}
+          }}
+          ... on PullRequestNotification {{
+            pullRequestCommentId
+            pullRequest {{ id number title url status sourceBranch targetBranch openedAt creator {{ name displayName }} }}
+          }}
+          actor {{ id name displayName }}
+        }}
+      }}
+    }}
+    `
+  let data = try client::graphql(api_key, query)
+  let nodes = decode::run(
+    data,
+    decode::path(["notifications", "nodes"], decode::list(decode::any)),
+  ).expect("Missing notifications nodes")
+  Result::ok(nodes)
+}
+
+fn fetch_notification_detail(api_key: Str, notification_id: Str) Any!Str {
+  let id = client::string_literal(notification_id)
+  let query = `
+    query {{
+      notification(id: {id}) {{
+        id
+        type
+        createdAt
+        title
+        subtitle
+        url
+        ... on IssueNotification {{
+          comment {{ id body createdAt user {{ name displayName }} }}
+          issue {{
+            id
+            identifier
+            title
+            url
+            description
+            priority
+            state {{ name }}
+            team {{ name key }}
+            project {{ name }}
+            assignee {{ name displayName }}
+            comments(first: 30) {{ nodes {{ id body createdAt user {{ name displayName }} }} }}
+            history(first: 10) {{ nodes {{ id createdAt fromState {{ name }} toState {{ name }} }} }}
+          }}
+        }}
+        ... on PullRequestNotification {{
+          pullRequestCommentId
+          pullRequest {{ id number title url status sourceBranch targetBranch openedAt creator {{ name displayName }} }}
+        }}
+        actor {{ id name displayName }}
+      }}
+    }}
+    `
+  let data = try client::graphql(api_key, query)
+  let notification = decode::run(
+    data,
+    decode::field("notification", decode::any),
+  ).expect("Missing notification")
+  Result::ok(notification)
+}
+
+fn decode_archive_result(data: Any) Void!Str {
+  let success = try decode::run(
+    data,
+    decode::path(["notificationArchive", "success"], decode::boolean),
+  ).map_err(fn(error) {
+    error.to_str()
+  })
+  match success {
+    true => Result::ok(()),
+    false => Result::err("notificationArchive returned success=false"),
+  }
+}
+
+fn archive_notification(api_key: Str, id: Str) Void!Str {
+  let mutation = `mutation {{ notificationArchive(id: {client::string_literal(id)}) {{ success }} }}`
+  let data = try client::graphql(api_key, mutation)
+  decode_archive_result(data)
+}
+
+fn load(api_key: Str) [Item]!Str {
+  let nodes = try fetch_inbox(api_key)
+  let items: mut [Item] = mut []
+  for node in nodes {
+    items.push(decode_item(node))
+  }
+  Result::ok(items.@)
+}
+
+fn archive(api_key: Str, notification_id: Str) Void!Str {
+  archive_notification(api_key, notification_id)
+}
+
+// ── Notification detail ─────────────────────────────────────────────────
+//
+// Issue notifications populate every field. PR notifications populate
+// what the GraphQL query exposes (identifier, title, state_name, etc.)
+// and leave description/team/project/comments/history empty.
+
+struct DetailComment {
+  author: Str,
+  created_at: Str,
+  body: Str,
+}
+
+struct DetailHistory {
+  from_state: Str,
+  to_state: Str,
+  created_at: Str,
+}
+
+struct Detail {
+  is_pr: Bool,
+  identifier: Str,
+  title: Str,
+  description: Str,
+  state_name: Str,
+  priority: Int?,
+  assignee_name: Str,
+  team_name: Str,
+  team_key: Str,
+  project_name: Str,
+  url: Str,
+  // The specific comment (or mention) that produced this notification, if
+  // any. Populated only for IssueNotifications whose `comment` field is
+  // non-null in the GraphQL response. The user usually cares about THIS
+  // comment, not the rest of the thread.
+  triggering_comment: DetailComment?,
+  comments: [DetailComment],
+  history: [DetailHistory],
+}
+
+// Read a nullable Str at a 1/2/3-deep path, defaulting to `fallback` on
+// error or null. We chain `decode::field` instead of using `decode::path`
+// because passing a `[Str]` variable to `decode::path` doesn't auto-convert
+// to `[PathSegment]` (only inline list literals are special-cased).
+fn path_str1(data: Any, k: Str, fallback: Str) Str {
+  match decode::run(data, decode::field(k, decode::nullable(decode::string))) {
+    ok(value) => {
+      match value {
+        v => v,
+        _ => fallback,
+      }
+    },
+    err(_) => fallback,
+  }
+}
+
+fn path_str2(data: Any, k1: Str, k2: Str, fallback: Str) Str {
+  match decode::run(data, decode::field(k1, decode::field(k2, decode::nullable(decode::string)))) {
+    ok(value) => {
+      match value {
+        v => v,
+        _ => fallback,
+      }
+    },
+    err(_) => fallback,
+  }
+}
+
+fn path_str3(data: Any, k1: Str, k2: Str, k3: Str, fallback: Str) Str {
+  match decode::run(
+    data,
+    decode::field(k1, decode::field(k2, decode::field(k3, decode::nullable(decode::string)))),
+  ) {
+    ok(value) => {
+      match value {
+        v => v,
+        _ => fallback,
+      }
+    },
+    err(_) => fallback,
+  }
+}
+
+fn path_dynamic1(data: Any, k: Str) Any {
+  match decode::run(data, decode::field(k, decode::any)) {
+    ok(d) => d,
+    err(_) => "{{}}",
+  }
+}
+
+fn path_dynamic2(data: Any, k1: Str, k2: Str) Any {
+  match decode::run(data, decode::field(k1, decode::field(k2, decode::any))) {
+    ok(d) => d,
+    err(_) => "{{}}",
+  }
+}
+
+// Read a list at a 3-deep path (e.g. issue.comments.nodes).
+fn path_list3(data: Any, k1: Str, k2: Str, k3: Str) [Any] {
+  match decode::run(
+    data,
+    decode::field(k1, decode::field(k2, decode::field(k3, decode::list(decode::any)))),
+  ) {
+    ok(list) => list,
+    err(_) => [],
+  }
+}
+
+fn decode_user_display(data: Any) Str {
+  let display = path_str1(data, "displayName", "")
+  match display.is_empty() {
+    false => display,
+    true => path_str1(data, "name", "—"),
+  }
+}
+
+fn decode_detail_comment(raw: Any) DetailComment {
+  DetailComment{
+    author: decode_user_display(path_dynamic1(raw, "user")),
+    created_at: path_str1(raw, "createdAt", ""),
+    body: path_str1(raw, "body", ""),
+  }
+}
+
+fn decode_detail_history(raw: Any) DetailHistory {
+  DetailHistory{
+    from_state: path_str2(raw, "fromState", "name", ""),
+    to_state: path_str2(raw, "toState", "name", ""),
+    created_at: path_str1(raw, "createdAt", ""),
+  }
+}
+
+// Linear's GraphQL API doesn't expose PR comment bodies (PR comments live
+// on GitHub/GitLab; only the comment id is stored). The closest signal
+// is `notification.subtitle`, which Linear pre-formats as e.g. "andy
+// mentioned you in a comment". It's metadata rather than the comment
+// text, but it's all we have. When the notification carries a
+// pullRequestCommentId we surface this subtitle as a synthetic
+// DetailComment so the detail pane shows a Comment section instead of
+// falling through to the (always empty) PR description.
+fn decode_pr_detail(notif: Any) Detail {
+  let number = optional_nested_int(notif, "pullRequest", "number")
+  let identifier = match number {
+    n => "PR #{n.to_str()}",
+    _ => "—",
+  }
+  let comment_id = path_str1(notif, "pullRequestCommentId", "")
+  let subtitle = path_str1(notif, "subtitle", "")
+  let triggering = match comment_id.is_empty() or subtitle.is_empty() {
+    true => Maybe::new(),
+    false => {
+      Maybe::new(
+        DetailComment{
+          author: decode_user_display(path_dynamic1(notif, "actor")),
+          created_at: path_str1(notif, "createdAt", ""),
+          body: subtitle,
+        },
+      )
+    },
+  }
+  Detail{
+    is_pr: true,
+    identifier: identifier,
+    title: path_str2(notif, "pullRequest", "title", ""),
+    description: "",
+    state_name: path_str2(notif, "pullRequest", "status", ""),
+    priority: Maybe::new(),
+    assignee_name: decode_user_display(path_dynamic2(notif, "pullRequest", "creator")),
+    team_name: "",
+    team_key: "",
+    project_name: "",
+    url: path_str2(notif, "pullRequest", "url", ""),
+    triggering_comment: triggering,
+    comments: [],
+    history: [],
+  }
+}
+
+// Decode notification.comment (the specific comment that triggered the
+// notification) into a DetailComment, or none if the notification has no
+// comment field.
+fn decode_triggering_comment(notif: Any) DetailComment? {
+  match decode::run(notif, decode::field("comment", decode::nullable(decode::any))) {
+    ok(value) => {
+      match value {
+        raw => Maybe::new(decode_detail_comment(raw)),
+        _ => Maybe::new(),
+      }
+    },
+    err(_) => Maybe::new(),
+  }
+}
+
+fn decode_issue_detail(notif: Any) Detail {
+  let comments: mut [DetailComment] = mut []
+  for raw in path_list3(notif, "issue", "comments", "nodes") {
+    comments.push(decode_detail_comment(raw))
+  }
+  let history: mut [DetailHistory] = mut []
+  for raw in path_list3(notif, "issue", "history", "nodes") {
+    history.push(decode_detail_history(raw))
+  }
+  Detail{
+    is_pr: false,
+    identifier: path_str2(notif, "issue", "identifier", "—"),
+    title: path_str2(notif, "issue", "title", ""),
+    description: path_str2(notif, "issue", "description", ""),
+    state_name: path_str3(notif, "issue", "state", "name", ""),
+    priority: optional_nested_int(notif, "issue", "priority"),
+    assignee_name: decode_user_display(path_dynamic2(notif, "issue", "assignee")),
+    team_name: path_str3(notif, "issue", "team", "name", ""),
+    team_key: path_str3(notif, "issue", "team", "key", ""),
+    project_name: path_str3(notif, "issue", "project", "name", ""),
+    url: path_str2(notif, "issue", "url", ""),
+    triggering_comment: decode_triggering_comment(notif),
+    comments: comments.@,
+    history: history.@,
+  }
+}
+
+fn decode_detail(notif: Any) Detail {
+  let n_type = decode::run(
+    notif,
+    decode::field("type", decode::string),
+  ).expect("Missing notification type")
+  match is_pr_type(n_type) {
+    true => decode_pr_detail(notif),
+    false => decode_issue_detail(notif),
+  }
+}
+
+fn load_detail(api_key: Str, notification_id: Str) Detail!Str {
+  let notif = try fetch_notification_detail(api_key, notification_id)
+  Result::ok(decode_detail(notif))
+}

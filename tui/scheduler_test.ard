@@ -1,0 +1,43 @@
+use ard/testing
+
+use cooper/testing as cooper_testing
+use go:time
+use tinear/tui/scheduler
+
+private struct Counter {
+  value: Int,
+}
+
+test fn scheduler_cancellation_suppresses_queued_action() Void!Str {
+  let application = cooper_testing::new(20, 5)
+  defer application.destroy()
+  let count = mut Counter{value: 0}
+  let schedule = scheduler::for_context(application.context)
+  let cancel = schedule(0, fn() {
+    count.value =+ 1
+  })
+  time::Sleep(10 * time::Millisecond)
+  cancel()
+  let _ = application.flush()
+  testing::assert(
+    count.value == 0,
+    "cancellation should suppress an action already queued for dispatch",
+  )
+}
+
+test fn scheduler_dispatches_uncancelled_action() Void!Str {
+  let application = cooper_testing::new(20, 5)
+  defer application.destroy()
+  let count = mut Counter{value: 0}
+  let schedule = scheduler::for_context(application.context)
+  let _ = schedule(0, fn() {
+    count.value =+ 1
+  })
+  mut attempts = 0
+  while attempts < 100 and count.value == 0 {
+    let _ = application.flush()
+    time::Sleep(time::Millisecond)
+    attempts =+ 1
+  }
+  testing::assert(count.value == 1, "elapsed action should run once on the UI thread")
+}

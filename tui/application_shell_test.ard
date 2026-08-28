@@ -1,0 +1,164 @@
+use ard/testing as assertions
+
+use cooper/box
+use cooper/context
+use cooper/event
+use cooper/geometry
+use cooper/selection
+use cooper/style
+use cooper/testing
+use cooper/text
+use tinear/tui/application_shell
+use tinear/tui/theme
+
+private fn no_schedule(delay: Int, action: fn()) fn() {
+  fn() {}
+}
+
+private fn screen(ctx: mut context::Context, label: Str) mut box::Box {
+  let root = box::new(
+    ctx,
+    styles: style::new(width: style::percent(100.0), height: style::percent(100.0)),
+  )
+  root.add(text::new(ctx, content: label))
+  root
+}
+
+private fn modifiers(super_key: Bool) event::Modifiers {
+  event::Modifiers{
+    shift: false,
+    ctrl: false,
+    alt: false,
+    super: super_key,
+  }
+}
+
+test fn application_shell_replaces_screen_with_explicit_disposal() Void!Str {
+  let application = testing::new(50, 12)
+  defer application.destroy()
+  let shell = application_shell::new(application.context, theme::new(), no_schedule)
+  application.root.add(shell.root)
+  mut disposals = 0
+  shell.set_screen(screen(application.context, "Welcome"), fn() {
+    disposals =+ 1
+  })
+  application.render()
+  try testing::assert_contains(application.frame().text(), "Welcome")
+
+  shell.set_screen(screen(application.context, "Inbox"), fn() {})
+  application.render()
+  try assertions::assert(disposals == 1, "replaced screen should dispose once")
+  try assertions::assert(shell.screen_host.child_count() == 1, "only one screen should remain mounted")
+  try testing::assert_contains(application.frame().text(), "Inbox")
+  assertions::assert(
+    not application.frame().text().contains("Welcome"),
+    "old screen should no longer paint",
+  )
+}
+
+test fn application_shell_disposes_owned_screen_and_overlays_once() Void!Str {
+  let application = testing::new(40, 10)
+  defer application.destroy()
+  let shell = application_shell::new(application.context, theme::new(), no_schedule)
+  application.root.add(shell.root)
+  mut screen_disposals = 0
+  mut modal_disposals = 0
+  shell.set_screen(screen(application.context, "Inbox"), fn() {
+    screen_disposals =+ 1
+  })
+  let modal_body = screen(application.context, "Search")
+  let _ = shell.modal.present(
+    "Search",
+    modal_body,
+    "",
+    fn() {
+      modal_disposals =+ 1
+    },
+    fn() {},
+    fn() {},
+    fn() Bool {
+      true
+    },
+  )
+  shell.dispose()
+  shell.dispose()
+  try assertions::assert(screen_disposals == 1, "active screen should dispose once")
+  try assertions::assert(modal_disposals == 1, "active modal should dispose once")
+  try assertions::assert(shell.toasts.disposed, "toast host should be disposed")
+  assertions::assert(shell.disposed, "application shell should be disposed")
+}
+
+test fn application_shell_copies_supplied_selection() Void!Str {
+  let application = testing::new(40, 8)
+  defer application.destroy()
+  let shell = application_shell::new(application.context, theme::new(), no_schedule)
+  application.root.add(shell.root)
+  let selected = selection::Selection{
+    anchor: geometry::Point{x: 0, y: 0},
+    focus: geometry::Point{x: 5, y: 0},
+    bounds: geometry::Rect{
+      x: 0,
+      y: 0,
+      width: 6,
+      height: 1,
+    },
+    selected_text: "copied",
+    is_dragging: false,
+  }
+  let received = event::key("c", "c", event::KeyEventType::press, modifiers(true))
+  try assertions::assert(shell.handle_key(received, selected), "Super+C should be handled")
+  let clipboard = try application.context.clipboard.read().map_err(fn(error) {
+    error.error()
+  })
+  assertions::assert(clipboard == "copied", "selected text should reach the clipboard")
+}
+
+test fn application_shell_consumes_rejected_modal_escape() Void!Str {
+  let application = testing::new(50, 12)
+  defer application.destroy()
+  let shell = application_shell::new(application.context, theme::new(), no_schedule)
+  application.root.add(shell.root)
+  let modal_body = screen(application.context, "Saving")
+  let _ = shell.modal.present(
+    "Saving",
+    modal_body,
+    "Please wait",
+    fn() {},
+    fn() {},
+    fn() {},
+    fn() Bool {
+      false
+    },
+  )
+  let received = event::key("escape", "", event::KeyEventType::press, modifiers(false))
+  try assertions::assert(
+    shell.handle_key(received, Maybe::new<selection::Selection>()),
+    "modal Escape should be consumed",
+  )
+  assertions::assert(shell.modal.is_open(), "dismissal guard should keep modal open")
+}
+
+test fn application_shell_routes_escape_to_modal_first() Void!Str {
+  let application = testing::new(50, 12)
+  defer application.destroy()
+  let shell = application_shell::new(application.context, theme::new(), no_schedule)
+  application.root.add(shell.root)
+  let modal_body = screen(application.context, "Search")
+  let _ = shell.modal.present(
+    "Search",
+    modal_body,
+    "Esc close",
+    fn() {},
+    fn() {},
+    fn() {},
+    fn() Bool {
+      true
+    },
+  )
+  let received = event::key("escape", "", event::KeyEventType::press, modifiers(false))
+  try assertions::assert(
+    shell.handle_key(received, Maybe::new<selection::Selection>()),
+    "modal Escape should be handled",
+  )
+  assertions::assert(not shell.modal.is_open(), "Escape should close the active modal")
+}

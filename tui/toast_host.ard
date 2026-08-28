@@ -1,0 +1,162 @@
+use cooper/box
+use cooper/color
+use cooper/context
+use cooper/style
+use cooper/text
+use tinear/tui/scheduler
+use tinear/tui/theme as tinear_theme
+
+enum Variant {
+  info,
+  success,
+  error,
+}
+
+struct Entry {
+  id: Int,
+  root: mut box::Box,
+  cancel_expiry: fn(),
+}
+
+struct ToastHost {
+  root: mut box::Box,
+  entries: [Entry],
+  next_id: Int,
+  disposed: Bool,
+  hidden_style: style::Style,
+  visible_style: style::Style,
+  palette: tinear_theme::Theme,
+  schedule: scheduler::Schedule,
+  context: mut context::Context,
+}
+
+private fn root_style(display: style::Display) style::Style {
+  style::new(
+    display: display,
+    position: style::Position::absolute,
+    right: style::cells(1),
+    bottom: style::cells(2),
+    width: style::cells(52),
+    max_height: style::percent(80.0),
+    flex_direction: style::FlexDirection::column,
+    align_items: style::Align::end,
+    gap: style::cells(1),
+    z_index: 900,
+  )
+}
+
+fn new(ctx: mut context::Context, palette: tinear_theme::Theme, schedule: scheduler::Schedule) mut ToastHost {
+  let hidden_style = root_style(style::Display::none)
+  let visible_style = root_style(style::Display::flex)
+  let root = box::new(ctx, styles: hidden_style)
+  (mut ToastHost{
+    root: root,
+    entries: [],
+    next_id: 0,
+    disposed: false,
+    hidden_style: hidden_style,
+    visible_style: visible_style,
+    palette: palette,
+    schedule: schedule,
+    context: ctx,
+  })
+}
+
+private fn border_color(palette: tinear_theme::Theme, variant: Variant) color::Color {
+  match variant {
+    Variant::info => palette.accent,
+    Variant::success => palette.success,
+    Variant::error => palette.danger,
+  }
+}
+
+impl ToastHost {
+  private fn mut remove(id: Int) Bool {
+    if self.disposed {
+      false
+    } else {
+      let remaining = mut List::new<Entry>()
+      mut removed = false
+      for entry in self.entries {
+        if entry.id == id {
+          entry.cancel_expiry()
+          let _ = self.root.remove(entry.root)
+          entry.root.destroy(recursive: true)
+          removed = true
+        } else {
+          remaining.push(entry)
+        }
+      }
+      self.entries = remaining.@
+      if self.entries.size() == 0 {
+        self.root.set_style(self.hidden_style)
+      }
+      removed
+    }
+  }
+
+  fn mut show(title: Str, description: Str, variant: Variant, ttl_ms: Int) Int {
+    if self.disposed {
+      panic("cannot show a toast on a disposed host")
+    }
+    if ttl_ms < 0 {
+      panic("toast TTL must be non-negative")
+    }
+
+    self.next_id =+ 1
+    let id = self.next_id
+    let toast = box::new(
+      self.context,
+      styles: style::new(
+        foreground: self.palette.on_surface,
+        background: self.palette.surface,
+        border: style::Border::rounded,
+        border_color: border_color(self.palette, variant),
+        width: style::percent(100.0),
+        padding: style::edges(style::cells(1)),
+        flex_direction: style::FlexDirection::column,
+      ),
+    )
+    toast.add(text::new(self.context, content: title, text_style: text::style(bold: true)))
+    if not description.is_empty() {
+      toast.add(
+        text::new(
+          self.context,
+          content: description,
+          text_style: text::style(foreground: self.palette.muted),
+        ),
+      )
+    }
+    let cancel_expiry = self.schedule(ttl_ms, fn() {
+      let _ = self.remove(id)
+    })
+    self.entries.push(
+      Entry{
+        id: id,
+        root: toast,
+        cancel_expiry: cancel_expiry,
+      },
+    )
+    self.root.add(toast)
+    self.root.set_style(self.visible_style)
+    id
+  }
+
+  fn mut dismiss(id: Int) Bool {
+    self.remove(id)
+  }
+
+  fn mut dispose() {
+    if not self.disposed {
+      let entries = self.entries
+      self.entries = []
+      self.disposed = true
+      for entry in entries {
+        entry.cancel_expiry()
+        let _ = self.root.remove(entry.root)
+        entry.root.destroy(recursive: true)
+      }
+      self.root.set_style(self.hidden_style)
+    }
+  }
+}

@@ -4,3 +4,4 @@ target = "go"
 
 [dependencies]
 cooper = { path = "../cooper" }
+decode = { git = "https://github.com/akonwi/ard-decode.git", commit = "c590f42ec43c5d362844925a8a978d64a1846c5c" }

@@ -1,0 +1,74 @@
+use ard/testing
+
+use go:encoding/json
+use tinear/models/cache
+use tinear/models/tabs
+
+test fn test_cache_decode_ignores_corrupt_json() Void!Str {
+  match cache::decode("not json") {
+    _cache => testing::assert(false, "corrupt JSON should not produce cache"),
+    _ => testing::assert(true, "corrupt JSON ignored"),
+  }
+}
+
+test fn test_cache_decode_ignores_unknown_version() Void!Str {
+  mut encoded = json::Marshal(
+    cache::DataCache{version: 999, logged_in: cache::empty_logged_in()},
+  ).expect("encode cache")
+  let content = Str::from(encoded)
+
+  match cache::decode(content) {
+    _cache => testing::assert(false, "unknown cache version should be ignored"),
+    _ => testing::assert(true, "unknown version ignored"),
+  }
+}
+
+test fn test_cache_round_trips_logged_in_state() Void!Str {
+  let tab_refs: [tabs::TabRef] = [
+    tabs::issue_tab("CCA-123"),
+    tabs::doc_tab("e234753fe971", "Video Call — Database Schema"),
+  ]
+  let original = cache::DataCache{version: cache::version(), logged_in: cache::LoggedInCache{tab_index: 2, tabs: tab_refs}}
+
+  let content = try cache::encode(original)
+
+  match cache::decode(content) {
+    restored => {
+      try testing::assert(restored.logged_in.tab_index == 2, "active tab index should round trip")
+      try testing::assert(restored.logged_in.tabs.size() == 2, "tab list size should round trip")
+      let first = restored.logged_in.tabs.at(0).expect("bounds")
+      try testing::assert(first.kind == tabs::Kind::issue, "issue kind should round trip")
+      try testing::assert(first.id == "CCA-123", "issue identifier should round trip")
+      try testing::assert(first.title == "CCA-123", "issue title should round trip")
+      let second = restored.logged_in.tabs.at(1).expect("bounds")
+      try testing::assert(second.kind == tabs::Kind::doc, "doc kind should round trip")
+      try testing::assert(second.id == "e234753fe971", "doc slug should round trip")
+      testing::assert(
+        second.title == "Video Call — Database Schema",
+        "doc title should round trip",
+      )
+    },
+    _ => testing::assert(false, "valid cache should decode"),
+  }
+}
+
+test fn test_cache_kind_persists_as_string_label() Void!Str {
+  let original = cache::DataCache{
+    version: cache::version(),
+    logged_in: cache::LoggedInCache{tab_index: 0, tabs: [tabs::doc_tab("abc", "T")]},
+  }
+  let content = try cache::encode(original)
+  try testing::assert(
+    content.contains("\"kind\":\"doc\""),
+    "kind should serialize as its stable label, not the enum's number",
+  )
+  testing::pass()
+}
+
+test fn test_cache_rejects_unknown_tab_kind() Void!Str {
+  let content = "{{\"version\": 2, \"logged_in\": {{\"tab_index\": 0, \"tabs\": [{{\"kind\": \"sprint\", \"id\": \"x\", \"title\": \"X\"}}]}}}}"
+  match cache::decode(content) {
+    _cache => testing::assert(false, "unknown tab kind should invalidate the cache"),
+    _ => testing::assert(true, "unknown tab kind ignored"),
+  }
+}

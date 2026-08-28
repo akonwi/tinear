@@ -1,0 +1,215 @@
+use ard/testing as assertions
+
+use cooper/box
+use cooper/context
+use cooper/event
+use cooper/input
+use cooper/style
+use cooper/testing
+use cooper/text
+use tinear/tui/modal_host
+use tinear/tui/theme
+
+private fn modifiers() event::Modifiers {
+  event::Modifiers{
+    shift: false,
+    ctrl: false,
+    alt: false,
+    super: false,
+  }
+}
+
+private struct DismissGuard {
+  allowed: Bool,
+}
+
+private fn body(ctx: mut context::Context, label: Str) mut box::Box {
+  let root = box::new(
+    ctx,
+    styles: style::new(width: style::percent(100.0), height: style::cells(2)),
+  )
+  root.add(text::new(ctx, content: label))
+  root
+}
+
+test fn modal_host_presents_replaces_and_closes_one_body() Void!Str {
+  let application = testing::new(80, 24)
+  defer application.destroy()
+  let host = modal_host::new(application.context, theme::new())
+  application.root.add(host.root)
+
+  mut first_disposals = 0
+  let first = body(application.context, "First modal")
+  let first_ticket = host.present(
+    title: "First",
+    body: first,
+    footer: "Esc close",
+    dispose: fn() {
+      first_disposals =+ 1
+    },
+    initial_focus: fn() {},
+    restore_focus: fn() {},
+    can_dismiss: fn() Bool {
+      true
+    },
+  )
+  application.render()
+  try assertions::assert(host.is_current(first_ticket), "first ticket should be current")
+  try assertions::assert(host.body_slot.child_count() == 1, "one body should be mounted")
+  try testing::assert_contains(application.frame().text(), "First modal")
+
+  let second = body(application.context, "Second modal")
+  let second_ticket = host.present(
+    title: "Second",
+    body: second,
+    footer: "Enter choose",
+    dispose: fn() {},
+    initial_focus: fn() {},
+    restore_focus: fn() {},
+    can_dismiss: fn() Bool {
+      true
+    },
+  )
+  application.render()
+  try assertions::assert(first_disposals == 1, "replaced modal should dispose once")
+  try assertions::assert(not host.is_current(first_ticket), "replaced ticket should be stale")
+  try assertions::assert(host.is_current(second_ticket), "replacement ticket should be current")
+  try assertions::assert(host.body_slot.child_count() == 1, "replacement should keep one body")
+  try testing::assert_contains(application.frame().text(), "Second modal")
+
+  try assertions::assert(host.close_if_current(second_ticket), "current ticket should close")
+  try assertions::assert(not host.close(), "repeated close should be inert")
+  assertions::assert(
+    host.root.style().display == style::Display::none,
+    "closed host should be hidden",
+  )
+}
+
+test fn modal_host_blocks_background_mouse_input() Void!Str {
+  let application = testing::new(40, 12)
+  defer application.destroy()
+  mut background_presses = 0
+  let background = box::new(
+    application.context,
+    styles: style::new(width: style::percent(100.0), height: style::percent(100.0)),
+  )
+  let _ = background.on_mouse(fn(received: mut event::MouseEvent) {
+    if received.event_type == event::MouseEventType::down {
+      background_presses =+ 1
+    }
+  })
+  let host = modal_host::new(application.context, theme::new())
+  application.root.add(background)
+  application.root.add(host.root)
+  let modal_body = body(application.context, "Blocking")
+  let _ = host.present("Modal", modal_body, "", fn() {}, fn() {}, fn() {}, fn() Bool {
+    true
+  })
+  application.render()
+
+  application.click(0, 0)
+  try assertions::assert(background_presses == 0, "modal layer should block background clicks")
+  let _ = host.close()
+  application.click(0, 0)
+  assertions::assert(background_presses == 1, "background should receive clicks after close")
+}
+
+test fn escape_closes_modal_and_restores_focus() Void!Str {
+  let application = testing::new(60, 16)
+  defer application.destroy()
+  let background = input::new(application.context, placeholder: "Background")
+  application.root.add(background)
+  let host = modal_host::new(application.context, theme::new())
+  application.root.add(host.root)
+
+  let modal_body = body(application.context, "Editor")
+  let modal_input = input::new(application.context, placeholder: "Modal input")
+  modal_body.add(modal_input)
+  let _ = background.focus()
+  let _ = host.present(
+    "Edit",
+    modal_body,
+    "Esc close",
+    fn() {},
+    fn() {
+      let _ = modal_input.focus()
+    },
+    fn() {
+      let _ = background.focus()
+    },
+    fn() Bool {
+      true
+    },
+  )
+  let _ = application.on_key(fn(received: mut event::KeyEvent) {
+    if host.is_open() and received.event_type != event::KeyEventType::release and received.matches("escape") {
+      let _ = host.dismiss()
+      received.prevent_default()
+      received.stop_propagation()
+    }
+  })
+
+  application.key(event::key("x", "x", event::KeyEventType::press, modifiers()))
+  try assertions::assert(modal_input.value() == "x", "focused modal input should receive ordinary keys")
+  try assertions::assert(background.value().is_empty(), "background input should remain isolated")
+  application.key(event::key("escape", "", event::KeyEventType::press, modifiers()))
+  try assertions::assert(not host.is_open(), "Escape should close the modal")
+  assertions::assert(background.is_focused(), "closing should restore caller focus")
+}
+
+test fn non_focusable_modal_uses_frame_as_keyboard_barrier() Void!Str {
+  let application = testing::new(40, 10)
+  defer application.destroy()
+  let background = input::new(application.context, placeholder: "Background")
+  application.root.add(background)
+  let host = modal_host::new(application.context, theme::new())
+  application.root.add(host.root)
+  let _ = background.focus()
+  let modal_body = body(application.context, "Saving")
+  let _ = host.present("Saving", modal_body, "Please wait", fn() {}, fn() {}, fn() {}, fn() Bool {
+    false
+  })
+  application.key(event::key("x", "x", event::KeyEventType::press, modifiers()))
+  try assertions::assert(host.frame.is_focused(), "modal frame should provide fallback focus")
+  assertions::assert(
+    background.value().is_empty(),
+    "background input should not receive modal keys",
+  )
+}
+
+test fn modal_host_respects_guarded_dismissal() Void!Str {
+  let application = testing::new(40, 10)
+  defer application.destroy()
+  let host = modal_host::new(application.context, theme::new())
+  application.root.add(host.root)
+  let guard = mut DismissGuard{allowed: false}
+  let modal_body = body(application.context, "Saving")
+  let _ = host.present("Saving", modal_body, "Please wait", fn() {}, fn() {}, fn() {}, fn() Bool {
+    guard.allowed
+  })
+  try assertions::assert(not host.dismiss(), "guard should reject dismissal")
+  try assertions::assert(host.is_open(), "rejected dismissal should keep modal open")
+  guard.allowed = true
+  try assertions::assert(host.dismiss(), "guard should permit dismissal after state changes")
+  assertions::assert(not host.is_open(), "permitted dismissal should close modal")
+}
+
+test fn stale_modal_dispatch_does_not_touch_closed_body() Void!Str {
+  let application = testing::new(40, 10)
+  defer application.destroy()
+  let host = modal_host::new(application.context, theme::new())
+  application.root.add(host.root)
+  let modal_body = body(application.context, "Async")
+  let ticket = host.present("Async", modal_body, "", fn() {}, fn() {}, fn() {}, fn() Bool {
+    true
+  })
+  mut applied = 0
+  let _ = application.context.dispatch(fn() {
+    if host.is_current(ticket) {
+      applied =+ 1
+    }
+  })
+  let _ = host.close()
+  let _ = application.flush()
+  assertions::assert(applied == 0, "closed modal ticket should suppress queued completion")
+}

@@ -1,13 +1,18 @@
 use cooper/app
+use cooper/box
+use cooper/context
 use cooper/event
 use cooper/style
-use cooper/ui
+use cooper/text
+use tinear/config
+use tinear/services/auth
+use tinear/tui/application_shell
+use tinear/tui/scheduler
+use tinear/tui/theme
+use tinear/tui/welcome_controller
 
-fn main() {
-  let application = app::new().expect("create tinear")
-  let ctx = application.context
-
-  let screen = ui::box(
+private fn logged_in_placeholder(ctx: mut context::Context) mut box::Box {
+  let screen = box::new(
     ctx,
     styles: style::new(
       width: style::percent(100.0),
@@ -17,14 +22,45 @@ fn main() {
       gap: style::cells(1),
     ),
   )
-  screen.add(ui::text(ctx, content: "tinear", text_style: ui::text_style(bold: true)))
-  screen.add(ui::text(ctx, content: "Cooper rewrite in progress"))
-  screen.add(ui::text(ctx, content: "q quit", text_style: ui::text_style(dim: true)))
-  application.root.add(screen)
+  screen.add(text::new(ctx, content: "tinear", text_style: text::style(bold: true)))
+  screen.add(text::new(ctx, content: "Authenticated shell coming next"))
+  screen
+}
+
+fn main() {
+  let application = app::new(exit_on_ctrl_c: false).expect("create tinear")
+  defer application.destroy()
+  let ctx = application.context
+  let palette = theme::new()
+  let shell = application_shell::new(ctx, palette, scheduler::for_context(ctx))
+  application.root.add(shell.root)
+
+  let configured = match config::load() {
+    ok(value) => value,
+    err(_) => config::Config{api_key: ""},
+  }
+  match configured.has_auth() {
+    true => shell.set_screen(logged_in_placeholder(ctx), fn() {}),
+    false => {
+      let welcome = welcome_controller::new(ctx, palette, auth::live(ctx), fn(api_key: Str) {
+        shell.set_screen(logged_in_placeholder(ctx), fn() {})
+      })
+      shell.set_screen(welcome.root, fn() {
+        welcome.dispose()
+      })
+
+      welcome.focus()
+    },
+  }
 
   let _ = application.on_key(fn(received: mut event::KeyEvent) {
-    if received.event_type != event::KeyEventType::release and received.matches("q") {
+    if received.event_type != event::KeyEventType::release and received.matches("c", ctrl: true) {
+      shell.dispose()
       application.destroy()
+      received.prevent_default()
+      received.stop_propagation()
+    } else {
+      let _ = shell.handle_key(received, application.selection())
     }
   })
 

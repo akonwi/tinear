@@ -1,0 +1,27 @@
+use cooper/color
+
+// Tinear keeps terminal-default foreground/background at the application root
+// and uses this small semantic palette only where meaning needs explicit color.
+struct Theme {
+  muted: color::Color,
+  border: color::Color,
+  surface: color::Color,
+  on_surface: color::Color,
+  accent: color::Color,
+  danger: color::Color,
+  warning: color::Color,
+  success: color::Color,
+}
+
+fn new() Theme {
+  Theme{
+    muted: color::hex("#7C8799"),
+    border: color::hex("#4B5565"),
+    surface: color::hex("#1F2937"),
+    on_surface: color::hex("#F8FAFC"),
+    accent: color::hex("#60A5FA"),
+    danger: color::hex("#F87171"),
+    warning: color::hex("#FBBF24"),
+    success: color::hex("#4ADE80"),
+  }
+}

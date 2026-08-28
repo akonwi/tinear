@@ -1,0 +1,42 @@
+struct Scope {
+  stop: Chan<Bool>,
+  generation: Int,
+  disposed: Bool,
+}
+
+fn new() mut Scope {
+  (mut Scope{
+    stop: Chan::new<Bool>(),
+    generation: 0,
+    disposed: false,
+  })
+}
+
+impl Scope {
+  // Start a new logical request and invalidate older completions.
+  fn mut begin_request() Int {
+    if self.disposed {
+      panic("cannot start work for a disposed controller")
+    }
+    self.generation =+ 1
+    self.generation
+  }
+
+  fn is_current(request_generation: Int) Bool {
+    (not self.disposed) and self.generation == request_generation
+  }
+
+  fn mut invalidate() {
+    if not self.disposed {
+      self.generation =+ 1
+    }
+  }
+
+  fn mut dispose() {
+    if not self.disposed {
+      self.disposed = true
+      self.generation =+ 1
+      self.stop.close()
+    }
+  }
+}

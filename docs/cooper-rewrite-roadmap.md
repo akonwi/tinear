@@ -114,14 +114,17 @@ scratchpad; durable architectural decisions should be recorded as ADRs.
 
 ## Delivery roadmap
 
+**Current focus:** finish Phase 0/1 gates, then begin Phase 4 shell and tabs.
+
 ### Phase 0 — Contract and Cooper integration gates
 
 - [ ] Pin the exact Cooper revision used by the rewrite once it is remotely available; use the local path during active joint development.
-- [ ] Add an ADR superseding ADR 0002's vaxis/ui implementation decision with direct Cooper retained controls.
-- [ ] Decide app-local semantic palette behavior while retaining terminal-default foreground/background.
+- [x] Add an ADR superseding ADR 0002's vaxis/ui implementation decision with direct Cooper retained controls.
+- [x] Decide app-local semantic palette behavior while retaining terminal-default foreground/background.
 - [ ] Decide terminal-title parity: add a Cooper capability or document a temporary waiver.
-- [ ] Prove modal layering, mouse barrier, focus restoration, hidden tab roots, nested two-axis scrolling, and selection copy in small TestApp fixtures.
-- [ ] Define common controller lifecycle and request-generation conventions in project guidance.
+- [x] Prove modal layering, mouse barrier, focus restoration, and selection copy in TestApp fixtures.
+- [ ] Prove retained hidden-tab roots and nested two-axis scrolling in shell/board fixtures.
+- [x] Define common controller lifecycle and request-generation conventions in working guidance and `tui/lifecycle.ard`.
 
 **Exit criteria:** architectural gaps have explicit decisions; no unsupported Cooper API is required.
 
@@ -141,17 +144,23 @@ platform/url.ard
 ffi/markdown/*
 ```
 
-- [ ] Re-add `decode` as a direct Ard dependency.
-- [ ] Restore config path/load/write behavior.
-- [ ] Restore the Linear GraphQL client with timeout and GraphQL error extraction.
-- [ ] Restore typed tabs and shell cache v2.
-- [ ] Restore inbox, issue/comment/board/picker/create, and document models.
-- [ ] Move workflow/priority model helpers out of the old TUI dependency direction.
-- [ ] Restore the markdown parser as the only necessary Go-side app FFI.
+- [x] Re-add `decode` as a direct Ard dependency.
+- [x] Restore config path/load/write behavior.
+- [x] Restore the Linear GraphQL client with timeout and GraphQL error extraction.
+- [x] Restore typed tabs and shell cache v2.
+- [x] Restore inbox, issue/comment/board/picker/create, and document models.
+- [x] Move workflow/priority model helpers out of the old TUI dependency direction.
+- [x] Restore the markdown parser as the only necessary Go-side app FFI.
+- [x] Restore safe, non-blocking terminal-browser URL routing without the obsolete Go process shim.
+- [ ] Restore optional terminal-browser app-mode probing without blocking the UI thread.
 - [ ] Introduce injectable service closures for controller tests.
-- [ ] Encode all GraphQL string arguments safely rather than interpolating IDs.
-- [ ] Make config/cache writes private and cache replacement atomic/serialized.
-- [ ] Fix board/picker source defects while porting: fetch assignee/project IDs and exclude canceled projects correctly.
+- [x] Encode all GraphQL string arguments safely rather than interpolating IDs.
+- [ ] Make network response decoders fallible instead of panicking on malformed or permission-dependent payloads.
+- [ ] Inject/test the HTTP transport, status/error matrix, and response-size boundary.
+- [ ] Thread per-controller cancellation into HTTP request contexts so closed views interrupt in-flight requests.
+- [x] Make config/cache directories and files private and replace files atomically.
+- [ ] Serialize/coalesce shell cache writes so older snapshots cannot overwrite newer state.
+- [x] Fix board/picker source defects while porting: fetch assignee/project IDs and exclude canceled projects correctly.
 
 **Exit criteria:** all model/cache/markdown tests from `main` are restored or replaced with equivalent coverage; model modules have no Cooper imports.
 
@@ -168,21 +177,21 @@ tui/hints_bar.ard
 tui/theme.ard
 ```
 
-- [ ] Build a permanent app root with content, modal, and toast planes.
+- [x] Build a permanent app root with content, modal, and toast planes.
 - [ ] Implement app-level key routing by active view and interaction mode.
-- [ ] Implement modal ticket/generation ownership, background mouse blocking, guarded dismiss, and focus restore.
-- [ ] Implement toast stacking, variants, TTL cancellation, and disposal.
-- [ ] Implement Super+C using `App.selection()` and `Context.clipboard.write()`.
-- [ ] Add TestApp coverage for modal isolation, toast expiry, selection copy, and teardown.
+- [x] Implement modal ticket/generation ownership, background mouse blocking, guarded dismiss, and focus restore.
+- [x] Implement toast stacking, variants, TTL cancellation, and disposal.
+- [x] Implement Super+C using `App.selection()` and `Context.clipboard.write()`.
+- [x] Add TestApp coverage for modal isolation, toast expiry, selection copy, and teardown.
 
 **Exit criteria:** infrastructure can host either welcome or logged-in content without reconstructing the App.
 
 ### Phase 3 — Welcome and authentication
 
-- [ ] Build retained logo, API-key Input, login action, loading state, and inline error.
-- [ ] Validate asynchronously without blocking the UI thread.
-- [ ] Persist a valid key and transition to the shell.
-- [ ] Ensure dismissal/quit during validation suppresses late completion.
+- [x] Build retained logo, API-key Input, login action, loading state, and inline error.
+- [x] Validate asynchronously without blocking the UI thread.
+- [x] Persist a valid key and transition to the shell.
+- [x] Ensure dismissal/quit during validation suppresses late completion.
 
 **Exit criteria:** TestApp covers missing config, env/config precedence, invalid key, valid key, and clean shutdown.
 
@@ -195,7 +204,7 @@ tui/shell_controller.ard
 tui/tab_bar.ard
 ```
 
-- [ ] Restore pure tab reducers/tests first.
+- [x] Restore pure tab reducers/tests first.
 - [ ] Construct Inbox and My Issues controllers once.
 - [ ] Add dynamic issue/document controller creation and identity reuse.
 - [ ] Toggle inactive roots with `Display::none` and focus the active view explicitly.

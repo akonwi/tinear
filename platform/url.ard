@@ -1,0 +1,51 @@
+use ard/async
+
+use cooper/context
+use go:os/exec
+
+fn is_supported(target: Str) Bool {
+  target.starts_with("https://") or target.starts_with("http://")
+}
+
+private fn unsupported(target: Str) Void!Error {
+  Result::err(Error::new("unsupported URL scheme: {target}"))
+}
+
+private fn start_terminal_browser(executable: Str, target: Str) Void!Error {
+  let args = mut ["open", target, "--split", "right", "--size", "0.55"]
+  let command = exec::Command(executable, args...)
+  match command.Start() {
+    ok(_) => {
+      async::start(fn() {
+        let _ = command.Wait()
+      })
+      Result::ok(())
+    },
+    err(error) => Result::err(error),
+  }
+}
+
+// Prefer a non-blocking terminal-browser split, then use the supplied platform
+// fallback. Targets are restricted to web URLs and passed as one process
+// argument without a shell.
+fn open_with_fallback(target: Str, fallback: fn(Str) Void!Error) Void!Error {
+  if not is_supported(target) {
+    unsupported(target)
+  } else {
+    match exec::LookPath("terminal-browser") {
+      ok(executable) => {
+        match start_terminal_browser(executable, target) {
+          ok(_) => Result::ok(()),
+          err(_) => fallback(target),
+        }
+      },
+      err(_) => fallback(target),
+    }
+  }
+}
+
+fn open(ctx: mut context::Context, target: Str) Void!Error {
+  open_with_fallback(target, fn(url: Str) Void!Error {
+    ctx.open_url(url)
+  })
+}

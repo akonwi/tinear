@@ -1,0 +1,166 @@
+use tinear/models/cache
+use tinear/models/tabs
+
+// Two permanent tabs (Inbox and My Issues) plus dynamic issue/document tabs.
+struct Model {
+  tab_index: Int,
+  tabs: [tabs::TabRef],
+}
+
+fn empty() Model {
+  Model{tab_index: 0, tabs: []}
+}
+
+fn total_tabs(model: Model) Int {
+  2 + model.tabs.size()
+}
+
+fn clamp_tab_index(index: Int, total: Int) Int {
+  match {
+    total <= 0 => 0,
+    index < 0 => 0,
+    index >= total => total - 1,
+    _ => index,
+  }
+}
+
+private fn normalize_tabs(values: [tabs::TabRef]) [tabs::TabRef] {
+  let normalized = mut List::new<tabs::TabRef>()
+  for candidate in values {
+    if not candidate.id.is_empty() {
+      mut duplicate = false
+      for existing in normalized {
+        if tabs::same(existing, candidate) {
+          duplicate = true
+        }
+      }
+      if not duplicate {
+        normalized.push(candidate)
+      }
+    }
+  }
+  normalized.@
+}
+
+fn restore(saved: cache::LoggedInCache?) Model {
+  match saved {
+    value => {
+      let selected_reference = match value.tab_index >= 2 {
+        true => value.tabs.at(value.tab_index - 2),
+        false => Maybe::new<tabs::TabRef>(),
+      }
+      let normalized = normalize_tabs(value.tabs)
+      let candidate = Model{tab_index: value.tab_index, tabs: normalized}
+      mut selected_index = clamp_tab_index(candidate.tab_index, total_tabs(candidate))
+      match selected_reference {
+        selected => {
+          for reference, index in candidate.tabs {
+            if tabs::same(reference, selected) {
+              selected_index = 2 + index
+            }
+          }
+        },
+        _ => (),
+      }
+      Model{tab_index: selected_index, tabs: candidate.tabs}
+    },
+    _ => empty(),
+  }
+}
+
+fn snapshot(model: Model) cache::LoggedInCache {
+  cache::LoggedInCache{tab_index: model.tab_index, tabs: model.tabs}
+}
+
+fn cycle_next(model: Model) Int {
+  let count = total_tabs(model)
+  match model.tab_index + 1 >= count {
+    true => 0,
+    false => model.tab_index + 1,
+  }
+}
+
+fn cycle_previous(model: Model) Int {
+  match model.tab_index <= 0 {
+    true => total_tabs(model) - 1,
+    false => model.tab_index - 1,
+  }
+}
+
+fn selected_is_dynamic(model: Model) Bool {
+  model.tab_index >= 2
+}
+
+fn selected_dynamic(model: Model) tabs::TabRef? {
+  if not selected_is_dynamic(model) {
+    Maybe::new<tabs::TabRef>()
+  } else {
+    model.tabs.at(model.tab_index - 2)
+  }
+}
+
+fn select_tab(model: Model, index: Int) Model {
+  Model{tab_index: clamp_tab_index(index, total_tabs(model)), tabs: model.tabs}
+}
+
+fn close_current(model: Model) Model {
+  let dynamic_index = model.tab_index - 2
+  if dynamic_index < 0 or dynamic_index >= model.tabs.size() {
+    model
+  } else {
+    let remaining = mut List::new<tabs::TabRef>()
+    for tab, index in model.tabs {
+      if not index == dynamic_index {
+        remaining.push(tab)
+      }
+    }
+    Model{tab_index: 1, tabs: remaining.@}
+  }
+}
+
+fn open(model: Model, reference: tabs::TabRef) Model {
+  mut existing_index = -1
+  for tab, index in model.tabs {
+    if tabs::same(tab, reference) {
+      existing_index = index
+    }
+  }
+  if existing_index >= 0 {
+    Model{tab_index: 2 + existing_index, tabs: model.tabs}
+  } else {
+    let next_tabs = mut List::new<tabs::TabRef>()
+    for tab in model.tabs {
+      next_tabs.push(tab)
+    }
+    next_tabs.push(reference)
+    Model{tab_index: 2 + next_tabs.size() - 1, tabs: next_tabs.@}
+  }
+}
+
+fn title(model: Model, reference: tabs::TabRef) Str? {
+  mut found: Str? = Maybe::new()
+  for tab in model.tabs {
+    if tabs::same(tab, reference) {
+      found = Maybe::new(tab.title)
+    }
+  }
+  found
+}
+
+fn retitle(model: Model, reference: tabs::TabRef, title: Str) Model {
+  let next_tabs = mut List::new<tabs::TabRef>()
+  for tab in model.tabs {
+    if tabs::same(tab, reference) {
+      next_tabs.push(
+        tabs::TabRef{
+          kind: tab.kind,
+          id: tab.id,
+          title: title,
+        },
+      )
+    } else {
+      next_tabs.push(tab)
+    }
+  }
+  Model{tab_index: model.tab_index, tabs: next_tabs.@}
+}

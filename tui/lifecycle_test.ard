@@ -1,0 +1,25 @@
+use ard/testing
+
+use tinear/tui/lifecycle
+
+test fn request_generation_rejects_stale_work() Void!Str {
+  let scope = lifecycle::new()
+  let first = scope.begin_request()
+  let second = scope.begin_request()
+  try testing::assert(not scope.is_current(first), "new request should invalidate older work")
+  testing::assert(scope.is_current(second), "latest request should remain current")
+}
+
+test fn disposal_is_idempotent_and_closes_stop_channel() Void!Str {
+  let scope = lifecycle::new()
+  let request = scope.begin_request()
+  scope.dispose()
+  scope.dispose()
+  let stopped = select {
+    scope.stop.recv() => true,
+    _ => false,
+  }
+  try testing::assert(stopped, "dispose should close the controller stop channel")
+  try testing::assert(scope.disposed, "scope should report disposal")
+  testing::assert(not scope.is_current(request), "disposed scope should reject pending work")
+}
