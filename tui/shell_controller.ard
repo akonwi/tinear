@@ -47,14 +47,14 @@ struct ShellController {
   disposed: Bool,
 }
 
-private fn body_style(display: style::Display) style::Style {
-  style::new(
-    display: display,
-    width: style::percent(100.0),
-    height: style::percent(100.0),
-    flex_grow: 1.0,
-    overflow: style::Overflow::hidden,
-  )
+private fn body_style(current: style::Style, display: style::Display) style::Style {
+  let updated = mut current
+  updated.display = display
+  updated.width = style::percent(100.0)
+  updated.height = style::percent(100.0)
+  updated.flex_grow = 1.0
+  updated.overflow = style::Overflow::hidden
+  updated.@
 }
 
 private fn context_for(model: shell_model::Model) Str {
@@ -204,7 +204,7 @@ impl ShellController {
     }
     if not found {
       let screen = self.make_dynamic(reference)
-      screen.root.set_style(body_style(style::Display::none))
+      screen.root.set_style(body_style(screen.root.style(), style::Display::none))
       self.body_host.add(screen.root)
       self.dynamic_screens.push(DynamicScreen{reference: reference, screen: screen})
     }
@@ -300,6 +300,7 @@ impl ShellController {
   private fn mut apply_selection(should_persist: Bool) {
     self.inbox.root.set_style(
       body_style(
+        self.inbox.root.style(),
         match self.model.tab_index == 0 {
           true => style::Display::flex,
           false => style::Display::none,
@@ -308,6 +309,7 @@ impl ShellController {
     )
     self.board.root.set_style(
       body_style(
+        self.board.root.style(),
         match self.model.tab_index == 1 {
           true => style::Display::flex,
           false => style::Display::none,
@@ -317,6 +319,7 @@ impl ShellController {
     for dynamic, index in self.dynamic_screens {
       dynamic.screen.root.set_style(
         body_style(
+          dynamic.screen.root.style(),
           match self.model.tab_index == 2 + index {
             true => style::Display::flex,
             false => style::Display::none,

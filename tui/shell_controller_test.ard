@@ -38,7 +38,11 @@ private fn key(value: Str) mut event::KeyEvent {
 private fn fake_screen(ctx: mut context::Context, label: Str, state: mut ScreenState) shell_controller::Screen {
   let root = box::new(
     ctx,
-    styles: style::new(width: style::percent(100.0), height: style::percent(100.0)),
+    styles: style::new(
+      width: style::percent(100.0),
+      height: style::percent(100.0),
+      flex_direction: style::FlexDirection::row,
+    ),
   )
   root.set_focusable(true)
   root.add(text::new(ctx, content: label))
@@ -115,6 +119,10 @@ test fn shell_switches_persistent_tabs_and_persists_selection() Void!Str {
   )
   application.root.add(controller.root)
   application.render()
+  try assertions::assert(
+    controller.inbox.root.style().flex_direction == style::FlexDirection::row,
+    "shell visibility changes must preserve the screen's own layout style",
+  )
   try testing::assert_contains(application.frame().text(), "Inbox body")
   let active_tab = application.frame().cell(1, 0).expect("active Inbox tab")
   try assertions::assert(active_tab.grapheme == "I", "active tab label should remain readable")
