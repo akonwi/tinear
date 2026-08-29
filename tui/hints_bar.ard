@@ -1,3 +1,4 @@
+use cooper/box
 use cooper/context
 use cooper/style
 use cooper/text
@@ -9,15 +10,17 @@ struct Hint {
 }
 
 struct HintsBar {
-  root: mut text::Text,
+  root: mut box::Box,
+  context_text: mut text::Text,
+  actions_text: mut text::Text,
   palette: tinear_theme::Theme,
 }
 
-fn content(hints: [Hint], palette: tinear_theme::Theme) text::StyledText {
+private fn actions_content(hints: [Hint], palette: tinear_theme::Theme) text::StyledText {
   let spans = mut List::new<text::Span>()
   for hint, index in hints {
     if index > 0 {
-      spans.push(text::span("  ", style: text::span_style()))
+      spans.push(text::span("   "))
     }
     spans.push(
       text::span(hint.key, style: text::span_style(foreground: palette.accent, bold: true)),
@@ -29,20 +32,55 @@ fn content(hints: [Hint], palette: tinear_theme::Theme) text::StyledText {
   text::styled_text(spans.@)
 }
 
-fn new(ctx: mut context::Context, palette: tinear_theme::Theme, hints: [Hint]) mut HintsBar {
-  let root = text::new(
+fn new(ctx: mut context::Context, palette: tinear_theme::Theme, context_label: Str, hints: [Hint]) mut HintsBar {
+  let root = box::new(
     ctx,
-    content: content(hints, palette),
+    styles: style::new(
+      width: style::percent(100.0),
+      height: style::cells(1),
+      flex_shrink: 0.0,
+      flex_direction: style::FlexDirection::row,
+      align_items: style::Align::center,
+      justify_content: style::Justify::space_between,
+      overflow: style::Overflow::hidden,
+    ),
+  )
+  let context_text = text::new(
+    ctx,
+    content: " {context_label}",
     selectable: false,
     wrap: text::TextWrap::none,
     overflow: text::TextOverflow::ellipsis,
-    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+    styles: style::new(
+      width: style::cells(1),
+      min_width: style::cells(8),
+      height: style::cells(1),
+      flex_grow: 1.0,
+      flex_shrink: 1.0,
+    ),
+    text_style: text::style(dim: true),
   )
-  (mut HintsBar{root: root, palette: palette})
+  let actions_text = text::new(
+    ctx,
+    content: actions_content(hints, palette),
+    selectable: false,
+    wrap: text::TextWrap::none,
+    overflow: text::TextOverflow::ellipsis,
+    styles: style::new(width: style::fit_content(), height: style::cells(1), flex_shrink: 1.0),
+  )
+  root.add(context_text)
+  root.add(actions_text)
+  (mut HintsBar{
+    root: root,
+    context_text: context_text,
+    actions_text: actions_text,
+    palette: palette,
+  })
 }
 
 impl HintsBar {
-  fn mut set(hints: [Hint]) {
-    self.root.set_content(content(hints, self.palette))
+  fn mut set(context_label: Str, hints: [Hint]) {
+    self.context_text.set_content(" {context_label}")
+    self.actions_text.set_content(actions_content(hints, self.palette))
   }
 }

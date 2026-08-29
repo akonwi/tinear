@@ -116,6 +116,21 @@ test fn shell_switches_persistent_tabs_and_persists_selection() Void!Str {
   application.root.add(controller.root)
   application.render()
   try testing::assert_contains(application.frame().text(), "Inbox body")
+  let active_tab = application.frame().cell(1, 0).expect("active Inbox tab")
+  try assertions::assert(active_tab.grapheme == "I", "active tab label should remain readable")
+  try assertions::assert(
+    active_tab.style.foreground.expect("active tab accent").index.expect("host palette index") == Uint8::from(4),
+    "active tab should use host accent",
+  )
+  try assertions::assert(
+    active_tab.style.bold and (not active_tab.style.underline) and (not active_tab.style.reverse),
+    "active tab should use accent and weight without underline or reverse video",
+  )
+  let top_rule = application.frame().cell(0, 1).expect("tab rule")
+  try assertions::assert(
+    top_rule.grapheme == "─" and top_rule.style.dim,
+    "tab bar should end with a dim rule",
+  )
   try assertions::assert(
     controller.board.root.style().display == style::Display::none,
     "board should stay mounted but hidden",
@@ -124,6 +139,11 @@ test fn shell_switches_persistent_tabs_and_persists_selection() Void!Str {
   try assertions::assert(controller.handle_key(key("tab")), "Tab should switch views")
   application.render()
   try assertions::assert(controller.model.tab_index == 1, "Tab should select My Issues")
+  let board_tab = application.frame().cell(8, 0).expect("active board tab")
+  try assertions::assert(
+    board_tab.style.bold and (not board_tab.style.underline) and (not board_tab.style.reverse),
+    "selected board tab should follow Quiet Structure selection",
+  )
   try assertions::assert(board_state.focuses == 1, "new active screen should reclaim focus")
   try assertions::assert(snapshots.size() == 1, "selection should persist")
   try testing::assert_contains(application.frame().text(), "Board body")

@@ -64,10 +64,20 @@ test fn picker_filters_navigates_and_selects() Void!Str {
   application.render()
   try assertions::assert(picker.cursor == 1, "selected id should seed cursor")
   try assertions::assert(
-    picker.results.requested_scroll_top() == 2,
-    "focus should reveal initial selection",
+    picker.results.requested_scroll_top() == 3,
+    "initial selection should request a deterministic offset before layout",
   )
   try testing::assert_contains(application.frame().text(), "In Progress")
+  let rule = application.frame().cell(0, 1).expect("picker rule")
+  try assertions::assert(
+    rule.grapheme == "─" and rule.style.dim,
+    "picker input should end with a dim rule",
+  )
+  let rail = application.frame().cell(0, 5).expect("selected picker rail")
+  try assertions::assert(
+    rail.grapheme == "▌" and not rail.style.reverse,
+    "picker selection should use a rail without reverse video",
+  )
 
   application.key(key("down", ""))
   application.key(key("return", ""))
@@ -127,7 +137,7 @@ test fn picker_mouse_selects_visible_row() Void!Str {
   )
   application.root.add(picker.root)
   application.render()
-  application.click(2, 4)
+  application.click(2, 5)
   try assertions::assert(selection.id == "doing", "clicking second row should select it")
   assertions::assert(selection.count == 1, "mouse selection should activate once")
 }

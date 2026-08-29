@@ -9,6 +9,7 @@ use cooper/color
 // source of truth on light and dark backgrounds. Tinear does not own a canvas
 // color or a dark/light mode.
 struct Theme {
+  background: color::Color,
   border: color::Color,
   accent: color::Color,
   danger: color::Color,
@@ -18,7 +19,9 @@ struct Theme {
 
 fn new() Theme {
   Theme{
+    // An explicit default background fills overlays without owning a color.
     // ANSI slots 1-4 and 8 are supplied by the user's terminal theme.
+    background: color::terminal_default(),
     border: color::indexed(8),
     accent: color::indexed(4),
     danger: color::indexed(1),
@@ -29,6 +32,7 @@ fn new() Theme {
 
 test fn theme_uses_terminal_defaults_and_host_palette_slots() Void!Str {
   let theme = new()
+  try assertions::assert(theme.background.terminal_default, "Expected explicit host background fill")
   try assertions::assert(
     theme.accent.index.expect("accent palette slot") == Uint8::from(4),
     "Expected host blue accent",

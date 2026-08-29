@@ -78,7 +78,7 @@ Horizontal row of tabs across the top of the screen:
 - **Issue tabs** (e.g. `ENG-123`) are added dynamically when an issue is opened
   from Inbox, My Issues, or Search. Max one tab per issue (re-selecting an
   already-open issue switches to its existing tab).
-- **Selected tab** is accent-colored, bold, and underlined; inactive tabs are dim.
+- **Selected tab** is accent-colored and bold; inactive tabs are dim.
 - Tab bar is a horizontal row followed by a dim rule. See
   [design-language.md](design-language.md) for the current visual standard.
 

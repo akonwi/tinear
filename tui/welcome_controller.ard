@@ -52,7 +52,7 @@ fn new(
       ctx,
       content: "▀█▀ ▀ █▀█ █▀▀ ▄▀█ █▀█\n █  █ █ █ ██▄ █▀█ █▀▄",
       selectable: false,
-      text_style: text::style(bold: true),
+      text_style: text::style(foreground: palette.accent, bold: true),
     ),
   )
   form.add(text::new(ctx, content: "Enter your Linear API key", selectable: false))

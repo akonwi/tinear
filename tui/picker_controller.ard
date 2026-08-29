@@ -8,6 +8,8 @@ use cooper/text
 use go:strings
 use tinear/tui/theme as tinear_theme
 
+let RESULT_RULE: Str = "────────────────────────────────────────────────────────────────────────────────"
+
 struct Option {
   id: Str,
   label: Str,
@@ -17,7 +19,9 @@ struct Option {
 struct Row {
   option_id: Str,
   root: mut box::Box,
+  rail: mut text::Text,
   label: mut text::Text,
+  description: mut text::Text,
   remove_mouse: fn(),
 }
 
@@ -40,6 +44,25 @@ struct PickerController {
 private fn matches(option: Option, query: Str) Bool {
   let normalized = strings::ToLower(query.trim())
   normalized.is_empty() or strings::ToLower(option.label).contains(normalized) or strings::ToLower(option.description).contains(normalized)
+}
+
+private fn row_height(option: Option) Int {
+  match option.description.is_empty() {
+    true => 2,
+    false => 3,
+  }
+}
+
+private fn description_style(option: Option) style::Style {
+  style::new(
+    display: match option.description.is_empty() {
+      true => style::Display::none,
+      false => style::Display::flex,
+    },
+    width: style::percent(100.0),
+    height: style::cells(1),
+    flex_shrink: 0.0,
+  )
 }
 
 private fn empty_style(display: style::Display) style::Style {
@@ -65,7 +88,6 @@ fn new(
       width: style::percent(100.0),
       height: style::cells(12),
       flex_direction: style::FlexDirection::column,
-      gap: style::cells(1),
       overflow: style::Overflow::hidden,
     ),
   )
@@ -74,19 +96,29 @@ fn new(
     placeholder: placeholder,
     styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
   )
+  let rule = text::new(
+    ctx,
+    content: RESULT_RULE,
+    selectable: false,
+    wrap: text::TextWrap::none,
+    overflow: text::TextOverflow::clip,
+    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+    text_style: text::style(dim: true),
+  )
   let results = scroll_box::new(
     ctx,
     styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_grow: 1.0),
   )
   let empty_text = text::new(
     ctx,
-    content: "No matches",
+    content: "  No matches",
     selectable: false,
     styles: empty_style(style::Display::none),
     text_style: text::style(dim: true),
   )
   results.add(empty_text)
   root.add(query)
+  root.add(rule)
   root.add(results)
   let picker = mut PickerController{
     root: root,
@@ -138,24 +170,55 @@ impl PickerController {
       self.context,
       styles: style::new(
         width: style::percent(100.0),
-        height: style::cells(2),
+        height: style::cells(row_height(option)),
         flex_shrink: 0.0,
+        flex_direction: style::FlexDirection::row,
         overflow: style::Overflow::hidden,
       ),
     )
-    let content = match option.description.is_empty() {
-      true => option.label,
-      false => "{option.label}\n{option.description}",
-    }
+    let rail = text::new(
+      self.context,
+      content: match option.description.is_empty() {
+        true => "  ",
+        false => "  \n  ",
+      },
+      selectable: false,
+      wrap: text::TextWrap::none,
+      styles: style::new(
+        width: style::cells(2),
+        height: style::cells(row_height(option) - 1),
+        flex_shrink: 0.0,
+      ),
+    )
+    let content = box::new(
+      self.context,
+      styles: style::new(
+        width: style::cells(1),
+        height: style::cells(row_height(option) - 1),
+        flex_grow: 1.0,
+      ),
+    )
     let label = text::new(
       self.context,
-      content: content,
+      content: option.label,
       selectable: false,
       wrap: text::TextWrap::none,
       overflow: text::TextOverflow::ellipsis,
-      styles: style::new(width: style::percent(100.0), height: style::cells(2)),
+      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
     )
-    root.add(label)
+    let description = text::new(
+      self.context,
+      content: option.description,
+      selectable: false,
+      wrap: text::TextWrap::none,
+      overflow: text::TextOverflow::ellipsis,
+      styles: description_style(option),
+      text_style: text::style(dim: true),
+    )
+    content.add(label)
+    content.add(description)
+    root.add(rail)
+    root.add(content)
     let option_id = option.id
     let remove_mouse = root.on_mouse(fn(received: mut event::MouseEvent) {
       if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
@@ -167,7 +230,9 @@ impl PickerController {
     Row{
       option_id: option.id,
       root: root,
+      rail: rail,
       label: label,
+      description: description,
       remove_mouse: remove_mouse,
     }
   }
@@ -189,12 +254,18 @@ impl PickerController {
         existing => existing,
         _ => self.create_row(option),
       }
-      row.label.set_content(
-        match option.description.is_empty() {
-          true => option.label,
-          false => "{option.label}\n{option.description}",
-        },
+      row.root.set_style(
+        style::new(
+          width: style::percent(100.0),
+          height: style::cells(row_height(option)),
+          flex_shrink: 0.0,
+          flex_direction: style::FlexDirection::row,
+          overflow: style::Overflow::hidden,
+        ),
       )
+      row.label.set_content(option.label)
+      row.description.set_content(option.description)
+      row.description.set_style(description_style(option))
       next.push(row)
       self.results.add(row.root)
     }
@@ -224,8 +295,27 @@ impl PickerController {
 
   private fn mut refresh_row_styles() {
     for row, index in self.rows {
-      let active = index == self.cursor
-      row.label.set_text_style(text::style(bold: active, reverse: active))
+      match self.filtered.at(index) {
+        option => {
+          let active = index == self.cursor
+          row.rail.set_content(
+            match {
+              active and option.description.is_empty() => "▌ ",
+              active => "▌ \n▌ ",
+              option.description.is_empty() => "  ",
+              _ => "  \n  ",
+            },
+          )
+          row.rail.set_text_style(
+            match active {
+              true => text::style(foreground: self.palette.accent, bold: true),
+              false => text::style(),
+            },
+          )
+          row.label.set_text_style(text::style(bold: active))
+        },
+        _ => (),
+      }
     }
   }
 
@@ -244,6 +334,16 @@ impl PickerController {
     }
   }
 
+  private fn selected_offset() Int {
+    mut offset = 0
+    for option, index in self.filtered {
+      if index < self.cursor {
+        offset = offset + row_height(option)
+      }
+    }
+    offset
+  }
+
   fn mut select_id(option_id: Str) {
     for option, index in self.filtered {
       if option.id == option_id {
@@ -251,12 +351,7 @@ impl PickerController {
       }
     }
     self.refresh_row_styles()
-    match self.rows.at(self.cursor) {
-      row => {
-        let _ = self.results.scroll_to(self.cursor * 2)
-      },
-      _ => (),
-    }
+    let _ = self.results.scroll_to(self.selected_offset())
   }
 
   private fn mut move_cursor(delta: Int) {
@@ -288,7 +383,7 @@ impl PickerController {
 
   fn mut focus() {
     let _ = self.query.focus()
-    let _ = self.results.scroll_to(self.cursor * 2)
+    let _ = self.results.scroll_to(self.selected_offset())
   }
 
   fn mut dispose() {

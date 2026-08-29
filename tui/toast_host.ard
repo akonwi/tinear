@@ -1,5 +1,4 @@
 use cooper/box
-use cooper/color
 use cooper/context
 use cooper/style
 use cooper/text
@@ -62,12 +61,13 @@ fn new(ctx: mut context::Context, palette: tinear_theme::Theme, schedule: schedu
   })
 }
 
-private fn border_color(palette: tinear_theme::Theme, variant: Variant) color::Color {
-  match variant {
-    Variant::info => palette.accent,
-    Variant::success => palette.success,
-    Variant::error => palette.danger,
+private fn toast_content(title: Str, description: Str) text::StyledText {
+  let spans = mut List::new<text::Span>()
+  spans.push(text::span(title, style: text::span_style(bold: true)))
+  if not description.is_empty() {
+    spans.push(text::span(" · {description}", style: text::span_style(dim: true)))
   }
+  text::styled_text(spans.@)
 }
 
 impl ToastHost {
@@ -105,20 +105,55 @@ impl ToastHost {
 
     self.next_id =+ 1
     let id = self.next_id
+    let marker = match variant {
+      Variant::info => "•",
+      Variant::success => "✓",
+      Variant::error => "!",
+    }
+    let marker_color = match variant {
+      Variant::info => self.palette.accent,
+      Variant::success => self.palette.success,
+      Variant::error => self.palette.danger,
+    }
     let toast = box::new(
       self.context,
       styles: style::new(
-        border: style::Border::rounded,
-        border_color: border_color(self.palette, variant),
-        width: style::percent(100.0),
-        padding: style::edges(style::cells(1)),
-        flex_direction: style::FlexDirection::column,
+        background: self.palette.background,
+        width: style::fit_content(),
+        max_width: style::percent(100.0),
+        height: style::cells(1),
+        flex_direction: style::FlexDirection::row,
+        padding: style::Edges{
+          top: style::cells(0),
+          right: style::cells(1),
+          bottom: style::cells(0),
+          left: style::cells(1),
+        },
+        overflow: style::Overflow::hidden,
       ),
     )
-    toast.add(text::new(self.context, content: title, text_style: text::style(bold: true)))
-    if not description.is_empty() {
-      toast.add(text::new(self.context, content: description, text_style: text::style(dim: true)))
-    }
+    toast.add(
+      text::new(
+        self.context,
+        content: marker,
+        selectable: false,
+        styles: style::new(width: style::cells(2), height: style::cells(1), flex_shrink: 0.0),
+        text_style: text::style(foreground: marker_color, bold: true),
+      ),
+    )
+    toast.add(
+      text::new(
+        self.context,
+        content: toast_content(title, description),
+        wrap: text::TextWrap::none,
+        overflow: text::TextOverflow::ellipsis,
+        styles: style::new(
+          width: style::fit_content(),
+          max_width: style::cells(48),
+          height: style::cells(1),
+        ),
+      ),
+    )
     let cancel_expiry = self.schedule(ttl_ms, fn() {
       let _ = self.remove(id)
     })

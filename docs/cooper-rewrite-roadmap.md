@@ -245,11 +245,11 @@ Complete this pass before resuming feature phases so new screens inherit a
 coherent language instead of extending the bare parity styling.
 
 - [x] Establish a host-theme foundation using terminal-default foreground/background and indexed ANSI semantic colors.
-- [ ] Restyle shell tabs and footer with accent hierarchy and dim rules.
-- [ ] Restyle Inbox rows with selection rails and rebuild detail as structured retained controls.
-- [ ] Restyle board headers/cards with comfortable spacing, priority color, metadata, and selection rails.
-- [ ] Apply the shared list language to picker/search results.
-- [ ] Align modals and toasts with the terminal-default canvas.
+- [x] Restyle shell tabs and footer with accent hierarchy and dim rules.
+- [x] Restyle Inbox rows with selection rails and render detail as structured styled content.
+- [x] Restyle board headers/cards with comfortable spacing, priority color, metadata, and selection rails.
+- [x] Apply the shared list language to picker/search results.
+- [x] Align modals and toasts with the terminal-default canvas.
 - [ ] Add TestApp coverage at narrow, standard, and wide sizes for selected, focused, loading, empty, and error states.
 
 **Exit criteria:** shell, Inbox, My Issues, picker, modal, and toast screenshots/frames follow the design guide and have no full-row reverse selection.

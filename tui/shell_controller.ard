@@ -3,6 +3,7 @@ use cooper/context
 use cooper/event
 use cooper/style
 use cooper/text
+use go:strings
 use tinear/models/cache
 use tinear/models/shell as shell_model
 use tinear/models/tabs
@@ -54,6 +55,19 @@ private fn body_style(display: style::Display) style::Style {
     flex_grow: 1.0,
     overflow: style::Overflow::hidden,
   )
+}
+
+private fn context_for(model: shell_model::Model) Str {
+  match model.tab_index {
+    0 => "Inbox",
+    1 => "My Issues",
+    _ => {
+      match shell_model::selected_dynamic(model) {
+        reference => shell_model::title(model, reference).or("Detail"),
+        _ => "Detail",
+      }
+    },
+  }
 }
 
 private fn hints_for(model: shell_model::Model) [hints_bar::Hint] {
@@ -127,9 +141,29 @@ fn new(
       overflow: style::Overflow::hidden,
     ),
   )
-  let hints = hints_bar::new(ctx, palette, hints_for(initial_model))
+  let tab_rule = text::new(
+    ctx,
+    content: strings::Repeat("─", 512),
+    selectable: false,
+    wrap: text::TextWrap::none,
+    overflow: text::TextOverflow::clip,
+    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+    text_style: text::style(dim: true),
+  )
+  let footer_rule = text::new(
+    ctx,
+    content: strings::Repeat("─", 512),
+    selectable: false,
+    wrap: text::TextWrap::none,
+    overflow: text::TextOverflow::clip,
+    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+    text_style: text::style(dim: true),
+  )
+  let hints = hints_bar::new(ctx, palette, context_for(initial_model), hints_for(initial_model))
   root.add(tab_bar)
+  root.add(tab_rule)
   root.add(body_host)
+  root.add(footer_rule)
   root.add(hints.root)
   body_host.add(inbox.root)
   body_host.add(board.root)
@@ -197,21 +231,53 @@ impl ShellController {
         width: style::cells(width),
         height: style::cells(1),
         flex_shrink: 0.0,
+        flex_direction: style::FlexDirection::row,
         overflow: style::Overflow::hidden,
       ),
     )
     let selected = index == self.model.tab_index
+    let label_width = match dynamic {
+      true => width - 2,
+      false => width,
+    }
     chip.add(
       text::new(
         self.context,
-        content: " {label} ",
+        content: text::styled_text(
+          [
+            text::span(" "),
+            text::span(
+              label,
+              style: match selected {
+                true => text::span_style(foreground: self.palette.accent, bold: true),
+                false => text::span_style(dim: true),
+              },
+            ),
+            text::span(" "),
+          ],
+        ),
         selectable: false,
         wrap: text::TextWrap::none,
         overflow: text::TextOverflow::ellipsis,
-        styles: style::new(width: style::cells(width), height: style::cells(1)),
-        text_style: text::style(bold: selected, reverse: selected),
+        styles: style::new(
+          width: style::cells(label_width),
+          height: style::cells(1),
+          flex_shrink: 0.0,
+        ),
       ),
     )
+    if dynamic {
+      chip.add(
+        text::new(
+          self.context,
+          content: "× ",
+          selectable: false,
+          wrap: text::TextWrap::none,
+          styles: style::new(width: style::cells(2), height: style::cells(1), flex_shrink: 0.0),
+          text_style: text::style(dim: true),
+        ),
+      )
+    }
     let remove_mouse = chip.on_mouse(fn(received: mut event::MouseEvent) {
       if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
         self.select_tab(index)
@@ -259,7 +325,7 @@ impl ShellController {
       )
     }
     self.rebuild_tab_bar()
-    self.hints.set(hints_for(self.model))
+    self.hints.set(context_for(self.model), hints_for(self.model))
     if should_persist {
       self.persist(shell_model::snapshot(self.model))
     }

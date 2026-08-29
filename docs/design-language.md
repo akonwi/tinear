@@ -38,17 +38,19 @@ adapter, not an application color scheme:
 | host ANSI green | successful completion and confirmations |
 | host ANSI bright black/gray | modal boundaries and rare structural separators |
 
-The default theme must not contain hard-coded RGB values. Missing foreground
-and background values preserve the terminal defaults; semantic colors use
-Cooper's indexed-color support so ANSI slots resolve through the user's terminal
-palette. Prefer `dim` over a color for muted content. Every colored state also
-uses a glyph, label, weight, or placement so color is never the only signal.
+The default theme must not contain hard-coded RGB values. Primary screens omit
+foreground and background values to preserve the terminal canvas. Overlays use
+Cooper's explicit terminal-default background to occlude underlying content
+without choosing a color. Semantic colors use indexed-color support so ANSI
+slots resolve through the user's terminal palette. Prefer `dim` over a color
+for muted content. Every colored state also uses a glyph, label, weight, or
+placement so color is never the only signal.
 
 ## Shell
 
 - The tab bar is one line followed by a dim horizontal rule.
-- The active tab is accent-colored, bold, and underlined. Inactive tabs are
-  dim. Tabs do not use reverse-video chips.
+- The active tab is accent-colored and bold. Inactive tabs are dim. Tabs do
+  not use underlines or reverse-video chips.
 - Permanent tabs remain visually stable; dynamic tabs add a dim `×` suffix.
 - The footer begins with a dim rule. Its left side provides context/status and
   its right side provides current key hints. Keys are accent/bold; labels are
@@ -79,7 +81,8 @@ uses a glyph, label, weight, or placement so color is never the only signal.
 
 ## My Issues
 
-- Columns are approximately 42 cells wide with two cells between columns.
+- Columns are approximately 40 cells wide with two cells between columns, so a
+  complete card remains visible in the supported 40-cell narrow layout.
 - Column headers use bold state name, dim count, and a dim rule. The selected
   column can strengthen the header but does not gain a box border.
 - Cards use a comfortable five-row rhythm: priority + bold identifier, title up

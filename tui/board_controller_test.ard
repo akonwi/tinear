@@ -122,7 +122,21 @@ test fn board_builds_nested_retained_columns_and_navigates_cards() Void!Str {
     "cards should be retained per column",
   )
   try testing::assert_contains(application.frame().text(), "AKO-1")
-  application.click(2, 1)
+  let header = application.frame().cell(2, 0).expect("selected column header")
+  try assertions::assert(
+    header.style.foreground.expect("column accent").index.expect("host palette index") == Uint8::from(4),
+    "selected column should use host accent",
+  )
+  let rail = application.frame().cell(0, 2).expect("selected card rail")
+  try assertions::assert(
+    rail.grapheme == "▌" and not rail.style.reverse,
+    "selected card should use a rail without reverse video",
+  )
+  try assertions::assert(
+    rail.style.foreground.expect("card accent").index.expect("host palette index") == Uint8::from(4),
+    "selected card rail should use host accent",
+  )
+  application.click(2, 2)
   try assertions::assert(opened.identifier == "AKO-1", "clicking a card should open it")
 
   try assertions::assert(controller.handle_key(key("down")), "Down should move within a column")

@@ -142,6 +142,21 @@ test fn inbox_loads_rows_and_discards_stale_detail_completion() Void!Str {
   )
   try assertions::assert(controller.rows.size() == 2, "loaded notifications should create rows")
   try assertions::assert(fake.details.size() == 1, "first item should request detail")
+  application.render()
+  let rail = application.frame().cell(0, 0).expect("selected Inbox rail")
+  try assertions::assert(
+    rail.grapheme == "▌" and not rail.style.reverse,
+    "Inbox selection should use a rail without reverse video",
+  )
+  try assertions::assert(
+    rail.style.foreground.expect("selection accent").index.expect("host palette index") == Uint8::from(4),
+    "Inbox rail should use host accent",
+  )
+  let divider = application.frame().cell(40, 0).expect("Inbox pane divider")
+  try assertions::assert(
+    divider.grapheme == "│" and divider.style.dim,
+    "Inbox panes should use a dim divider",
+  )
 
   try assertions::assert(controller.handle_key(key("down", "")), "Down should move selection")
   try assertions::assert(controller.cursor == 1, "cursor should move to second item")
@@ -154,6 +169,8 @@ test fn inbox_loads_rows_and_discards_stale_detail_completion() Void!Str {
   (fake.details.at(1).expect("current").completion)(Result::ok(detail("AKO-2", "Current detail")))
   application.render()
   try testing::assert_contains(application.frame().text(), "Current detail")
+  try testing::assert_contains(application.frame().text(), "── Details")
+  try testing::assert_contains(application.frame().text(), "Alex commented")
 
   try assertions::assert(controller.handle_key(key("return", "")), "Enter should open issue")
   try assertions::assert(opened.value == "AKO-2", "selected issue identifier should open")
@@ -214,7 +231,7 @@ test fn inbox_opens_pr_in_browser_and_archives_optimistically() Void!Str {
     Result::ok(detail("AKO-2", "Late detail")),
   )
   assertions::assert(
-    controller.detail_text.content() == "Inbox zero",
+    controller.detail_text.content() == "You're all caught up.",
     "late detail must not replace empty state",
   )
 }

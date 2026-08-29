@@ -24,9 +24,19 @@ test fn toast_host_stacks_and_expires_entries() Void!Str {
   let second = host.show("Warning", "Partial results", toast_host::Variant::info, 2500)
   application.render()
   try assertions::assert(host.entries.size() == 2, "toasts should stack")
+  try assertions::assert(
+    host.entries.at(0).expect("success toast").root.style().border == style::Border::none,
+    "Quiet Structure toasts should remain borderless",
+  )
+  try assertions::assert(
+    host.entries.at(
+      0,
+    ).expect("success toast").root.style().background.expect("toast fill").terminal_default,
+    "toast should occlude content with the host background",
+  )
   try assertions::assert(delays.at(0).or(0) == 5000, "first TTL should be scheduled")
   try assertions::assert(delays.at(1).or(0) == 2500, "second TTL should be scheduled")
-  try testing::assert_contains(application.frame().text(), "Saved")
+  try testing::assert_contains(application.frame().text(), "✓ Saved")
   try testing::assert_contains(application.frame().text(), "Warning")
 
   (actions.at(0).expect("first expiry"))()

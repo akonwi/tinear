@@ -55,6 +55,14 @@ test fn modal_host_presents_replaces_and_closes_one_body() Void!Str {
   )
   application.render()
   try assertions::assert(host.is_current(first_ticket), "first ticket should be current")
+  try assertions::assert(
+    host.frame.style().border_color.expect("modal border").index.expect("host palette index") == Uint8::from(4),
+    "active modal border should use host accent",
+  )
+  try assertions::assert(
+    host.frame.style().background.expect("modal background fill").terminal_default,
+    "modal should occlude content with the host background",
+  )
   try assertions::assert(host.body_slot.child_count() == 1, "one body should be mounted")
   try testing::assert_contains(application.frame().text(), "First modal")
 

@@ -12,17 +12,26 @@ use tinear/tui/scheduler
 use tinear/tui/shell_controller
 use tinear/tui/theme as tinear_theme
 
+let COLUMN_WIDTH: Int = 38
+let COLUMN_GAP: Int = 2
+let CARD_HEIGHT: Int = 5
+let COLUMN_RULE: Str = "────────────────────────────────────"
+
 struct CardRecord {
   issue_id: Str,
   root: mut box::Box,
-  label: mut text::Text,
+  rail: mut text::Text,
+  id_line: mut text::Text,
+  title: mut text::Text,
+  metadata: mut text::Text,
   remove_mouse: fn(),
 }
 
 struct ColumnRecord {
   key: Str,
   root: mut box::Box,
-  header: mut text::Text,
+  header_label: mut text::Text,
+  header_rule: mut text::Text,
   scroll: mut scroll_box::ScrollBox,
   cards: [CardRecord],
 }
@@ -75,20 +84,65 @@ private fn columns_row_style(count: Int) style::Style {
     false => 0,
   }
   style::new(
-    width: style::cells(count * 32 + gaps),
+    width: style::cells(count * COLUMN_WIDTH + gaps * COLUMN_GAP),
     height: style::percent(100.0),
     flex_direction: style::FlexDirection::row,
     align_items: style::Align::stretch,
-    gap: style::cells(1),
+    gap: style::cells(COLUMN_GAP),
   )
 }
 
-private fn card_content(issue: issues::Issue) Str {
-  let metadata = match issue.project_name == "—" and issue.assignee_name == "—" {
-    true => "{issue.team_key} · {issue.cycle_label}",
-    false => "{issue.project_name} · {issue.cycle_label} · {issue.assignee_name}",
+private fn priority_style(priority: Int?, palette: tinear_theme::Theme) text::SpanStyle {
+  match priority {
+    value => {
+      match value {
+        1 => text::span_style(foreground: palette.danger, bold: true),
+        2 => text::span_style(foreground: palette.warning, bold: true),
+        4 => text::span_style(dim: true),
+        _ => text::span_style(),
+      }
+    },
+    _ => text::span_style(),
   }
-  "{issue_state::priority_glyph(issue.priority)} {issue.identifier} {issue.title}\n{metadata}"
+}
+
+private fn card_metadata(issue: issues::Issue) Str {
+  let has_cycle = not issue.cycle_label.is_empty() and not issue.cycle_label == "—"
+  let has_project = not issue.project_name.is_empty() and not issue.project_name == "—"
+  match {
+    has_cycle and has_project => "{issue.cycle_label} · {issue.project_name}",
+    has_cycle => issue.cycle_label,
+    has_project => issue.project_name,
+    _ => "",
+  }
+}
+
+private fn id_content(issue: issues::Issue, palette: tinear_theme::Theme) text::StyledText {
+  text::styled_text(
+    [
+      text::span(
+        issue_state::priority_glyph(issue.priority),
+        style: priority_style(issue.priority, palette),
+      ),
+      text::span(" {issue.identifier}", style: text::span_style(bold: true)),
+    ],
+  )
+}
+
+private fn header_content(column: issues::BoardColumn, selected: Bool, palette: tinear_theme::Theme) text::StyledText {
+  text::styled_text(
+    [
+      text::span("  "),
+      text::span(
+        column.name,
+        style: match selected {
+          true => text::span_style(foreground: palette.accent, bold: true),
+          false => text::span_style(bold: true),
+        },
+      ),
+      text::span("  {column.issues.size()}", style: text::span_style(dim: true)),
+    ],
+  )
 }
 
 fn new(
@@ -165,20 +219,61 @@ impl BoardController {
       self.context,
       styles: style::new(
         width: style::percent(100.0),
-        height: style::cells(3),
+        height: style::cells(CARD_HEIGHT),
         flex_shrink: 0.0,
+        flex_direction: style::FlexDirection::row,
         overflow: style::Overflow::hidden,
       ),
     )
-    let label = text::new(
+    let rail = text::new(
       self.context,
-      content: card_content(issue),
+      content: "  \n  \n  \n  ",
+      selectable: false,
+      wrap: text::TextWrap::none,
+      styles: style::new(
+        width: style::cells(2),
+        height: style::cells(CARD_HEIGHT - 1),
+        flex_shrink: 0.0,
+      ),
+    )
+    let content = box::new(
+      self.context,
+      styles: style::new(
+        width: style::cells(1),
+        height: style::cells(CARD_HEIGHT - 1),
+        flex_grow: 1.0,
+      ),
+    )
+    let id_line = text::new(
+      self.context,
+      content: id_content(issue, self.palette),
+      selectable: false,
+      wrap: text::TextWrap::none,
+      overflow: text::TextOverflow::ellipsis,
+      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+    )
+    let title = text::new(
+      self.context,
+      content: issue.title,
       selectable: false,
       wrap: text::TextWrap::word,
       overflow: text::TextOverflow::ellipsis,
-      styles: style::new(width: style::percent(100.0), height: style::cells(3)),
+      styles: style::new(width: style::percent(100.0), height: style::cells(2), flex_shrink: 0.0),
     )
-    root.add(label)
+    let metadata = text::new(
+      self.context,
+      content: card_metadata(issue),
+      selectable: false,
+      wrap: text::TextWrap::none,
+      overflow: text::TextOverflow::ellipsis,
+      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+      text_style: text::style(dim: true),
+    )
+    content.add(id_line)
+    content.add(title)
+    content.add(metadata)
+    root.add(rail)
+    root.add(content)
     let issue_id = issue.id
     let remove_mouse = root.on_mouse(fn(received: mut event::MouseEvent) {
       if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
@@ -190,7 +285,10 @@ impl BoardController {
     CardRecord{
       issue_id: issue.id,
       root: root,
-      label: label,
+      rail: rail,
+      id_line: id_line,
+      title: title,
+      metadata: metadata,
       remove_mouse: remove_mouse,
     }
   }
@@ -215,7 +313,9 @@ impl BoardController {
         existing => existing,
         _ => self.create_card(issue),
       }
-      card.label.set_content(card_content(issue))
+      card.id_line.set_content(id_content(issue, self.palette))
+      card.title.set_content(issue.title)
+      card.metadata.set_content(card_metadata(issue))
       next.push(card)
       scroll.add(card.root)
     }
@@ -238,29 +338,41 @@ impl BoardController {
     let root = box::new(
       self.context,
       styles: style::new(
-        width: style::cells(32),
+        width: style::cells(COLUMN_WIDTH),
         height: style::percent(100.0),
         flex_shrink: 0.0,
         overflow: style::Overflow::hidden,
       ),
     )
-    let header = text::new(
+    let header_label = text::new(
       self.context,
       content: "",
       selectable: false,
+      wrap: text::TextWrap::none,
+      overflow: text::TextOverflow::ellipsis,
       styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
-      text_style: text::style(bold: true),
+    )
+    let header_rule = text::new(
+      self.context,
+      content: "  {COLUMN_RULE}",
+      selectable: false,
+      wrap: text::TextWrap::none,
+      overflow: text::TextOverflow::clip,
+      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+      text_style: text::style(dim: true),
     )
     let scroll = scroll_box::new(
       self.context,
       styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_grow: 1.0),
     )
-    root.add(header)
+    root.add(header_label)
+    root.add(header_rule)
     root.add(scroll)
     ColumnRecord{
       key: column_key(column),
       root: root,
-      header: header,
+      header_label: header_label,
+      header_rule: header_rule,
       scroll: scroll,
       cards: [],
     }
@@ -284,12 +396,13 @@ impl BoardController {
         existing => existing,
         _ => self.create_column(column),
       }
-      base.header.set_content("{column.name}  {column.issues.size()}")
+      base.header_label.set_content(header_content(column, false, self.palette))
       let cards = self.reconcile_cards(base.scroll, base.cards, column.issues)
       let updated = ColumnRecord{
         key: key,
         root: base.root,
-        header: base.header,
+        header_label: base.header_label,
+        header_rule: base.header_rule,
         scroll: base.scroll,
         cards: cards,
       }
@@ -312,21 +425,52 @@ impl BoardController {
     }
     self.column_records = next.@
     self.columns_row.set_style(columns_row_style(self.column_records.size()))
-    self.refresh_card_styles()
+    self.refresh_selection_styles()
   }
 
-  private fn mut refresh_card_styles() {
+  private fn mut refresh_selection_styles() {
     let selected = self.selected_issue_id()
-    for column in self.column_records {
+    for column, column_index in self.column_records {
+      match self.columns.at(column_index) {
+        value => {
+          column.header_label.set_content(
+            header_content(value, column_index == self.column_index, self.palette),
+          )
+        },
+        _ => (),
+      }
       for card in column.cards {
-        let active = card.issue_id == selected
-        card.label.set_text_style(text::style(bold: active, reverse: active))
+        for issue in self.columns.at(column_index).expect("column").issues {
+          if issue.id == card.issue_id {
+            let active = card.issue_id == selected
+            card.rail.set_content(
+              match active {
+                true => "▌ \n▌ \n▌ \n▌ ",
+                false => "  \n  \n  \n  ",
+              },
+            )
+            card.rail.set_text_style(
+              match active {
+                true => text::style(foreground: self.palette.accent, bold: true),
+                false => text::style(),
+              },
+            )
+            card.id_line.set_content(id_content(issue, self.palette))
+            card.title.set_content(issue.title)
+            card.metadata.set_content(card_metadata(issue))
+          }
+        }
       }
     }
   }
 
   private fn mut show_status(message: Str, error: Bool) {
-    self.status.set_content(message)
+    self.status.set_content(
+      match message.is_empty() {
+        true => "",
+        false => "  {message}",
+      },
+    )
     self.status.set_text_style(
       match error {
         true => text::style(foreground: self.palette.danger, bold: true),
@@ -354,13 +498,23 @@ impl BoardController {
   private fn mut reveal_selection() {
     match self.column_records.at(self.column_index) {
       column => {
-        let _ = self.outer_scroll.scroll_to_x(self.column_index * 33)
+        let _ = self.outer_scroll.scroll_child_into_view(column.root)
         match column.cards.at(self.card_index) {
           card => {
-            let _ = column.scroll.scroll_to(self.card_index * 3)
+            let _ = column.scroll.scroll_child_into_view(card.root)
           },
           _ => (),
         }
+      },
+      _ => (),
+    }
+  }
+
+  private fn mut restore_reconciled_selection() {
+    let _ = self.outer_scroll.scroll_to_x(self.column_index * (COLUMN_WIDTH + COLUMN_GAP))
+    match self.column_records.at(self.column_index) {
+      column => {
+        let _ = column.scroll.scroll_to(self.card_index * CARD_HEIGHT)
       },
       _ => (),
     }
@@ -389,7 +543,7 @@ impl BoardController {
       0 => self.show_status("No assigned issues", false),
       _ => {
         self.show_status("", false)
-        self.reveal_selection()
+        self.restore_reconciled_selection()
       },
     }
   }
@@ -445,7 +599,7 @@ impl BoardController {
         }
       }
     }
-    self.refresh_card_styles()
+    self.refresh_selection_styles()
     self.reveal_selection()
   }
 
@@ -468,7 +622,7 @@ impl BoardController {
         if self.card_index >= count {
           self.card_index = count - 1
         }
-        self.refresh_card_styles()
+        self.refresh_selection_styles()
         self.reveal_selection()
       }
     }
@@ -487,7 +641,7 @@ impl BoardController {
           }
           if next != self.card_index {
             self.card_index = next
-            self.refresh_card_styles()
+            self.refresh_selection_styles()
             self.reveal_selection()
           }
         }
