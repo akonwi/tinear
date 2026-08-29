@@ -1,0 +1,267 @@
+use ard/testing as assertions
+
+use cooper/box
+use cooper/context
+use cooper/event
+use cooper/style
+use cooper/testing
+use cooper/text
+use tinear/models/cache
+use tinear/models/shell as shell_model
+use tinear/models/tabs
+use tinear/tui/shell_controller
+use tinear/tui/theme
+
+private struct ScreenState {
+  focuses: Int,
+  handled: Int,
+  disposals: Int,
+}
+
+private struct Counter {
+  value: Int,
+}
+
+private fn modifiers() event::Modifiers {
+  event::Modifiers{
+    shift: false,
+    ctrl: false,
+    alt: false,
+    super: false,
+  }
+}
+
+private fn key(value: Str) mut event::KeyEvent {
+  event::key(value, value, event::KeyEventType::press, modifiers())
+}
+
+private fn fake_screen(ctx: mut context::Context, label: Str, state: mut ScreenState) shell_controller::Screen {
+  let root = box::new(
+    ctx,
+    styles: style::new(width: style::percent(100.0), height: style::percent(100.0)),
+  )
+  root.set_focusable(true)
+  root.add(text::new(ctx, content: label))
+  shell_controller::Screen{
+    root: root,
+    focus: fn() {
+      state.focuses =+ 1
+      let _ = root.focus()
+    },
+    handle_key: fn(received: mut event::KeyEvent) Bool {
+      if received.matches("x") {
+        state.handled =+ 1
+        true
+      } else {
+        false
+      }
+    },
+    dispose: fn() {
+      state.disposals =+ 1
+    },
+  }
+}
+
+private fn dynamic_factory(ctx: mut context::Context, created: mut Counter, disposed: mut Counter) fn(tabs::TabRef) shell_controller::Screen {
+  fn(reference: tabs::TabRef) shell_controller::Screen {
+    created.value =+ 1
+    let state = mut ScreenState{
+      focuses: 0,
+      handled: 0,
+      disposals: 0,
+    }
+    let base = fake_screen(ctx, "Detail {reference.title}", state)
+    shell_controller::Screen{
+      root: base.root,
+      focus: base.focus,
+      handle_key: base.handle_key,
+      dispose: fn() {
+        base.dispose()
+        disposed.value =+ 1
+      },
+    }
+  }
+}
+
+test fn shell_switches_persistent_tabs_and_persists_selection() Void!Str {
+  let application = testing::new(80, 16)
+  defer application.destroy()
+  let inbox_state = mut ScreenState{
+    focuses: 0,
+    handled: 0,
+    disposals: 0,
+  }
+  let board_state = mut ScreenState{
+    focuses: 0,
+    handled: 0,
+    disposals: 0,
+  }
+  let created = mut Counter{value: 0}
+  let disposed = mut Counter{value: 0}
+  let snapshots = mut List::new<cache::LoggedInCache>()
+  let controller = shell_controller::new(
+    application.context,
+    theme::new(),
+    shell_model::empty(),
+    fake_screen(application.context, "Inbox body", inbox_state),
+    fake_screen(application.context, "Board body", board_state),
+    dynamic_factory(application.context, created, disposed),
+    fn(value: cache::LoggedInCache) {
+      snapshots.push(value)
+    },
+    fn() {},
+    fn() {},
+    fn() {},
+  )
+  application.root.add(controller.root)
+  application.render()
+  try testing::assert_contains(application.frame().text(), "Inbox body")
+  try assertions::assert(
+    controller.board.root.style().display == style::Display::none,
+    "board should stay mounted but hidden",
+  )
+
+  try assertions::assert(controller.handle_key(key("tab")), "Tab should switch views")
+  application.render()
+  try assertions::assert(controller.model.tab_index == 1, "Tab should select My Issues")
+  try assertions::assert(board_state.focuses == 1, "new active screen should reclaim focus")
+  try assertions::assert(snapshots.size() == 1, "selection should persist")
+  try testing::assert_contains(application.frame().text(), "Board body")
+  assertions::assert(
+    controller.inbox.root.style().display == style::Display::none,
+    "Inbox should remain mounted but hidden",
+  )
+}
+
+test fn shell_restores_opens_reuses_retitles_and_closes_dynamic_tabs() Void!Str {
+  let application = testing::new(100, 18)
+  defer application.destroy()
+  let created = mut Counter{value: 0}
+  let disposed = mut Counter{value: 0}
+  let fixed = mut ScreenState{
+    focuses: 0,
+    handled: 0,
+    disposals: 0,
+  }
+  let restored_ref = tabs::doc_tab("doc-1", "Restored doc")
+  let initial = shell_model::Model{tab_index: 0, tabs: [restored_ref]}
+  let controller = shell_controller::new(
+    application.context,
+    theme::new(),
+    initial,
+    fake_screen(application.context, "Inbox", fixed),
+    fake_screen(application.context, "Board", fixed),
+    dynamic_factory(application.context, created, disposed),
+    fn(value: cache::LoggedInCache) {},
+    fn() {},
+    fn() {},
+    fn() {},
+  )
+  application.root.add(controller.root)
+  try assertions::assert(created.value == 1, "restored tab should create one retained controller")
+  try assertions::assert(
+    controller.dynamic_screens.at(0).expect("restored").screen.root.style().display == style::Display::none,
+    "inactive restored tab should be hidden",
+  )
+
+  controller.select_tab(2)
+  application.render()
+  try testing::assert_contains(application.frame().text(), "Detail Restored doc")
+  controller.open(tabs::doc_tab("doc-1", "ignored"))
+  try assertions::assert(created.value == 1, "opening existing identity should reuse its controller")
+  controller.retitle(restored_ref, "Renamed doc")
+  application.render()
+  try testing::assert_contains(application.frame().text(), "Renamed doc")
+
+  try assertions::assert(controller.handle_key(key("escape")), "Escape should close dynamic tab")
+  try assertions::assert(controller.model.tab_index == 1, "closing detail should return to board")
+  try assertions::assert(controller.dynamic_screens.size() == 0, "closed controller should detach")
+  assertions::assert(disposed.value == 1, "closed controller should dispose once")
+}
+
+test fn shell_routes_mouse_global_and_active_commands() Void!Str {
+  let application = testing::new(80, 14)
+  defer application.destroy()
+  let inbox_state = mut ScreenState{
+    focuses: 0,
+    handled: 0,
+    disposals: 0,
+  }
+  let board_state = mut ScreenState{
+    focuses: 0,
+    handled: 0,
+    disposals: 0,
+  }
+  let created = mut Counter{value: 0}
+  let disposed = mut Counter{value: 0}
+  let searches = mut Counter{value: 0}
+  let creations = mut Counter{value: 0}
+  let controller = shell_controller::new(
+    application.context,
+    theme::new(),
+    shell_model::empty(),
+    fake_screen(application.context, "Inbox", inbox_state),
+    fake_screen(application.context, "Board", board_state),
+    dynamic_factory(application.context, created, disposed),
+    fn(value: cache::LoggedInCache) {},
+    fn() {},
+    fn() {
+      searches.value =+ 1
+    },
+    fn() {
+      creations.value =+ 1
+    },
+  )
+  application.root.add(controller.root)
+  application.render()
+  application.click(8, 0)
+  try assertions::assert(controller.model.tab_index == 1, "clicking My Issues tab should select it")
+  try assertions::assert(controller.handle_key(key("?")), "search should be globally handled")
+  try assertions::assert(controller.handle_key(key("c")), "create should be globally handled")
+  try assertions::assert(controller.handle_key(key("x")), "active screen should handle remaining keys")
+  try assertions::assert(searches.value == 1, "search callback should run")
+  try assertions::assert(creations.value == 1, "create callback should run")
+  try assertions::assert(board_state.handled == 1, "active board should receive delegated key")
+  controller.open(tabs::issue_tab("AKO-1"))
+  try assertions::assert(not controller.handle_key(key("c")), "detail tabs should own the c command")
+  assertions::assert(creations.value == 1, "detail c should not start issue creation")
+}
+
+test fn shell_disposal_cleans_screens_and_persistence_once() Void!Str {
+  let application = testing::new(60, 12)
+  defer application.destroy()
+  let inbox_state = mut ScreenState{
+    focuses: 0,
+    handled: 0,
+    disposals: 0,
+  }
+  let board_state = mut ScreenState{
+    focuses: 0,
+    handled: 0,
+    disposals: 0,
+  }
+  let created = mut Counter{value: 0}
+  let disposed = mut Counter{value: 0}
+  let persistence_disposals = mut Counter{value: 0}
+  let controller = shell_controller::new(
+    application.context,
+    theme::new(),
+    shell_model::Model{tab_index: 2, tabs: [tabs::issue_tab("AKO-1")]},
+    fake_screen(application.context, "Inbox", inbox_state),
+    fake_screen(application.context, "Board", board_state),
+    dynamic_factory(application.context, created, disposed),
+    fn(value: cache::LoggedInCache) {},
+    fn() {
+      persistence_disposals.value =+ 1
+    },
+    fn() {},
+    fn() {},
+  )
+  application.root.add(controller.root)
+  controller.dispose()
+  controller.dispose()
+  try assertions::assert(inbox_state.disposals == 1, "Inbox should dispose once")
+  try assertions::assert(board_state.disposals == 1, "board should dispose once")
+  try assertions::assert(disposed.value == 1, "dynamic screen should dispose once")
+  assertions::assert(persistence_disposals.value == 1, "persistence worker should dispose once")
+}

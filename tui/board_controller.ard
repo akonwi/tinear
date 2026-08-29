@@ -1,0 +1,555 @@
+use cooper/box
+use cooper/context
+use cooper/event
+use cooper/scroll_box
+use cooper/style
+use cooper/text
+use tinear/models/issue_state
+use tinear/models/issues
+use tinear/services/board_service
+use tinear/tui/lifecycle
+use tinear/tui/scheduler
+use tinear/tui/shell_controller
+use tinear/tui/theme as tinear_theme
+
+struct CardRecord {
+  issue_id: Str,
+  root: mut box::Box,
+  label: mut text::Text,
+  remove_mouse: fn(),
+}
+
+struct ColumnRecord {
+  key: Str,
+  root: mut box::Box,
+  header: mut text::Text,
+  scroll: mut scroll_box::ScrollBox,
+  cards: [CardRecord],
+}
+
+struct BoardController {
+  root: mut box::Box,
+  context: mut context::Context,
+  status: mut text::Text,
+  outer_scroll: mut scroll_box::ScrollBox,
+  columns_row: mut box::Box,
+  columns: [issues::BoardColumn],
+  column_records: [ColumnRecord],
+  column_index: Int,
+  card_index: Int,
+  generation: Int,
+  scope: mut lifecycle::Scope,
+  service: board_service::Service,
+  schedule: scheduler::Schedule,
+  cancel_refresh: fn(),
+  on_open_issue: fn(Str),
+  notify_error: fn(Str, Str),
+  palette: tinear_theme::Theme,
+}
+
+private fn column_key(column: issues::BoardColumn) Str {
+  "{column.state_type}:{column.name}"
+}
+
+private fn status_style(display: style::Display) style::Style {
+  style::new(
+    display: display,
+    width: style::percent(100.0),
+    height: style::cells(1),
+    flex_shrink: 0.0,
+  )
+}
+
+private fn board_style(display: style::Display) style::Style {
+  style::new(
+    display: display,
+    width: style::percent(100.0),
+    height: style::cells(1),
+    flex_grow: 1.0,
+  )
+}
+
+private fn columns_row_style(count: Int) style::Style {
+  let gaps = match count > 0 {
+    true => count - 1,
+    false => 0,
+  }
+  style::new(
+    width: style::cells(count * 32 + gaps),
+    height: style::percent(100.0),
+    flex_direction: style::FlexDirection::row,
+    align_items: style::Align::stretch,
+    gap: style::cells(1),
+  )
+}
+
+private fn card_content(issue: issues::Issue) Str {
+  let metadata = match issue.project_name == "—" and issue.assignee_name == "—" {
+    true => "{issue.team_key} · {issue.cycle_label}",
+    false => "{issue.project_name} · {issue.cycle_label} · {issue.assignee_name}",
+  }
+  "{issue_state::priority_glyph(issue.priority)} {issue.identifier} {issue.title}\n{metadata}"
+}
+
+fn new(
+  ctx: mut context::Context,
+  palette: tinear_theme::Theme,
+  service: board_service::Service,
+  schedule: scheduler::Schedule,
+  on_open_issue: fn(Str),
+  notify_error: fn(Str, Str),
+) mut BoardController {
+  let root = box::new(
+    ctx,
+    styles: style::new(
+      width: style::percent(100.0),
+      height: style::percent(100.0),
+      overflow: style::Overflow::hidden,
+    ),
+  )
+  let status = text::new(
+    ctx,
+    content: "Loading My Issues…",
+    selectable: false,
+    styles: status_style(style::Display::flex),
+    text_style: text::style(dim: true),
+  )
+  let outer_scroll = scroll_box::new(ctx, styles: board_style(style::Display::none))
+  let columns_row = box::new(ctx, styles: columns_row_style(0))
+  outer_scroll.add(columns_row)
+  root.add(status)
+  root.add(outer_scroll)
+  (mut BoardController{
+    root: root,
+    context: ctx,
+    status: status,
+    outer_scroll: outer_scroll,
+    columns_row: columns_row,
+    columns: [],
+    column_records: [],
+    column_index: 0,
+    card_index: 0,
+    generation: 0,
+    scope: lifecycle::new(),
+    service: service,
+    schedule: schedule,
+    cancel_refresh: fn() {},
+    on_open_issue: on_open_issue,
+    notify_error: notify_error,
+    palette: palette,
+  })
+}
+
+impl BoardController {
+  fn selected_issue_id() Str {
+    match self.columns.at(self.column_index) {
+      column => {
+        match column.issues.at(self.card_index) {
+          issue => issue.id,
+          _ => "",
+        }
+      },
+      _ => "",
+    }
+  }
+
+  private fn selected_issue() issues::Issue? {
+    match self.columns.at(self.column_index) {
+      column => column.issues.at(self.card_index),
+      _ => Maybe::new<issues::Issue>(),
+    }
+  }
+
+  private fn mut create_card(issue: issues::Issue) CardRecord {
+    let root = box::new(
+      self.context,
+      styles: style::new(
+        width: style::percent(100.0),
+        height: style::cells(3),
+        flex_shrink: 0.0,
+        overflow: style::Overflow::hidden,
+      ),
+    )
+    let label = text::new(
+      self.context,
+      content: card_content(issue),
+      selectable: false,
+      wrap: text::TextWrap::word,
+      overflow: text::TextOverflow::ellipsis,
+      styles: style::new(width: style::percent(100.0), height: style::cells(3)),
+    )
+    root.add(label)
+    let issue_id = issue.id
+    let remove_mouse = root.on_mouse(fn(received: mut event::MouseEvent) {
+      if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
+        self.select_issue(issue_id)
+        self.open_selected()
+        received.stop_propagation()
+      }
+    })
+    CardRecord{
+      issue_id: issue.id,
+      root: root,
+      label: label,
+      remove_mouse: remove_mouse,
+    }
+  }
+
+  private fn mut reconcile_cards(
+    scroll: mut scroll_box::ScrollBox,
+    previous: [CardRecord],
+    values: [issues::Issue],
+  ) [CardRecord] {
+    for card in previous {
+      let _ = scroll.remove(card.root)
+    }
+    let next = mut List::new<CardRecord>()
+    for issue in values {
+      mut found: CardRecord? = Maybe::new()
+      for card in previous {
+        if card.issue_id == issue.id {
+          found = Maybe::new(card)
+        }
+      }
+      let card = match found {
+        existing => existing,
+        _ => self.create_card(issue),
+      }
+      card.label.set_content(card_content(issue))
+      next.push(card)
+      scroll.add(card.root)
+    }
+    for old in previous {
+      mut retained = false
+      for card in next {
+        if card.issue_id == old.issue_id {
+          retained = true
+        }
+      }
+      if not retained {
+        old.remove_mouse()
+        old.root.destroy(recursive: true)
+      }
+    }
+    next.@
+  }
+
+  private fn mut create_column(column: issues::BoardColumn) ColumnRecord {
+    let root = box::new(
+      self.context,
+      styles: style::new(
+        width: style::cells(32),
+        height: style::percent(100.0),
+        flex_shrink: 0.0,
+        overflow: style::Overflow::hidden,
+      ),
+    )
+    let header = text::new(
+      self.context,
+      content: "",
+      selectable: false,
+      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+      text_style: text::style(bold: true),
+    )
+    let scroll = scroll_box::new(
+      self.context,
+      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_grow: 1.0),
+    )
+    root.add(header)
+    root.add(scroll)
+    ColumnRecord{
+      key: column_key(column),
+      root: root,
+      header: header,
+      scroll: scroll,
+      cards: [],
+    }
+  }
+
+  private fn mut reconcile_columns() {
+    let previous = self.column_records
+    for column in previous {
+      let _ = self.columns_row.remove(column.root)
+    }
+    let next = mut List::new<ColumnRecord>()
+    for column in self.columns {
+      let key = column_key(column)
+      mut found: ColumnRecord? = Maybe::new()
+      for existing in previous {
+        if existing.key == key {
+          found = Maybe::new(existing)
+        }
+      }
+      let base = match found {
+        existing => existing,
+        _ => self.create_column(column),
+      }
+      base.header.set_content("{column.name}  {column.issues.size()}")
+      let cards = self.reconcile_cards(base.scroll, base.cards, column.issues)
+      let updated = ColumnRecord{
+        key: key,
+        root: base.root,
+        header: base.header,
+        scroll: base.scroll,
+        cards: cards,
+      }
+      next.push(updated)
+      self.columns_row.add(updated.root)
+    }
+    for old in previous {
+      mut retained = false
+      for column in next {
+        if column.key == old.key {
+          retained = true
+        }
+      }
+      if not retained {
+        for card in old.cards {
+          card.remove_mouse()
+        }
+        old.root.destroy(recursive: true)
+      }
+    }
+    self.column_records = next.@
+    self.columns_row.set_style(columns_row_style(self.column_records.size()))
+    self.refresh_card_styles()
+  }
+
+  private fn mut refresh_card_styles() {
+    let selected = self.selected_issue_id()
+    for column in self.column_records {
+      for card in column.cards {
+        let active = card.issue_id == selected
+        card.label.set_text_style(text::style(bold: active, reverse: active))
+      }
+    }
+  }
+
+  private fn mut show_status(message: Str, error: Bool) {
+    self.status.set_content(message)
+    self.status.set_text_style(
+      match error {
+        true => text::style(foreground: self.palette.danger, bold: true),
+        false => text::style(dim: true),
+      },
+    )
+    self.status.set_style(
+      status_style(
+        match message.is_empty() {
+          true => style::Display::none,
+          false => style::Display::flex,
+        },
+      ),
+    )
+    self.outer_scroll.set_style(
+      board_style(
+        match message.is_empty() {
+          true => style::Display::flex,
+          false => style::Display::none,
+        },
+      ),
+    )
+  }
+
+  private fn mut reveal_selection() {
+    match self.column_records.at(self.column_index) {
+      column => {
+        let _ = self.outer_scroll.scroll_to_x(self.column_index * 33)
+        match column.cards.at(self.card_index) {
+          card => {
+            let _ = column.scroll.scroll_to(self.card_index * 3)
+          },
+          _ => (),
+        }
+      },
+      _ => (),
+    }
+  }
+
+  private fn mut replace_columns(columns: [issues::BoardColumn], preserve_selection: Bool) {
+    let previous_id = match preserve_selection {
+      true => self.selected_issue_id(),
+      false => "",
+    }
+    self.columns = columns
+    self.column_index = 0
+    self.card_index = 0
+    if not previous_id.is_empty() {
+      for column, column_index in self.columns {
+        for issue, card_index in column.issues {
+          if issue.id == previous_id {
+            self.column_index = column_index
+            self.card_index = card_index
+          }
+        }
+      }
+    }
+    self.reconcile_columns()
+    match self.columns.size() {
+      0 => self.show_status("No assigned issues", false),
+      _ => {
+        self.show_status("", false)
+        self.reveal_selection()
+      },
+    }
+  }
+
+  private fn mut schedule_refresh() {
+    self.cancel_refresh()
+    self.cancel_refresh = self.schedule(5 * 60 * 1000, fn() {
+      if not self.scope.disposed {
+        self.refresh(true)
+        self.schedule_refresh()
+      }
+    })
+  }
+
+  fn mut start() {
+    if (not self.scope.disposed) and self.generation == 0 {
+      self.refresh(false)
+      self.schedule_refresh()
+    }
+  }
+
+  fn mut refresh(silent: Bool) {
+    if not self.scope.disposed {
+      self.generation =+ 1
+      let generation = self.generation
+      if not silent {
+        self.show_status("Loading My Issues…", false)
+      }
+      self.service.load(self.scope.stop.receiver(), fn(result: [issues::BoardColumn]!Str) {
+        if (not self.scope.disposed) and generation == self.generation {
+          match result {
+            ok(columns) => self.replace_columns(columns, silent),
+            err(message) => {
+              if self.columns.size() == 0 {
+                self.show_status(message, true)
+              } else {
+                self.show_status("", false)
+                self.notify_error("Couldn't refresh My Issues", message)
+              }
+            },
+          }
+        }
+      })
+    }
+  }
+
+  fn mut select_issue(issue_id: Str) {
+    for column, column_index in self.columns {
+      for issue, card_index in column.issues {
+        if issue.id == issue_id {
+          self.column_index = column_index
+          self.card_index = card_index
+        }
+      }
+    }
+    self.refresh_card_styles()
+    self.reveal_selection()
+  }
+
+  private fn mut move_horizontal(delta: Int) {
+    if self.columns.size() > 0 {
+      mut next = self.column_index + delta
+      mut searching = true
+      while searching {
+        if next < 0 or next >= self.columns.size() {
+          searching = false
+        } else if self.columns.at(next).expect("column").issues.size() > 0 {
+          searching = false
+        } else {
+          next = next + delta
+        }
+      }
+      if next >= 0 and next < self.columns.size() and next != self.column_index {
+        self.column_index = next
+        let count = self.columns.at(next).expect("column").issues.size()
+        if self.card_index >= count {
+          self.card_index = count - 1
+        }
+        self.refresh_card_styles()
+        self.reveal_selection()
+      }
+    }
+  }
+
+  private fn mut move_vertical(delta: Int) {
+    match self.columns.at(self.column_index) {
+      column => {
+        if column.issues.size() > 0 {
+          mut next = self.card_index + delta
+          if next < 0 {
+            next = 0
+          }
+          if next >= column.issues.size() {
+            next = column.issues.size() - 1
+          }
+          if next != self.card_index {
+            self.card_index = next
+            self.refresh_card_styles()
+            self.reveal_selection()
+          }
+        }
+      },
+      _ => (),
+    }
+  }
+
+  private fn mut open_selected() {
+    match self.selected_issue() {
+      issue => self.on_open_issue(issue.identifier),
+      _ => (),
+    }
+  }
+
+  fn mut focus() {
+    let _ = self.outer_scroll.focus()
+  }
+
+  fn mut handle_key(received: mut event::KeyEvent) Bool {
+    if self.scope.disposed or received.event_type == event::KeyEventType::release {
+      false
+    } else {
+      mut handled = true
+      match {
+        received.matches("j") or received.matches("down") => self.move_vertical(1),
+        received.matches("k") or received.matches("up") => self.move_vertical(-1),
+        received.matches("l") or received.matches("right") => self.move_horizontal(1),
+        received.matches("h") or received.matches("left") => self.move_horizontal(-1),
+        received.matches("return") => self.open_selected(),
+        received.matches("r") => self.refresh(false),
+        _ => { handled = false },
+      }
+      handled
+    }
+  }
+
+  fn mut screen() shell_controller::Screen {
+    shell_controller::Screen{
+      root: self.root,
+      focus: fn() {
+        self.focus()
+      },
+      handle_key: fn(received: mut event::KeyEvent) Bool {
+        self.handle_key(received)
+      },
+      dispose: fn() {
+        self.dispose()
+      },
+    }
+  }
+
+  fn mut dispose() {
+    if not self.scope.disposed {
+      self.cancel_refresh()
+      self.scope.dispose()
+      for column in self.column_records {
+        for card in column.cards {
+          card.remove_mouse()
+        }
+      }
+      self.column_records = []
+    }
+  }
+}

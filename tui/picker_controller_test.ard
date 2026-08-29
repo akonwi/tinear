@@ -1,0 +1,154 @@
+use ard/testing as assertions
+
+use cooper/event
+use cooper/testing
+use tinear/tui/picker_controller
+use tinear/tui/theme
+
+private struct Selection {
+  id: Str,
+  count: Int,
+}
+
+private fn options() [picker_controller::Option] {
+  [
+    picker_controller::Option{
+      id: "todo",
+      label: "Todo",
+      description: "Unstarted",
+    },
+    picker_controller::Option{
+      id: "doing",
+      label: "In Progress",
+      description: "Started",
+    },
+    picker_controller::Option{
+      id: "done",
+      label: "Done",
+      description: "Completed",
+    },
+  ]
+}
+
+private fn key(name: Str, text: Str) mut event::KeyEvent {
+  event::key(
+    name,
+    text,
+    event::KeyEventType::press,
+    event::Modifiers{
+      shift: false,
+      ctrl: false,
+      alt: false,
+      super: false,
+    },
+  )
+}
+
+test fn picker_filters_navigates_and_selects() Void!Str {
+  let application = testing::new(50, 16)
+  defer application.destroy()
+  let selection = mut Selection{id: "", count: 0}
+  let picker = picker_controller::new(
+    application.context,
+    theme::new(),
+    "Filter states",
+    options(),
+    "doing",
+    fn(option: picker_controller::Option) {
+      selection.id = option.id
+      selection.count =+ 1
+    },
+  )
+  application.root.add(picker.root)
+  picker.focus()
+  application.render()
+  try assertions::assert(picker.cursor == 1, "selected id should seed cursor")
+  try assertions::assert(
+    picker.results.requested_scroll_top() == 2,
+    "focus should reveal initial selection",
+  )
+  try testing::assert_contains(application.frame().text(), "In Progress")
+
+  application.key(key("down", ""))
+  application.key(key("return", ""))
+  try assertions::assert(selection.id == "done", "keyboard selection should activate highlighted option")
+  try assertions::assert(selection.count == 1, "selection callback should run once")
+
+  picker.apply_filter("progress")
+  try assertions::assert(picker.filtered.size() == 1, "filter should match label case-insensitively")
+  try assertions::assert(
+    picker.filtered.at(0).expect("match").id == "doing",
+    "matching option should remain",
+  )
+  picker.apply_filter("completed")
+  assertions::assert(
+    picker.filtered.at(0).expect("description match").id == "done",
+    "description should be searchable",
+  )
+}
+
+test fn picker_renders_empty_state_and_ignores_empty_activation() Void!Str {
+  let application = testing::new(50, 16)
+  defer application.destroy()
+  let selection = mut Selection{id: "", count: 0}
+  let picker = picker_controller::new(
+    application.context,
+    theme::new(),
+    "Filter",
+    options(),
+    "",
+    fn(option: picker_controller::Option) {
+      selection.count =+ 1
+    },
+  )
+  application.root.add(picker.root)
+  picker.apply_filter("no such state")
+  application.render()
+  try testing::assert_contains(application.frame().text(), "No matches")
+  picker.focus()
+  application.key(key("return", ""))
+  assertions::assert(selection.count == 0, "empty picker should not activate")
+}
+
+test fn picker_mouse_selects_visible_row() Void!Str {
+  let application = testing::new(50, 16)
+  defer application.destroy()
+  let selection = mut Selection{id: "", count: 0}
+  let picker = picker_controller::new(
+    application.context,
+    theme::new(),
+    "Filter",
+    options(),
+    "",
+    fn(option: picker_controller::Option) {
+      selection.id = option.id
+      selection.count =+ 1
+    },
+  )
+  application.root.add(picker.root)
+  application.render()
+  application.click(2, 4)
+  try assertions::assert(selection.id == "doing", "clicking second row should select it")
+  assertions::assert(selection.count == 1, "mouse selection should activate once")
+}
+
+test fn picker_disposal_removes_listeners() Void!Str {
+  let application = testing::new(40, 12)
+  defer application.destroy()
+  let selection = mut Selection{id: "", count: 0}
+  let picker = picker_controller::new(
+    application.context,
+    theme::new(),
+    "Filter",
+    options(),
+    "",
+    fn(option: picker_controller::Option) {
+      selection.count =+ 1
+    },
+  )
+  application.root.add(picker.root)
+  picker.dispose()
+  picker.dispose()
+  try assertions::assert(picker.disposed, "picker disposal should be idempotent")
+  assertions::assert(picker.rows.size() == 0, "disposed picker should release row records")
+}

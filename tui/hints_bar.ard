@@ -1,0 +1,48 @@
+use cooper/context
+use cooper/style
+use cooper/text
+use tinear/tui/theme as tinear_theme
+
+struct Hint {
+  key: Str,
+  label: Str,
+}
+
+struct HintsBar {
+  root: mut text::Text,
+  palette: tinear_theme::Theme,
+}
+
+fn content(hints: [Hint], palette: tinear_theme::Theme) text::StyledText {
+  let spans = mut List::new<text::Span>()
+  for hint, index in hints {
+    if index > 0 {
+      spans.push(text::span("  ", style: text::span_style()))
+    }
+    spans.push(
+      text::span(hint.key, style: text::span_style(foreground: palette.accent, bold: true)),
+    )
+    if not hint.label.is_empty() {
+      spans.push(text::span(" {hint.label}", style: text::span_style(dim: true)))
+    }
+  }
+  text::styled_text(spans.@)
+}
+
+fn new(ctx: mut context::Context, palette: tinear_theme::Theme, hints: [Hint]) mut HintsBar {
+  let root = text::new(
+    ctx,
+    content: content(hints, palette),
+    selectable: false,
+    wrap: text::TextWrap::none,
+    overflow: text::TextOverflow::ellipsis,
+    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+  )
+  (mut HintsBar{root: root, palette: palette})
+}
+
+impl HintsBar {
+  fn mut set(hints: [Hint]) {
+    self.root.set_content(content(hints, self.palette))
+  }
+}

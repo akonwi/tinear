@@ -1,0 +1,308 @@
+use cooper/box
+use cooper/context
+use cooper/event
+use cooper/input
+use cooper/scroll_box
+use cooper/style
+use cooper/text
+use go:strings
+use tinear/tui/theme as tinear_theme
+
+struct Option {
+  id: Str,
+  label: Str,
+  description: Str,
+}
+
+struct Row {
+  option_id: Str,
+  root: mut box::Box,
+  label: mut text::Text,
+  remove_mouse: fn(),
+}
+
+struct PickerController {
+  root: mut box::Box,
+  context: mut context::Context,
+  query: mut input::Input,
+  results: mut scroll_box::ScrollBox,
+  empty_text: mut text::Text,
+  options: [Option],
+  filtered: [Option],
+  rows: [Row],
+  cursor: Int,
+  on_select: fn(Option),
+  listeners: [fn()],
+  disposed: Bool,
+  palette: tinear_theme::Theme,
+}
+
+private fn matches(option: Option, query: Str) Bool {
+  let normalized = strings::ToLower(query.trim())
+  normalized.is_empty() or strings::ToLower(option.label).contains(normalized) or strings::ToLower(option.description).contains(normalized)
+}
+
+private fn empty_style(display: style::Display) style::Style {
+  style::new(
+    display: display,
+    width: style::percent(100.0),
+    height: style::cells(1),
+    flex_shrink: 0.0,
+  )
+}
+
+fn new(
+  ctx: mut context::Context,
+  palette: tinear_theme::Theme,
+  placeholder: Str,
+  options: [Option],
+  selected_id: Str,
+  on_select: fn(Option),
+) mut PickerController {
+  let root = box::new(
+    ctx,
+    styles: style::new(
+      width: style::percent(100.0),
+      height: style::cells(12),
+      flex_direction: style::FlexDirection::column,
+      gap: style::cells(1),
+      overflow: style::Overflow::hidden,
+    ),
+  )
+  let query = input::new(
+    ctx,
+    placeholder: placeholder,
+    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+  )
+  let results = scroll_box::new(
+    ctx,
+    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_grow: 1.0),
+  )
+  let empty_text = text::new(
+    ctx,
+    content: "No matches",
+    selectable: false,
+    styles: empty_style(style::Display::none),
+    text_style: text::style(dim: true),
+  )
+  results.add(empty_text)
+  root.add(query)
+  root.add(results)
+  let picker = mut PickerController{
+    root: root,
+    context: ctx,
+    query: query,
+    results: results,
+    empty_text: empty_text,
+    options: options,
+    filtered: [],
+    rows: [],
+    cursor: 0,
+    on_select: on_select,
+    listeners: [],
+    disposed: false,
+    palette: palette,
+  }
+  picker.apply_filter("")
+  if not selected_id.is_empty() {
+    picker.select_id(selected_id)
+  }
+  picker.listeners.push(
+    query.on_input(fn(value: Str) {
+      picker.apply_filter(value)
+    }),
+  )
+  picker.listeners.push(
+    query.on_key(fn(received: mut event::KeyEvent) {
+      if received.event_type != event::KeyEventType::release {
+        mut handled = true
+        match {
+          received.matches("down") => picker.move_cursor(1),
+          received.matches("up") => picker.move_cursor(-1),
+          received.matches("return") => picker.activate(),
+          _ => { handled = false },
+        }
+        if handled {
+          received.prevent_default()
+          received.stop_propagation()
+        }
+      }
+    }),
+  )
+  picker
+}
+
+impl PickerController {
+  private fn mut create_row(option: Option) Row {
+    let root = box::new(
+      self.context,
+      styles: style::new(
+        width: style::percent(100.0),
+        height: style::cells(2),
+        flex_shrink: 0.0,
+        overflow: style::Overflow::hidden,
+      ),
+    )
+    let content = match option.description.is_empty() {
+      true => option.label,
+      false => "{option.label}\n{option.description}",
+    }
+    let label = text::new(
+      self.context,
+      content: content,
+      selectable: false,
+      wrap: text::TextWrap::none,
+      overflow: text::TextOverflow::ellipsis,
+      styles: style::new(width: style::percent(100.0), height: style::cells(2)),
+    )
+    root.add(label)
+    let option_id = option.id
+    let remove_mouse = root.on_mouse(fn(received: mut event::MouseEvent) {
+      if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
+        self.select_id(option_id)
+        self.activate()
+        received.stop_propagation()
+      }
+    })
+    Row{
+      option_id: option.id,
+      root: root,
+      label: label,
+      remove_mouse: remove_mouse,
+    }
+  }
+
+  private fn mut reconcile_rows() {
+    let previous = self.rows
+    for row in previous {
+      let _ = self.results.remove(row.root)
+    }
+    let next = mut List::new<Row>()
+    for option in self.filtered {
+      mut found: Row? = Maybe::new()
+      for row in previous {
+        if row.option_id == option.id {
+          found = Maybe::new(row)
+        }
+      }
+      let row = match found {
+        existing => existing,
+        _ => self.create_row(option),
+      }
+      row.label.set_content(
+        match option.description.is_empty() {
+          true => option.label,
+          false => "{option.label}\n{option.description}",
+        },
+      )
+      next.push(row)
+      self.results.add(row.root)
+    }
+    for old in previous {
+      mut retained = false
+      for row in next {
+        if row.option_id == old.option_id {
+          retained = true
+        }
+      }
+      if not retained {
+        old.remove_mouse()
+        old.root.destroy(recursive: true)
+      }
+    }
+    self.rows = next.@
+    self.empty_text.set_style(
+      empty_style(
+        match self.filtered.size() == 0 {
+          true => style::Display::flex,
+          false => style::Display::none,
+        },
+      ),
+    )
+    self.refresh_row_styles()
+  }
+
+  private fn mut refresh_row_styles() {
+    for row, index in self.rows {
+      let active = index == self.cursor
+      row.label.set_text_style(text::style(bold: active, reverse: active))
+    }
+  }
+
+  fn mut apply_filter(value: Str) {
+    if not self.disposed {
+      let filtered = mut List::new<Option>()
+      for option in self.options {
+        if matches(option, value) {
+          filtered.push(option)
+        }
+      }
+      self.filtered = filtered.@
+      self.cursor = 0
+      self.reconcile_rows()
+      let _ = self.results.scroll_to(0)
+    }
+  }
+
+  fn mut select_id(option_id: Str) {
+    for option, index in self.filtered {
+      if option.id == option_id {
+        self.cursor = index
+      }
+    }
+    self.refresh_row_styles()
+    match self.rows.at(self.cursor) {
+      row => {
+        let _ = self.results.scroll_to(self.cursor * 2)
+      },
+      _ => (),
+    }
+  }
+
+  private fn mut move_cursor(delta: Int) {
+    if self.filtered.size() > 0 {
+      mut next = self.cursor + delta
+      if next < 0 {
+        next = 0
+      }
+      if next >= self.filtered.size() {
+        next = self.filtered.size() - 1
+      }
+      self.cursor = next
+      self.refresh_row_styles()
+      match self.rows.at(self.cursor) {
+        row => {
+          let _ = self.results.scroll_child_into_view(row.root)
+        },
+        _ => (),
+      }
+    }
+  }
+
+  private fn mut activate() {
+    match self.filtered.at(self.cursor) {
+      option => self.on_select(option),
+      _ => (),
+    }
+  }
+
+  fn mut focus() {
+    let _ = self.query.focus()
+    let _ = self.results.scroll_to(self.cursor * 2)
+  }
+
+  fn mut dispose() {
+    if not self.disposed {
+      self.disposed = true
+      let listeners = self.listeners
+      self.listeners = []
+      for remove in listeners {
+        remove()
+      }
+      for row in self.rows {
+        row.remove_mouse()
+      }
+      self.rows = []
+    }
+  }
+}

@@ -1,0 +1,281 @@
+use ard/testing as assertions
+
+use cooper/event
+use cooper/style
+use cooper/testing
+use tinear/models/issues
+use tinear/services/board_service
+use tinear/tui/board_controller
+use tinear/tui/theme
+
+private struct FakeState {
+  loads: [fn([issues::BoardColumn]!Str)],
+}
+
+private struct ScheduledState {
+  actions: [fn()],
+  cancellations: Int,
+}
+
+private struct Opened {
+  identifier: Str,
+  count: Int,
+}
+
+private fn fake_service(state: mut FakeState) board_service::Service {
+  board_service::Service{
+    load: fn(cancellation: Receiver<Bool>, completion: fn([issues::BoardColumn]!Str)) {
+      state.loads.push(completion)
+      ()
+    },
+  }
+}
+
+private fn fake_schedule(state: mut ScheduledState) fn(Int, fn()) fn() {
+  fn(milliseconds: Int, action: fn()) fn() {
+    state.actions.push(action)
+    fn() {
+      state.cancellations =+ 1
+    }
+  }
+}
+
+private fn issue(id: Str, identifier: Str, title: Str, state_name: Str) issues::Issue {
+  issues::Issue{
+    id: id,
+    identifier: identifier,
+    title: title,
+    description: Maybe::new<Str>(),
+    priority: 2,
+    state_id: "state-{state_name}",
+    state_name: state_name,
+    state_type: "started",
+    state_position: 1.0,
+    team_id: "team-1",
+    team_name: "Core",
+    team_key: "COR",
+    project_id: "project-1",
+    project_name: "Tinear",
+    assignee_id: "user-1",
+    assignee_name: "Alex",
+    cycle_id: "cycle-1",
+    cycle_label: "Cycle 1",
+    url: "https://linear.app/{identifier}",
+  }
+}
+
+private fn column(name: Str, position: Float64, cards: [issues::Issue]) issues::BoardColumn {
+  issues::BoardColumn{
+    name: name,
+    state_type: "started",
+    position: position,
+    issues: cards,
+  }
+}
+
+private fn key(name: Str) mut event::KeyEvent {
+  event::key(
+    name,
+    "",
+    event::KeyEventType::press,
+    event::Modifiers{
+      shift: false,
+      ctrl: false,
+      alt: false,
+      super: false,
+    },
+  )
+}
+
+test fn board_builds_nested_retained_columns_and_navigates_cards() Void!Str {
+  let application = testing::new(100, 18)
+  defer application.destroy()
+  let fake = mut FakeState{loads: []}
+  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
+  let opened = mut Opened{identifier: "", count: 0}
+  let controller = board_controller::new(
+    application.context,
+    theme::new(),
+    fake_service(fake),
+    fake_schedule(scheduled),
+    fn(identifier: Str) {
+      opened.identifier = identifier
+      opened.count =+ 1
+    },
+    fn(title: Str, message: Str) {},
+  )
+  application.root.add(controller.root)
+  controller.start()
+  try assertions::assert(fake.loads.size() == 1, "start should load board")
+  (fake.loads.at(0).expect("load"))(
+    Result::ok(
+      [
+        column("Todo", 1.0, [issue("i1", "AKO-1", "First", "Todo"), issue("i2", "AKO-2", "Second", "Todo")]),
+        column("Doing", 2.0, [issue("i3", "AKO-3", "Third", "Doing")]),
+      ],
+    ),
+  )
+  application.render()
+  try assertions::assert(controller.column_records.size() == 2, "columns should be retained")
+  try assertions::assert(
+    controller.column_records.at(0).expect("Todo").cards.size() == 2,
+    "cards should be retained per column",
+  )
+  try testing::assert_contains(application.frame().text(), "AKO-1")
+  application.click(2, 1)
+  try assertions::assert(opened.identifier == "AKO-1", "clicking a card should open it")
+
+  try assertions::assert(controller.handle_key(key("down")), "Down should move within a column")
+  try assertions::assert(controller.card_index == 1, "vertical cursor should move")
+  try assertions::assert(controller.handle_key(key("right")), "Right should move columns")
+  try assertions::assert(controller.column_index == 1, "horizontal cursor should move")
+  try assertions::assert(controller.card_index == 0, "cursor should clamp to target column")
+  try assertions::assert(controller.handle_key(key("return")), "Enter should open issue")
+  try assertions::assert(opened.identifier == "AKO-3", "selected issue should open")
+  assertions::assert(opened.count == 2, "mouse and keyboard activation should each open once")
+}
+
+test fn board_refresh_preserves_selected_issue_across_column_move() Void!Str {
+  let application = testing::new(80, 16)
+  defer application.destroy()
+  let fake = mut FakeState{loads: []}
+  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
+  let controller = board_controller::new(
+    application.context,
+    theme::new(),
+    fake_service(fake),
+    fake_schedule(scheduled),
+    fn(identifier: Str) {},
+    fn(title: Str, message: Str) {},
+  )
+  application.root.add(controller.root)
+  controller.start()
+  (fake.loads.at(0).expect("load"))(
+    Result::ok(
+      [
+        column("Todo", 1.0, [issue("i1", "AKO-1", "First", "Todo"), issue("i2", "AKO-2", "Second", "Todo")]),
+        column("Doing", 2.0, [issue("i3", "AKO-3", "Third", "Doing")]),
+      ],
+    ),
+  )
+  let _ = controller.handle_key(key("down"))
+  try assertions::assert(controller.selected_issue_id() == "i2", "second issue should be selected")
+  (scheduled.actions.at(0).expect("periodic refresh"))()
+  try assertions::assert(fake.loads.size() == 2, "periodic refresh should load")
+  (fake.loads.at(1).expect("refresh"))(
+    Result::ok(
+      [
+        column("Todo", 1.0, [issue("i1", "AKO-1", "First", "Todo")]),
+        column(
+          "Doing",
+          2.0,
+          [issue("i2", "AKO-2", "Second", "Doing"), issue("i3", "AKO-3", "Third", "Doing")],
+        ),
+      ],
+    ),
+  )
+  try assertions::assert(controller.column_index == 1, "selection should follow issue to new column")
+  try assertions::assert(controller.card_index == 0, "selection should follow issue card index")
+  assertions::assert(
+    controller.selected_issue_id() == "i2",
+    "same stable issue should remain selected",
+  )
+}
+
+test fn board_ignores_stale_load_and_handles_narrow_horizontal_navigation() Void!Str {
+  let application = testing::new(40, 12)
+  defer application.destroy()
+  let fake = mut FakeState{loads: []}
+  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
+  let controller = board_controller::new(
+    application.context,
+    theme::new(),
+    fake_service(fake),
+    fake_schedule(scheduled),
+    fn(identifier: Str) {},
+    fn(title: Str, message: Str) {},
+  )
+  application.root.add(controller.root)
+  controller.start()
+  controller.refresh(false)
+  (fake.loads.at(0).expect("stale"))(
+    Result::ok([column("Stale", 1.0, [issue("old", "OLD-1", "Old", "Stale")])]),
+  )
+  try assertions::assert(controller.columns.size() == 0, "older generation should be ignored")
+  (fake.loads.at(1).expect("current"))(
+    Result::ok(
+      [
+        column("One", 1.0, [issue("i1", "AKO-1", "First", "One")]),
+        column("Empty", 2.0, []),
+        column("Three", 3.0, [issue("i3", "AKO-3", "Third", "Three")]),
+      ],
+    ),
+  )
+  application.render()
+  try assertions::assert(controller.handle_key(key("right")), "narrow board should skip an empty column")
+  application.render()
+  try assertions::assert(controller.column_index == 2, "final column should be selected")
+  testing::assert_contains(application.frame().text(), "AKO-3")
+}
+
+test fn board_failed_manual_refresh_restores_existing_columns() Void!Str {
+  let application = testing::new(60, 12)
+  defer application.destroy()
+  let fake = mut FakeState{loads: []}
+  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
+  let errors = mut Opened{identifier: "", count: 0}
+  let controller = board_controller::new(
+    application.context,
+    theme::new(),
+    fake_service(fake),
+    fake_schedule(scheduled),
+    fn(identifier: Str) {},
+    fn(title: Str, message: Str) {
+      errors.identifier = title
+      errors.count =+ 1
+    },
+  )
+  application.root.add(controller.root)
+  controller.start()
+  (fake.loads.at(0).expect("load"))(
+    Result::ok([column("Todo", 1.0, [issue("i1", "AKO-1", "First", "Todo")])]),
+  )
+  controller.refresh(false)
+  try assertions::assert(
+    controller.outer_scroll.style().display == style::Display::none,
+    "loading state should hide board",
+  )
+  (fake.loads.at(1).expect("refresh"))(Result::err("network unavailable"))
+  try assertions::assert(
+    controller.outer_scroll.style().display == style::Display::flex,
+    "failed refresh should restore board",
+  )
+  try assertions::assert(errors.count == 1, "failed refresh should notify")
+  assertions::assert(
+    errors.identifier == "Couldn't refresh My Issues",
+    "refresh error should be contextual",
+  )
+}
+
+test fn board_disposal_cancels_refresh_and_late_completion() Void!Str {
+  let application = testing::new(60, 12)
+  defer application.destroy()
+  let fake = mut FakeState{loads: []}
+  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
+  let controller = board_controller::new(
+    application.context,
+    theme::new(),
+    fake_service(fake),
+    fake_schedule(scheduled),
+    fn(identifier: Str) {},
+    fn(title: Str, message: Str) {},
+  )
+  application.root.add(controller.root)
+  controller.start()
+  controller.dispose()
+  (fake.loads.at(0).expect("load"))(
+    Result::ok([column("Todo", 1.0, [issue("i1", "AKO-1", "First", "Todo")])]),
+  )
+  try assertions::assert(controller.columns.size() == 0, "disposed board should ignore late load")
+  assertions::assert(scheduled.cancellations == 1, "dispose should cancel periodic refresh")
+}

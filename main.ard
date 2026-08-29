@@ -5,14 +5,33 @@ use cooper/event
 use cooper/style
 use cooper/text
 use tinear/config
+use tinear/models/cache
+use tinear/models/shell as shell_model
+use tinear/models/tabs
+use tinear/platform/url
 use tinear/services/auth
+use tinear/services/board_service
+use tinear/services/cache_writer
+use tinear/services/inbox_service
 use tinear/tui/application_shell
+use tinear/tui/board_controller
+use tinear/tui/inbox_controller
 use tinear/tui/scheduler
+use tinear/tui/shell_controller
 use tinear/tui/theme
+use tinear/tui/toast_host
 use tinear/tui/welcome_controller
 
-private fn logged_in_placeholder(ctx: mut context::Context) mut box::Box {
-  let screen = box::new(
+private struct ActiveRoute {
+  handle: fn(mut event::KeyEvent) Bool,
+}
+
+private struct ShellActions {
+  open_issue: fn(Str),
+}
+
+private fn placeholder_screen(ctx: mut context::Context, title: Str, message: Str) shell_controller::Screen {
+  let root = box::new(
     ctx,
     styles: style::new(
       width: style::percent(100.0),
@@ -22,9 +41,120 @@ private fn logged_in_placeholder(ctx: mut context::Context) mut box::Box {
       gap: style::cells(1),
     ),
   )
-  screen.add(text::new(ctx, content: "tinear", text_style: text::style(bold: true)))
-  screen.add(text::new(ctx, content: "Authenticated shell coming next"))
-  screen
+  root.set_focusable(true)
+  root.add(text::new(ctx, content: title, text_style: text::style(bold: true)))
+  root.add(text::new(ctx, content: message, text_style: text::style(dim: true)))
+  shell_controller::Screen{
+    root: root,
+    focus: fn() {
+      let _ = root.focus()
+    },
+    handle_key: fn(received: mut event::KeyEvent) Bool {
+      false
+    },
+    dispose: fn() {},
+  }
+}
+
+private fn dynamic_placeholder(ctx: mut context::Context, reference: tabs::TabRef) shell_controller::Screen {
+  let kind = match reference.kind {
+    tabs::Kind::issue => "Issue",
+    tabs::Kind::doc => "Document",
+  }
+  placeholder_screen(ctx, "{kind} · {reference.title}", "Retained detail controller coming next")
+}
+
+private fn show_logged_in(
+  ctx: mut context::Context,
+  palette: theme::Theme,
+  api_key: Str,
+  application_shell: mut application_shell::ApplicationShell,
+  active_route: mut ActiveRoute,
+) {
+  let writer = cache_writer::live(ctx)
+  let model = shell_model::restore(cache::load_logged_in())
+  let actions = mut ShellActions{open_issue: fn(identifier: Str) {}}
+  let inbox = inbox_controller::new(
+    ctx,
+    palette,
+    inbox_service::live(ctx, api_key),
+    scheduler::for_context(ctx),
+    fn(identifier: Str) {
+      actions.open_issue(identifier)
+    },
+    fn(target: Str) {
+      match url::open(ctx, target) {
+        ok(_) => (),
+        err(error) => {
+          let _ = application_shell.toasts.show(
+            "Couldn't open URL",
+            error.error(),
+            toast_host::Variant::error,
+            4000,
+          )
+        },
+      }
+    },
+    fn(title: Str, message: Str) {
+      let _ = application_shell.toasts.show(title, message, toast_host::Variant::error, 4000)
+    },
+  )
+  let board = board_controller::new(
+    ctx,
+    palette,
+    board_service::live(ctx, api_key),
+    scheduler::for_context(ctx),
+    fn(identifier: Str) {
+      actions.open_issue(identifier)
+    },
+    fn(title: Str, message: Str) {
+      let _ = application_shell.toasts.show(title, message, toast_host::Variant::error, 4000)
+    },
+  )
+  let controller = shell_controller::new(
+    ctx,
+    palette,
+    model,
+    inbox.screen(),
+    board.screen(),
+    fn(reference: tabs::TabRef) shell_controller::Screen {
+      dynamic_placeholder(ctx, reference)
+    },
+    fn(snapshot: cache::LoggedInCache) {
+      writer.persist(snapshot)
+    },
+    fn() {
+      writer.dispose()
+    },
+    fn() {
+      let _ = application_shell.toasts.show(
+        "Search",
+        "Global search is the next shell milestone",
+        toast_host::Variant::info,
+        2500,
+      )
+    },
+    fn() {
+      let _ = application_shell.toasts.show(
+        "Create issue",
+        "Issue creation will follow the Inbox and board ports",
+        toast_host::Variant::info,
+        2500,
+      )
+    },
+  )
+  application_shell.set_screen(controller.root, fn() {
+    controller.dispose()
+  })
+  actions.open_issue = fn(identifier: Str) {
+    controller.open(tabs::issue_tab(identifier))
+  }
+  active_route.handle = fn(received: mut event::KeyEvent) Bool {
+    controller.handle_key(received)
+  }
+  inbox.start()
+  board.start()
+  controller.focus_active()
 }
 
 fn main() {
@@ -32,35 +162,40 @@ fn main() {
   defer application.destroy()
   let ctx = application.context
   let palette = theme::new()
-  let shell = application_shell::new(ctx, palette, scheduler::for_context(ctx))
-  application.root.add(shell.root)
+  let application_shell = application_shell::new(ctx, palette, scheduler::for_context(ctx))
+  let active_route = mut ActiveRoute{handle: fn(received: mut event::KeyEvent) Bool {
+    false
+  }}
+  application.root.add(application_shell.root)
 
   let configured = match config::load() {
     ok(value) => value,
     err(_) => config::Config{api_key: ""},
   }
   match configured.has_auth() {
-    true => shell.set_screen(logged_in_placeholder(ctx), fn() {}),
+    true => show_logged_in(ctx, palette, configured.api_key, application_shell, active_route),
     false => {
       let welcome = welcome_controller::new(ctx, palette, auth::live(ctx), fn(api_key: Str) {
-        shell.set_screen(logged_in_placeholder(ctx), fn() {})
+        show_logged_in(ctx, palette, api_key, application_shell, active_route)
       })
-      shell.set_screen(welcome.root, fn() {
+      application_shell.set_screen(welcome.root, fn() {
         welcome.dispose()
       })
-
-      welcome.focus()
+      let _ = welcome.focus()
     },
   }
 
   let _ = application.on_key(fn(received: mut event::KeyEvent) {
     if received.event_type != event::KeyEventType::release and received.matches("c", ctrl: true) {
-      shell.dispose()
+      application_shell.dispose()
       application.destroy()
       received.prevent_default()
       received.stop_propagation()
     } else {
-      let _ = shell.handle_key(received, application.selection())
+      let handled = application_shell.handle_key(received, application.selection())
+      if (not handled) and not application_shell.modal.is_open() {
+        let _ = active_route.handle(received)
+      }
     }
   })
 

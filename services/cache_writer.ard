@@ -1,0 +1,69 @@
+use ard/async
+
+use cooper/context
+use tinear/models/cache
+
+type Save = fn(cache::LoggedInCache) Void!Str
+
+struct Writer {
+  updates: Chan<cache::LoggedInCache>,
+  done: Chan<Bool>,
+  disposed: Bool,
+}
+
+fn new(ctx: mut context::Context, save: Save) mut Writer {
+  let writer = mut Writer{
+    updates: Chan::new<cache::LoggedInCache>(1),
+    done: Chan::new<Bool>(1),
+    disposed: false,
+  }
+  let receiver = writer.updates.receiver()
+  let done = writer.done.sender()
+  async::start(fn() {
+    mut running = true
+    while running {
+      match receiver.recv() {
+        snapshot => {
+          let _ = save(snapshot)
+        },
+        _ => { running = false },
+      }
+    }
+    done.send(true)
+  })
+  writer
+}
+
+impl Writer {
+  // Keep at most one pending snapshot. If the worker is busy, replace the
+  // queued state so an older cache write can never overtake the newest model.
+  fn mut persist(snapshot: cache::LoggedInCache) {
+    if not self.disposed {
+      select {
+        self.updates.sender().send(snapshot) => (),
+        _ => {
+          select {
+            self.updates.receiver().recv() => (),
+            _ => (),
+          }
+          select {
+            self.updates.sender().send(snapshot) => (),
+            _ => (),
+          }
+        },
+      }
+    }
+  }
+
+  fn mut dispose() {
+    if not self.disposed {
+      self.disposed = true
+      self.updates.close()
+      let _ = self.done.receiver().recv()
+    }
+  }
+}
+
+fn live(ctx: mut context::Context) mut Writer {
+  new(ctx, cache::save_logged_in)
+}

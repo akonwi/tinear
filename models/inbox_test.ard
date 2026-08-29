@@ -18,6 +18,18 @@ test fn decode_issue_notification_uses_issue_destination() Void!Str {
   )
 }
 
+test fn required_notification_fields_fail_without_panicking() Void!Str {
+  let missing_type = try decode::from_json("{{\"id\":\"notification-1\"}}")
+  try testing::assert(
+    inbox::try_decode_item(missing_type).is_err(),
+    "missing type should fail item decode",
+  )
+  testing::assert(
+    inbox::try_decode_detail(missing_type).is_err(),
+    "missing type should fail detail decode",
+  )
+}
+
 test fn archive_result_requires_explicit_success() Void!Str {
   let accepted = try decode::from_json("{{\"notificationArchive\":{{\"success\":true}}}}")
   try inbox::decode_archive_result(accepted)

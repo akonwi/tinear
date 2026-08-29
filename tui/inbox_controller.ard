@@ -1,0 +1,538 @@
+use cooper/box
+use cooper/context
+use cooper/event
+use cooper/scroll_box
+use cooper/style
+use cooper/text
+use tinear/models/inbox
+use tinear/services/inbox_service
+use tinear/tui/lifecycle
+use tinear/tui/scheduler
+use tinear/tui/shell_controller
+use tinear/tui/theme as tinear_theme
+
+struct Row {
+  notification_id: Str,
+  root: mut box::Box,
+  label: mut text::Text,
+  remove_mouse: fn(),
+}
+
+struct InboxController {
+  root: mut box::Box,
+  context: mut context::Context,
+  list_scroll: mut scroll_box::ScrollBox,
+  detail_scroll: mut scroll_box::ScrollBox,
+  list_status: mut text::Text,
+  detail_text: mut text::Text,
+  rows: [Row],
+  items: [inbox::Item],
+  cursor: Int,
+  loading: Bool,
+  list_generation: Int,
+  detail_generation: Int,
+  detail_notification_id: Str,
+  scope: mut lifecycle::Scope,
+  service: inbox_service::Service,
+  schedule: scheduler::Schedule,
+  cancel_refresh: fn(),
+  on_open_issue: fn(Str),
+  open_url: fn(Str),
+  notify_error: fn(Str, Str),
+  palette: tinear_theme::Theme,
+}
+
+private fn status_style(display: style::Display) style::Style {
+  style::new(
+    display: display,
+    width: style::percent(100.0),
+    height: style::cells(1),
+    flex_shrink: 0.0,
+  )
+}
+
+private fn row_label(item: inbox::Item) Str {
+  "{item.actor_name} {item.type_label} · {item.target_id} · {item.title}"
+}
+
+private fn detail_content(item: inbox::Item, detail: inbox::Detail) Str {
+  mut output = "{detail.identifier}  {detail.title}\n"
+  if not detail.state_name.is_empty() {
+    output = "{output}\nState: {detail.state_name}"
+  }
+  if (not detail.assignee_name.is_empty()) and not detail.assignee_name == "—" {
+    output = "{output}\nAssignee: {detail.assignee_name}"
+  }
+  if not detail.team_name.is_empty() {
+    output = "{output}\nTeam: {detail.team_name}"
+  }
+  if not detail.project_name.is_empty() {
+    output = "{output}\nProject: {detail.project_name}"
+  }
+  if not detail.description.is_empty() {
+    output = "{output}\n\n{detail.description}"
+  }
+  match detail.triggering_comment {
+    comment => { output = "{output}\n\nComment · {comment.author}\n{comment.body}" },
+    _ => (),
+  }
+  for comment in detail.comments {
+    output = "{output}\n\n{comment.author}\n{comment.body}"
+  }
+  for history in detail.history {
+    output = "{output}\n\n{history.from_state} → {history.to_state}"
+  }
+  if output.trim().is_empty() {
+    row_label(item)
+  } else {
+    output
+  }
+}
+
+fn new(
+  ctx: mut context::Context,
+  palette: tinear_theme::Theme,
+  service: inbox_service::Service,
+  schedule: scheduler::Schedule,
+  on_open_issue: fn(Str),
+  open_url: fn(Str),
+  notify_error: fn(Str, Str),
+) mut InboxController {
+  let root = box::new(
+    ctx,
+    styles: style::new(
+      width: style::percent(100.0),
+      height: style::percent(100.0),
+      flex_direction: style::FlexDirection::row,
+      overflow: style::Overflow::hidden,
+      gap: style::cells(1),
+    ),
+  )
+  let list_scroll = scroll_box::new(
+    ctx,
+    styles: style::new(
+      width: style::percent(40.0),
+      height: style::percent(100.0),
+      flex_shrink: 0.0,
+    ),
+  )
+  let detail_scroll = scroll_box::new(
+    ctx,
+    styles: style::new(width: style::percent(60.0), height: style::percent(100.0), flex_grow: 1.0),
+  )
+  let list_status = text::new(
+    ctx,
+    content: "Loading Inbox…",
+    selectable: false,
+    styles: status_style(style::Display::flex),
+    text_style: text::style(dim: true),
+  )
+  let detail_text = text::new(
+    ctx,
+    content: "Select a notification",
+    selectable: true,
+    styles: style::new(width: style::percent(100.0), flex_shrink: 0.0),
+    wrap: text::TextWrap::word,
+  )
+  list_scroll.add(list_status)
+  detail_scroll.add(detail_text)
+  root.add(list_scroll)
+  root.add(detail_scroll)
+
+  (mut InboxController{
+    root: root,
+    context: ctx,
+    list_scroll: list_scroll,
+    detail_scroll: detail_scroll,
+    list_status: list_status,
+    detail_text: detail_text,
+    rows: [],
+    items: [],
+    cursor: 0,
+    loading: false,
+    list_generation: 0,
+    detail_generation: 0,
+    detail_notification_id: "",
+    scope: lifecycle::new(),
+    service: service,
+    schedule: schedule,
+    cancel_refresh: fn() {},
+    on_open_issue: on_open_issue,
+    open_url: open_url,
+    notify_error: notify_error,
+    palette: palette,
+  })
+}
+
+impl InboxController {
+  private fn selected_id() Str {
+    match self.items.at(self.cursor) {
+      item => item.notification_id,
+      _ => "",
+    }
+  }
+
+  private fn mut create_row(item: inbox::Item) Row {
+    let root = box::new(
+      self.context,
+      styles: style::new(
+        width: style::percent(100.0),
+        height: style::cells(1),
+        flex_shrink: 0.0,
+        overflow: style::Overflow::hidden,
+      ),
+    )
+    let label = text::new(
+      self.context,
+      content: row_label(item),
+      selectable: false,
+      wrap: text::TextWrap::none,
+      overflow: text::TextOverflow::ellipsis,
+      styles: style::new(width: style::percent(100.0), height: style::cells(1)),
+    )
+    root.add(label)
+    let notification_id = item.notification_id
+    let remove_mouse = root.on_mouse(fn(received: mut event::MouseEvent) {
+      if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
+        self.select_id(notification_id)
+        received.stop_propagation()
+      }
+    })
+    Row{
+      notification_id: item.notification_id,
+      root: root,
+      label: label,
+      remove_mouse: remove_mouse,
+    }
+  }
+
+  private fn mut reconcile_rows() {
+    let previous = self.rows
+    for row in previous {
+      let _ = self.list_scroll.remove(row.root)
+    }
+    let next = mut List::new<Row>()
+    for item in self.items {
+      mut found: Row? = Maybe::new()
+      for row in previous {
+        if row.notification_id == item.notification_id {
+          found = Maybe::new(row)
+        }
+      }
+      let row = match found {
+        existing => existing,
+        _ => self.create_row(item),
+      }
+      row.label.set_content(row_label(item))
+      next.push(row)
+      self.list_scroll.add(row.root)
+    }
+    for old in previous {
+      mut retained = false
+      for row in next {
+        if row.notification_id == old.notification_id {
+          retained = true
+        }
+      }
+      if not retained {
+        old.remove_mouse()
+        old.root.destroy(recursive: true)
+      }
+    }
+    self.rows = next.@
+    self.refresh_row_styles()
+  }
+
+  private fn mut refresh_row_styles() {
+    let selected = self.selected_id()
+    for row in self.rows {
+      let active = row.notification_id == selected
+      row.label.set_text_style(text::style(bold: active, reverse: active))
+    }
+  }
+
+  private fn mut show_list_status(message: Str, error: Bool) {
+    self.list_status.set_content(message)
+    self.list_status.set_text_style(
+      match error {
+        true => text::style(foreground: self.palette.danger, bold: true),
+        false => text::style(dim: true),
+      },
+    )
+    self.list_status.set_style(
+      status_style(
+        match message.is_empty() {
+          true => style::Display::none,
+          false => style::Display::flex,
+        },
+      ),
+    )
+  }
+
+  private fn mut replace_items(items: [inbox::Item], preserve_selection: Bool) {
+    let previous_id = match preserve_selection {
+      true => self.selected_id(),
+      false => "",
+    }
+    self.items = items
+    self.cursor = 0
+    if not previous_id.is_empty() {
+      for item, index in self.items {
+        if item.notification_id == previous_id {
+          self.cursor = index
+        }
+      }
+    }
+    if self.cursor >= self.items.size() and self.items.size() > 0 {
+      self.cursor = self.items.size() - 1
+    }
+    self.reconcile_rows()
+    match self.items.size() {
+      0 => {
+        self.show_list_status("No notifications", false)
+        self.detail_notification_id = ""
+        self.detail_text.set_content("Inbox zero")
+      },
+      _ => {
+        self.show_list_status("", false)
+        self.load_selected_detail()
+      },
+    }
+  }
+
+  private fn mut schedule_refresh() {
+    self.cancel_refresh()
+    self.cancel_refresh = self.schedule(5 * 60 * 1000, fn() {
+      if not self.scope.disposed {
+        self.refresh(true)
+        self.schedule_refresh()
+      }
+    })
+  }
+
+  fn mut start() {
+    if (not self.scope.disposed) and self.list_generation == 0 {
+      self.refresh(false)
+      self.schedule_refresh()
+    }
+  }
+
+  fn mut refresh(silent: Bool) {
+    if not self.scope.disposed {
+      self.list_generation =+ 1
+      let generation = self.list_generation
+      self.loading = true
+      if not silent {
+        self.show_list_status("Loading Inbox…", false)
+      }
+      self.service.load(self.scope.stop.receiver(), fn(result: [inbox::Item]!Str) {
+        if (not self.scope.disposed) and generation == self.list_generation {
+          self.loading = false
+          match result {
+            ok(items) => self.replace_items(items, silent),
+            err(message) => {
+              if self.items.size() == 0 {
+                self.show_list_status(message, true)
+              } else {
+                self.notify_error("Couldn't refresh Inbox", message)
+              }
+            },
+          }
+        }
+      })
+    }
+  }
+
+  private fn mut load_selected_detail() {
+    match self.items.at(self.cursor) {
+      item => {
+        self.detail_generation =+ 1
+        let generation = self.detail_generation
+        let notification_id = item.notification_id
+        self.detail_notification_id = notification_id
+        self.detail_text.set_content("Loading {item.target_id}…")
+        let _ = self.detail_scroll.scroll_to(0)
+        self.service.load_detail(
+          notification_id,
+          self.scope.stop.receiver(),
+          fn(result: inbox::Detail!Str) {
+            if (not self.scope.disposed) and generation == self.detail_generation and self.detail_notification_id == notification_id {
+              match result {
+                ok(detail) => {
+                  self.detail_text.set_text_style(text::style())
+                  self.detail_text.set_content(detail_content(item, detail))
+                },
+                err(message) => {
+                  self.detail_text.set_text_style(text::style(foreground: self.palette.danger))
+                  self.detail_text.set_content(message)
+                },
+              }
+            }
+          },
+        )
+      },
+      _ => {
+        self.detail_notification_id = ""
+        self.detail_text.set_content("Select a notification")
+      },
+    }
+  }
+
+  fn mut select_id(notification_id: Str) {
+    if not self.scope.disposed {
+      for item, index in self.items {
+        if item.notification_id == notification_id {
+          self.cursor = index
+        }
+      }
+      self.refresh_row_styles()
+      match self.rows.at(self.cursor) {
+        row => {
+          let _ = self.list_scroll.scroll_child_into_view(row.root)
+        },
+        _ => (),
+      }
+      self.load_selected_detail()
+    }
+  }
+
+  private fn mut move_cursor(delta: Int) {
+    if self.items.size() > 0 {
+      mut next = self.cursor + delta
+      if next < 0 {
+        next = 0
+      }
+      if next >= self.items.size() {
+        next = self.items.size() - 1
+      }
+      if next != self.cursor {
+        self.cursor = next
+        self.refresh_row_styles()
+        match self.rows.at(self.cursor) {
+          row => {
+            let _ = self.list_scroll.scroll_child_into_view(row.root)
+          },
+          _ => (),
+        }
+        self.load_selected_detail()
+      }
+    }
+  }
+
+  private fn mut open_selected(browser: Bool) {
+    match self.items.at(self.cursor) {
+      item => {
+        if browser {
+          if not item.url.is_empty() {
+            self.open_url(item.url)
+          }
+        } else if item.notification_type.starts_with("issue") {
+          if (not item.target_id.is_empty()) and not item.target_id == "—" {
+            self.on_open_issue(item.target_id)
+          }
+        } else if not item.url.is_empty() {
+          self.open_url(item.url)
+        }
+      },
+      _ => (),
+    }
+  }
+
+  private fn mut archive_selected() {
+    match self.items.at(self.cursor) {
+      item => {
+        let remaining = mut List::new<inbox::Item>()
+        for candidate in self.items {
+          if not candidate.notification_id == item.notification_id {
+            remaining.push(candidate)
+          }
+        }
+        self.items = remaining.@
+        if self.cursor >= self.items.size() and self.cursor > 0 {
+          self.cursor =- 1
+        }
+        self.reconcile_rows()
+        match self.items.size() {
+          0 => {
+            self.detail_generation =+ 1
+            self.detail_notification_id = ""
+            self.show_list_status("No notifications", false)
+            self.detail_text.set_content("Inbox zero")
+          },
+          _ => self.load_selected_detail(),
+        }
+        self.service.archive(
+          item.notification_id,
+          self.scope.stop.receiver(),
+          fn(result: Void!Str) {
+            match result {
+              ok(_) => (),
+              err(message) => self.notify_error("Couldn't archive notification", message),
+            }
+          },
+        )
+      },
+      _ => (),
+    }
+  }
+
+  fn mut focus() {
+    let _ = self.list_scroll.focus()
+  }
+
+  fn mut handle_key(received: mut event::KeyEvent) Bool {
+    if self.scope.disposed or received.event_type == event::KeyEventType::release {
+      false
+    } else {
+      mut handled = true
+      match {
+        received.matches("j") or received.matches("down") => self.move_cursor(1),
+        received.matches("k") or received.matches("up") => self.move_cursor(-1),
+        received.matches("return") => self.open_selected(false),
+        received.matches("o") => self.open_selected(true),
+        received.matches("backspace") => self.archive_selected(),
+        received.matches("r") => self.refresh(false),
+        received.matches("l") or received.matches("right") => {
+          let _ = self.detail_scroll.scroll_by(1)
+        },
+        received.matches("h") or received.matches("left") => {
+          let _ = self.detail_scroll.scroll_by(-1)
+        },
+        received.matches("space", shift: true) => {
+          let _ = self.detail_scroll.scroll_by(-10)
+        },
+        received.matches("space") => {
+          let _ = self.detail_scroll.scroll_by(10)
+        },
+        _ => { handled = false },
+      }
+      handled
+    }
+  }
+
+  fn mut screen() shell_controller::Screen {
+    shell_controller::Screen{
+      root: self.root,
+      focus: fn() {
+        self.focus()
+      },
+      handle_key: fn(received: mut event::KeyEvent) Bool {
+        self.handle_key(received)
+      },
+      dispose: fn() {
+        self.dispose()
+      },
+    }
+  }
+
+  fn mut dispose() {
+    if not self.scope.disposed {
+      self.cancel_refresh()
+      self.scope.dispose()
+      for row in self.rows {
+        row.remove_mouse()
+      }
+      self.rows = []
+    }
+  }
+}
