@@ -19,7 +19,7 @@ struct Option {
 struct Row {
   option_id: Str,
   root: mut box::Box,
-  rail: mut text::Text,
+  surface: mut box::Box,
   label: mut text::Text,
   description: mut text::Text,
   remove_mouse: fn(),
@@ -35,6 +35,7 @@ struct PickerController {
   filtered: [Option],
   rows: [Row],
   cursor: Int,
+  hovered_id: Str,
   on_select: fn(Option),
   listeners: [fn()],
   disposed: Bool,
@@ -51,6 +52,16 @@ private fn row_height(option: Option) Int {
     true => 2,
     false => 3,
   }
+}
+
+private fn row_style(option: Option) style::Style {
+  style::new(
+    width: style::percent(100.0),
+    height: style::cells(row_height(option)),
+    flex_shrink: 0.0,
+    flex_direction: style::FlexDirection::row,
+    overflow: style::Overflow::hidden,
+  )
 }
 
 private fn description_style(option: Option) style::Style {
@@ -130,6 +141,7 @@ fn new(
     filtered: [],
     rows: [],
     cursor: 0,
+    hovered_id: "",
     on_select: on_select,
     listeners: [],
     disposed: false,
@@ -166,36 +178,20 @@ fn new(
 
 impl PickerController {
   private fn mut create_row(option: Option) Row {
-    let root = box::new(
-      self.context,
-      styles: style::new(
-        width: style::percent(100.0),
-        height: style::cells(row_height(option)),
-        flex_shrink: 0.0,
-        flex_direction: style::FlexDirection::row,
-        overflow: style::Overflow::hidden,
-      ),
-    )
-    let rail = text::new(
-      self.context,
-      content: match option.description.is_empty() {
-        true => "  ",
-        false => "  \n  ",
-      },
-      selectable: false,
-      wrap: text::TextWrap::none,
-      styles: style::new(
-        width: style::cells(2),
-        height: style::cells(row_height(option) - 1),
-        flex_shrink: 0.0,
-      ),
-    )
+    let root = box::new(self.context, styles: row_style(option))
     let content = box::new(
       self.context,
       styles: style::new(
         width: style::cells(1),
         height: style::cells(row_height(option) - 1),
         flex_grow: 1.0,
+        background: self.palette.background,
+        padding: style::Edges{
+          top: style::cells(0),
+          right: style::cells(1),
+          bottom: style::cells(0),
+          left: style::cells(1),
+        },
       ),
     )
     let label = text::new(
@@ -217,11 +213,14 @@ impl PickerController {
     )
     content.add(label)
     content.add(description)
-    root.add(rail)
     root.add(content)
     let option_id = option.id
-    let remove_mouse = root.on_mouse(fn(received: mut event::MouseEvent) {
-      if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
+    let remove_mouse = content.on_mouse(fn(received: mut event::MouseEvent) {
+      if received.event_type == event::MouseEventType::move {
+        self.set_hovered(option_id)
+      } else if received.event_type == event::MouseEventType::out {
+        self.clear_hovered(option_id)
+      } else if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
         self.select_id(option_id)
         self.activate()
         received.stop_propagation()
@@ -230,7 +229,7 @@ impl PickerController {
     Row{
       option_id: option.id,
       root: root,
-      rail: rail,
+      surface: content,
       label: label,
       description: description,
       remove_mouse: remove_mouse,
@@ -238,6 +237,7 @@ impl PickerController {
   }
 
   private fn mut reconcile_rows() {
+    self.hovered_id = ""
     let previous = self.rows
     for row in previous {
       let _ = self.results.remove(row.root)
@@ -254,15 +254,7 @@ impl PickerController {
         existing => existing,
         _ => self.create_row(option),
       }
-      row.root.set_style(
-        style::new(
-          width: style::percent(100.0),
-          height: style::cells(row_height(option)),
-          flex_shrink: 0.0,
-          flex_direction: style::FlexDirection::row,
-          overflow: style::Overflow::hidden,
-        ),
-      )
+      row.root.set_style(row_style(option))
       row.label.set_content(option.label)
       row.description.set_content(option.description)
       row.description.set_style(description_style(option))
@@ -293,26 +285,43 @@ impl PickerController {
     self.refresh_row_styles()
   }
 
+  private fn mut set_hovered(option_id: Str) {
+    if not self.hovered_id == option_id {
+      self.hovered_id = option_id
+      self.refresh_row_styles()
+    }
+  }
+
+  private fn mut clear_hovered(option_id: Str) {
+    if self.hovered_id == option_id {
+      self.hovered_id = ""
+      self.refresh_row_styles()
+    }
+  }
+
   private fn mut refresh_row_styles() {
     for row, index in self.rows {
       match self.filtered.at(index) {
         option => {
           let active = index == self.cursor
-          row.rail.set_content(
-            match {
-              active and option.description.is_empty() => "▌ ",
-              active => "▌ \n▌ ",
-              option.description.is_empty() => "  ",
-              _ => "  \n  ",
-            },
+          let hovered = (not active) and row.option_id == self.hovered_id
+          let foreground = match {
+            active => self.palette.item_active_foreground,
+            hovered => self.palette.item_hover_foreground,
+            _ => self.palette.foreground,
+          }
+          let background = match {
+            active => self.palette.item_active_background,
+            hovered => self.palette.item_hover_background,
+            _ => self.palette.background,
+          }
+          let surface_style = mut row.surface.style()
+          surface_style.background = Maybe::new(background)
+          row.surface.set_style(surface_style.@)
+          row.label.set_text_style(text::style(foreground: foreground, bold: active))
+          row.description.set_text_style(
+            text::style(foreground: foreground, dim: (not active) and not hovered),
           )
-          row.rail.set_text_style(
-            match active {
-              true => text::style(foreground: self.palette.accent, bold: true),
-              false => text::style(),
-            },
-          )
-          row.label.set_text_style(text::style(bold: active))
         },
         _ => (),
       }
@@ -364,6 +373,7 @@ impl PickerController {
         next = self.filtered.size() - 1
       }
       self.cursor = next
+      self.hovered_id = ""
       self.refresh_row_styles()
       match self.rows.at(self.cursor) {
         row => {

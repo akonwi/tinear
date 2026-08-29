@@ -246,8 +246,8 @@ coherent language instead of extending the bare parity styling.
 
 - [x] Establish a host-theme foundation using terminal-default foreground/background and indexed ANSI semantic colors.
 - [x] Restyle shell tabs and footer with accent hierarchy and dim rules.
-- [x] Restyle Inbox rows with selection rails and render detail as structured styled content.
-- [x] Restyle board headers/cards with comfortable spacing, priority color, metadata, and selection rails.
+- [x] Restyle Inbox rows with hover/active surfaces and render detail as structured styled content.
+- [x] Restyle board headers/cards with comfortable spacing, priority color, metadata, and hover/active surfaces.
 - [x] Apply the shared list language to picker/search results.
 - [x] Align modals and toasts with the terminal-default canvas.
 - [ ] Add TestApp coverage at narrow, standard, and wide sizes for selected, focused, loading, empty, and error states.

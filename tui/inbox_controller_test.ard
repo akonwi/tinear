@@ -147,15 +147,34 @@ test fn inbox_loads_rows_and_discards_stale_detail_completion() Void!Str {
     "selected notification summary should render before detail returns",
   )
   application.render()
-  let rail = application.frame().cell(0, 0).expect("selected Inbox rail")
+  let selected_surface = application.frame().cell(0, 0).expect("selected Inbox surface")
   try assertions::assert(
-    rail.grapheme == "▌" and not rail.style.reverse,
-    "Inbox selection should use a rail without reverse video",
+    selected_surface.style.background.expect("active background").index.expect("host palette index") == Uint8::from(4),
+    "selected Inbox row should use the active background",
   )
+  let selected_title = application.frame().cell(1, 0).expect("selected Inbox title")
   try assertions::assert(
-    rail.style.foreground.expect("selection accent").index.expect("host palette index") == Uint8::from(4),
-    "Inbox rail should use host accent",
+    selected_title.style.foreground.expect("active foreground").index.expect("host palette index") == Uint8::from(15) and selected_title.style.background.expect("active text background").index.expect("host palette index") == Uint8::from(4) and selected_title.style.bold,
+    "selected Inbox row should use readable active text",
   )
+  application.mouse_move(3, 3)
+  application.render()
+  let hovered_surface = application.frame().cell(0, 3).expect("hovered Inbox surface")
+  try assertions::assert(
+    hovered_surface.style.background.expect("hover background").index.expect("host palette index") == Uint8::from(8),
+    "hovered Inbox row should use the hover background",
+  )
+  application.mouse_move(3, 2)
+  application.render()
+  try assertions::assert(
+    application.frame().cell(
+      0,
+      3,
+    ).expect("restored Inbox surface").style.background.expect("default background").terminal_default,
+    "leaving a row should restore its terminal-default background",
+  )
+  application.click(3, 5)
+  try assertions::assert(controller.cursor == 0, "clicking row spacing should not select an item")
   let divider = application.frame().cell(59, 0).expect("Inbox pane divider")
   try assertions::assert(
     divider.grapheme == "│" and divider.style.dim,

@@ -9,12 +9,13 @@ hierarchy rather than reproducing a web interface inside the terminal.
 1. **Respect the terminal.** Keep the user's default foreground and background
    across primary screens. Do not paint a full application canvas.
 2. **Structure before chrome.** Create hierarchy with alignment, spacing,
-   styled text, and dim rules. Borders and filled surfaces are reserved for
-   overlays that need separation.
-3. **One accent, used deliberately.** Accent marks the active tab, current
-   selection rail, focus, and primary interactive context. It is not decoration.
-4. **Selection is not inversion.** A selected row or card uses an accent `▌`
-   rail plus bold primary text. Do not reverse the whole item.
+   styled text, and dim rules. Borders are reserved for overlays; filled
+   surfaces communicate pointer and selection state.
+3. **One accent, used deliberately.** Accent marks the active tab, selected
+   item background, focus, and primary interactive context. It is not decoration.
+4. **Interaction uses surfaces.** Hovered items use the host gray background;
+   selected items use the accent background and bold primary text. Do not add
+   selection rails or reverse-video treatment.
 5. **Secondary information recedes.** Metadata uses the terminal's default
    color with `dim` where possible. Semantic colors communicate priority,
    warning, success, and failure and never carry meaning alone.
@@ -32,11 +33,11 @@ adapter, not an application color scheme:
 |---|---|
 | terminal default | canvas, surfaces, primary text, normal content |
 | default + `dim` | metadata, inactive tabs, separators, timestamps |
-| host ANSI blue | active tab, selection rail, focus, notification context |
+| host ANSI blue | active tab, selected item background, focus, notification context |
 | host ANSI red | destructive actions, failures, urgent priority |
 | host ANSI yellow | warnings, high priority |
 | host ANSI green | successful completion and confirmations |
-| host ANSI bright black/gray | modal boundaries and rare structural separators |
+| host ANSI bright black/gray | hovered item background, modal boundaries, structural separators |
 
 The default theme must not contain hard-coded RGB values. Primary screens omit
 foreground and background values to preserve the terminal canvas. Overlays use
@@ -58,12 +59,13 @@ placement so color is never the only signal.
 
 ## Selection and focus
 
-- Lists, cards, and picker options reserve a one-cell selection rail.
-- Current focused selection: accent `▌` plus bold primary text.
-- Remembered selection in an unfocused region: dim `▌`, without bold.
-- Hover does not exist as a separate state. A click moves the cursor and invokes
-  the control's documented action.
-- Focus must remain understandable without color through the rail and weight.
+- Lists, cards, and picker options use full item surfaces for interaction state.
+- Hovered item: host gray background with bright host text.
+- Current selection: accent background, bright host text, and bold primary text.
+- Selection wins when an item is both selected and hovered. Keyboard navigation
+  clears stale pointer hover; clicking moves the cursor and invokes the control's
+  documented action.
+- Focus remains understandable without color through primary-text weight.
 
 ## Inbox
 
@@ -88,12 +90,12 @@ placement so color is never the only signal.
   to two lines, dim cycle/project metadata, and separation.
 - Priority combines glyph and semantic color:
   urgent = danger `!`, high = warning `↑`, medium = default `~`, low = dim `↓`.
-- Selected cards use the shared accent rail and bold identifier treatment.
+- Selected cards use the shared active background and bold identifier treatment.
 - Horizontal and vertical scrolling must keep the full selected card visible.
 
 ## Pickers and search
 
-- Reuse the same selection rail and typography as screen lists.
+- Reuse the same hover/active surfaces and typography as screen lists.
 - The filter input appears first, followed by a dim rule and the result list.
 - Option label is primary; description is dim and may occupy a second line.
 - Empty and loading states are inline. Do not add nested borders.

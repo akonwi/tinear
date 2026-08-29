@@ -162,7 +162,8 @@ Each row uses a comfortable title/subtitle rhythm:
 
 - Primary line: title, ellipsized to the pane width.
 - Secondary line: actor + action and identifier/team context, dim.
-- Selected row: accent `▌` rail plus bold primary text, never full-row reverse.
+- Hovered row: host gray background with contrasting text.
+- Selected row: accent background with contrasting text and a bold primary line.
 
 ### 4.3 Keys
 
@@ -221,7 +222,8 @@ Each column:
 - Column header: bold state name, dim count, and a dim rule.
 - Cards: colored priority glyph, bold identifier, title up to two lines, and dim
   cycle/project metadata.
-- Selected card: accent `▌` rail plus bold identifier, never full-row reverse.
+- Hovered card: host gray background with contrasting text.
+- Selected card: accent background with contrasting text and a bold identifier.
 - Visible column count adapts to terminal width.
 
 ### 5.3 Keys

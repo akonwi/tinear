@@ -73,11 +73,48 @@ test fn picker_filters_navigates_and_selects() Void!Str {
     rule.grapheme == "─" and rule.style.dim,
     "picker input should end with a dim rule",
   )
-  let rail = application.frame().cell(0, 5).expect("selected picker rail")
+  let selected_surface = application.frame().cell(0, 5).expect("selected picker surface")
   try assertions::assert(
-    rail.grapheme == "▌" and not rail.style.reverse,
-    "picker selection should use a rail without reverse video",
+    selected_surface.style.background.expect("active background").index.expect("host palette index") == Uint8::from(4),
+    "selected picker option should use the active background",
   )
+  let selected_label = application.frame().cell(1, 5).expect("selected picker label")
+  try assertions::assert(
+    selected_label.style.foreground.expect("active foreground").index.expect("host palette index") == Uint8::from(15) and selected_label.style.background.expect("active text background").index.expect("host palette index") == Uint8::from(4) and selected_label.style.bold,
+    "selected picker option should use readable active text",
+  )
+  application.mouse_move(2, 5)
+  application.render()
+  try assertions::assert(
+    application.frame().cell(
+      0,
+      5,
+    ).expect(
+      "selected hover surface",
+    ).style.background.expect("selected background").index.expect("host palette index") == Uint8::from(4),
+    "selected background should take precedence over hover",
+  )
+  application.mouse_move(2, 2)
+  application.render()
+  let hovered_surface = application.frame().cell(0, 2).expect("hovered picker surface")
+  try assertions::assert(
+    hovered_surface.style.background.expect("hover background").index.expect("host palette index") == Uint8::from(8),
+    "hovered picker option should use the hover background",
+  )
+  application.mouse_move(2, 4)
+  application.render()
+  try assertions::assert(
+    application.frame().cell(
+      0,
+      2,
+    ).expect(
+      "restored picker surface",
+    ).style.background.expect("default background").terminal_default,
+    "leaving an option should restore its terminal-default background",
+  )
+  application.click(2, 4)
+  try assertions::assert(selection.count == 0, "clicking option spacing should not activate an option")
+  picker.focus()
 
   application.key(key("down", ""))
   application.key(key("return", ""))

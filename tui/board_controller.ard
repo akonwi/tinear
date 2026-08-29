@@ -20,7 +20,7 @@ let COLUMN_RULE: Str = "──────────────────�
 struct CardRecord {
   issue_id: Str,
   root: mut box::Box,
-  rail: mut text::Text,
+  surface: mut box::Box,
   id_line: mut text::Text,
   title: mut text::Text,
   metadata: mut text::Text,
@@ -46,6 +46,7 @@ struct BoardController {
   column_records: [ColumnRecord],
   column_index: Int,
   card_index: Int,
+  hovered_issue_id: Str,
   generation: Int,
   scope: mut lifecycle::Scope,
   service: board_service::Service,
@@ -117,14 +118,29 @@ private fn card_metadata(issue: issues::Issue) Str {
   }
 }
 
-private fn id_content(issue: issues::Issue, palette: tinear_theme::Theme) text::StyledText {
+private fn id_content(
+  issue: issues::Issue,
+  palette: tinear_theme::Theme,
+  active: Bool?,
+  hovered: Bool?,
+) text::StyledText {
+  let is_active = active.or(false)
+  let is_hovered = hovered.or(false)
+  let foreground = match {
+    is_active => palette.item_active_foreground,
+    is_hovered => palette.item_hover_foreground,
+    _ => palette.foreground,
+  }
   text::styled_text(
     [
       text::span(
         issue_state::priority_glyph(issue.priority),
-        style: priority_style(issue.priority, palette),
+        style: match is_active or is_hovered {
+          true => text::span_style(foreground: foreground, bold: true),
+          false => priority_style(issue.priority, palette),
+        },
       ),
-      text::span(" {issue.identifier}", style: text::span_style(bold: true)),
+      text::span(" {issue.identifier}", style: text::span_style(foreground: foreground, bold: true)),
     ],
   )
 }
@@ -183,6 +199,7 @@ fn new(
     column_records: [],
     column_index: 0,
     card_index: 0,
+    hovered_issue_id: "",
     generation: 0,
     scope: lifecycle::new(),
     service: service,
@@ -225,28 +242,24 @@ impl BoardController {
         overflow: style::Overflow::hidden,
       ),
     )
-    let rail = text::new(
-      self.context,
-      content: "  \n  \n  \n  ",
-      selectable: false,
-      wrap: text::TextWrap::none,
-      styles: style::new(
-        width: style::cells(2),
-        height: style::cells(CARD_HEIGHT - 1),
-        flex_shrink: 0.0,
-      ),
-    )
-    let content = box::new(
+    let surface = box::new(
       self.context,
       styles: style::new(
         width: style::cells(1),
         height: style::cells(CARD_HEIGHT - 1),
         flex_grow: 1.0,
+        background: self.palette.background,
+        padding: style::Edges{
+          top: style::cells(0),
+          right: style::cells(1),
+          bottom: style::cells(0),
+          left: style::cells(1),
+        },
       ),
     )
     let id_line = text::new(
       self.context,
-      content: id_content(issue, self.palette),
+      content: id_content(issue, self.palette, false, false),
       selectable: false,
       wrap: text::TextWrap::none,
       overflow: text::TextOverflow::ellipsis,
@@ -269,14 +282,17 @@ impl BoardController {
       styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
       text_style: text::style(dim: true),
     )
-    content.add(id_line)
-    content.add(title)
-    content.add(metadata)
-    root.add(rail)
-    root.add(content)
+    surface.add(id_line)
+    surface.add(title)
+    surface.add(metadata)
+    root.add(surface)
     let issue_id = issue.id
-    let remove_mouse = root.on_mouse(fn(received: mut event::MouseEvent) {
-      if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
+    let remove_mouse = surface.on_mouse(fn(received: mut event::MouseEvent) {
+      if received.event_type == event::MouseEventType::move {
+        self.set_hovered(issue_id)
+      } else if received.event_type == event::MouseEventType::out {
+        self.clear_hovered(issue_id)
+      } else if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
         self.select_issue(issue_id)
         self.open_selected()
         received.stop_propagation()
@@ -285,7 +301,7 @@ impl BoardController {
     CardRecord{
       issue_id: issue.id,
       root: root,
-      rail: rail,
+      surface: surface,
       id_line: id_line,
       title: title,
       metadata: metadata,
@@ -313,7 +329,7 @@ impl BoardController {
         existing => existing,
         _ => self.create_card(issue),
       }
-      card.id_line.set_content(id_content(issue, self.palette))
+      card.id_line.set_content(id_content(issue, self.palette, false, false))
       card.title.set_content(issue.title)
       card.metadata.set_content(card_metadata(issue))
       next.push(card)
@@ -379,6 +395,7 @@ impl BoardController {
   }
 
   private fn mut reconcile_columns() {
+    self.hovered_issue_id = ""
     let previous = self.column_records
     for column in previous {
       let _ = self.columns_row.remove(column.root)
@@ -428,6 +445,20 @@ impl BoardController {
     self.refresh_selection_styles()
   }
 
+  private fn mut set_hovered(issue_id: Str) {
+    if not self.hovered_issue_id == issue_id {
+      self.hovered_issue_id = issue_id
+      self.refresh_selection_styles()
+    }
+  }
+
+  private fn mut clear_hovered(issue_id: Str) {
+    if self.hovered_issue_id == issue_id {
+      self.hovered_issue_id = ""
+      self.refresh_selection_styles()
+    }
+  }
+
   private fn mut refresh_selection_styles() {
     let selected = self.selected_issue_id()
     for column, column_index in self.column_records {
@@ -443,21 +474,27 @@ impl BoardController {
         for issue in self.columns.at(column_index).expect("column").issues {
           if issue.id == card.issue_id {
             let active = card.issue_id == selected
-            card.rail.set_content(
-              match active {
-                true => "▌ \n▌ \n▌ \n▌ ",
-                false => "  \n  \n  \n  ",
-              },
-            )
-            card.rail.set_text_style(
-              match active {
-                true => text::style(foreground: self.palette.accent, bold: true),
-                false => text::style(),
-              },
-            )
-            card.id_line.set_content(id_content(issue, self.palette))
+            let hovered = (not active) and card.issue_id == self.hovered_issue_id
+            let foreground = match {
+              active => self.palette.item_active_foreground,
+              hovered => self.palette.item_hover_foreground,
+              _ => self.palette.foreground,
+            }
+            let background = match {
+              active => self.palette.item_active_background,
+              hovered => self.palette.item_hover_background,
+              _ => self.palette.background,
+            }
+            let surface_style = mut card.surface.style()
+            surface_style.background = Maybe::new(background)
+            card.surface.set_style(surface_style.@)
+            card.id_line.set_content(id_content(issue, self.palette, active, hovered))
             card.title.set_content(issue.title)
+            card.title.set_text_style(text::style(foreground: foreground, bold: active))
             card.metadata.set_content(card_metadata(issue))
+            card.metadata.set_text_style(
+              text::style(foreground: foreground, dim: (not active) and not hovered),
+            )
           }
         }
       }
@@ -605,6 +642,8 @@ impl BoardController {
 
   private fn mut move_horizontal(delta: Int) {
     if self.columns.size() > 0 {
+      let cleared_hover = not self.hovered_issue_id.is_empty()
+      self.hovered_issue_id = ""
       mut next = self.column_index + delta
       mut searching = true
       while searching {
@@ -624,11 +663,15 @@ impl BoardController {
         }
         self.refresh_selection_styles()
         self.reveal_selection()
+      } else if cleared_hover {
+        self.refresh_selection_styles()
       }
     }
   }
 
   private fn mut move_vertical(delta: Int) {
+    let cleared_hover = not self.hovered_issue_id.is_empty()
+    self.hovered_issue_id = ""
     match self.columns.at(self.column_index) {
       column => {
         if column.issues.size() > 0 {
@@ -643,6 +686,8 @@ impl BoardController {
             self.card_index = next
             self.refresh_selection_styles()
             self.reveal_selection()
+          } else if cleared_hover {
+            self.refresh_selection_styles()
           }
         }
       },

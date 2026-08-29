@@ -16,7 +16,7 @@ use tinear/tui/theme as tinear_theme
 struct Row {
   notification_id: Str,
   root: mut box::Box,
-  rail: mut text::Text,
+  surface: mut box::Box,
   title: mut text::Text,
   subtitle: mut text::Text,
   remove_mouse: fn(),
@@ -37,6 +37,7 @@ struct InboxController {
   rows: [Row],
   items: [inbox::Item],
   cursor: Int,
+  hovered_id: Str,
   loading: Bool,
   list_generation: Int,
   detail_generation: Int,
@@ -301,6 +302,7 @@ fn new(
     rows: [],
     items: [],
     cursor: 0,
+    hovered_id: "",
     loading: false,
     list_generation: 0,
     detail_generation: 0,
@@ -336,16 +338,20 @@ impl InboxController {
         overflow: style::Overflow::hidden,
       ),
     )
-    let rail = text::new(
-      self.context,
-      content: "  \n  ",
-      selectable: false,
-      wrap: text::TextWrap::none,
-      styles: style::new(width: style::cells(2), height: style::cells(2), flex_shrink: 0.0),
-    )
     let content = box::new(
       self.context,
-      styles: style::new(width: style::cells(1), height: style::cells(2), flex_grow: 1.0),
+      styles: style::new(
+        width: style::cells(1),
+        height: style::cells(2),
+        flex_grow: 1.0,
+        background: self.palette.background,
+        padding: style::Edges{
+          top: style::cells(0),
+          right: style::cells(0),
+          bottom: style::cells(0),
+          left: style::cells(1),
+        },
+      ),
     )
     let title = text::new(
       self.context,
@@ -366,11 +372,14 @@ impl InboxController {
     )
     content.add(title)
     content.add(subtitle)
-    root.add(rail)
     root.add(content)
     let notification_id = item.notification_id
-    let remove_mouse = root.on_mouse(fn(received: mut event::MouseEvent) {
-      if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
+    let remove_mouse = content.on_mouse(fn(received: mut event::MouseEvent) {
+      if received.event_type == event::MouseEventType::move {
+        self.set_hovered(notification_id)
+      } else if received.event_type == event::MouseEventType::out {
+        self.clear_hovered(notification_id)
+      } else if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
         self.select_id(notification_id)
         received.stop_propagation()
       }
@@ -378,7 +387,7 @@ impl InboxController {
     Row{
       notification_id: item.notification_id,
       root: root,
-      rail: rail,
+      surface: content,
       title: title,
       subtitle: subtitle,
       remove_mouse: remove_mouse,
@@ -386,6 +395,7 @@ impl InboxController {
   }
 
   private fn mut reconcile_rows() {
+    self.hovered_id = ""
     let previous = self.rows
     for row in previous {
       let _ = self.list_scroll.remove(row.root)
@@ -423,23 +433,42 @@ impl InboxController {
     self.refresh_row_styles()
   }
 
+  private fn mut set_hovered(notification_id: Str) {
+    if not self.hovered_id == notification_id {
+      self.hovered_id = notification_id
+      self.refresh_row_styles()
+    }
+  }
+
+  private fn mut clear_hovered(notification_id: Str) {
+    if self.hovered_id == notification_id {
+      self.hovered_id = ""
+      self.refresh_row_styles()
+    }
+  }
+
   private fn mut refresh_row_styles() {
     let selected = self.selected_id()
     for row in self.rows {
       let active = row.notification_id == selected
-      row.rail.set_content(
-        match active {
-          true => "▌ \n▌ ",
-          false => "  \n  ",
-        },
+      let hovered = (not active) and row.notification_id == self.hovered_id
+      let foreground = match {
+        active => self.palette.item_active_foreground,
+        hovered => self.palette.item_hover_foreground,
+        _ => self.palette.foreground,
+      }
+      let background = match {
+        active => self.palette.item_active_background,
+        hovered => self.palette.item_hover_background,
+        _ => self.palette.background,
+      }
+      let surface_style = mut row.surface.style()
+      surface_style.background = Maybe::new(background)
+      row.surface.set_style(surface_style.@)
+      row.title.set_text_style(text::style(foreground: foreground, bold: active))
+      row.subtitle.set_text_style(
+        text::style(foreground: foreground, dim: (not active) and not hovered),
       )
-      row.rail.set_text_style(
-        match active {
-          true => text::style(foreground: self.palette.accent, bold: true),
-          false => text::style(),
-        },
-      )
-      row.title.set_text_style(text::style(bold: active))
     }
   }
 
@@ -628,6 +657,8 @@ impl InboxController {
 
   private fn mut move_cursor(delta: Int) {
     if self.items.size() > 0 {
+      let cleared_hover = not self.hovered_id.is_empty()
+      self.hovered_id = ""
       mut next = self.cursor + delta
       if next < 0 {
         next = 0
@@ -645,6 +676,8 @@ impl InboxController {
           _ => (),
         }
         self.load_selected_detail()
+      } else if cleared_hover {
+        self.refresh_row_styles()
       }
     }
   }
