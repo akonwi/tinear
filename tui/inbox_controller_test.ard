@@ -184,8 +184,6 @@ test fn inbox_loads_rows_and_discards_stale_detail_completion() Void!Str {
     controller.detail_scroll.layout().screen.width > controller.list_scroll.layout().screen.width,
     "notification list should be a sidebar beside a larger detail pane",
   )
-  try testing::assert_contains(application.frame().text(), "DETAILS")
-
   try assertions::assert(controller.handle_key(key("down", "")), "Down should move selection")
   try assertions::assert(controller.cursor == 1, "cursor should move to second item")
   try assertions::assert(fake.details.size() == 2, "selection should request new detail")

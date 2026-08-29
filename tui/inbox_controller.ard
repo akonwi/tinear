@@ -253,13 +253,6 @@ fn new(
       },
     ),
   )
-  let detail_heading = text::new(
-    ctx,
-    content: "DETAILS",
-    selectable: false,
-    styles: style::new(width: style::percent(100.0), height: style::cells(2), flex_shrink: 0.0),
-    text_style: text::style(dim: true, bold: true),
-  )
   let detail_scroll = scroll_box::new(
     ctx,
     styles: style::new(
@@ -286,7 +279,6 @@ fn new(
   )
   list_scroll.add(list_status)
   detail_scroll.add(detail_text)
-  detail_pane.add(detail_heading)
   detail_pane.add(detail_scroll)
   root.add(list_scroll)
   root.add(separator)
