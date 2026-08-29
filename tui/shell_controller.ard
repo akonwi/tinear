@@ -57,19 +57,6 @@ private fn body_style(current: style::Style, display: style::Display) style::Sty
   updated.@
 }
 
-private fn context_for(model: shell_model::Model) Str {
-  match model.tab_index {
-    0 => "Inbox",
-    1 => "My Issues",
-    _ => {
-      match shell_model::selected_dynamic(model) {
-        reference => shell_model::title(model, reference).or("Detail"),
-        _ => "Detail",
-      }
-    },
-  }
-}
-
 private fn hints_for(model: shell_model::Model) [hints_bar::Hint] {
   match model.tab_index {
     0 => {
@@ -159,7 +146,7 @@ fn new(
     styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
     text_style: text::style(dim: true),
   )
-  let hints = hints_bar::new(ctx, palette, context_for(initial_model), hints_for(initial_model))
+  let hints = hints_bar::new(ctx, palette, hints_for(initial_model))
   root.add(tab_bar)
   root.add(tab_rule)
   root.add(body_host)
@@ -328,7 +315,7 @@ impl ShellController {
       )
     }
     self.rebuild_tab_bar()
-    self.hints.set(context_for(self.model), hints_for(self.model))
+    self.hints.set(hints_for(self.model))
     if should_persist {
       self.persist(shell_model::snapshot(self.model))
     }

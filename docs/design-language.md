@@ -52,9 +52,8 @@ placement so color is never the only signal.
 - The active tab is accent-colored and bold. Inactive tabs are dim. Tabs do
   not use underlines or reverse-video chips.
 - Permanent tabs remain visually stable; dynamic tabs add a dim `×` suffix.
-- The footer begins with a dim rule. Its left side provides context/status and
-  its right side provides current key hints. Keys are accent/bold; labels are
-  dim.
+- The footer begins with a dim rule and provides left-aligned key hints without
+  repeating the active tab title. Keys are accent/bold; labels are dim.
 - Primary body regions use terminal-default background without boxes.
 
 ## Selection and focus

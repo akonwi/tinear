@@ -143,6 +143,11 @@ test fn shell_switches_persistent_tabs_and_persists_selection() Void!Str {
     controller.board.root.style().display == style::Display::none,
     "board should stay mounted but hidden",
   )
+  let first_hint = application.frame().cell(0, 15).expect("left-aligned footer hint")
+  try assertions::assert(
+    first_hint.grapheme == "T" and first_hint.style.bold,
+    "footer key hints should begin at the left edge",
+  )
 
   try assertions::assert(controller.handle_key(key("tab")), "Tab should switch views")
   application.render()
@@ -151,6 +156,11 @@ test fn shell_switches_persistent_tabs_and_persists_selection() Void!Str {
   try assertions::assert(
     board_tab.style.bold and (not board_tab.style.underline) and (not board_tab.style.reverse),
     "selected board tab should follow Quiet Structure selection",
+  )
+  let board_hint = application.frame().cell(0, 15).expect("board footer hint")
+  try assertions::assert(
+    board_hint.grapheme == "←",
+    "updated footer hints should remain left-aligned without a tab-title prefix",
   )
   try assertions::assert(board_state.focuses == 1, "new active screen should reclaim focus")
   try assertions::assert(snapshots.size() == 1, "selection should persist")

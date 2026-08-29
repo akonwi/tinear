@@ -93,7 +93,7 @@ mounted in an `indexed_stack` so inactive tab state survives switches.
 | **My Issues** | Kanban board grouped by workflow state (see §5) |
 | **Issue detail** | Full issue view (see §6) |
 
-Footer bar below the body shows context-sensitive hints.
+Footer bar below the body shows left-aligned, context-sensitive key hints without repeating the active tab title.
 
 ### 3.4 Tab switching
 
