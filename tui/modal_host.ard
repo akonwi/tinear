@@ -49,8 +49,6 @@ fn new(ctx: mut context::Context, palette: tinear_theme::Theme) mut ModalHost {
       width: style::percent(70.0),
       max_width: style::cells(72),
       max_height: style::percent(80.0),
-      foreground: palette.on_surface,
-      background: palette.surface,
       border: style::Border::rounded,
       border_color: palette.border,
       flex_direction: style::FlexDirection::column,
@@ -64,11 +62,7 @@ fn new(ctx: mut context::Context, palette: tinear_theme::Theme) mut ModalHost {
     ctx,
     styles: style::new(width: style::percent(100.0), flex_direction: style::FlexDirection::column),
   )
-  let footer_text = text::new(
-    ctx,
-    content: "",
-    text_style: text::style(foreground: palette.muted, dim: true),
-  )
+  let footer_text = text::new(ctx, content: "", text_style: text::style(dim: true))
 
   frame.add(title_text)
   frame.add(body_slot)

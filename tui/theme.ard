@@ -1,12 +1,15 @@
+use ard/testing as assertions
+
 use cooper/color
 
-// Tinear keeps terminal-default foreground/background at the application root
-// and uses this small semantic palette only where meaning needs explicit color.
+// Tinear's theme is grounded in the host terminal palette.
+//
+// A missing foreground/background means "use the terminal default" in Cooper.
+// Semantic colors use ANSI palette slots so the terminal theme remains the
+// source of truth on light and dark backgrounds. Tinear does not own a canvas
+// color or a dark/light mode.
 struct Theme {
-  muted: color::Color,
   border: color::Color,
-  surface: color::Color,
-  on_surface: color::Color,
   accent: color::Color,
   danger: color::Color,
   warning: color::Color,
@@ -15,13 +18,35 @@ struct Theme {
 
 fn new() Theme {
   Theme{
-    muted: color::hex("#7C8799"),
-    border: color::hex("#4B5565"),
-    surface: color::hex("#1F2937"),
-    on_surface: color::hex("#F8FAFC"),
-    accent: color::hex("#60A5FA"),
-    danger: color::hex("#F87171"),
-    warning: color::hex("#FBBF24"),
-    success: color::hex("#4ADE80"),
+    // ANSI slots 1-4 and 8 are supplied by the user's terminal theme.
+    border: color::indexed(8),
+    accent: color::indexed(4),
+    danger: color::indexed(1),
+    warning: color::indexed(3),
+    success: color::indexed(2),
   }
+}
+
+test fn theme_uses_terminal_defaults_and_host_palette_slots() Void!Str {
+  let theme = new()
+  try assertions::assert(
+    theme.accent.index.expect("accent palette slot") == Uint8::from(4),
+    "Expected host blue accent",
+  )
+  try assertions::assert(
+    theme.danger.index.expect("danger palette slot") == Uint8::from(1),
+    "Expected host red danger",
+  )
+  try assertions::assert(
+    theme.warning.index.expect("warning palette slot") == Uint8::from(3),
+    "Expected host yellow warning",
+  )
+  try assertions::assert(
+    theme.success.index.expect("success palette slot") == Uint8::from(2),
+    "Expected host green success",
+  )
+  assertions::assert(
+    theme.border.index.expect("border palette slot") == Uint8::from(8),
+    "Expected host gray border",
+  )
 }

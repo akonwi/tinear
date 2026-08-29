@@ -78,8 +78,9 @@ Horizontal row of tabs across the top of the screen:
 - **Issue tabs** (e.g. `ENG-123`) are added dynamically when an issue is opened
   from Inbox, My Issues, or Search. Max one tab per issue (re-selecting an
   already-open issue switches to its existing tab).
-- **Selected tab** is rendered with reversed video (`ui::style(reverse: true)`).
-- Tab bar is a horizontal `row` of labels separated by vertical dividers.
+- **Selected tab** is accent-colored, bold, and underlined; inactive tabs are dim.
+- Tab bar is a horizontal row followed by a dim rule. See
+  [design-language.md](design-language.md) for the current visual standard.
 
 ### 3.3 Tab body
 
@@ -153,13 +154,15 @@ approved, requested changes, checks failed, requested review, etc.
 
 ### 4.2 Rendering
 
-Each row:
+Each row uses a comfortable title/subtitle rhythm:
 ```
-ENG-123  Alice  assigned    Update the authentication flow
+  Update the authentication flow
+  Alice assigned · ENG-123
 ```
 
-- Columns: target ID (10 wide), actor name, type label, title (expanded to fill).
-- Selected row: reversed video on the entire row.
+- Primary line: title, ellipsized to the pane width.
+- Secondary line: actor + action and identifier/team context, dim.
+- Selected row: accent `▌` rail plus bold primary text, never full-row reverse.
 
 ### 4.3 Keys
 
@@ -215,8 +218,10 @@ Each column:
    ...
 ```
 
-- Column header: state name + count, styled with the state's color.
-- Cards: identifier + title. Selected card is reversed video.
+- Column header: bold state name, dim count, and a dim rule.
+- Cards: colored priority glyph, bold identifier, title up to two lines, and dim
+  cycle/project metadata.
+- Selected card: accent `▌` rail plus bold identifier, never full-row reverse.
 - Visible column count adapts to terminal width.
 
 ### 5.3 Keys

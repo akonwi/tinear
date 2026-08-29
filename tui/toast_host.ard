@@ -108,8 +108,6 @@ impl ToastHost {
     let toast = box::new(
       self.context,
       styles: style::new(
-        foreground: self.palette.on_surface,
-        background: self.palette.surface,
         border: style::Border::rounded,
         border_color: border_color(self.palette, variant),
         width: style::percent(100.0),
@@ -119,13 +117,7 @@ impl ToastHost {
     )
     toast.add(text::new(self.context, content: title, text_style: text::style(bold: true)))
     if not description.is_empty() {
-      toast.add(
-        text::new(
-          self.context,
-          content: description,
-          text_style: text::style(foreground: self.palette.muted),
-        ),
-      )
+      toast.add(text::new(self.context, content: description, text_style: text::style(dim: true)))
     }
     let cancel_expiry = self.schedule(ttl_ms, fn() {
       let _ = self.remove(id)

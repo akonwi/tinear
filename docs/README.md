@@ -6,6 +6,8 @@ Architecture Decision Records (ADRs) and project documentation.
 
 - [features.md](features.md) — feature reference for the TUI: startup, the
   logged-in shell, inbox/board/issue-detail flows, modals, persistence.
+- [design-language.md](design-language.md) — the Quiet Structure visual system
+  for layout, hierarchy, selection, color, density, and overlays.
 
 ## ADRs
 

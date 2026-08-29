@@ -159,7 +159,7 @@ ffi/markdown/*
 - [ ] Inject/test the HTTP transport, status/error matrix, and response-size boundary.
 - [ ] Thread per-controller cancellation into HTTP request contexts so closed views interrupt in-flight requests.
 - [x] Make config/cache directories and files private and replace files atomically.
-- [ ] Serialize/coalesce shell cache writes so older snapshots cannot overwrite newer state.
+- [x] Serialize/coalesce shell cache writes so older snapshots cannot overwrite newer state.
 - [x] Fix board/picker source defects while porting: fetch assignee/project IDs and exclude canceled projects correctly.
 
 **Exit criteria:** all model/cache/markdown tests from `main` are restored or replaced with equivalent coverage; model modules have no Cooper imports.
@@ -178,7 +178,7 @@ tui/theme.ard
 ```
 
 - [x] Build a permanent app root with content, modal, and toast planes.
-- [ ] Implement app-level key routing by active view and interaction mode.
+- [x] Implement app-level key routing by active view and interaction mode.
 - [x] Implement modal ticket/generation ownership, background mouse blocking, guarded dismiss, and focus restore.
 - [x] Implement toast stacking, variants, TTL cancellation, and disposal.
 - [x] Implement Super+C using `App.selection()` and `Context.clipboard.write()`.
@@ -205,38 +205,54 @@ tui/tab_bar.ard
 ```
 
 - [x] Restore pure tab reducers/tests first.
-- [ ] Construct Inbox and My Issues controllers once.
-- [ ] Add dynamic issue/document controller creation and identity reuse.
-- [ ] Toggle inactive roots with `Display::none` and focus the active view explicitly.
-- [ ] Implement keyboard/mouse tab navigation and dynamic close behavior.
-- [ ] Hydrate/persist shell cache, including document retitling.
-- [ ] Serialize/coalesce persistence so older snapshots cannot overwrite newer state.
+- [x] Construct Inbox and My Issues controllers once.
+- [x] Add dynamic issue/document controller creation and identity reuse.
+- [x] Toggle inactive roots with `Display::none` and focus the active view explicitly.
+- [x] Implement keyboard/mouse tab navigation and dynamic close behavior.
+- [x] Hydrate/persist shell cache, including document retitling.
+- [x] Serialize/coalesce persistence so older snapshots cannot overwrite newer state.
 
 **Exit criteria:** TestApp covers open/reuse/switch/close/restore, hidden-state retention, focus restoration, malformed cache, and closed-tab disposal.
 
 ### Phase 5 — Inbox vertical slice
 
-- [ ] Build retained list rows and split detail layout.
-- [ ] Implement loading/error/empty states and initial load.
-- [ ] Implement cursor navigation/reveal and detail scrolling.
-- [ ] Implement stale-safe detail requests.
-- [ ] Implement issue/PR opening, terminal-browser routing, optimistic archive, and manual refresh.
-- [ ] Add five-minute silent refresh with cursor-by-ID preservation.
+- [x] Build retained list rows and split detail layout.
+- [x] Implement loading/error/empty states and initial load.
+- [x] Implement cursor navigation/reveal and detail scrolling.
+- [x] Implement stale-safe detail requests.
+- [x] Implement issue/PR opening, terminal-browser routing, optimistic archive, and manual refresh.
+- [x] Add five-minute silent refresh with cursor-by-ID preservation.
 - [ ] Add terminal-title count behavior when the framework gate is resolved.
 
 **Exit criteria:** Inbox is a complete network-backed daily-use slice with deterministic tests for stale requests, deletion, refresh preservation, routing, and disposal.
 
 ### Phase 6 — My Issues board and reusable pickers
 
-- [ ] Build an outer horizontal `ScrollBox` containing a retained row of columns.
-- [ ] Give each column its own vertical `ScrollBox` and retained card records.
-- [ ] Reconcile columns/cards by stable IDs and use `scroll_child_into_view`.
-- [ ] Restore card rendering, ordering, navigation, opening, manual refresh, and periodic refresh.
-- [ ] Build the app-local filterable picker controller.
+- [x] Build an outer horizontal `ScrollBox` containing a retained row of columns.
+- [x] Give each column its own vertical `ScrollBox` and retained card records.
+- [x] Reconcile columns/cards by stable IDs and use `scroll_child_into_view`.
+- [x] Restore card rendering, ordering, navigation, opening, manual refresh, and periodic refresh.
+- [x] Build the app-local filterable picker controller.
 - [ ] Restore state, cycle, priority, assignee, and project pickers/mutations.
 - [ ] Benchmark the bounded 200-issue workload before considering app-local virtualization.
 
 **Exit criteria:** board navigation, nested scrolling, cursor preservation, every picker, and every mutation path pass TestApp coverage at narrow and wide sizes.
+
+### Visual baseline checkpoint — Quiet Structure
+
+The agreed visual system is recorded in `docs/design-language.md` and ADR 0004.
+Complete this pass before resuming feature phases so new screens inherit a
+coherent language instead of extending the bare parity styling.
+
+- [x] Establish a host-theme foundation using terminal-default foreground/background and indexed ANSI semantic colors.
+- [ ] Restyle shell tabs and footer with accent hierarchy and dim rules.
+- [ ] Restyle Inbox rows with selection rails and rebuild detail as structured retained controls.
+- [ ] Restyle board headers/cards with comfortable spacing, priority color, metadata, and selection rails.
+- [ ] Apply the shared list language to picker/search results.
+- [ ] Align modals and toasts with the terminal-default canvas.
+- [ ] Add TestApp coverage at narrow, standard, and wide sizes for selected, focused, loading, empty, and error states.
+
+**Exit criteria:** shell, Inbox, My Issues, picker, modal, and toast screenshots/frames follow the design guide and have no full-row reverse selection.
 
 ### Phase 7 — Markdown, issue detail, comments, and document detail
 
@@ -297,7 +313,7 @@ These are documented ideas, not behavior that the rewrite must reproduce before 
 ## Known framework/app risks to track
 
 - [ ] Cooper has no public terminal-title API.
-- [ ] Cooper has no holistic terminal-derived semantic theme service.
+- [ ] Cooper has indexed host-palette colors but no holistic terminal-queried, contrast-derived semantic theme service.
 - [ ] Cooper has no general app-facing modal/focus-trap control; Tinear must own modal policy.
 - [ ] Cooper has no always-expanded ListBox/Combobox; Tinear needs a retained picker/search list.
 - [ ] Cooper has no built-in virtualization; use bounded eager retained rows first and profile.
