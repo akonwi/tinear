@@ -6,6 +6,7 @@ use cooper/style
 use cooper/text
 use tinear/config
 use tinear/models/cache
+use tinear/models/issues
 use tinear/models/shell as shell_model
 use tinear/models/tabs
 use tinear/platform/url
@@ -13,9 +14,11 @@ use tinear/services/auth
 use tinear/services/board_service
 use tinear/services/cache_writer
 use tinear/services/inbox_service
+use tinear/services/issue_fields_service
 use tinear/tui/application_shell
 use tinear/tui/board_controller
 use tinear/tui/inbox_controller
+use tinear/tui/issue_field_picker_controller
 use tinear/tui/scheduler
 use tinear/tui/shell_controller
 use tinear/tui/theme
@@ -28,6 +31,7 @@ private struct ActiveRoute {
 
 private struct ShellActions {
   open_issue: fn(Str),
+  open_picker: fn(issue_field_picker_controller::Field, issues::Issue),
 }
 
 private fn placeholder_screen(ctx: mut context::Context, title: Str, message: Str) shell_controller::Screen {
@@ -73,7 +77,10 @@ private fn show_logged_in(
 ) {
   let writer = cache_writer::live(ctx)
   let model = shell_model::restore(cache::load_logged_in())
-  let actions = mut ShellActions{open_issue: fn(identifier: Str) {}}
+  let actions = mut ShellActions{
+    open_issue: fn(identifier: Str) {},
+    open_picker: fn(field: issue_field_picker_controller::Field, issue: issues::Issue) {},
+  }
   let inbox = inbox_controller::new(
     ctx,
     palette,
@@ -107,10 +114,31 @@ private fn show_logged_in(
     fn(identifier: Str) {
       actions.open_issue(identifier)
     },
+    fn(field: issue_field_picker_controller::Field, issue: issues::Issue) {
+      actions.open_picker(field, issue)
+    },
     fn(title: Str, message: Str) {
       let _ = application_shell.toasts.show(title, message, toast_host::Variant::error, 4000)
     },
   )
+  let field_pickers = issue_field_picker_controller::new(
+    ctx,
+    application_shell.modal,
+    palette,
+    issue_fields_service::live(ctx, api_key),
+    fn() {
+      board.focus()
+    },
+    fn() {
+      board.refresh(true)
+    },
+    fn(title: Str, message: Str) {
+      let _ = application_shell.toasts.show(title, message, toast_host::Variant::error, 4000)
+    },
+  )
+  actions.open_picker = fn(field: issue_field_picker_controller::Field, issue: issues::Issue) {
+    field_pickers.open(field, issue)
+  }
   let controller = shell_controller::new(
     ctx,
     palette,
@@ -124,6 +152,7 @@ private fn show_logged_in(
       writer.persist(snapshot)
     },
     fn() {
+      field_pickers.dispose()
       writer.dispose()
     },
     fn() {

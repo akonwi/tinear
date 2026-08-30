@@ -1,0 +1,546 @@
+use cooper/box
+use cooper/context
+use cooper/style
+use cooper/text
+use tinear/models/issue_state
+use tinear/models/issues
+use tinear/services/issue_fields_service
+use tinear/tui/lifecycle
+use tinear/tui/modal_host
+use tinear/tui/picker_controller
+use tinear/tui/theme as tinear_theme
+
+enum Field {
+  state,
+  cycle,
+  priority,
+  assignee,
+  project,
+}
+
+private struct RequestCancellation {
+  stop: Chan<Bool>,
+  cancelled: Bool,
+}
+
+private fn request_cancellation() mut RequestCancellation {
+  (mut RequestCancellation{stop: Chan::new<Bool>(), cancelled: false})
+}
+
+impl RequestCancellation {
+  fn mut cancel() {
+    if not self.cancelled {
+      self.cancelled = true
+      self.stop.close()
+    }
+  }
+}
+
+struct Controller {
+  context: mut context::Context,
+  modal: mut modal_host::ModalHost,
+  palette: tinear_theme::Theme,
+  service: issue_fields_service::Service,
+  scope: mut lifecycle::Scope,
+  generation: Int,
+  current_ticket: modal_host::Ticket?,
+  restore_focus: fn(),
+  on_changed: fn(),
+  notify_error: fn(Str, Str),
+}
+
+private fn state_title(issue: issues::Issue) Str {
+  "Change state — {issue.identifier}"
+}
+
+private fn cycle_title(issue: issues::Issue) Str {
+  "Change cycle — {issue.identifier}"
+}
+
+private fn priority_title(issue: issues::Issue) Str {
+  "Change priority — {issue.identifier}"
+}
+
+private fn assignee_title(issue: issues::Issue) Str {
+  "Assign — {issue.identifier}"
+}
+
+private fn project_title(issue: issues::Issue) Str {
+  "Change project — {issue.identifier}"
+}
+
+private fn cycle_label(cycle: issues::Cycle) Str {
+  match cycle.name.is_empty() {
+    true => "Cycle {cycle.number}",
+    false => cycle.name,
+  }
+}
+
+fn sort_states(states: [issues::WorkflowState]) [issues::WorkflowState] {
+  if states.size() < 2 {
+    states
+  } else {
+    let result = mut states
+    for i in 0..states.size() - 2 {
+      for j in 0..states.size() - 2 - i {
+        let a = result.at(j).expect("bounds checked")
+        let b = result.at(j + 1).expect("bounds checked")
+        let rank_a = issue_state::state_type_rank(a.state_type)
+        let rank_b = issue_state::state_type_rank(b.state_type)
+        let swap = match rank_a == rank_b {
+          true => a.position > b.position,
+          false => rank_a > rank_b,
+        }
+        if swap {
+          result.set(j, b)
+          result.set(j + 1, a)
+        }
+      }
+    }
+    result.@
+  }
+}
+
+fn cycles_for_issue(result: issues::TeamCyclesResult, current_cycle_id: Str) [issues::Cycle] {
+  let filtered = mut List::new<issues::Cycle>()
+  for cycle in result.cycles {
+    let include = match result.active_cycle_number {
+      active => cycle.number <= active + 1 or cycle.id == current_cycle_id,
+      _ => true,
+    }
+    if include {
+      filtered.push(cycle)
+    }
+  }
+  if filtered.size() > 1 {
+    for i in 0..filtered.size() - 2 {
+      for j in 0..filtered.size() - 2 - i {
+        let a = filtered.at(j).expect("bounds checked")
+        let b = filtered.at(j + 1).expect("bounds checked")
+        if a.number < b.number {
+          filtered.set(j, b)
+          filtered.set(j + 1, a)
+        }
+      }
+    }
+  }
+  filtered.@
+}
+
+fn new(
+  ctx: mut context::Context,
+  modal: mut modal_host::ModalHost,
+  palette: tinear_theme::Theme,
+  service: issue_fields_service::Service,
+  restore_focus: fn(),
+  on_changed: fn(),
+  notify_error: fn(Str, Str),
+) mut Controller {
+  (mut Controller{
+    context: ctx,
+    modal: modal,
+    palette: palette,
+    service: service,
+    scope: lifecycle::new(),
+    generation: 0,
+    current_ticket: Maybe::new<modal_host::Ticket>(),
+    restore_focus: restore_focus,
+    on_changed: on_changed,
+    notify_error: notify_error,
+  })
+}
+
+impl Controller {
+  private fn mut present_loading(title: Str, updating: Bool, dispose: fn()) modal_host::Ticket {
+    let body = box::new(
+      self.context,
+      styles: style::new(
+        width: style::percent(100.0),
+        height: style::cells(3),
+        align_items: style::Align::center,
+        justify_content: style::Justify::center,
+      ),
+    )
+    body.add(
+      text::new(
+        self.context,
+        content: match updating {
+          true => "Updating…",
+          false => "Loading…",
+        },
+        selectable: false,
+        text_style: text::style(dim: true),
+      ),
+    )
+    let ticket = self.modal.present(
+      title,
+      body,
+      match updating {
+        true => "",
+        false => "Esc cancel",
+      },
+      dispose,
+      fn() {},
+      self.restore_focus,
+      fn() Bool {
+        not updating
+      },
+    )
+    self.current_ticket = Maybe::new(ticket)
+    ticket
+  }
+
+  private fn mut present_picker(
+    title: Str,
+    placeholder: Str,
+    options: [picker_controller::Option],
+    selected_id: Str,
+    issue: issues::Issue,
+    field: Field,
+  ) {
+    if not self.scope.disposed {
+      let picker = picker_controller::new(
+        self.context,
+        self.palette,
+        placeholder,
+        options,
+        selected_id,
+        fn(option: picker_controller::Option) {
+          self.apply(field, issue, option.id)
+        },
+      )
+      let ticket = self.modal.present(
+        title,
+        picker.root,
+        "↑↓ navigate   Enter select   Esc cancel",
+        fn() {
+          picker.dispose()
+        },
+        fn() {
+          picker.focus()
+        },
+        self.restore_focus,
+        fn() Bool {
+          true
+        },
+      )
+      self.current_ticket = Maybe::new(ticket)
+    }
+  }
+
+  private fn mut fail_load(ticket: modal_host::Ticket, title: Str, message: Str) {
+    if (not self.scope.disposed) and self.modal.is_current(ticket) {
+      let _ = self.modal.close_if_current(ticket)
+      self.notify_error(title, message)
+    }
+  }
+
+  private fn mut open_state(issue: issues::Issue, generation: Int) {
+    let cancellation = request_cancellation()
+    let ticket = self.present_loading(state_title(issue), false, fn() {
+      cancellation.cancel()
+    })
+    self.service.load_states(
+      cancellation.stop.receiver(),
+      issue.team_id,
+      fn(result: [issues::WorkflowState]!Str) {
+        if (not self.scope.disposed) and generation == self.generation and self.modal.is_current(ticket) {
+          match result {
+            ok(states) => {
+              let options = mut List::new<picker_controller::Option>()
+              for value in sort_states(states) {
+                options.push(
+                  picker_controller::Option{
+                    id: value.id,
+                    label: value.name,
+                    description: value.state_type,
+                  },
+                )
+              }
+              self.present_picker(
+                state_title(issue),
+                "Filter states",
+                options.@,
+                issue.state_id,
+                issue,
+                Field::state,
+              )
+            },
+            err(message) => self.fail_load(ticket, "State picker", message),
+          }
+        }
+      },
+    )
+  }
+
+  private fn mut open_cycle(issue: issues::Issue, generation: Int) {
+    let cancellation = request_cancellation()
+    let ticket = self.present_loading(cycle_title(issue), false, fn() {
+      cancellation.cancel()
+    })
+    self.service.load_cycles(
+      cancellation.stop.receiver(),
+      issue.team_id,
+      fn(result: issues::TeamCyclesResult!Str) {
+        if (not self.scope.disposed) and generation == self.generation and self.modal.is_current(ticket) {
+          match result {
+            ok(value) => {
+              let options = mut List::new<picker_controller::Option>()
+              options.push(
+                picker_controller::Option{
+                  id: "",
+                  label: "No cycle",
+                  description: "",
+                },
+              )
+              for cycle in cycles_for_issue(value, issue.cycle_id) {
+                options.push(
+                  picker_controller::Option{
+                    id: cycle.id,
+                    label: cycle_label(cycle),
+                    description: cycle.starts_at,
+                  },
+                )
+              }
+              self.present_picker(
+                cycle_title(issue),
+                "Filter cycles",
+                options.@,
+                issue.cycle_id,
+                issue,
+                Field::cycle,
+              )
+            },
+            err(message) => self.fail_load(ticket, "Cycle picker", message),
+          }
+        }
+      },
+    )
+  }
+
+  private fn mut open_priority(issue: issues::Issue) {
+    let options = mut List::new<picker_controller::Option>()
+    for value in [0, 1, 2, 3, 4] {
+      let label = match value {
+        0 => "No priority",
+        _ => {
+          "{issue_state::priority_glyph(Maybe::new(value))} {issue_state::priority_label(Maybe::new(value))}"
+        },
+      }
+      options.push(
+        picker_controller::Option{
+          id: "{value}",
+          label: label,
+          description: "",
+        },
+      )
+    }
+    self.present_picker(
+      priority_title(issue),
+      "Filter priorities",
+      options.@,
+      "{issue.priority.or(0)}",
+      issue,
+      Field::priority,
+    )
+  }
+
+  private fn mut open_assignee(issue: issues::Issue, generation: Int) {
+    let cancellation = request_cancellation()
+    let ticket = self.present_loading(assignee_title(issue), false, fn() {
+      cancellation.cancel()
+    })
+    self.service.load_members(
+      cancellation.stop.receiver(),
+      issue.team_id,
+      fn(result: [issues::Member]!Str) {
+        if (not self.scope.disposed) and generation == self.generation and self.modal.is_current(ticket) {
+          match result {
+            ok(members) => {
+              let options = mut List::new<picker_controller::Option>()
+              options.push(
+                picker_controller::Option{
+                  id: "",
+                  label: "Unassigned",
+                  description: "",
+                },
+              )
+              for member in members {
+                options.push(
+                  picker_controller::Option{
+                    id: member.id,
+                    label: member.name,
+                    description: "",
+                  },
+                )
+              }
+              self.present_picker(
+                assignee_title(issue),
+                "Filter members",
+                options.@,
+                issue.assignee_id,
+                issue,
+                Field::assignee,
+              )
+            },
+            err(message) => self.fail_load(ticket, "Assign", message),
+          }
+        }
+      },
+    )
+  }
+
+  private fn mut open_project(issue: issues::Issue, generation: Int) {
+    let cancellation = request_cancellation()
+    let ticket = self.present_loading(project_title(issue), false, fn() {
+      cancellation.cancel()
+    })
+    self.service.load_projects(
+      cancellation.stop.receiver(),
+      issue.team_id,
+      fn(result: [issues::Project]!Str) {
+        if (not self.scope.disposed) and generation == self.generation and self.modal.is_current(ticket) {
+          match result {
+            ok(projects) => {
+              let options = mut List::new<picker_controller::Option>()
+              options.push(
+                picker_controller::Option{
+                  id: "",
+                  label: "No project",
+                  description: "",
+                },
+              )
+              for project in projects {
+                options.push(
+                  picker_controller::Option{
+                    id: project.id,
+                    label: project.name,
+                    description: "",
+                  },
+                )
+              }
+              self.present_picker(
+                project_title(issue),
+                "Filter projects",
+                options.@,
+                issue.project_id,
+                issue,
+                Field::project,
+              )
+            },
+            err(message) => self.fail_load(ticket, "Change project", message),
+          }
+        }
+      },
+    )
+  }
+
+  fn mut open(field: Field, issue: issues::Issue) {
+    if not self.scope.disposed {
+      self.generation =+ 1
+      let generation = self.generation
+      match field {
+        Field::state => self.open_state(issue, generation),
+        Field::cycle => self.open_cycle(issue, generation),
+        Field::priority => self.open_priority(issue),
+        Field::assignee => self.open_assignee(issue, generation),
+        Field::project => self.open_project(issue, generation),
+      }
+    }
+  }
+
+  private fn mut finish_update(
+    ticket: modal_host::Ticket,
+    generation: Int,
+    title: Str,
+    result: Void!Str,
+  ) {
+    if (not self.scope.disposed) and generation == self.generation {
+      let _ = self.modal.close_if_current(ticket)
+      match result {
+        ok(_) => self.on_changed(),
+        err(message) => self.notify_error(title, message),
+      }
+    }
+  }
+
+  private fn mut apply(field: Field, issue: issues::Issue, value: Str) {
+    if not self.scope.disposed {
+      self.generation =+ 1
+      let generation = self.generation
+      let ticket = self.present_loading("Updating {issue.identifier}", true, fn() {})
+      match field {
+        Field::state => {
+          self.service.update_state(
+            self.scope.stop.receiver(),
+            issue.id,
+            value,
+            fn(result: Void!Str) {
+              self.finish_update(ticket, generation, "Update state", result)
+            },
+          )
+        },
+        Field::cycle => {
+          self.service.update_cycle(
+            self.scope.stop.receiver(),
+            issue.id,
+            value,
+            fn(result: Void!Str) {
+              self.finish_update(ticket, generation, "Update cycle", result)
+            },
+          )
+        },
+        Field::priority => {
+          mut priority = 0
+          for candidate in [0, 1, 2, 3, 4] {
+            if value == "{candidate}" {
+              priority = candidate
+            }
+          }
+          self.service.update_priority(
+            self.scope.stop.receiver(),
+            issue.id,
+            priority,
+            fn(result: Void!Str) {
+              self.finish_update(ticket, generation, "Update priority", result)
+            },
+          )
+        },
+        Field::assignee => {
+          self.service.update_assignee(
+            self.scope.stop.receiver(),
+            issue.id,
+            value,
+            fn(result: Void!Str) {
+              self.finish_update(ticket, generation, "Assign", result)
+            },
+          )
+        },
+        Field::project => {
+          self.service.update_project(
+            self.scope.stop.receiver(),
+            issue.id,
+            value,
+            fn(result: Void!Str) {
+              self.finish_update(ticket, generation, "Update project", result)
+            },
+          )
+        },
+      }
+    }
+  }
+
+  fn mut dispose() {
+    if not self.scope.disposed {
+      self.generation =+ 1
+      self.scope.dispose()
+      match self.current_ticket {
+        ticket => {
+          let _ = self.modal.close_if_current(ticket)
+        },
+        _ => (),
+      }
+      self.current_ticket = Maybe::new<modal_host::Ticket>()
+    }
+  }
+}

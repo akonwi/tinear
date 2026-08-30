@@ -6,6 +6,7 @@ use cooper/testing
 use tinear/models/issues
 use tinear/services/board_service
 use tinear/tui/board_controller
+use tinear/tui/issue_field_picker_controller
 use tinear/tui/theme
 
 private struct FakeState {
@@ -20,6 +21,10 @@ private struct ScheduledState {
 private struct Opened {
   identifier: Str,
   count: Int,
+}
+
+struct Picked {
+  names: [Str],
 }
 
 private fn fake_service(state: mut FakeState) board_service::Service {
@@ -73,6 +78,22 @@ private fn column(name: Str, position: Float64, cards: [issues::Issue]) issues::
   }
 }
 
+private fn ignore_picker(field: issue_field_picker_controller::Field, selected: issues::Issue) {}
+
+private fn shifted_key(name: Str) mut event::KeyEvent {
+  event::key(
+    name,
+    "",
+    event::KeyEventType::press,
+    event::Modifiers{
+      shift: true,
+      ctrl: false,
+      alt: false,
+      super: false,
+    },
+  )
+}
+
 private fn key(name: Str) mut event::KeyEvent {
   event::key(
     name,
@@ -102,6 +123,7 @@ test fn board_builds_nested_retained_columns_and_navigates_cards() Void!Str {
       opened.identifier = identifier
       opened.count =+ 1
     },
+    ignore_picker,
     fn(title: Str, message: Str) {},
   )
   application.root.add(controller.root)
@@ -122,10 +144,14 @@ test fn board_builds_nested_retained_columns_and_navigates_cards() Void!Str {
     "cards should be retained per column",
   )
   try testing::assert_contains(application.frame().text(), "AKO-1")
-  let header = application.frame().cell(2, 0).expect("selected column header")
+  let header = application.frame().cell(0, 0).expect("selected column header")
   try assertions::assert(
     header.style.foreground.expect("column accent").index.expect("host palette index") == Uint8::from(4),
     "selected column should use host accent",
+  )
+  try assertions::assert(
+    application.frame().cell(0, 1).expect("column separator").grapheme == "─",
+    "column separator should align with the card edge",
   )
   let selected_surface = application.frame().cell(0, 2).expect("selected card surface")
   try assertions::assert(
@@ -179,6 +205,7 @@ test fn board_refresh_preserves_selected_issue_across_column_move() Void!Str {
     fake_service(fake),
     fake_schedule(scheduled),
     fn(identifier: Str) {},
+    ignore_picker,
     fn(title: Str, message: Str) {},
   )
   application.root.add(controller.root)
@@ -226,6 +253,7 @@ test fn board_ignores_stale_load_and_handles_narrow_horizontal_navigation() Void
     fake_service(fake),
     fake_schedule(scheduled),
     fn(identifier: Str) {},
+    ignore_picker,
     fn(title: Str, message: Str) {},
   )
   application.root.add(controller.root)
@@ -251,6 +279,48 @@ test fn board_ignores_stale_load_and_handles_narrow_horizontal_navigation() Void
   testing::assert_contains(application.frame().text(), "AKO-3")
 }
 
+test fn board_routes_field_picker_commands_for_selected_issue() Void!Str {
+  let application = testing::new(60, 12)
+  defer application.destroy()
+  let fake = mut FakeState{loads: []}
+  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
+  let picked = mut Picked{names: []}
+  let controller = board_controller::new(
+    application.context,
+    theme::new(),
+    fake_service(fake),
+    fake_schedule(scheduled),
+    fn(identifier: Str) {},
+    fn(field: issue_field_picker_controller::Field, selected: issues::Issue) {
+      let name = match field {
+        issue_field_picker_controller::Field::state => "state",
+        issue_field_picker_controller::Field::cycle => "cycle",
+        issue_field_picker_controller::Field::priority => "priority",
+        issue_field_picker_controller::Field::assignee => "assignee",
+        issue_field_picker_controller::Field::project => "project",
+      }
+      picked.names.push("{name}:{selected.id}")
+    },
+    fn(title: Str, message: Str) {},
+  )
+  application.root.add(controller.root)
+  controller.start()
+  (fake.loads.at(0).expect("load"))(
+    Result::ok([column("Todo", 1.0, [issue("i1", "AKO-1", "First", "Todo")])]),
+  )
+  let _ = controller.handle_key(key("s"))
+  let _ = controller.handle_key(key("y"))
+  let _ = controller.handle_key(key("p"))
+  let _ = controller.handle_key(key("a"))
+  let _ = controller.handle_key(shifted_key("p"))
+  try assertions::assert(picked.names.size() == 5, "all field commands should route")
+  try assertions::assert(picked.names.at(0).expect("state") == "state:i1", "s should edit state")
+  try assertions::assert(picked.names.at(1).expect("cycle") == "cycle:i1", "y should edit cycle")
+  try assertions::assert(picked.names.at(2).expect("priority") == "priority:i1", "p should edit priority")
+  try assertions::assert(picked.names.at(3).expect("assignee") == "assignee:i1", "a should edit assignee")
+  assertions::assert(picked.names.at(4).expect("project") == "project:i1", "P should edit project")
+}
+
 test fn board_failed_manual_refresh_restores_existing_columns() Void!Str {
   let application = testing::new(60, 12)
   defer application.destroy()
@@ -263,6 +333,7 @@ test fn board_failed_manual_refresh_restores_existing_columns() Void!Str {
     fake_service(fake),
     fake_schedule(scheduled),
     fn(identifier: Str) {},
+    ignore_picker,
     fn(title: Str, message: Str) {
       errors.identifier = title
       errors.count =+ 1
@@ -301,6 +372,7 @@ test fn board_disposal_cancels_refresh_and_late_completion() Void!Str {
     fake_service(fake),
     fake_schedule(scheduled),
     fn(identifier: Str) {},
+    ignore_picker,
     fn(title: Str, message: Str) {},
   )
   application.root.add(controller.root)

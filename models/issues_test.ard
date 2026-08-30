@@ -184,3 +184,19 @@ test fn decode_comment_handles_bot_and_missing_authors() Void!Str {
   ).expect("parse")
   testing::assert(issues::decode_comment(human).author == "shortname", "displayName preferred")
 }
+
+test fn malformed_picker_models_return_errors_without_panicking() Void!Str {
+  let malformed_state = decode::from_json(
+    `{{"id":"state-1","name":"Todo","type":"unstarted"}}`,
+  ).expect("parse state")
+  match issues::decode_workflow_state(malformed_state) {
+    ok(_) => try testing::assert(false, "workflow state without position should fail"),
+    err(_) => (),
+  }
+
+  let malformed_cycle = decode::from_json(`{{"id":"cycle-1","name":null}}`).expect("parse cycle")
+  match issues::decode_cycle(malformed_cycle) {
+    ok(_) => testing::assert(false, "cycle without number should fail"),
+    err(_) => testing::assert(true, "malformed picker models should return errors"),
+  }
+}

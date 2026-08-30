@@ -7,6 +7,7 @@ use cooper/text
 use tinear/models/issue_state
 use tinear/models/issues
 use tinear/services/board_service
+use tinear/tui/issue_field_picker_controller
 use tinear/tui/lifecycle
 use tinear/tui/scheduler
 use tinear/tui/shell_controller
@@ -15,7 +16,7 @@ use tinear/tui/theme as tinear_theme
 let COLUMN_WIDTH: Int = 38
 let COLUMN_GAP: Int = 2
 let CARD_HEIGHT: Int = 5
-let COLUMN_RULE: Str = "────────────────────────────────────"
+let COLUMN_RULE: Str = "──────────────────────────────────────"
 
 struct CardRecord {
   issue_id: Str,
@@ -53,6 +54,7 @@ struct BoardController {
   schedule: scheduler::Schedule,
   cancel_refresh: fn(),
   on_open_issue: fn(Str),
+  on_pick_field: fn(issue_field_picker_controller::Field, issues::Issue),
   notify_error: fn(Str, Str),
   palette: tinear_theme::Theme,
 }
@@ -148,7 +150,6 @@ private fn id_content(
 private fn header_content(column: issues::BoardColumn, selected: Bool, palette: tinear_theme::Theme) text::StyledText {
   text::styled_text(
     [
-      text::span("  "),
       text::span(
         column.name,
         style: match selected {
@@ -167,6 +168,7 @@ fn new(
   service: board_service::Service,
   schedule: scheduler::Schedule,
   on_open_issue: fn(Str),
+  on_pick_field: fn(issue_field_picker_controller::Field, issues::Issue),
   notify_error: fn(Str, Str),
 ) mut BoardController {
   let root = box::new(
@@ -206,6 +208,7 @@ fn new(
     schedule: schedule,
     cancel_refresh: fn() {},
     on_open_issue: on_open_issue,
+    on_pick_field: on_pick_field,
     notify_error: notify_error,
     palette: palette,
   })
@@ -370,7 +373,7 @@ impl BoardController {
     )
     let header_rule = text::new(
       self.context,
-      content: "  {COLUMN_RULE}",
+      content: COLUMN_RULE,
       selectable: false,
       wrap: text::TextWrap::none,
       overflow: text::TextOverflow::clip,
@@ -702,6 +705,13 @@ impl BoardController {
     }
   }
 
+  private fn mut pick_selected(field: issue_field_picker_controller::Field) {
+    match self.selected_issue() {
+      issue => self.on_pick_field(field, issue),
+      _ => (),
+    }
+  }
+
   fn mut focus() {
     let _ = self.outer_scroll.focus()
   }
@@ -718,6 +728,13 @@ impl BoardController {
         received.matches("h") or received.matches("left") => self.move_horizontal(-1),
         received.matches("return") => self.open_selected(),
         received.matches("r") => self.refresh(false),
+        received.matches("s") => self.pick_selected(issue_field_picker_controller::Field::state),
+        received.matches("y") => self.pick_selected(issue_field_picker_controller::Field::cycle),
+        received.matches("p") => self.pick_selected(issue_field_picker_controller::Field::priority),
+        received.matches("a") => self.pick_selected(issue_field_picker_controller::Field::assignee),
+        received.matches("p", shift: true) => {
+          self.pick_selected(issue_field_picker_controller::Field::project)
+        },
         _ => { handled = false },
       }
       handled

@@ -74,6 +74,7 @@ private fn hints_for(model: shell_model::Model) [hints_bar::Hint] {
         hints_bar::Hint{key: "←↑↓→", label: "move"},
         hints_bar::Hint{key: "↵", label: "open"},
         hints_bar::Hint{key: "r", label: "refresh"},
+        hints_bar::Hint{key: "s/y/p/a/P", label: "edit"},
         hints_bar::Hint{key: "c", label: "new issue"},
         hints_bar::Hint{key: "?", label: "search"},
       ]

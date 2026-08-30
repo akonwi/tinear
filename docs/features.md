@@ -237,6 +237,9 @@ Each column:
 | `Enter` | Open selected issue in a new tab |
 | `s` | Open **state picker** (move issue to different workflow state) |
 | `y` | Open **cycle picker** (move issue to different cycle) |
+| `p` | Open **priority picker** |
+| `a` | Open **assignee picker** |
+| `Shift+p` | Open **project picker** |
 | `r` | Refresh board from API |
 | `?` | Open search overlay |
 
@@ -282,40 +285,31 @@ Parent: ENG-100
 
 ## 7. Pickers (modal overlays)
 
-State, cycle, and priority pickers are modal overlays that appear centered over
-the current view. They trap focus and auto-focus on open.
+State, cycle, priority, assignee, and project pickers are modal overlays that
+appear centered over the current view. They trap focus and auto-focus the filter
+input on open.
 
-### 7.1 Picker widget (`tui/picker.ard`)
+### 7.1 Picker controller (`tui/picker_controller.ard`)
 
-A reusable picker component:
+The reusable retained picker accepts options with stable IDs, labels, and
+optional searchable descriptions. It reconciles rows by ID as the filter
+changes.
 
-```ard
-struct PickerProps {
-  items: [PickerOption],
-  title: Str,
-  on_select: fn(EventContext, PickerOption),
-  on_dismiss: fn(EventContext),
-}
-struct PickerOption {
-  id: Str,
-  label: Str,
-  color: Str?,      // optional color for the option
-  current: Bool,     // true = this is the currently-selected option
-}
-```
-
-- Rendered as a bordered box with title + scrollable list.
-- Selected option is reversed video.
-- Current option (`.current = true`) shows a checkmark.
+- Rendered as a bordered modal with a filter input and scrollable result list.
+- The selected option uses the accent background; hover uses the host gray background.
+- The issue's current value seeds the initial cursor and scroll position.
+- Async option loads are stale-safe; dismissing a loading modal cancels its local request ownership.
+- Mutations show a non-dismissible progress state and refresh the board on success.
 
 ### 7.2 Keys
 
 | Key | Action |
 |---|---|
-| `j` / `Down` | Move cursor down |
-| `k` / `Up` | Move cursor up |
-| `Enter` / `Space` | Confirm selection → calls `on_select`, closes picker |
-| `Escape` | Dismiss → calls `on_dismiss`, closes picker |
+| Typing | Filter by label or description |
+| `Down` | Move cursor down |
+| `Up` | Move cursor up |
+| `Enter` | Confirm selection and start the mutation |
+| `Escape` | Dismiss the picker or an in-progress option load |
 
 ### 7.3 Picker types
 
@@ -325,9 +319,13 @@ struct PickerOption {
   Selecting a cycle calls `issues::update_cycle()`.
 - **Priority picker**: static list (Urgent, High, Medium, Low, No Priority).
   Selecting calls `issues::update_priority()`.
+- **Assignee picker**: active members for the issue's team, plus Unassigned.
+  Selecting calls `issues::update_assignee()`.
+- **Project picker**: active projects for the issue's team, plus No project.
+  Selecting calls `issues::update_project()`.
 
-After a successful mutation, the issue is re-fetched and the cached tab state
-is updated.
+After a successful board mutation, My Issues refreshes while preserving the
+selected issue by stable ID.
 
 ---
 

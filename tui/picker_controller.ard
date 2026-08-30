@@ -49,8 +49,8 @@ private fn matches(option: Option, query: Str) Bool {
 
 private fn row_height(option: Option) Int {
   match option.description.is_empty() {
-    true => 2,
-    false => 3,
+    true => 1,
+    false => 2,
   }
 }
 
@@ -183,7 +183,7 @@ impl PickerController {
       self.context,
       styles: style::new(
         width: style::cells(1),
-        height: style::cells(row_height(option) - 1),
+        height: style::cells(row_height(option)),
         flex_grow: 1.0,
         background: self.palette.background,
         padding: style::Edges{

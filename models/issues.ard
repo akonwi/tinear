@@ -298,31 +298,40 @@ fn thread_comments(comments: [Comment]) [Comment] {
   ordered.@
 }
 
-fn decode_workflow_state(raw: Any) WorkflowState {
-  WorkflowState{
-    id: decode::run(raw, decode::field("id", decode::string)).expect("Missing workflow state.id"),
-    name: normalize_text(
-      decode::run(raw, decode::field("name", decode::string)).expect("Missing workflow state.name"),
-    ),
-    state_type: decode::run(raw, decode::field("type", decode::string)).expect("Missing workflow state.type"),
-    position: decode::run(raw, decode::field("position", decode::float)).expect("Missing workflow state.position"),
+fn decode_workflow_state(raw: Any) WorkflowState!Str {
+  let id = try decode::run(raw, decode::field("id", decode::string)) -> error { Result::err(error.to_str()) }
+  let name = try decode::run(raw, decode::field("name", decode::string)) -> error { Result::err(error.to_str()) }
+  let state_type = try decode::run(raw, decode::field("type", decode::string)) -> error { Result::err(error.to_str()) }
+  let position = try decode::run(raw, decode::field("position", decode::float)) -> error {
+    Result::err(error.to_str())
   }
+  Result::ok(
+    WorkflowState{
+      id: id,
+      name: normalize_text(name),
+      state_type: state_type,
+      position: position,
+    },
+  )
 }
 
-fn decode_cycle(raw: Any) Cycle {
-  let name = decode::run(
-    raw,
-    decode::field("name", decode::nullable(decode::string)),
-  ).expect("Missing cycle.name")
-  Cycle{
-    id: decode::run(raw, decode::field("id", decode::string)).expect("Missing cycle.id"),
-    number: decode::run(raw, decode::field("number", decode::int)).expect("Missing cycle.number"),
-    name: match name {
-      n => normalize_text(n),
-      _ => "",
-    },
-    starts_at: optional_str(raw, "startsAt", ""),
+fn decode_cycle(raw: Any) Cycle!Str {
+  let id = try decode::run(raw, decode::field("id", decode::string)) -> error { Result::err(error.to_str()) }
+  let number = try decode::run(raw, decode::field("number", decode::int)) -> error { Result::err(error.to_str()) }
+  let name = try decode::run(raw, decode::field("name", decode::nullable(decode::string))) -> error {
+    Result::err(error.to_str())
   }
+  Result::ok(
+    Cycle{
+      id: id,
+      number: number,
+      name: match name {
+        n => normalize_text(n),
+        _ => "",
+      },
+      starts_at: optional_str(raw, "startsAt", ""),
+    },
+  )
 }
 
 fn fetch_viewer(api_key: Str) Any!Str {
@@ -334,10 +343,9 @@ fn fetch_viewer(api_key: Str) Any!Str {
 fn update_state(api_key: Str, issue_id: Str, state_id: Str) Void!Str {
   let mutation = `mutation {{ issueUpdate(id: {client::string_literal(issue_id)}, input: {{ stateId: {client::string_literal(state_id)} }}) {{ success }} }}`
   let data = try client::graphql(api_key, mutation)
-  let success = decode::run(
-    data,
-    decode::path(["issueUpdate", "success"], decode::boolean),
-  ).expect("Missing issueUpdate.success")
+  let success = try decode::run(data, decode::path(["issueUpdate", "success"], decode::boolean)) -> error {
+    Result::err(error.to_str())
+  }
   match success {
     true => Result::ok(()),
     false => Result::err("issueUpdate returned success=false"),
@@ -348,10 +356,9 @@ fn update_cycle(api_key: Str, issue_id: Str, cycle_id: Str) Void!Str {
   let cycle_value = client::nullable_string_literal(cycle_id)
   let mutation = `mutation {{ issueUpdate(id: {client::string_literal(issue_id)}, input: {{ cycleId: {cycle_value} }}) {{ success }} }}`
   let data = try client::graphql(api_key, mutation)
-  let success = decode::run(
-    data,
-    decode::path(["issueUpdate", "success"], decode::boolean),
-  ).expect("Missing issueUpdate.success")
+  let success = try decode::run(data, decode::path(["issueUpdate", "success"], decode::boolean)) -> error {
+    Result::err(error.to_str())
+  }
   match success {
     true => Result::ok(()),
     false => Result::err("issueUpdate returned success=false"),
@@ -391,21 +398,19 @@ fn fetch_issue_comments(api_key: Str, issue_id: Str) [Any]!Str {
 fn fetch_team_states(api_key: Str, team_id: Str) [Any]!Str {
   let query = `query {{ team(id: {client::string_literal(team_id)}) {{ states {{ nodes {{ id name type position }} }} }} }}`
   let data = try client::graphql(api_key, query)
-  let nodes = decode::run(
-    data,
-    decode::path(["team", "states", "nodes"], decode::list(decode::any)),
-  ).expect("Missing team.states.nodes")
+  let nodes = try decode::run(data, decode::path(["team", "states", "nodes"], decode::list(decode::any))) -> error {
+    Result::err(error.to_str())
+  }
   Result::ok(nodes)
 }
 
 fn fetch_team_cycles(api_key: Str, team_id: Str) TeamCyclesResult!Str {
   let query = `query {{ team(id: {client::string_literal(team_id)}) {{ activeCycle {{ number }} cycles(first: 50) {{ nodes {{ id number name startsAt }} }} }} }}`
   let data = try client::graphql(api_key, query)
-  let team_obj = decode::run(data, decode::field("team", decode::any)).expect("Missing team")
-  let nodes = decode::run(
-    team_obj,
-    decode::path(["cycles", "nodes"], decode::list(decode::any)),
-  ).expect("Missing team.cycles.nodes")
+  let team_obj = try decode::run(data, decode::field("team", decode::any)) -> error { Result::err(error.to_str()) }
+  let nodes = try decode::run(team_obj, decode::path(["cycles", "nodes"], decode::list(decode::any))) -> error {
+    Result::err(error.to_str())
+  }
 
   let active_number = match decode::run(team_obj, decode::path(["activeCycle", "number"], decode::nullable(decode::int))) {
     ok(value) => value,
@@ -414,7 +419,7 @@ fn fetch_team_cycles(api_key: Str, team_id: Str) TeamCyclesResult!Str {
 
   let cycles: mut [Cycle] = mut []
   for raw in nodes {
-    cycles.push(decode_cycle(raw))
+    cycles.push(try decode_cycle(raw))
   }
   Result::ok(TeamCyclesResult{active_cycle_number: active_number, cycles: cycles.@})
 }
@@ -559,7 +564,7 @@ fn load_team_states(api_key: Str, team_id: Str) [WorkflowState]!Str {
   let raw_states = try fetch_team_states(api_key, team_id)
   let states: mut [WorkflowState] = mut []
   for raw in raw_states {
-    states.push(decode_workflow_state(raw))
+    states.push(try decode_workflow_state(raw))
   }
   Result::ok(states.@)
 }

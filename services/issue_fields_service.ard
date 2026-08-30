@@ -1,0 +1,146 @@
+use ard/async
+
+use cooper/context
+use tinear/models/issues
+
+type LoadStates = fn(Receiver<Bool>, Str, fn([issues::WorkflowState]!Str))
+type LoadCycles = fn(Receiver<Bool>, Str, fn(issues::TeamCyclesResult!Str))
+type LoadMembers = fn(Receiver<Bool>, Str, fn([issues::Member]!Str))
+type LoadProjects = fn(Receiver<Bool>, Str, fn([issues::Project]!Str))
+type UpdateStringField = fn(Receiver<Bool>, Str, Str, fn(Void!Str))
+type UpdatePriority = fn(Receiver<Bool>, Str, Int, fn(Void!Str))
+
+struct Service {
+  load_states: LoadStates,
+  load_cycles: LoadCycles,
+  load_members: LoadMembers,
+  load_projects: LoadProjects,
+  update_state: UpdateStringField,
+  update_cycle: UpdateStringField,
+  update_priority: UpdatePriority,
+  update_assignee: UpdateStringField,
+  update_project: UpdateStringField,
+}
+
+private fn cancelled(app: Receiver<Void>, view: Receiver<Bool>) Bool {
+  select {
+    app.recv() => true,
+    view.recv() => true,
+    _ => false,
+  }
+}
+
+fn live(ctx: mut context::Context, api_key: Str) Service {
+  let app_cancellation = ctx.cancellation
+  let dispatch = ctx.dispatch
+  Service{
+    load_states: fn(view_cancellation: Receiver<Bool>, team_id: Str, completion: fn([issues::WorkflowState]!Str)) {
+      async::start(fn() {
+        if not cancelled(app_cancellation, view_cancellation) {
+          let result = issues::load_team_states(api_key, team_id)
+          if not cancelled(app_cancellation, view_cancellation) {
+            let _ = dispatch(fn() {
+              completion(result)
+            })
+          }
+        }
+      })
+    },
+    load_cycles: fn(view_cancellation: Receiver<Bool>, team_id: Str, completion: fn(issues::TeamCyclesResult!Str)) {
+      async::start(fn() {
+        if not cancelled(app_cancellation, view_cancellation) {
+          let result = issues::load_team_cycles(api_key, team_id)
+          if not cancelled(app_cancellation, view_cancellation) {
+            let _ = dispatch(fn() {
+              completion(result)
+            })
+          }
+        }
+      })
+    },
+    load_members: fn(view_cancellation: Receiver<Bool>, team_id: Str, completion: fn([issues::Member]!Str)) {
+      async::start(fn() {
+        if not cancelled(app_cancellation, view_cancellation) {
+          let result = issues::fetch_team_members(api_key, team_id)
+          if not cancelled(app_cancellation, view_cancellation) {
+            let _ = dispatch(fn() {
+              completion(result)
+            })
+          }
+        }
+      })
+    },
+    load_projects: fn(view_cancellation: Receiver<Bool>, team_id: Str, completion: fn([issues::Project]!Str)) {
+      async::start(fn() {
+        if not cancelled(app_cancellation, view_cancellation) {
+          let result = issues::fetch_team_projects(api_key, team_id)
+          if not cancelled(app_cancellation, view_cancellation) {
+            let _ = dispatch(fn() {
+              completion(result)
+            })
+          }
+        }
+      })
+    },
+    update_state: fn(view_cancellation: Receiver<Bool>, issue_id: Str, state_id: Str, completion: fn(Void!Str)) {
+      async::start(fn() {
+        if not cancelled(app_cancellation, view_cancellation) {
+          let result = issues::update_state(api_key, issue_id, state_id)
+          if not cancelled(app_cancellation, view_cancellation) {
+            let _ = dispatch(fn() {
+              completion(result)
+            })
+          }
+        }
+      })
+    },
+    update_cycle: fn(view_cancellation: Receiver<Bool>, issue_id: Str, cycle_id: Str, completion: fn(Void!Str)) {
+      async::start(fn() {
+        if not cancelled(app_cancellation, view_cancellation) {
+          let result = issues::update_cycle(api_key, issue_id, cycle_id)
+          if not cancelled(app_cancellation, view_cancellation) {
+            let _ = dispatch(fn() {
+              completion(result)
+            })
+          }
+        }
+      })
+    },
+    update_priority: fn(view_cancellation: Receiver<Bool>, issue_id: Str, priority: Int, completion: fn(Void!Str)) {
+      async::start(fn() {
+        if not cancelled(app_cancellation, view_cancellation) {
+          let result = issues::update_priority(api_key, issue_id, priority)
+          if not cancelled(app_cancellation, view_cancellation) {
+            let _ = dispatch(fn() {
+              completion(result)
+            })
+          }
+        }
+      })
+    },
+    update_assignee: fn(view_cancellation: Receiver<Bool>, issue_id: Str, assignee_id: Str, completion: fn(Void!Str)) {
+      async::start(fn() {
+        if not cancelled(app_cancellation, view_cancellation) {
+          let result = issues::update_assignee(api_key, issue_id, assignee_id)
+          if not cancelled(app_cancellation, view_cancellation) {
+            let _ = dispatch(fn() {
+              completion(result)
+            })
+          }
+        }
+      })
+    },
+    update_project: fn(view_cancellation: Receiver<Bool>, issue_id: Str, project_id: Str, completion: fn(Void!Str)) {
+      async::start(fn() {
+        if not cancelled(app_cancellation, view_cancellation) {
+          let result = issues::update_project(api_key, issue_id, project_id)
+          if not cancelled(app_cancellation, view_cancellation) {
+            let _ = dispatch(fn() {
+              completion(result)
+            })
+          }
+        }
+      })
+    },
+  }
+}

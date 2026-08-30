@@ -233,8 +233,9 @@ tui/tab_bar.ard
 - [x] Reconcile columns/cards by stable IDs and use `scroll_child_into_view`.
 - [x] Restore card rendering, ordering, navigation, opening, manual refresh, and periodic refresh.
 - [x] Build the app-local filterable picker controller.
-- [ ] Restore state, cycle, priority, assignee, and project pickers/mutations.
-- [ ] Benchmark the bounded 200-issue workload before considering app-local virtualization.
+- [x] Restore state, cycle, priority, assignee, and project pickers/mutations.
+- [x] Benchmark the bounded 200-issue workload before considering app-local virtualization.
+  - `ard run benchmarks/board_200.ard`: 200 cards / 10 columns measured ~6.5 ms construction, ~6.6 ms initial render, ~7.0 ms per rendered navigation, and ~10.2 ms narrow resize on the development machine. Keep eager retained cards; virtualization is not warranted yet.
 
 **Exit criteria:** board navigation, nested scrolling, cursor preservation, every picker, and every mutation path pass TestApp coverage at narrow and wide sizes.
 
