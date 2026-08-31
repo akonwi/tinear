@@ -16,6 +16,7 @@ use tinear/services/board_service
 use tinear/services/cache_writer
 use tinear/services/document_detail_service
 use tinear/services/inbox_service
+use tinear/services/issue_creation_service
 use tinear/services/issue_detail_service
 use tinear/services/issue_edit_service
 use tinear/services/issue_fields_service
@@ -24,6 +25,7 @@ use tinear/tui/application_shell
 use tinear/tui/board_controller
 use tinear/tui/document_detail_controller
 use tinear/tui/inbox_controller
+use tinear/tui/issue_creation_controller
 use tinear/tui/issue_detail_controller
 use tinear/tui/issue_editor_controller
 use tinear/tui/issue_field_picker_controller
@@ -282,6 +284,25 @@ private fn show_logged_in(
   actions.open_picker = fn(field: issue_field_picker_controller::Field, issue: issues::Issue) {
     field_pickers.open(field, issue)
   }
+  let creation = issue_creation_controller::new(
+    ctx,
+    application_shell.modal,
+    palette,
+    issue_creation_service::live(ctx, api_key),
+    fn() {
+      actions.focus_shell()
+    },
+    fn(title: Str, message: Str, success: Bool) {
+      let variant = match success {
+        true => toast_host::Variant::success,
+        false => toast_host::Variant::error,
+      }
+      let _ = application_shell.toasts.show(title, message, variant, 4000)
+    },
+    fn(identifier: Str) {
+      actions.open_issue(identifier)
+    },
+  )
   let search = search_controller::new(
     application_shell.modal,
     palette,
@@ -324,6 +345,7 @@ private fn show_logged_in(
       writer.persist(snapshot)
     },
     fn() {
+      creation.dispose()
       search.dispose()
       field_pickers.dispose()
       writer.dispose()
@@ -332,12 +354,7 @@ private fn show_logged_in(
       search.open(ctx)
     },
     fn() {
-      let _ = application_shell.toasts.show(
-        "Create issue",
-        "Issue creation will follow the Inbox and board ports",
-        toast_host::Variant::info,
-        2500,
-      )
+      creation.open()
     },
   )
   application_shell.set_screen(controller.root, fn() {

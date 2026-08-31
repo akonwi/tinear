@@ -355,6 +355,15 @@ Opened with `?` from any tab.
 - Selecting a result opens or reuses its issue/document tab and closes search.
 - Escape dismisses search and cancels pending work.
 
+### 8.1 Issue creation
+
+Press `c` from Inbox or My Issues to open the retained creation flow. Tinear
+loads workspace teams first: one team advances directly to the form, multiple
+teams show a picker, and no teams reports an error. The form requires a title
+and accepts an optional multiline description. `Tab` switches fields and
+`Ctrl+Enter` creates the issue. Submission guards duplicate input and modal
+dismissal; success shows a toast and opens the new issue tab.
+
 ---
 
 ## 9. Global keys (logged-in screen)

@@ -12,10 +12,10 @@ scratchpad; durable architectural decisions should be recorded as ADRs.
 
 ## Status snapshot
 
-- **Current implementation focus:** finish Phase 8 issue creation, then enter Phase 9 parity hardening.
-- **Feature slices complete:** authentication, shell/cache, Inbox, My Issues, field picker/mutation flows, Markdown, issue details/comments/editing, document details, and global search.
+- **Current implementation focus:** Phase 9 parity hardening and the remaining explicit Phase 0/1 framework and transport gates.
+- **Feature slices complete:** authentication, shell/cache, Inbox, My Issues, field picker/mutation flows, Markdown, issue details/comments/editing, document details, global search, and issue creation.
 - **Open framework/foundation gates:** remotely pin Cooper, terminal-title parity, optional terminal-browser app mode, transport injection/limits, fallible decoder cleanup, and true HTTP cancellation.
-- **Latest validation:** `ard check main.ard`, `ard build main.ard`, 117 Ard tests, and Go Markdown parser tests pass.
+- **Latest validation:** `ard check main.ard`, `ard build main.ard`, 121 Ard tests, and Go Markdown parser tests pass.
 
 ## Parity ledger
 
@@ -115,14 +115,14 @@ scratchpad; durable architectural decisions should be recorded as ADRs.
 - [x] One failed search source yields a warning with surviving results; both failing yields an error.
 - [x] Search supports loading, empty-query, no-results, and error states.
 - [x] Enter/mouse opens or reuses the correct dynamic tab and closes search.
-- [ ] `c` from Inbox/My Issues starts issue creation.
-- [ ] Creation loads teams: zero reports failure, one advances directly, many show team selection.
-- [ ] Creation requires a title, accepts an optional multiline Markdown description, and blocks duplicate/dismissed in-flight submission.
-- [ ] Successful creation shows a toast and opens the new issue tab.
+- [x] `c` from Inbox/My Issues starts issue creation.
+- [x] Creation loads teams: zero reports failure, one advances directly, many show team selection.
+- [x] Creation requires a title, accepts an optional multiline Markdown description, and blocks duplicate/dismissed in-flight submission.
+- [x] Successful creation shows a toast and opens the new issue tab.
 
 ## Delivery roadmap
 
-**Current focus:** finish Phase 8 issue creation while carrying the explicit Phase 0/1 framework and transport gates into Phase 9.
+**Current focus:** Phase 9 parity hardening, including the remaining explicit Phase 0/1 framework and transport gates.
 
 ### Phase 0 — Contract and Cooper integration gates
 
@@ -280,8 +280,8 @@ coherent language instead of extending the bare parity styling.
 
 - [x] Build search modal Input/results viewport.
 - [x] Restore debounce, generation checks, merged issue/document results, partial-failure warning, navigation, and open behavior.
-- [ ] Build issue creation as one modal-owned retained state machine.
-- [ ] Restore team selection, title/description form, submission chords, guarded dismissal, toasts, and tab opening.
+- [x] Build issue creation as one modal-owned retained state machine.
+- [x] Restore team selection, title/description form, submission chords, guarded dismissal, toasts, and tab opening.
 
 **Exit criteria:** deterministic tests cover stale search, all search states, zero/one/many teams, validation, duplicate submission prevention, dismissal races, and successful creation.
 

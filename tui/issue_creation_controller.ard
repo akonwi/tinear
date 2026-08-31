@@ -1,0 +1,509 @@
+use cooper/box
+use cooper/context
+use cooper/event
+use cooper/input
+use cooper/style
+use cooper/text
+use cooper/text_area
+use tinear/models/issues
+use tinear/services/issue_creation_service
+use tinear/tui/lifecycle
+use tinear/tui/modal_host
+use tinear/tui/picker_controller
+use tinear/tui/theme as tinear_theme
+
+private fn begin_submission(guard: Chan<Bool>) Bool {
+  select {
+    guard.sender().send(true) => true,
+    _ => false,
+  }
+}
+
+private fn clear_submission(guard: Chan<Bool>) {
+  select {
+    guard.receiver().recv() => (),
+    _ => (),
+  }
+}
+
+private fn submission_active(guard: Chan<Bool>) Bool {
+  mut active = false
+  select {
+    guard.receiver().recv() => {
+      active = true
+      guard.sender().send(true)
+    },
+    _ => (),
+  }
+  active
+}
+
+private fn submit_chord(received: mut event::KeyEvent) Bool {
+  received.matches("return", ctrl: true) or received.matches("m", ctrl: true) or received.matches("j", ctrl: true)
+}
+
+private struct CreationForm {
+  root: mut box::Box,
+  title: mut input::Input,
+  description: mut text_area::TextArea,
+  status: mut text::Text,
+  listeners: [fn()],
+  disposed: Bool,
+}
+
+impl CreationForm {
+  fn mut dispose() {
+    if not self.disposed {
+      self.disposed = true
+      for remove in self.listeners {
+        remove()
+      }
+      self.listeners = []
+    }
+  }
+}
+
+private struct CreationSession {
+  root: mut box::Box,
+  context: mut context::Context,
+  modal: mut modal_host::ModalHost,
+  palette: tinear_theme::Theme,
+  service: issue_creation_service::Service,
+  scope: mut lifecycle::Scope,
+  ticket: modal_host::Ticket?,
+  stage_root: (mut box::Box)?,
+  stage_dispose: fn(),
+  form: (mut CreationForm)?,
+  selected_team: issues::Team?,
+  submit_guard: Chan<Bool>,
+  notify: fn(Str, Str, Bool),
+  on_created: fn(Str),
+}
+
+private fn new_session(
+  ctx: mut context::Context,
+  modal: mut modal_host::ModalHost,
+  palette: tinear_theme::Theme,
+  service: issue_creation_service::Service,
+  notify: fn(Str, Str, Bool),
+  on_created: fn(Str),
+) mut CreationSession {
+  let root = box::new(
+    ctx,
+    styles: style::new(
+      width: style::percent(100.0),
+      height: style::cells(12),
+      flex_direction: style::FlexDirection::column,
+      overflow: style::Overflow::hidden,
+    ),
+  )
+  (mut CreationSession{
+    root: root,
+    context: ctx,
+    modal: modal,
+    palette: palette,
+    service: service,
+    scope: lifecycle::new(),
+    ticket: Maybe::new<modal_host::Ticket>(),
+    stage_root: Maybe::new<mut box::Box>(),
+    stage_dispose: fn() {},
+    form: Maybe::new<mut CreationForm>(),
+    selected_team: Maybe::new<issues::Team>(),
+    submit_guard: Chan::new<Bool>(1),
+    notify: notify,
+    on_created: on_created,
+  })
+}
+
+impl CreationSession {
+  private fn mut replace_stage(next: mut box::Box, dispose: fn()) {
+    let previous = self.stage_root
+    let previous_dispose = self.stage_dispose
+    self.stage_root = Maybe::new<mut box::Box>(next)
+    self.stage_dispose = dispose
+    match previous {
+      root => {
+        let _ = self.root.remove(root)
+      },
+      _ => (),
+    }
+    previous_dispose()
+    match previous {
+      root => root.destroy(recursive: true),
+      _ => (),
+    }
+    self.root.add(next)
+  }
+
+  private fn mut close_with_error(message: Str) {
+    match self.ticket {
+      ticket => {
+        let _ = self.modal.close_if_current(ticket)
+      },
+      _ => (),
+    }
+    self.notify("New issue", message, false)
+  }
+
+  private fn mut show_loading() {
+    let loading = box::new(
+      self.context,
+      styles: style::new(
+        width: style::percent(100.0),
+        height: style::percent(100.0),
+        align_items: style::Align::center,
+        justify_content: style::Justify::center,
+      ),
+    )
+    loading.add(
+      text::new(
+        self.context,
+        content: "Loading teams…",
+        selectable: false,
+        text_style: text::style(dim: true),
+      ),
+    )
+    self.replace_stage(loading, fn() {})
+    self.modal.title_text.set_content("New issue")
+    self.modal.footer_text.set_content("Esc cancel")
+  }
+
+  private fn mut show_team_picker(teams: [issues::Team]) {
+    let options = mut List::new<picker_controller::Option>()
+    for team in teams {
+      options.push(
+        picker_controller::Option{
+          id: team.id,
+          label: "{team.name} ({team.key})",
+          description: "",
+        },
+      )
+    }
+    let picker = picker_controller::new(
+      self.context,
+      self.palette,
+      "Filter teams",
+      options.@,
+      "",
+      fn(option: picker_controller::Option) {
+        for team in teams {
+          if team.id == option.id {
+            self.show_form(team)
+          }
+        }
+      },
+    )
+    self.form = Maybe::new<mut CreationForm>()
+    self.replace_stage(picker.root, fn() {
+      picker.dispose()
+    })
+    self.modal.title_text.set_content("New issue — choose team")
+    self.modal.footer_text.set_content("↑↓ select   Enter confirm   Esc cancel")
+    let _ = picker.focus()
+  }
+
+  private fn mut set_form_status(form: mut CreationForm, message: Str, danger: Bool) {
+    form.status.set_content(message)
+    form.status.set_text_style(
+      match danger {
+        true => text::style(foreground: self.palette.danger, bold: true),
+        false => text::style(dim: true),
+      },
+    )
+  }
+
+  private fn mut handle_form_key(form: mut CreationForm, received: mut event::KeyEvent) {
+    if received.event_type != event::KeyEventType::release {
+      if submission_active(self.submit_guard) {
+        received.prevent_default()
+        received.stop_propagation()
+      } else if submit_chord(received) {
+        self.submit(form)
+        received.prevent_default()
+        received.stop_propagation()
+      }
+    }
+  }
+
+  private fn mut handle_title_key(form: mut CreationForm, received: mut event::KeyEvent) {
+    if received.event_type != event::KeyEventType::release and (received.matches("tab") or received.matches("tab", shift: true)) and (not submission_active(self.submit_guard)) {
+      let _ = form.description.focus()
+      received.prevent_default()
+      received.stop_propagation()
+    } else {
+      self.handle_form_key(form, received)
+    }
+  }
+
+  private fn mut handle_description_key(form: mut CreationForm, received: mut event::KeyEvent) {
+    if received.event_type != event::KeyEventType::release and (received.matches("tab") or received.matches("tab", shift: true)) and (not submission_active(self.submit_guard)) {
+      let _ = form.title.focus()
+      received.prevent_default()
+      received.stop_propagation()
+    } else {
+      self.handle_form_key(form, received)
+    }
+  }
+
+  private fn mut handle_form_paste(received: mut event::PasteEvent) {
+    if submission_active(self.submit_guard) {
+      received.prevent_default()
+      received.stop_propagation()
+    }
+  }
+
+  private fn mut show_form(team: issues::Team) {
+    self.selected_team = Maybe::new(team)
+    let root = box::new(
+      self.context,
+      styles: style::new(
+        width: style::percent(100.0),
+        height: style::cells(12),
+        flex_direction: style::FlexDirection::column,
+      ),
+    )
+    let title_label = text::new(
+      self.context,
+      content: "Title",
+      selectable: false,
+      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+      text_style: text::style(dim: true),
+    )
+    let title = input::new(
+      self.context,
+      placeholder: "Issue title…",
+      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+    )
+    let spacer = box::new(
+      self.context,
+      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+    )
+    let description_label = text::new(
+      self.context,
+      content: "Description (optional)",
+      selectable: false,
+      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+      text_style: text::style(dim: true),
+    )
+    let description = text_area::new(
+      self.context,
+      placeholder: "Add details…",
+      styles: style::new(width: style::percent(100.0), height: style::cells(7), flex_shrink: 0.0),
+    )
+    let status = text::new(
+      self.context,
+      content: "",
+      selectable: false,
+      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+      text_style: text::style(dim: true),
+    )
+    root.add(title_label)
+    root.add(title)
+    root.add(spacer)
+    root.add(description_label)
+    root.add(description)
+    root.add(status)
+    let form = mut CreationForm{
+      root: root,
+      title: title,
+      description: description,
+      status: status,
+      listeners: [],
+      disposed: false,
+    }
+    form.listeners.push(
+      title.on_input(fn(value: Str) {
+        if not submission_active(self.submit_guard) {
+          self.set_form_status(form, "", false)
+        }
+      }),
+    )
+    form.listeners.push(
+      title.on_key(fn(received: mut event::KeyEvent) {
+        self.handle_title_key(form, received)
+      }),
+    )
+    form.listeners.push(
+      description.on_key(fn(received: mut event::KeyEvent) {
+        self.handle_description_key(form, received)
+      }),
+    )
+    form.listeners.push(
+      title.on_paste(fn(received: mut event::PasteEvent) {
+        self.handle_form_paste(received)
+      }),
+    )
+    form.listeners.push(
+      description.on_paste(fn(received: mut event::PasteEvent) {
+        self.handle_form_paste(received)
+      }),
+    )
+    self.form = Maybe::new(form)
+    self.replace_stage(root, fn() {
+      form.dispose()
+    })
+    self.modal.title_text.set_content("New issue — {team.name}")
+    self.modal.footer_text.set_content("Tab next field   Ctrl+Enter create   Esc cancel")
+    let _ = title.focus()
+  }
+
+  private fn mut finish_create(form: mut CreationForm, result: Str!Str) {
+    clear_submission(self.submit_guard)
+    if not self.scope.disposed {
+      match result {
+        ok(identifier) => {
+          match self.ticket {
+            ticket => {
+              let _ = self.modal.close_if_current(ticket)
+            },
+            _ => (),
+          }
+          self.notify("Issue created", identifier, true)
+          if not identifier.trim().is_empty() {
+            self.on_created(identifier.trim())
+          }
+        },
+        err(message) => self.set_form_status(form, message, true),
+      }
+    }
+  }
+
+  private fn mut submit(form: mut CreationForm) {
+    let title = form.title.value().trim()
+    if title.is_empty() {
+      self.set_form_status(form, "Title is required", true)
+    } else {
+      match self.selected_team {
+        team => {
+          if begin_submission(self.submit_guard) {
+            self.set_form_status(form, "Creating…", false)
+            let description = form.description.value()
+            let generation = self.scope.begin_request()
+            self.service.create_issue(
+              self.scope.stop.receiver(),
+              team.id,
+              title,
+              description,
+              fn(result: Str!Str) {
+                if self.scope.is_current(generation) {
+                  self.finish_create(form, result)
+                }
+              },
+            )
+          }
+        },
+        _ => self.set_form_status(form, "Select a team", true),
+      }
+    }
+  }
+
+  fn mut start() {
+    if not self.scope.disposed {
+      self.show_loading()
+      let generation = self.scope.begin_request()
+      self.service.load_teams(self.scope.stop.receiver(), fn(result: [issues::Team]!Str) {
+        if self.scope.is_current(generation) {
+          match result {
+            ok(teams) => {
+              match teams.size() {
+                0 => self.close_with_error("No teams found in this workspace"),
+                1 => self.show_form(teams.at(0).expect("one team")),
+                _ => self.show_team_picker(teams),
+              }
+            },
+            err(message) => self.close_with_error(message),
+          }
+        }
+      })
+    }
+  }
+
+  fn mut dispose() {
+    if not self.scope.disposed {
+      self.scope.dispose()
+      self.stage_dispose()
+      self.stage_dispose = fn() {}
+      self.form = Maybe::new<mut CreationForm>()
+    }
+  }
+}
+
+struct Controller {
+  context: mut context::Context,
+  modal: mut modal_host::ModalHost,
+  palette: tinear_theme::Theme,
+  service: issue_creation_service::Service,
+  restore_focus: fn(),
+  notify: fn(Str, Str, Bool),
+  on_created: fn(Str),
+  current_ticket: modal_host::Ticket?,
+  disposed: Bool,
+}
+
+fn new(
+  ctx: mut context::Context,
+  modal: mut modal_host::ModalHost,
+  palette: tinear_theme::Theme,
+  service: issue_creation_service::Service,
+  restore_focus: fn(),
+  notify: fn(Str, Str, Bool),
+  on_created: fn(Str),
+) mut Controller {
+  (mut Controller{
+    context: ctx,
+    modal: modal,
+    palette: palette,
+    service: service,
+    restore_focus: restore_focus,
+    notify: notify,
+    on_created: on_created,
+    current_ticket: Maybe::new<modal_host::Ticket>(),
+    disposed: false,
+  })
+}
+
+impl Controller {
+  fn mut open() {
+    if not self.disposed and not self.modal.is_open() {
+      let session = new_session(
+        self.context,
+        self.modal,
+        self.palette,
+        self.service,
+        self.notify,
+        self.on_created,
+      )
+      let ticket = self.modal.present(
+        "New issue",
+        session.root,
+        "Esc cancel",
+        fn() {
+          session.dispose()
+        },
+        fn() {
+          let _ = session.root.focus()
+        },
+        self.restore_focus,
+        fn() Bool {
+          not submission_active(session.submit_guard)
+        },
+      )
+      session.ticket = Maybe::new(ticket)
+      self.current_ticket = Maybe::new(ticket)
+      session.start()
+    }
+  }
+
+  fn mut dispose() {
+    if not self.disposed {
+      self.disposed = true
+      match self.current_ticket {
+        ticket => {
+          let _ = self.modal.close_if_current(ticket)
+        },
+        _ => (),
+      }
+      self.current_ticket = Maybe::new<modal_host::Ticket>()
+    }
+  }
+}

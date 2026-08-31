@@ -774,6 +774,27 @@ struct Team {
   key: Str,
 }
 
+private fn validate_team_identity(id: Str, key: Str) Void!Str {
+  match id.trim().is_empty() or key.trim().is_empty() {
+    true => Result::err("Team identity cannot be empty"),
+    false => Result::ok(()),
+  }
+}
+
+fn try_decode_team(raw: Any) Team!Str {
+  let id = try decode::run(raw, decode::field("id", decode::string)) -> error { Result::err(error.to_str()) }
+  let name = try decode::run(raw, decode::field("name", decode::string)) -> error { Result::err(error.to_str()) }
+  let key = try decode::run(raw, decode::field("key", decode::string)) -> error { Result::err(error.to_str()) }
+  try validate_team_identity(id, key)
+  Result::ok(
+    Team{
+      id: id,
+      name: normalize_text(name),
+      key: key,
+    },
+  )
+}
+
 fn fetch_teams(api_key: Str) [Team]!Str {
   // first: 250 is Linear's page-size cap; workspaces beyond that need
   // pagination (unlikely for now, but the default page is smaller).
@@ -784,16 +805,7 @@ fn fetch_teams(api_key: Str) [Team]!Str {
   }
   let teams: mut [Team] = mut []
   for node in nodes {
-    let id = try decode::run(node, decode::field("id", decode::string)) -> e { Result::err(e.to_str()) }
-    let name = try decode::run(node, decode::field("name", decode::string)) -> e { Result::err(e.to_str()) }
-    let key = try decode::run(node, decode::field("key", decode::string)) -> e { Result::err(e.to_str()) }
-    teams.push(
-      Team{
-        id: id,
-        name: normalize_text(name),
-        key: key,
-      },
-    )
+    teams.push(try try_decode_team(node))
   }
   Result::ok(teams.@)
 }
@@ -815,9 +827,12 @@ fn create_issue(api_key: Str, team_id: Str, title: Str, description: Str) Str!St
     // GraphQL errors, which client::graphql already extracts; a bare
     // success=false without one is unexpected.
     true => {
-      let identifier = try decode::run(data, decode::path(["issueCreate", "issue", "identifier"], decode::string)) -> e {
-        Result::err(e.to_str())
-      }
+      // The mutation already landed when success=true. Missing response
+      // metadata must not make the form retry and create a duplicate issue.
+      let identifier = decode::run(
+        data,
+        decode::path(["issueCreate", "issue", "identifier"], decode::string),
+      ).or("").trim()
       Result::ok(identifier)
     },
     false => Result::err("Linear rejected the issue (no error detail returned)"),

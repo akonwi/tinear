@@ -53,7 +53,12 @@ fn new(ctx: mut context::Context, palette: tinear_theme::Theme) mut ModalHost {
       border: style::Border::rounded,
       border_color: palette.accent,
       flex_direction: style::FlexDirection::column,
-      padding: style::edges(style::cells(1)),
+      padding: style::Edges{
+        top: style::cells(0),
+        right: style::cells(1),
+        bottom: style::cells(0),
+        left: style::cells(1),
+      },
       gap: style::cells(1),
     ),
   )

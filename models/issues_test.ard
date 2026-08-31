@@ -195,6 +195,11 @@ test fn decode_comment_handles_bot_and_missing_authors() Void!Str {
   testing::assert(issues::decode_comment(human).author == "shortname", "displayName preferred")
 }
 
+test fn malformed_team_identity_returns_error_without_panicking() Void!Str {
+  let malformed = decode::from_json(`{{"id":"", "name":"Core", "key":"AKO"}}`).expect("parse team")
+  testing::assert(issues::try_decode_team(malformed).is_err(), "empty team IDs should be rejected")
+}
+
 test fn malformed_picker_models_return_errors_without_panicking() Void!Str {
   let malformed_state = decode::from_json(
     `{{"id":"state-1","name":"Todo","type":"unstarted"}}`,
