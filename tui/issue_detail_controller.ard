@@ -14,6 +14,7 @@ use tinear/tui/markdown_controller
 use tinear/tui/scheduler
 use tinear/tui/shell_controller
 use tinear/tui/theme as tinear_theme
+use tinear/tui/timestamp
 
 let DESCRIPTION_SECTION: Int = 0
 let COMMENTS_SECTION: Int = 1
@@ -395,7 +396,7 @@ impl IssueDetailController {
     let root = box::new(self.context, styles: comment_style(comment, false, false, self.palette))
     let header = text::new(
       self.context,
-      content: "{comment.author}  {comment.created_at}",
+      content: "{comment.author}  {timestamp::friendly(comment.created_at)}",
       selectable: true,
       styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
       text_style: text::style(bold: true),
@@ -442,7 +443,7 @@ impl IssueDetailController {
         _ => self.create_comment(comment),
       }
       record.root.set_style(comment_style(comment, false, false, self.palette))
-      record.header.set_content("{comment.author}  {comment.created_at}")
+      record.header.set_content("{comment.author}  {timestamp::friendly(comment.created_at)}")
       record.body.set_source(comment.body)
       self.comments_root.add(record.root)
       next.push(record)

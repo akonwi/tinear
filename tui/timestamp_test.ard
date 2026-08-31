@@ -1,0 +1,25 @@
+use ard/testing as assertions
+
+use tinear/tui/timestamp
+
+test fn friendly_timestamp_formats_rfc3339_without_raw_api_syntax() Void!Str {
+  let formatted = timestamp::friendly("2026-05-26T20:17:01.313Z")
+  try assertions::assert(formatted.contains("2026"), "friendly timestamp should retain the year")
+  try assertions::assert(formatted.contains("·"), "friendly timestamp should separate date and time")
+  try assertions::assert(
+    formatted.contains("AM") or formatted.contains("PM"),
+    "friendly timestamp should use a readable clock",
+  )
+  assertions::assert(
+    not formatted.contains("T") and not formatted.ends_with("Z"),
+    "friendly timestamp should hide RFC3339 delimiters",
+  )
+}
+
+test fn friendly_timestamp_preserves_empty_and_unknown_values() Void!Str {
+  try assertions::assert(timestamp::friendly("") == "", "empty timestamps should remain empty")
+  assertions::assert(
+    timestamp::friendly("sometime later") == "sometime later",
+    "unrecognized timestamps should remain visible",
+  )
+}

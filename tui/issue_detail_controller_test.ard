@@ -72,7 +72,7 @@ private fn comment(id: Str, author: Str, body: Str, depth: Int) issues::Comment 
   issues::Comment{
     id: id,
     author: author,
-    created_at: "2026-01-01",
+    created_at: "2026-01-01T12:00:00Z",
     body: body,
     parent_id: "",
     depth: depth,
@@ -158,6 +158,11 @@ test fn issue_detail_loads_issue_and_comments_independently_and_routes_commands(
   try assertions::assert(controller.handle_key(key("c")), "c should switch to comments")
   application.render()
   try testing::assert_contains(application.frame().text(), "First comment")
+  try testing::assert_contains(application.frame().text(), "Jan")
+  try assertions::assert(
+    not application.frame().text().contains("T12:00:00Z"),
+    "comment timestamps should not expose raw RFC3339 syntax",
+  )
   let focused_comment = controller.comment_records.at(0).expect("focused comment")
   try assertions::assert(
     focused_comment.root.style().background.expect("active background").index.expect("palette") == Uint8::from(4),

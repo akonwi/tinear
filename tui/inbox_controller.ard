@@ -12,6 +12,7 @@ use tinear/tui/lifecycle
 use tinear/tui/scheduler
 use tinear/tui/shell_controller
 use tinear/tui/theme as tinear_theme
+use tinear/tui/timestamp
 
 struct Row {
   notification_id: Str,
@@ -122,7 +123,7 @@ private fn detail_content(item: inbox::Item, detail: inbox::Detail, palette: tin
       )
       let header = match comment.created_at.is_empty() {
         true => comment.author,
-        false => "{comment.author} · {comment.created_at}",
+        false => "{comment.author} · {timestamp::friendly(comment.created_at)}",
       }
       spans.push(text::span("\n{header}", style: text::span_style(dim: true)))
       spans.push(text::span("\n{comment.body}"))
@@ -139,7 +140,7 @@ private fn detail_content(item: inbox::Item, detail: inbox::Detail, palette: tin
     for comment in detail.comments {
       let header = match comment.created_at.is_empty() {
         true => comment.author,
-        false => "{comment.author} · {comment.created_at}",
+        false => "{comment.author} · {timestamp::friendly(comment.created_at)}",
       }
       spans.push(text::span("\n{header}", style: text::span_style(dim: true)))
       spans.push(text::span("\n{comment.body}\n"))
