@@ -216,6 +216,13 @@ fn cycle_label(raw: Any) Str {
   }
 }
 
+private fn validate_issue_identity(id: Str, identifier: Str) Void!Str {
+  match id.trim().is_empty() or identifier.trim().is_empty() {
+    true => Result::err("Issue search identity cannot be empty"),
+    false => Result::ok(()),
+  }
+}
+
 fn try_decode_issue(raw: Any) Issue!Str {
   let state = try decode::run(raw, decode::field("state", decode::any)) -> error { Result::err(error.to_str()) }
   let team = try decode::run(raw, decode::field("team", decode::any)) -> error { Result::err(error.to_str()) }
@@ -226,6 +233,7 @@ fn try_decode_issue(raw: Any) Issue!Str {
   let title = try decode::run(raw, decode::field("title", decode::string)) -> error {
     Result::err(error.to_str())
   }
+  try validate_issue_identity(id, identifier)
   let description = try decode::run(raw, decode::field("description", decode::nullable(decode::string))) -> error {
     Result::err(error.to_str())
   }
@@ -483,10 +491,9 @@ fn fetch_single_issue(api_key: Str, issue_id: Str) Any!Str {
 fn fetch_issue_search(api_key: Str, term: Str) [Any]!Str {
   let query = `query {{ searchIssues(term: {client::string_literal(term)}, first: 20) {{ nodes {{ {issue_fields()} }} }} }}`
   let data = try client::graphql(api_key, query)
-  let nodes = decode::run(
-    data,
-    decode::path(["searchIssues", "nodes"], decode::list(decode::any)),
-  ).expect("Missing searchIssues.nodes")
+  let nodes = try decode::run(data, decode::path(["searchIssues", "nodes"], decode::list(decode::any))) -> error {
+    Result::err(error.to_str())
+  }
   Result::ok(nodes)
 }
 

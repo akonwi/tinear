@@ -6,6 +6,7 @@ use cooper/style
 use cooper/text
 use tinear/config
 use tinear/models/cache
+use tinear/models/documents
 use tinear/models/issues
 use tinear/models/shell as shell_model
 use tinear/models/tabs
@@ -13,17 +14,21 @@ use tinear/platform/url
 use tinear/services/auth
 use tinear/services/board_service
 use tinear/services/cache_writer
+use tinear/services/document_detail_service
 use tinear/services/inbox_service
 use tinear/services/issue_detail_service
 use tinear/services/issue_edit_service
 use tinear/services/issue_fields_service
+use tinear/services/search_service
 use tinear/tui/application_shell
 use tinear/tui/board_controller
+use tinear/tui/document_detail_controller
 use tinear/tui/inbox_controller
 use tinear/tui/issue_detail_controller
 use tinear/tui/issue_editor_controller
 use tinear/tui/issue_field_picker_controller
 use tinear/tui/scheduler
+use tinear/tui/search_controller
 use tinear/tui/shell_controller
 use tinear/tui/theme
 use tinear/tui/toast_host
@@ -35,7 +40,10 @@ private struct ActiveRoute {
 
 private struct ShellActions {
   open_issue: fn(Str),
+  open_doc: fn(tabs::TabRef),
   open_picker: fn(issue_field_picker_controller::Field, issues::Issue),
+  retitle_doc: fn(tabs::TabRef, Str),
+  focus_shell: fn(),
 }
 
 private struct DetailActions {
@@ -70,12 +78,41 @@ private fn placeholder_screen(ctx: mut context::Context, title: Str, message: St
   }
 }
 
-private fn dynamic_placeholder(ctx: mut context::Context, reference: tabs::TabRef) shell_controller::Screen {
-  placeholder_screen(
+private fn document_detail_screen(
+  ctx: mut context::Context,
+  palette: theme::Theme,
+  api_key: Str,
+  reference: tabs::TabRef,
+  application_shell: mut application_shell::ApplicationShell,
+  on_title: fn(Str),
+) shell_controller::Screen {
+  let detail = document_detail_controller::new(
     ctx,
-    "Document · {reference.title}",
-    "Retained document controller coming next",
+    palette,
+    reference.id,
+    reference.title,
+    document_detail_service::live(ctx, api_key),
+    scheduler::for_context(ctx),
+    on_title,
+    fn(target: Str) {
+      match url::open(ctx, target) {
+        ok(_) => (),
+        err(error) => {
+          let _ = application_shell.toasts.show(
+            "Couldn't open URL",
+            error.error(),
+            toast_host::Variant::error,
+            4000,
+          )
+        },
+      }
+    },
+    fn(title: Str, message: Str) {
+      let _ = application_shell.toasts.show(title, message, toast_host::Variant::error, 4000)
+    },
   )
+  detail.start()
+  detail.screen()
 }
 
 private fn issue_detail_screen(
@@ -182,7 +219,10 @@ private fn show_logged_in(
   let model = shell_model::restore(cache::load_logged_in())
   let actions = mut ShellActions{
     open_issue: fn(identifier: Str) {},
+    open_doc: fn(reference: tabs::TabRef) {},
     open_picker: fn(field: issue_field_picker_controller::Field, issue: issues::Issue) {},
+    retitle_doc: fn(reference: tabs::TabRef, title: Str) {},
+    focus_shell: fn() {},
   }
   let inbox = inbox_controller::new(
     ctx,
@@ -242,6 +282,21 @@ private fn show_logged_in(
   actions.open_picker = fn(field: issue_field_picker_controller::Field, issue: issues::Issue) {
     field_pickers.open(field, issue)
   }
+  let search = search_controller::new(
+    application_shell.modal,
+    palette,
+    search_service::live(ctx, api_key),
+    scheduler::for_context(ctx),
+    fn() {
+      actions.focus_shell()
+    },
+    fn(issue: issues::Issue) {
+      actions.open_issue(issue.identifier)
+    },
+    fn(document: documents::DocMeta) {
+      actions.open_doc(tabs::doc_tab(document.slug_id, document.title))
+    },
+  )
   let controller = shell_controller::new(
     ctx,
     palette,
@@ -251,23 +306,30 @@ private fn show_logged_in(
     fn(reference: tabs::TabRef) shell_controller::Screen {
       match reference.kind {
         tabs::Kind::issue => issue_detail_screen(ctx, palette, api_key, reference.id, application_shell),
-        tabs::Kind::doc => dynamic_placeholder(ctx, reference),
+        tabs::Kind::doc => {
+          document_detail_screen(
+            ctx,
+            palette,
+            api_key,
+            reference,
+            application_shell,
+            fn(title: Str) {
+              actions.retitle_doc(reference, title)
+            },
+          )
+        },
       }
     },
     fn(snapshot: cache::LoggedInCache) {
       writer.persist(snapshot)
     },
     fn() {
+      search.dispose()
       field_pickers.dispose()
       writer.dispose()
     },
     fn() {
-      let _ = application_shell.toasts.show(
-        "Search",
-        "Global search is the next shell milestone",
-        toast_host::Variant::info,
-        2500,
-      )
+      search.open(ctx)
     },
     fn() {
       let _ = application_shell.toasts.show(
@@ -283,6 +345,15 @@ private fn show_logged_in(
   })
   actions.open_issue = fn(identifier: Str) {
     controller.open(tabs::issue_tab(identifier))
+  }
+  actions.open_doc = fn(reference: tabs::TabRef) {
+    controller.open(reference)
+  }
+  actions.focus_shell = fn() {
+    controller.focus_active()
+  }
+  actions.retitle_doc = fn(reference: tabs::TabRef, title: Str) {
+    controller.retitle(reference, title)
   }
   active_route.handle = fn(received: mut event::KeyEvent) Bool {
     controller.handle_key(received)

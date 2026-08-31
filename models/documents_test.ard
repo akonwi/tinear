@@ -52,7 +52,35 @@ test fn container_falls_back_to_initiative_then_dash() Void!Str {
   )
 }
 
-test fn missing_content_decodes_to_none() Void!Str {
+test fn empty_document_identity_returns_error() Void!Str {
+  let raw = decode::from_json(
+    "{{\"id\": \"u\", \"slugId\": \"\", \"title\": \"T\", \"updatedAt\": \"\", \"url\": \"\", \"project\": null, \"initiative\": null, \"creator\": null, \"content\": null}}",
+  ).expect("parse")
+  testing::assert(
+    documents::try_decode_doc(raw).is_err(),
+    "empty slugs must not create invalid tabs",
+  )
+}
+
+test fn malformed_document_returns_error_without_panicking() Void!Str {
+  let raw = decode::from_json("{{\"slugId\": \"s\", \"title\": \"Missing ID\"}}").expect("parse")
+  testing::assert(
+    documents::try_decode_doc(raw).is_err(),
+    "missing required fields should return an error",
+  )
+}
+
+test fn malformed_content_returns_error_without_clearing_visible_document() Void!Str {
+  let raw = decode::from_json(
+    "{{\"id\": \"u\", \"slugId\": \"s\", \"title\": \"T\", \"updatedAt\": \"\", \"url\": \"\", \"project\": null, \"initiative\": null, \"creator\": null, \"content\": 42}}",
+  ).expect("parse")
+  testing::assert(
+    documents::try_decode_doc(raw).is_err(),
+    "non-string content should return an error",
+  )
+}
+
+test fn null_content_decodes_to_none() Void!Str {
   let raw = decode::from_json(
     "{{\"id\": \"u\", \"slugId\": \"s\", \"title\": \"T\", \"updatedAt\": \"\", \"url\": \"\", \"project\": null, \"initiative\": null, \"creator\": null, \"content\": null}}",
   ).expect("parse")

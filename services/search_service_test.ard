@@ -1,0 +1,73 @@
+use ard/testing
+
+use tinear/models/documents
+use tinear/models/issues
+use tinear/services/search_service
+
+private fn issue() issues::Issue {
+  issues::Issue{
+    id: "issue-1",
+    identifier: "AKO-1",
+    title: "Issue result",
+    description: Maybe::new<Str>(),
+    priority: 2,
+    state_id: "started",
+    state_name: "In Progress",
+    state_type: "started",
+    state_position: 1.0,
+    team_id: "team-1",
+    team_name: "Core",
+    team_key: "AKO",
+    project_id: "",
+    project_name: "—",
+    assignee_id: "",
+    assignee_name: "—",
+    cycle_id: "",
+    cycle_label: "—",
+    url: "https://linear.app/AKO-1",
+  }
+}
+
+private fn document() documents::DocMeta {
+  documents::DocMeta{
+    id: "doc-1",
+    slug_id: "doc-slug",
+    title: "Document result",
+    container: "Tinear",
+    creator: "Alex",
+    updated_at: "",
+    url: "https://linear.app/document/doc-slug",
+  }
+}
+
+test fn combined_search_keeps_issue_then_document_order() Void!Str {
+  let outcome = try search_service::combine(Result::ok([issue()]), Result::ok([document()]))
+  try testing::assert(outcome.hits.size() == 2, "both result types should survive")
+  try testing::assert(outcome.warning.is_empty(), "successful halves should not warn")
+  let first_identifier = match outcome.hits.at(0).expect("issue") {
+    Issue(found) => found.identifier,
+    DocMeta(ignored) => "",
+  }
+  try testing::assert(first_identifier == "AKO-1", "issues should come first")
+  let second_slug = match outcome.hits.at(1).expect("document") {
+    DocMeta(found) => found.slug_id,
+    Issue(ignored) => "",
+  }
+  testing::assert(second_slug == "doc-slug", "documents should follow issues")
+}
+
+test fn combined_search_degrades_one_failure_and_fails_when_both_fail() Void!Str {
+  let partial = try search_service::combine(
+    Result::err<[issues::Issue], Str>("issues offline"),
+    Result::ok([document()]),
+  )
+  try testing::assert(partial.hits.size() == 1, "surviving search results should render")
+  try testing::assert(partial.warning == "Issue search unavailable", "partial failure should warn")
+  testing::assert(
+    search_service::combine(
+      Result::err<[issues::Issue], Str>("all offline"),
+      Result::err<[documents::DocMeta], Str>("docs offline"),
+    ).is_err(),
+    "both failures should fail the search",
+  )
+}

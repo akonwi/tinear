@@ -1,0 +1,79 @@
+use ard/async
+
+use cooper/context
+use tinear/models/documents
+use tinear/models/issues
+
+type Hit = issues::Issue | documents::DocMeta
+
+struct Outcome {
+  hits: [Hit],
+  warning: Str,
+}
+
+type Search = fn(Receiver<Bool>, Str, fn(Outcome!Str))
+
+struct Service {
+  search: Search,
+}
+
+fn combine(issue_result: [issues::Issue]!Str, document_result: [documents::DocMeta]!Str) Outcome!Str {
+  if issue_result.is_err() and document_result.is_err() {
+    match issue_result {
+      err(message) => Result::err(message),
+      ok(_) => Result::err("Search failed"),
+    }
+  } else {
+    let hits: mut [Hit] = mut []
+    mut warning = ""
+    match issue_result {
+      ok(found) => {
+        for issue in found {
+          hits.push(issue)
+        }
+      },
+      err(_) => { warning = "Issue search unavailable" },
+    }
+    match document_result {
+      ok(found) => {
+        for document in found {
+          hits.push(document)
+        }
+      },
+      err(_) => { warning = "Document search unavailable" },
+    }
+    Result::ok(Outcome{hits: hits.@, warning: warning})
+  }
+}
+
+private fn cancelled(app: Receiver<Void>, view: Receiver<Bool>) Bool {
+  select {
+    app.recv() => true,
+    view.recv() => true,
+    _ => false,
+  }
+}
+
+fn live(ctx: mut context::Context, api_key: Str) Service {
+  let app_cancellation = ctx.cancellation
+  let dispatch = ctx.dispatch
+  Service{
+    search: fn(view_cancellation: Receiver<Bool>, term: Str, completion: fn(Outcome!Str)) {
+      async::start(fn() {
+        if not cancelled(app_cancellation, view_cancellation) {
+          let issue_result = issues::search(api_key, term)
+          let document_result = match cancelled(app_cancellation, view_cancellation) {
+            true => Result::err("Search cancelled"),
+            false => documents::search(api_key, term),
+          }
+          let result = combine(issue_result, document_result)
+          if not cancelled(app_cancellation, view_cancellation) {
+            let _ = dispatch(fn() {
+              completion(result)
+            })
+          }
+        }
+      })
+    },
+  }
+}

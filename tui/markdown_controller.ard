@@ -28,6 +28,7 @@ struct MarkdownController {
   active: Bool,
   hovered: Bool,
   on_open_link: fn(Str),
+  empty_label: Str,
   palette: tinear_theme::Theme,
   disposed: Bool,
 }
@@ -158,7 +159,13 @@ private fn block_style(spaced: Bool, background: tinear_theme::Theme?, active: B
   )
 }
 
-fn new(ctx: mut context::Context, palette: tinear_theme::Theme, source: Str, on_open_link: fn(Str)) mut MarkdownController {
+fn new(
+  ctx: mut context::Context,
+  palette: tinear_theme::Theme,
+  source: Str,
+  on_open_link: fn(Str),
+  empty_label: Str?,
+) mut MarkdownController {
   let root = box::new(
     ctx,
     styles: style::new(
@@ -177,6 +184,7 @@ fn new(ctx: mut context::Context, palette: tinear_theme::Theme, source: Str, on_
     active: false,
     hovered: false,
     on_open_link: on_open_link,
+    empty_label: empty_label.or("No description"),
     palette: palette,
     disposed: false,
   }
@@ -428,7 +436,7 @@ impl MarkdownController {
         empty.add(
           text::new(
             self.context,
-            content: "No description",
+            content: self.empty_label,
             selectable: false,
             text_style: text::style(
               foreground: interaction_foreground(self.active, self.hovered, self.palette),

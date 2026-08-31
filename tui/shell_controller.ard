@@ -80,15 +80,31 @@ private fn hints_for(model: shell_model::Model) [hints_bar::Hint] {
       ]
     },
     _ => {
-      [
-        hints_bar::Hint{key: "d/c", label: "section"},
-        hints_bar::Hint{key: "↑↓", label: "scroll"},
-        hints_bar::Hint{key: "n/r", label: "comment"},
-        hints_bar::Hint{key: "e", label: "description"},
-        hints_bar::Hint{key: "s/y/p/a/P", label: "fields"},
-        hints_bar::Hint{key: "o", label: "browser"},
-        hints_bar::Hint{key: "Esc", label: "close"},
-      ]
+      match model.tabs.at(model.tab_index - 2) {
+        reference => {
+          match reference.kind {
+            tabs::Kind::doc => {
+              [
+                hints_bar::Hint{key: "↑↓", label: "scroll"},
+                hints_bar::Hint{key: "o", label: "browser"},
+                hints_bar::Hint{key: "Esc", label: "close"},
+              ]
+            },
+            _ => {
+              [
+                hints_bar::Hint{key: "d/c", label: "section"},
+                hints_bar::Hint{key: "↑↓", label: "scroll"},
+                hints_bar::Hint{key: "n/r", label: "comment"},
+                hints_bar::Hint{key: "e", label: "description"},
+                hints_bar::Hint{key: "s/y/p/a/P", label: "fields"},
+                hints_bar::Hint{key: "o", label: "browser"},
+                hints_bar::Hint{key: "Esc", label: "close"},
+              ]
+            },
+          }
+        },
+        _ => [],
+      }
     },
   }
 }
@@ -419,7 +435,9 @@ impl ShellController {
         received.matches("escape") and shell_model::selected_is_dynamic(self.model) => {
           let _ = self.close_current()
         },
-        received.matches("?") => self.on_search(),
+        received.matches("?") or received.matches("?", shift: true) or received.matches("/", shift: true) => {
+          self.on_search()
+        },
         received.matches("c") and self.model.tab_index <= 1 => self.on_create(),
         _ => { handled = self.handle_active(received) },
       }

@@ -1,0 +1,37 @@
+use ard/async
+
+use cooper/context
+use tinear/models/documents
+
+type LoadDocument = fn(Receiver<Bool>, Str, fn(documents::Doc!Str))
+
+struct Service {
+  load: LoadDocument,
+}
+
+private fn cancelled(app: Receiver<Void>, view: Receiver<Bool>) Bool {
+  select {
+    app.recv() => true,
+    view.recv() => true,
+    _ => false,
+  }
+}
+
+fn live(ctx: mut context::Context, api_key: Str) Service {
+  let app_cancellation = ctx.cancellation
+  let dispatch = ctx.dispatch
+  Service{
+    load: fn(view_cancellation: Receiver<Bool>, slug_id: Str, completion: fn(documents::Doc!Str)) {
+      async::start(fn() {
+        if not cancelled(app_cancellation, view_cancellation) {
+          let result = documents::fetch_single(api_key, slug_id)
+          if not cancelled(app_cancellation, view_cancellation) {
+            let _ = dispatch(fn() {
+              completion(result)
+            })
+          }
+        }
+      })
+    },
+  }
+}

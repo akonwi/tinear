@@ -255,9 +255,25 @@ test fn shell_routes_mouse_global_and_active_commands() Void!Str {
   application.click(8, 0)
   try assertions::assert(controller.model.tab_index == 1, "clicking My Issues tab should select it")
   try assertions::assert(controller.handle_key(key("?")), "search should be globally handled")
+  try assertions::assert(
+    controller.handle_key(
+      event::key(
+        "?",
+        "?",
+        event::KeyEventType::press,
+        event::Modifiers{
+          shift: true,
+          ctrl: false,
+          alt: false,
+          super: false,
+        },
+      ),
+    ),
+    "terminal question-mark events should be globally handled with Shift",
+  )
   try assertions::assert(controller.handle_key(key("c")), "create should be globally handled")
   try assertions::assert(controller.handle_key(key("x")), "active screen should handle remaining keys")
-  try assertions::assert(searches.value == 1, "search callback should run")
+  try assertions::assert(searches.value == 2, "both normalized search key shapes should run the callback")
   try assertions::assert(creations.value == 1, "create callback should run")
   try assertions::assert(board_state.handled == 1, "active board should receive delegated key")
   controller.open(tabs::issue_tab("AKO-1"))

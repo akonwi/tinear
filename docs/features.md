@@ -289,6 +289,14 @@ Parent: ENG-100
 | `Escape` | Dismiss an editor/picker, then close the issue tab |
 | `?` | Open search overlay |
 
+### 6.3 Document tabs
+
+Document search results and restored document tabs load the latest Linear
+content into a retained detail controller. The tab shows title, project or
+initiative, creator, a friendly local update time, and rendered Markdown.
+Fresh titles retitle the tab and persisted cache. `j`/`k` scroll, `o` opens the
+Linear URL, and closing the tab cancels its periodic refresh worker.
+
 ---
 
 ## 7. Pickers (modal overlays)
@@ -341,10 +349,11 @@ selected issue by stable ID.
 
 Opened with `?` from any tab.
 
-- Text field for fuzzy-searching issues by title/identifier.
-- Results list updates as user types.
-- Selecting a result opens the issue in a new tab and closes search.
-- Escape dismisses search.
+- Text field searches Linear issues and documents after a 300 ms debounce.
+- Issue and document results share one navigable list; stale responses are ignored.
+- If one search source fails, surviving results remain visible with a warning.
+- Selecting a result opens or reuses its issue/document tab and closes search.
+- Escape dismisses search and cancels pending work.
 
 ---
 
@@ -358,7 +367,7 @@ Opened with `?` from any tab.
 | `Shift+Tab` | Previous tab |
 | `1` | Inbox tab |
 | `2` | My Issues tab |
-| `Escape` | Close picker, or close issue tab, or ignored |
+| `Escape` | Close modal, or close issue/document tab, or ignored |
 
 ---
 
@@ -367,7 +376,7 @@ Opened with `?` from any tab.
 `models/cache.ard` handles saving and restoring tab state:
 
 - **Save**: called after tab open, tab close, tab switch. Writes `LoggedInCache`
-  (active tab + list of open issue tabs) to `~/.tinear/cache.json`.
+  (active tab + list of open issue/document tabs) to `~/.tinear/cache.json`.
 - **Load**: called on `logged_in_screen` init. Reads cache file. On parse error
   or missing file, returns defaults (Inbox tab, no issue tabs).
 - **Version**: schema version `1` — if future versions change the shape, old

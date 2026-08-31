@@ -37,7 +37,14 @@ fn meta_fields() Str {
     `
 }
 
-fn decode_meta(raw: Any) DocMeta {
+private fn validate_document_identity(id: Str, slug_id: Str) Void!Str {
+  match id.trim().is_empty() or slug_id.trim().is_empty() {
+    true => Result::err("Document search identity cannot be empty"),
+    false => Result::ok(()),
+  }
+}
+
+fn try_decode_meta(raw: Any) DocMeta!Str {
   let project = issues::nested_str(raw, "project", "name", "")
   let initiative = issues::nested_str(raw, "initiative", "name", "")
   let container = match project.is_empty() {
@@ -49,37 +56,53 @@ fn decode_meta(raw: Any) DocMeta {
       }
     },
   }
-  DocMeta{
-    id: decode::run(raw, decode::field("id", decode::string)).expect("Missing document.id"),
-    slug_id: decode::run(raw, decode::field("slugId", decode::string)).expect("Missing document.slugId"),
-    title: issues::normalize_text(
-      decode::run(raw, decode::field("title", decode::string)).expect("Missing document.title"),
-    ),
-    container: issues::normalize_text(container),
-    creator: issues::normalize_text(issues::user_display_name_opt(raw, "creator")),
-    updated_at: issues::optional_str(raw, "updatedAt", ""),
-    url: issues::optional_str(raw, "url", ""),
+  let id = try decode::run(raw, decode::field("id", decode::string)) -> error { Result::err(error.to_str()) }
+  let slug_id = try decode::run(raw, decode::field("slugId", decode::string)) -> error {
+    Result::err(error.to_str())
   }
+  let title = try decode::run(raw, decode::field("title", decode::string)) -> error {
+    Result::err(error.to_str())
+  }
+  try validate_document_identity(id, slug_id)
+  Result::ok(
+    DocMeta{
+      id: id,
+      slug_id: slug_id,
+      title: issues::normalize_text(title),
+      container: issues::normalize_text(container),
+      creator: issues::normalize_text(issues::user_display_name_opt(raw, "creator")),
+      updated_at: issues::optional_str(raw, "updatedAt", ""),
+      url: issues::optional_str(raw, "url", ""),
+    },
+  )
+}
+
+fn decode_meta(raw: Any) DocMeta {
+  try_decode_meta(raw).expect("Malformed document metadata")
+}
+
+fn try_decode_doc(raw: Any) Doc!Str {
+  let meta = try try_decode_meta(raw)
+  let content = try decode::run(raw, decode::field("content", decode::nullable(decode::string))) -> error {
+    Result::err(error.to_str())
+  }
+  Result::ok(Doc{meta: meta, content: issues::normalize_nullable_str(content)})
 }
 
 fn decode_doc(raw: Any) Doc {
-  Doc{
-    meta: decode_meta(raw),
-    content: issues::normalize_nullable_str(issues::nullable_str(raw, "content")),
-  }
+  try_decode_doc(raw).expect("Malformed document")
 }
 
 // Most recently updated documents across the workspace.
 fn fetch_recent(api_key: Str, limit: Int) [DocMeta]!Str {
   let query = `query {{ documents(first: {limit}, orderBy: updatedAt) {{ nodes {{ {meta_fields()} }} }} }}`
   let data = try client::graphql(api_key, query)
-  let nodes = decode::run(
-    data,
-    decode::path(["documents", "nodes"], decode::list(decode::any)),
-  ).expect("Missing documents.nodes")
+  let nodes = try decode::run(data, decode::path(["documents", "nodes"], decode::list(decode::any))) -> error {
+    Result::err(error.to_str())
+  }
   let out: mut [DocMeta] = mut []
   for node in nodes {
-    out.push(decode_meta(node))
+    out.push(try try_decode_meta(node))
   }
   Result::ok(out.@)
 }
@@ -88,13 +111,12 @@ fn fetch_recent(api_key: Str, limit: Int) [DocMeta]!Str {
 fn search(api_key: Str, term: Str) [DocMeta]!Str {
   let query = `query {{ searchDocuments(term: {client::string_literal(term)}, first: 20) {{ nodes {{ {meta_fields()} }} }} }}`
   let data = try client::graphql(api_key, query)
-  let nodes = decode::run(
-    data,
-    decode::path(["searchDocuments", "nodes"], decode::list(decode::any)),
-  ).expect("Missing searchDocuments.nodes")
+  let nodes = try decode::run(data, decode::path(["searchDocuments", "nodes"], decode::list(decode::any))) -> error {
+    Result::err(error.to_str())
+  }
   let out: mut [DocMeta] = mut []
   for node in nodes {
-    out.push(decode_meta(node))
+    out.push(try try_decode_meta(node))
   }
   Result::ok(out.@)
 }
@@ -104,6 +126,8 @@ fn search(api_key: Str, term: Str) [DocMeta]!Str {
 fn fetch_single(api_key: Str, slug_id: Str) Doc!Str {
   let query = `query {{ document(id: {client::string_literal(slug_id)}) {{ {meta_fields()} content }} }}`
   let data = try client::graphql(api_key, query)
-  let raw = decode::run(data, decode::field("document", decode::any)).expect("Missing document")
-  Result::ok(decode_doc(raw))
+  let raw = try decode::run(data, decode::field("document", decode::any)) -> error {
+    Result::err(error.to_str())
+  }
+  try_decode_doc(raw)
 }

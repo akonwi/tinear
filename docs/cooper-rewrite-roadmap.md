@@ -263,15 +263,15 @@ coherent language instead of extending the bare parity styling.
 - [x] Restore comment threading/cursor, top-level compose, and replies.
 - [x] Restore description editing/saving with stale-refresh protection.
 - [x] Wire issue field pickers and browser opening.
-- [ ] Build document metadata/content tabs, retitling, browser opening, and refresh.
-- [ ] Verify every per-tab worker stops on close.
+- [x] Build document metadata/content tabs, retitling, browser opening, and refresh.
+- [x] Verify every per-tab worker stops on close.
 
 **Exit criteria:** Markdown parser/render fixtures and complete issue/document interaction flows pass TestApp coverage.
 
 ### Phase 8 — Global search and issue creation
 
-- [ ] Build search modal Input/results viewport.
-- [ ] Restore debounce, generation checks, merged issue/document results, partial-failure warning, navigation, and open behavior.
+- [x] Build search modal Input/results viewport.
+- [x] Restore debounce, generation checks, merged issue/document results, partial-failure warning, navigation, and open behavior.
 - [ ] Build issue creation as one modal-owned retained state machine.
 - [ ] Restore team selection, title/description form, submission chords, guarded dismissal, toasts, and tab opening.
 

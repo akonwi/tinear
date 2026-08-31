@@ -11,6 +11,16 @@ fn issue_json(description: Str) Str {
   issue_json_with_title("Title â\u0080\u0094 quoted â\u0080\u009ctextâ\u0080\u009d", description)
 }
 
+test fn empty_issue_identity_returns_error() Void!Str {
+  let raw = decode::from_json(
+    `{{"id":"issue-1","identifier":"","title":"Title","description":null,"priority":2,"state":{{"id":"state-1","name":"In Progress","type":"started","position":1.0}},"team":{{"id":"team-1","name":"Core","key":"AKO"}},"project":null,"assignee":null,"cycle":null}}`,
+  ).expect("parse issue")
+  testing::assert(
+    issues::try_decode_issue(raw).is_err(),
+    "empty identifiers must not create invalid tabs",
+  )
+}
+
 test fn test_decode_issue_normalizes_mojibake_text() Void!Str {
   let raw = decode::from_json(
     issue_json(
