@@ -1,0 +1,57 @@
+use ard/async
+
+use cooper/context
+use tinear/models/issues
+
+type CreateComment = fn(Receiver<Bool>, Str, Str, Str, fn(Str!Str))
+type UpdateDescription = fn(Receiver<Bool>, Str, Str, fn(Void!Str))
+
+struct Service {
+  create_comment: CreateComment,
+  update_description: UpdateDescription,
+}
+
+private fn cancelled(app: Receiver<Void>, view: Receiver<Bool>) Bool {
+  select {
+    app.recv() => true,
+    view.recv() => true,
+    _ => false,
+  }
+}
+
+fn live(ctx: mut context::Context, api_key: Str) Service {
+  let app_cancellation = ctx.cancellation
+  let dispatch = ctx.dispatch
+  Service{
+    create_comment: fn(
+      view_cancellation: Receiver<Bool>,
+      issue_id: Str,
+      body: Str,
+      parent_id: Str,
+      completion: fn(Str!Str),
+    ) {
+      async::start(fn() {
+        if not cancelled(app_cancellation, view_cancellation) {
+          let result = issues::create_comment(api_key, issue_id, body, parent_id)
+          if not cancelled(app_cancellation, view_cancellation) {
+            let _ = dispatch(fn() {
+              completion(result)
+            })
+          }
+        }
+      })
+    },
+    update_description: fn(view_cancellation: Receiver<Bool>, issue_id: Str, description: Str, completion: fn(Void!Str)) {
+      async::start(fn() {
+        if not cancelled(app_cancellation, view_cancellation) {
+          let result = issues::update_description(api_key, issue_id, description)
+          if not cancelled(app_cancellation, view_cancellation) {
+            let _ = dispatch(fn() {
+              completion(result)
+            })
+          }
+        }
+      })
+    },
+  }
+}

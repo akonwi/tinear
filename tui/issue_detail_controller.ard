@@ -48,6 +48,8 @@ struct IssueDetailController {
   issue: issues::Issue?,
   comments: [issues::Comment],
   active_section: Int,
+  pending_comment_id: Str,
+  focus_pending_comment: Bool,
   comment_cursor: Int,
   hovered_comment_id: Str,
   issue_generation: Int,
@@ -58,6 +60,8 @@ struct IssueDetailController {
   cancel_refresh: fn(),
   on_open_url: fn(Str),
   on_pick_field: fn(issue_field_picker_controller::Field, issues::Issue),
+  on_comment: fn(issues::Issue, Str, Str),
+  on_edit_description: fn(issues::Issue),
   notify_error: fn(Str, Str),
   remove_description_mouse: fn(),
   remove_comments_mouse: fn(),
@@ -156,6 +160,8 @@ fn new(
   schedule: scheduler::Schedule,
   on_open_url: fn(Str),
   on_pick_field: fn(issue_field_picker_controller::Field, issues::Issue),
+  on_comment: fn(issues::Issue, Str, Str),
+  on_edit_description: fn(issues::Issue),
   notify_error: fn(Str, Str),
 ) mut IssueDetailController {
   let root = box::new(
@@ -311,6 +317,8 @@ fn new(
     issue: Maybe::new<issues::Issue>(),
     comments: [],
     active_section: DESCRIPTION_SECTION,
+    pending_comment_id: "",
+    focus_pending_comment: false,
     comment_cursor: 0,
     hovered_comment_id: "",
     issue_generation: 0,
@@ -321,6 +329,8 @@ fn new(
     cancel_refresh: fn() {},
     on_open_url: on_open_url,
     on_pick_field: on_pick_field,
+    on_comment: on_comment,
+    on_edit_description: on_edit_description,
     notify_error: notify_error,
     remove_description_mouse: fn() {},
     remove_comments_mouse: fn() {},
@@ -394,6 +404,7 @@ impl IssueDetailController {
 
   private fn mut create_comment(comment: issues::Comment) CommentRecord {
     let root = box::new(self.context, styles: comment_style(comment, false, false, self.palette))
+    root.set_focusable(true)
     let header = text::new(
       self.context,
       content: "{comment.author}  {timestamp::friendly(comment.created_at)}",
@@ -510,9 +521,19 @@ impl IssueDetailController {
 
   private fn mut replace_comments(comments: [issues::Comment]) {
     let selected_id = self.selected_comment_id()
+    let requested_id = self.pending_comment_id
     self.comments = comments
     self.comment_cursor = 0
-    if not selected_id.is_empty() {
+    mut found_requested = false
+    if not requested_id.is_empty() {
+      for comment, index in self.comments {
+        if comment.id == requested_id {
+          self.comment_cursor = index
+          found_requested = true
+        }
+      }
+    }
+    if not found_requested and not selected_id.is_empty() {
       for comment, index in self.comments {
         if comment.id == selected_id {
           self.comment_cursor = index
@@ -520,6 +541,25 @@ impl IssueDetailController {
       }
     }
     self.show_comments()
+    if (not found_requested) and not requested_id.is_empty() {
+      // Preserve ID-based selection for a later eventually-consistent refresh,
+      // but do not let that later refresh steal focus from a newer modal.
+      self.focus_pending_comment = false
+    }
+    if found_requested {
+      self.pending_comment_id = ""
+      let should_focus = self.focus_pending_comment
+      self.focus_pending_comment = false
+      if should_focus {
+        match self.comment_records.at(self.comment_cursor) {
+          record => {
+            let _ = record.root.focus()
+            let _ = self.body_scroll.scroll_child_into_view(record.root)
+          },
+          _ => (),
+        }
+      }
+    }
   }
 
   private fn mut show_comments() {
@@ -649,6 +689,8 @@ impl IssueDetailController {
           match result {
             ok(comments) => self.replace_comments(comments),
             err(message) => {
+              self.pending_comment_id = ""
+              self.focus_pending_comment = false
               if self.comments.size() == 0 {
                 self.show_comments_error(message)
               } else {
@@ -703,6 +745,71 @@ impl IssueDetailController {
     }
   }
 
+  private fn mut compose_comment() {
+    match self.issue {
+      loaded => {
+        self.switch_section(COMMENTS_SECTION)
+        self.on_comment(loaded, "", "")
+      },
+      _ => (),
+    }
+  }
+
+  private fn mut reply_to_selected() {
+    if self.active_section == COMMENTS_SECTION {
+      match self.issue {
+        loaded => {
+          match self.comments.at(self.comment_cursor) {
+            target => {
+              let parent_id = match target.parent_id.is_empty() {
+                true => target.id,
+                false => target.parent_id,
+              }
+              self.on_comment(loaded, parent_id, target.author)
+            },
+            _ => (),
+          }
+        },
+        _ => (),
+      }
+    }
+  }
+
+  private fn mut edit_description() {
+    match self.issue {
+      loaded => {
+        self.switch_section(DESCRIPTION_SECTION)
+        self.on_edit_description(loaded)
+      },
+      _ => (),
+    }
+  }
+
+  fn mut comments_changed(comment_id: Str, should_focus: Bool) {
+    if not self.scope.disposed {
+      self.pending_comment_id = comment_id
+      self.focus_pending_comment = should_focus and not comment_id.is_empty()
+      self.switch_section(COMMENTS_SECTION)
+      self.refresh_comments(false)
+    }
+  }
+
+  fn mut description_changed(description: Str) {
+    if not self.scope.disposed {
+      self.issue_generation =+ 1
+      match self.issue {
+        loaded => {
+          let updated = mut loaded
+          updated.description = Maybe::new(description)
+          self.issue = Maybe::new(updated.@)
+          self.show_issue(updated.@)
+        },
+        _ => (),
+      }
+      self.refresh_issue(true)
+    }
+  }
+
   fn mut focus() {
     let _ = self.body_scroll.focus()
   }
@@ -723,6 +830,9 @@ impl IssueDetailController {
         received.matches("k") or received.matches("up") => {
           let _ = self.body_scroll.scroll_by(-1)
         },
+        received.matches("n") => self.compose_comment(),
+        received.matches("r") => self.reply_to_selected(),
+        received.matches("e") => self.edit_description(),
         received.matches("o") => self.open_browser(),
         received.matches("s") => self.pick(issue_field_picker_controller::Field::state),
         received.matches("y") => self.pick(issue_field_picker_controller::Field::cycle),

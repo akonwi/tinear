@@ -83,7 +83,9 @@ private fn hints_for(model: shell_model::Model) [hints_bar::Hint] {
       [
         hints_bar::Hint{key: "d/c", label: "section"},
         hints_bar::Hint{key: "↑↓", label: "scroll"},
-        hints_bar::Hint{key: "s/y/p/a/P", label: "edit"},
+        hints_bar::Hint{key: "n/r", label: "comment"},
+        hints_bar::Hint{key: "e", label: "description"},
+        hints_bar::Hint{key: "s/y/p/a/P", label: "fields"},
         hints_bar::Hint{key: "o", label: "browser"},
         hints_bar::Hint{key: "Esc", label: "close"},
       ]

@@ -260,8 +260,8 @@ coherent language instead of extending the bare parity styling.
 - [x] Map parsed markdown blocks/runs to persistent Cooper Box/Text controls.
 - [x] Build issue header, section tabs, body scrolling, and selection.
 - [x] Load issue/comments independently with lifecycle guards.
-- [ ] Restore comment threading/cursor, top-level compose, and replies.
-- [ ] Restore description editing/saving with stale-refresh protection.
+- [x] Restore comment threading/cursor, top-level compose, and replies.
+- [x] Restore description editing/saving with stale-refresh protection.
 - [x] Wire issue field pickers and browser opening.
 - [ ] Build document metadata/content tabs, retitling, browser opening, and refresh.
 - [ ] Verify every per-tab worker stops on close.

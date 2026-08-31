@@ -15,11 +15,13 @@ use tinear/services/board_service
 use tinear/services/cache_writer
 use tinear/services/inbox_service
 use tinear/services/issue_detail_service
+use tinear/services/issue_edit_service
 use tinear/services/issue_fields_service
 use tinear/tui/application_shell
 use tinear/tui/board_controller
 use tinear/tui/inbox_controller
 use tinear/tui/issue_detail_controller
+use tinear/tui/issue_editor_controller
 use tinear/tui/issue_field_picker_controller
 use tinear/tui/scheduler
 use tinear/tui/shell_controller
@@ -38,6 +40,8 @@ private struct ShellActions {
 
 private struct DetailActions {
   open_picker: fn(issue_field_picker_controller::Field, issues::Issue),
+  open_comment: fn(issues::Issue, Str, Str),
+  edit_description: fn(issues::Issue),
 }
 
 private fn placeholder_screen(ctx: mut context::Context, title: Str, message: Str) shell_controller::Screen {
@@ -81,7 +85,11 @@ private fn issue_detail_screen(
   identifier: Str,
   application_shell: mut application_shell::ApplicationShell,
 ) shell_controller::Screen {
-  let actions = mut DetailActions{open_picker: fn(field: issue_field_picker_controller::Field, issue: issues::Issue) {}}
+  let actions = mut DetailActions{
+    open_picker: fn(field: issue_field_picker_controller::Field, issue: issues::Issue) {},
+    open_comment: fn(issue: issues::Issue, parent_id: Str, author: Str) {},
+    edit_description: fn(issue: issues::Issue) {},
+  }
   let detail = issue_detail_controller::new(
     ctx,
     palette,
@@ -104,6 +112,12 @@ private fn issue_detail_screen(
     fn(field: issue_field_picker_controller::Field, issue: issues::Issue) {
       actions.open_picker(field, issue)
     },
+    fn(issue: issues::Issue, parent_id: Str, author: Str) {
+      actions.open_comment(issue, parent_id, author)
+    },
+    fn(issue: issues::Issue) {
+      actions.edit_description(issue)
+    },
     fn(title: Str, message: Str) {
       let _ = application_shell.toasts.show(title, message, toast_host::Variant::error, 4000)
     },
@@ -123,11 +137,36 @@ private fn issue_detail_screen(
       let _ = application_shell.toasts.show(title, message, toast_host::Variant::error, 4000)
     },
   )
+  let editor = issue_editor_controller::new(
+    ctx,
+    application_shell.modal,
+    palette,
+    issue_edit_service::live(ctx, api_key),
+    fn() {
+      detail.focus()
+    },
+    fn(comment_id: Str, should_focus: Bool) {
+      detail.comments_changed(comment_id, should_focus)
+    },
+    fn(description: Str) {
+      detail.description_changed(description)
+    },
+    fn(title: Str, message: Str) {
+      let _ = application_shell.toasts.show(title, message, toast_host::Variant::error, 4000)
+    },
+  )
   actions.open_picker = fn(field: issue_field_picker_controller::Field, issue: issues::Issue) {
     field_pickers.open(field, issue)
   }
+  actions.open_comment = fn(issue: issues::Issue, parent_id: Str, author: Str) {
+    editor.open_comment(issue, parent_id, author)
+  }
+  actions.edit_description = fn(issue: issues::Issue) {
+    editor.open_description(issue)
+  }
   detail.start()
   detail.screen(fn() {
+    editor.dispose()
     field_pickers.dispose()
   })
 }

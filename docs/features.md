@@ -268,17 +268,25 @@ Labels: bug, frontend
 Parent: ENG-100
 ```
 
-- Description is rendered with `replace_common_mojibake()` cleanup.
-- Metadata rows show state, cycle, priority, assignee, labels, parent.
+- Descriptions and comments use retained Markdown controls after mojibake cleanup.
+- Metadata rows show state, priority, assignee, cycle, project, and team.
+- Comments retain Linear's one-level threading, use friendly local timestamps,
+  and share the board's hover/focus surface treatment.
 
 ### 6.2 Keys
 
 | Key | Action |
 |---|---|
-| `s` | Open state picker for this issue |
-| `y` | Open cycle picker for this issue |
-| `Escape` | Close tab (return to My Issues) |
-| `o` | Open issue in browser (`open_url` via Linear web URL) |
+| `d` / `c` | Show Description / Comments section |
+| `j` / `k` | Scroll description or move the comment cursor |
+| `n` | Compose a top-level comment |
+| `r` | Reply to the selected comment |
+| `e` | Edit the description |
+| `Ctrl+Enter` | Submit a comment or save a description from its editor |
+| `s` / `y` / `p` | Change state / cycle / priority |
+| `a` / `Shift+p` | Change assignee / project |
+| `o` | Open issue in the browser |
+| `Escape` | Dismiss an editor/picker, then close the issue tab |
 | `?` | Open search overlay |
 
 ---
