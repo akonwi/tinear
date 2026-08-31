@@ -196,7 +196,19 @@ test fn malformed_picker_models_return_errors_without_panicking() Void!Str {
 
   let malformed_cycle = decode::from_json(`{{"id":"cycle-1","name":null}}`).expect("parse cycle")
   match issues::decode_cycle(malformed_cycle) {
-    ok(_) => testing::assert(false, "cycle without number should fail"),
-    err(_) => testing::assert(true, "malformed picker models should return errors"),
+    ok(_) => try testing::assert(false, "cycle without number should fail"),
+    err(_) => (),
+  }
+
+  let malformed_issue = decode::from_json(`{{"id":"issue-1"}}`).expect("parse issue")
+  match issues::try_decode_issue(malformed_issue) {
+    ok(_) => try testing::assert(false, "issue without required fields should fail"),
+    err(_) => (),
+  }
+
+  let malformed_comment = decode::from_json(`{{"id":"comment-1"}}`).expect("parse comment")
+  match issues::try_decode_comment(malformed_comment) {
+    ok(_) => testing::assert(false, "comment without body and creation time should fail"),
+    err(_) => testing::assert(true, "malformed detail models should return errors"),
   }
 }

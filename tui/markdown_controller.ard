@@ -1,0 +1,470 @@
+use cooper/box
+use cooper/color
+use cooper/context
+use cooper/style
+use cooper/text
+use go:strings
+use go:tinear/ffi/markdown
+use tinear/platform/url
+use tinear/tui/theme as tinear_theme
+use go:unicode
+
+struct BlockRecord {
+  root: mut box::Box,
+  remove_links: [fn()],
+}
+
+private struct LinkedText {
+  control: mut text::Text,
+  remove: fn(),
+}
+
+struct MarkdownController {
+  root: mut box::Box,
+  context: mut context::Context,
+  records: [BlockRecord],
+  source: Str,
+  rendered: Bool,
+  active: Bool,
+  hovered: Bool,
+  on_open_link: fn(Str),
+  palette: tinear_theme::Theme,
+  disposed: Bool,
+}
+
+private fn tight(previous: Str, next: Str) Bool {
+  previous == "list_item" and next == "list_item" or previous == "table_row" and next == "table_row" or previous == "quote" and next == "quote"
+}
+
+private fn indent(depth: Int) Str {
+  mut value = ""
+  mut index = 0
+  while index < depth {
+    value = "{value}  "
+    index =+ 1
+  }
+  value
+}
+
+private fn safe_link(target: Str) Bool {
+  mut supported = url::is_supported(target)
+  for character in target {
+    if unicode::IsControl(Int32::from(character)) {
+      supported = false
+    }
+  }
+  supported
+}
+
+private fn interaction_foreground(active: Bool, hovered: Bool, palette: tinear_theme::Theme) color::Color {
+  match {
+    active => palette.item_active_foreground,
+    hovered => palette.item_hover_foreground,
+    _ => palette.foreground,
+  }
+}
+
+private fn interaction_background(active: Bool, hovered: Bool, palette: tinear_theme::Theme) color::Color {
+  match {
+    active => palette.item_active_background,
+    hovered => palette.item_hover_background,
+    _ => palette.background,
+  }
+}
+
+private fn run_style(run: markdown::Run, palette: tinear_theme::Theme, active: Bool, hovered: Bool) text::SpanStyle {
+  let linked = safe_link(run.Link)
+  let foreground = match {
+    active or hovered => interaction_foreground(active, hovered, palette),
+    linked => palette.accent,
+    run.Code => palette.warning,
+    _ => palette.foreground,
+  }
+  text::span_style(
+    foreground: foreground,
+    background: match run.Code and not active and not hovered {
+      true => Maybe::new(palette.item_hover_background),
+      false => Maybe::new(),
+    },
+    bold: run.Bold,
+    italic: run.Italic,
+    underline: linked,
+    strike: run.Strike,
+  )
+}
+
+private fn spans_for(
+  block: markdown::Block,
+  palette: tinear_theme::Theme,
+  force_bold: Bool?,
+  force_dim: Bool?,
+  active: Bool,
+  hovered: Bool,
+) [text::Span] {
+  let spans = mut List::new<text::Span>()
+  for run in block.Runs {
+    let base = run_style(run, palette, active, hovered)
+    spans.push(
+      text::span(
+        run.Text,
+        style: text::span_style(
+          foreground: base.foreground,
+          background: base.background,
+          bold: base.bold.or(false) or force_bold.or(false),
+          dim: base.dim.or(false) or force_dim.or(false),
+          italic: base.italic,
+          underline: base.underline,
+          blink: base.blink,
+          reverse: base.reverse,
+          strike: base.strike,
+          hidden: base.hidden,
+        ),
+        link: match safe_link(run.Link) {
+          true => Maybe::new(run.Link),
+          false => Maybe::new(),
+        },
+      ),
+    )
+  }
+  spans.@
+}
+
+private fn block_style(spaced: Bool, background: tinear_theme::Theme?, active: Bool, hovered: Bool) style::Style {
+  style::new(
+    width: style::percent(100.0),
+    flex_shrink: 0.0,
+    background: match background {
+      palette => {
+        Maybe::new(
+          match active or hovered {
+            true => interaction_background(active, hovered, palette),
+            false => palette.item_hover_background,
+          },
+        )
+      },
+      _ => Maybe::new(),
+    },
+    margin: style::Edges{
+      top: style::cells(
+        match spaced {
+          true => 1,
+          false => 0,
+        },
+      ),
+      right: style::cells(0),
+      bottom: style::cells(0),
+      left: style::cells(0),
+    },
+  )
+}
+
+fn new(ctx: mut context::Context, palette: tinear_theme::Theme, source: Str, on_open_link: fn(Str)) mut MarkdownController {
+  let root = box::new(
+    ctx,
+    styles: style::new(
+      width: style::percent(100.0),
+      flex_direction: style::FlexDirection::column,
+      align_items: style::Align::stretch,
+      background: interaction_background(false, false, palette),
+    ),
+  )
+  let controller = mut MarkdownController{
+    root: root,
+    context: ctx,
+    records: [],
+    source: "",
+    rendered: false,
+    active: false,
+    hovered: false,
+    on_open_link: on_open_link,
+    palette: palette,
+    disposed: false,
+  }
+  controller.set_source(source)
+  controller
+}
+
+impl MarkdownController {
+  private fn mut text_control(content: text::StyledText, base_style: text::TextStyle?) LinkedText {
+    let control = text::new(
+      self.context,
+      content: content,
+      selectable: true,
+      wrap: text::TextWrap::word,
+      overflow: text::TextOverflow::clip,
+      styles: style::new(width: style::percent(100.0), flex_shrink: 0.0),
+      text_style: base_style.or(text::style()),
+    )
+    let remove = control.on_link(fn(received: mut text::LinkEvent) {
+      received.prevent_default()
+      self.on_open_link(received.url)
+    })
+    LinkedText{control: control, remove: remove}
+  }
+
+  private fn mut build_block(block: markdown::Block, spaced: Bool) BlockRecord {
+    let code = block.Kind == "code"
+    let root = box::new(
+      self.context,
+      styles: match code {
+        true => {
+          let configured = mut block_style(
+            spaced,
+            Maybe::new(self.palette),
+            self.active,
+            self.hovered,
+          )
+          configured.padding = style::Edges{
+            top: style::cells(0),
+            right: style::cells(1),
+            bottom: style::cells(0),
+            left: style::cells(1),
+          }
+          configured.@
+        },
+        false => block_style(spaced, Maybe::new<tinear_theme::Theme>(), self.active, self.hovered),
+      },
+    )
+    let removers = mut List::new<fn()>()
+    match block.Kind {
+      "rule" => {
+        let rule = text::new(
+          self.context,
+          content: strings::Repeat("─", 512),
+          selectable: false,
+          wrap: text::TextWrap::none,
+          overflow: text::TextOverflow::clip,
+          styles: style::new(
+            width: style::percent(100.0),
+            height: style::cells(1),
+            flex_shrink: 0.0,
+          ),
+          text_style: text::style(
+            foreground: match self.active or self.hovered {
+              true => interaction_foreground(self.active, self.hovered, self.palette),
+              false => self.palette.border,
+            },
+            dim: not self.active and not self.hovered,
+          ),
+        )
+        root.add(rule)
+      },
+      "code" => {
+        if not block.Lang.is_empty() {
+          let language = text::new(
+            self.context,
+            content: match block.Lang {
+              "mermaid" => "mermaid diagram (rendered in Linear)",
+              _ => block.Lang,
+            },
+            selectable: false,
+            styles: style::new(width: style::percent(100.0), flex_shrink: 0.0),
+            text_style: text::style(
+              foreground: match self.active or self.hovered {
+                true => interaction_foreground(self.active, self.hovered, self.palette),
+                false => self.palette.item_hover_foreground,
+              },
+              italic: true,
+            ),
+          )
+          root.add(language)
+        }
+        let raw = match block.Runs.at(0) {
+          run => run.Text,
+          _ => "",
+        }
+        let code_text = text::new(
+          self.context,
+          content: raw,
+          selectable: true,
+          wrap: text::TextWrap::word,
+          overflow: text::TextOverflow::clip,
+          styles: style::new(width: style::percent(100.0), flex_shrink: 0.0),
+          text_style: text::style(
+            foreground: match self.active or self.hovered {
+              true => interaction_foreground(self.active, self.hovered, self.palette),
+              false => self.palette.item_hover_foreground,
+            },
+          ),
+        )
+        root.add(code_text)
+      },
+      "heading" => {
+        let heading_spans = mut List::new<text::Span>()
+        for run in block.Runs {
+          let base = run_style(run, self.palette, self.active, self.hovered)
+          heading_spans.push(
+            text::span(
+              run.Text,
+              style: text::span_style(
+                foreground: match {
+                  self.active or self.hovered => interaction_foreground(self.active, self.hovered, self.palette),
+                  safe_link(run.Link) => self.palette.accent,
+                  block.Level <= 2 => self.palette.accent,
+                  _ => self.palette.foreground,
+                },
+                background: base.background,
+                bold: true,
+                italic: base.italic,
+                underline: base.underline,
+                strike: base.strike,
+              ),
+              link: match safe_link(run.Link) {
+                true => Maybe::new(run.Link),
+                false => Maybe::new(),
+              },
+            ),
+          )
+        }
+        let heading = self.text_control(
+          text::styled_text(heading_spans.@),
+          Maybe::new(
+            text::style(
+              foreground: match {
+                self.active or self.hovered => interaction_foreground(self.active, self.hovered, self.palette),
+                block.Level <= 2 => self.palette.accent,
+                _ => self.palette.foreground,
+              },
+              bold: true,
+            ),
+          ),
+        )
+        root.add(heading.control)
+        removers.push(heading.remove)
+      },
+      "quote" => {
+        let content = mut List::new<text::Span>()
+        content.push(
+          text::span(
+            "{indent(block.Indent - 1)}│ ",
+            style: text::span_style(
+              foreground: match self.active or self.hovered {
+                true => interaction_foreground(self.active, self.hovered, self.palette),
+                false => self.palette.border,
+              },
+            ),
+          ),
+        )
+        for span in spans_for(
+          block,
+          self.palette,
+          false,
+          not self.active and not self.hovered,
+          self.active,
+          self.hovered,
+        ) {
+          content.push(span)
+        }
+        let quote = self.text_control(
+          text::styled_text(content.@),
+          Maybe::new(text::style(dim: not self.active and not self.hovered)),
+        )
+        root.add(quote.control)
+        removers.push(quote.remove)
+      },
+      "list_item" => {
+        let content = mut List::new<text::Span>()
+        let marker = match block.Marker.is_empty() {
+          true => "  ",
+          false => "{block.Marker} ",
+        }
+        content.push(
+          text::span(
+            "{indent(block.Indent)}{marker}",
+            style: text::span_style(
+              foreground: match self.active or self.hovered {
+                true => interaction_foreground(self.active, self.hovered, self.palette),
+                false => self.palette.foreground,
+              },
+              dim: not self.active and not self.hovered,
+            ),
+          ),
+        )
+        for span in spans_for(block, self.palette, false, false, self.active, self.hovered) {
+          content.push(span)
+        }
+        let item = self.text_control(text::styled_text(content.@), Maybe::new(text::style()))
+        root.add(item.control)
+        removers.push(item.remove)
+      },
+      _ => {
+        let content = self.text_control(
+          text::styled_text(
+            spans_for(block, self.palette, block.Level == 1, false, self.active, self.hovered),
+          ),
+          Maybe::new(text::style()),
+        )
+        root.add(content.control)
+        removers.push(content.remove)
+      },
+    }
+    BlockRecord{root: root, remove_links: removers.@}
+  }
+
+  fn mut set_source(source: Str) {
+    if (not self.disposed) and ((not self.rendered) or (not source == self.source)) {
+      self.source = source
+      self.rendered = true
+      let previous = self.records
+      self.records = []
+      for record in previous {
+        let _ = self.root.remove(record.root)
+        for remove in record.remove_links {
+          remove()
+        }
+        record.root.destroy(recursive: true)
+      }
+      let parsed = markdown::Parse(source)
+      let records = mut List::new<BlockRecord>()
+      mut previous_kind = ""
+      for block, index in parsed {
+        let record = self.build_block(block, index > 0 and not tight(previous_kind, block.Kind))
+        self.root.add(record.root)
+        records.push(record)
+        previous_kind = block.Kind
+      }
+      if records.size() == 0 {
+        let empty = box::new(self.context, styles: style::new(width: style::percent(100.0)))
+        empty.add(
+          text::new(
+            self.context,
+            content: "No description",
+            selectable: false,
+            text_style: text::style(
+              foreground: interaction_foreground(self.active, self.hovered, self.palette),
+              dim: not self.active and not self.hovered,
+            ),
+          ),
+        )
+        self.root.add(empty)
+        records.push(BlockRecord{root: empty, remove_links: []})
+      }
+      self.records = records.@
+    }
+  }
+
+  fn mut set_interaction(active: Bool, hovered: Bool) {
+    if (not self.disposed) and (active != self.active or hovered != self.hovered) {
+      self.active = active
+      self.hovered = hovered
+      let updated = mut self.root.style()
+      updated.background = Maybe::new(interaction_background(active, hovered, self.palette))
+      self.root.set_style(updated.@)
+      self.rendered = false
+      self.set_source(self.source)
+    }
+  }
+
+  fn mut dispose() {
+    if not self.disposed {
+      self.disposed = true
+      let records = self.records
+      self.records = []
+      for record in records {
+        for remove in record.remove_links {
+          remove()
+        }
+      }
+    }
+  }
+}

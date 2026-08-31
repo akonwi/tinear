@@ -1,0 +1,51 @@
+use ard/async
+
+use cooper/context
+use tinear/models/issues
+
+type LoadIssue = fn(Receiver<Bool>, Str, fn(issues::Issue!Str))
+type LoadComments = fn(Receiver<Bool>, Str, fn([issues::Comment]!Str))
+
+struct Service {
+  load_issue: LoadIssue,
+  load_comments: LoadComments,
+}
+
+private fn cancelled(app: Receiver<Void>, view: Receiver<Bool>) Bool {
+  select {
+    app.recv() => true,
+    view.recv() => true,
+    _ => false,
+  }
+}
+
+fn live(ctx: mut context::Context, api_key: Str) Service {
+  let app_cancellation = ctx.cancellation
+  let dispatch = ctx.dispatch
+  Service{
+    load_issue: fn(view_cancellation: Receiver<Bool>, identifier: Str, completion: fn(issues::Issue!Str)) {
+      async::start(fn() {
+        if not cancelled(app_cancellation, view_cancellation) {
+          let result = issues::load_issue(api_key, identifier)
+          if not cancelled(app_cancellation, view_cancellation) {
+            let _ = dispatch(fn() {
+              completion(result)
+            })
+          }
+        }
+      })
+    },
+    load_comments: fn(view_cancellation: Receiver<Bool>, identifier: Str, completion: fn([issues::Comment]!Str)) {
+      async::start(fn() {
+        if not cancelled(app_cancellation, view_cancellation) {
+          let result = issues::load_comments(api_key, identifier)
+          if not cancelled(app_cancellation, view_cancellation) {
+            let _ = dispatch(fn() {
+              completion(result)
+            })
+          }
+        }
+      })
+    },
+  }
+}

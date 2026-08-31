@@ -257,12 +257,12 @@ coherent language instead of extending the bare parity styling.
 
 ### Phase 7 — Markdown, issue detail, comments, and document detail
 
-- [ ] Map parsed markdown blocks/runs to persistent Cooper Box/Text controls.
-- [ ] Build issue header, section tabs, body scrolling, and selection.
-- [ ] Load issue/comments independently with lifecycle guards.
+- [x] Map parsed markdown blocks/runs to persistent Cooper Box/Text controls.
+- [x] Build issue header, section tabs, body scrolling, and selection.
+- [x] Load issue/comments independently with lifecycle guards.
 - [ ] Restore comment threading/cursor, top-level compose, and replies.
 - [ ] Restore description editing/saving with stale-refresh protection.
-- [ ] Wire issue field pickers and browser opening.
+- [x] Wire issue field pickers and browser opening.
 - [ ] Build document metadata/content tabs, retitling, browser opening, and refresh.
 - [ ] Verify every per-tab worker stops on close.
 

@@ -1,0 +1,143 @@
+use ard/testing as assertions
+
+use cooper/testing
+use tinear/tui/markdown_controller
+use tinear/tui/theme
+
+private struct Opened {
+  url: Str,
+  count: Int,
+}
+
+test fn markdown_maps_semantic_blocks_runs_and_links_to_retained_controls() Void!Str {
+  let application = testing::new(60, 24)
+  defer application.destroy()
+  let opened = mut Opened{url: "", count: 0}
+  let view = markdown_controller::new(
+    application.context,
+    theme::new(),
+    "# Heading\n\nHello **bold** [site](https://example.com)\n\n- first\n- second\n\n> quoted\n\n```ard\nlet value = 1\n```\n\n---",
+    fn(url: Str) {
+      opened.url = url
+      opened.count =+ 1
+    },
+  )
+  application.root.add(view.root)
+  application.render()
+  try testing::assert_contains(application.frame().text(), "Heading")
+  try testing::assert_contains(application.frame().text(), "• first")
+  try testing::assert_contains(application.frame().text(), "│ quoted")
+  try testing::assert_contains(application.frame().text(), "let value = 1")
+
+  let heading = application.frame().cell(0, 0).expect("heading")
+  try assertions::assert(
+    heading.style.bold and heading.style.foreground.expect("heading accent").index.expect("palette") == Uint8::from(4),
+    "top-level heading should use bold accent styling",
+  )
+  let bold = application.frame().cell(6, 2).expect("bold run")
+  try assertions::assert(bold.style.bold, "strong markdown should map to a bold span")
+  let link = application.frame().cell(11, 2).expect("link run")
+  try assertions::assert(
+    link.style.underline and link.hyperlink.or("") == "https://example.com",
+    "links should expose underline and terminal hyperlink metadata",
+  )
+  application.click(12, 2)
+  try assertions::assert(
+    opened.url == "https://example.com",
+    "link click should route through app callback",
+  )
+  assertions::assert(opened.count == 1, "link callback should run once")
+}
+
+test fn markdown_source_replacement_keeps_stable_root_and_handles_empty_content() Void!Str {
+  let application = testing::new(40, 12)
+  defer application.destroy()
+  let view = markdown_controller::new(
+    application.context,
+    theme::new(),
+    "Original paragraph",
+    fn(url: Str) {},
+  )
+  let stable_root = view.root
+  application.root.add(view.root)
+  application.render()
+  try testing::assert_contains(application.frame().text(), "Original paragraph")
+
+  view.set_source("Replacement")
+  application.render()
+  try assertions::assert(view.root == stable_root, "markdown updates should retain one stable root")
+  let retained_block = view.records.at(0).expect("replacement block").root
+  view.set_source("Replacement")
+  try assertions::assert(
+    view.records.at(0).expect("unchanged block").root == retained_block,
+    "unchanged refreshes should preserve markdown block identity",
+  )
+  try testing::assert_contains(application.frame().text(), "Replacement")
+  try assertions::assert(
+    not application.frame().text().contains("Original paragraph"),
+    "replacement should remove old retained blocks",
+  )
+
+  view.set_source("")
+  application.render()
+  try testing::assert_contains(application.frame().text(), "No description")
+  view.dispose()
+  view.dispose()
+  assertions::assert(view.disposed, "markdown disposal should be idempotent")
+}
+
+test fn markdown_interaction_style_uses_readable_active_and_hover_surfaces() Void!Str {
+  let application = testing::new(40, 10)
+  defer application.destroy()
+  let view = markdown_controller::new(
+    application.context,
+    theme::new(),
+    "Comment with **emphasis**",
+    fn(url: Str) {},
+  )
+  application.root.add(view.root)
+  view.set_interaction(true, false)
+  application.render()
+  let active = application.frame().cell(0, 0).expect("active comment markdown")
+  try assertions::assert(
+    active.style.background.expect("active background").index.expect("palette") == Uint8::from(4) and active.style.foreground.expect("active foreground").index.expect("palette") == Uint8::from(15),
+    "active markdown should match issue-card selection colors",
+  )
+
+  view.set_interaction(false, true)
+  application.render()
+  let hovered = application.frame().cell(0, 0).expect("hovered comment markdown")
+  assertions::assert(
+    hovered.style.background.expect("hover background").index.expect("palette") == Uint8::from(8) and hovered.style.foreground.expect("hover foreground").index.expect("palette") == Uint8::from(15),
+    "hovered markdown should match issue-card hover colors",
+  )
+}
+
+test fn markdown_rejects_unsafe_link_metadata() Void!Str {
+  let application = testing::new(60, 10)
+  defer application.destroy()
+  let opened = mut Opened{url: "", count: 0}
+  let view = markdown_controller::new(
+    application.context,
+    theme::new(),
+    "[local](file:///etc/passwd) [control](https://example.com/\x1bescape)",
+    fn(url: Str) {
+      opened.count =+ 1
+    },
+  )
+  application.root.add(view.root)
+  application.render()
+  let local = application.frame().cell(0, 0).expect("local link text")
+  let control = application.frame().cell(6, 0).expect("control link text")
+  try assertions::assert(
+    local.hyperlink.is_none() and not local.style.underline,
+    "unsupported schemes should render as plain text",
+  )
+  try assertions::assert(
+    control.hyperlink.is_none() and not control.style.underline,
+    "control characters should prevent terminal hyperlink metadata",
+  )
+  application.click(1, 0)
+  application.click(7, 0)
+  assertions::assert(opened.count == 0, "unsafe links should not activate")
+}

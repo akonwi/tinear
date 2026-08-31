@@ -216,34 +216,64 @@ fn cycle_label(raw: Any) Str {
   }
 }
 
-fn decode_issue(raw: Any) Issue {
-  let state = decode::run(raw, decode::field("state", decode::any)).expect("Missing state")
-  let team = decode::run(raw, decode::field("team", decode::any)).expect("Missing team")
-  Issue{
-    id: decode::run(raw, decode::field("id", decode::string)).expect("Missing issue.id"),
-    identifier: decode::run(raw, decode::field("identifier", decode::string)).expect("Missing issue.identifier"),
-    title: normalize_text(
-      decode::run(raw, decode::field("title", decode::string)).expect("Missing issue.title"),
-    ),
-    description: normalize_nullable_str(nullable_str(raw, "description")),
-    priority: nullable_int(raw, "priority"),
-    state_id: decode::run(state, decode::field("id", decode::string)).expect("Missing state.id"),
-    state_name: normalize_text(
-      decode::run(state, decode::field("name", decode::string)).expect("Missing state.name"),
-    ),
-    state_type: decode::run(state, decode::field("type", decode::string)).expect("Missing state.type"),
-    state_position: decode::run(state, decode::field("position", decode::float)).expect("Missing state.position"),
-    team_id: decode::run(team, decode::field("id", decode::string)).expect("Missing team.id"),
-    team_name: normalize_text(decode::run(team, decode::field("name", decode::string)).expect("Missing team.name")),
-    team_key: decode::run(team, decode::field("key", decode::string)).expect("Missing team.key"),
-    project_id: nested_str(raw, "project", "id", ""),
-    project_name: normalize_text(nested_str(raw, "project", "name", "—")),
-    assignee_id: nested_str(raw, "assignee", "id", ""),
-    assignee_name: normalize_text(user_display_name_opt(raw, "assignee")),
-    cycle_id: cycle_id(raw),
-    cycle_label: cycle_label(raw),
-    url: optional_str(raw, "url", ""),
+fn try_decode_issue(raw: Any) Issue!Str {
+  let state = try decode::run(raw, decode::field("state", decode::any)) -> error { Result::err(error.to_str()) }
+  let team = try decode::run(raw, decode::field("team", decode::any)) -> error { Result::err(error.to_str()) }
+  let id = try decode::run(raw, decode::field("id", decode::string)) -> error { Result::err(error.to_str()) }
+  let identifier = try decode::run(raw, decode::field("identifier", decode::string)) -> error {
+    Result::err(error.to_str())
   }
+  let title = try decode::run(raw, decode::field("title", decode::string)) -> error {
+    Result::err(error.to_str())
+  }
+  let description = try decode::run(raw, decode::field("description", decode::nullable(decode::string))) -> error {
+    Result::err(error.to_str())
+  }
+  let priority = try decode::run(raw, decode::field("priority", decode::nullable(decode::int))) -> error {
+    Result::err(error.to_str())
+  }
+  let state_id = try decode::run(state, decode::field("id", decode::string)) -> error { Result::err(error.to_str()) }
+  let state_name = try decode::run(state, decode::field("name", decode::string)) -> error {
+    Result::err(error.to_str())
+  }
+  let state_type = try decode::run(state, decode::field("type", decode::string)) -> error {
+    Result::err(error.to_str())
+  }
+  let state_position = try decode::run(state, decode::field("position", decode::float)) -> error {
+    Result::err(error.to_str())
+  }
+  let team_id = try decode::run(team, decode::field("id", decode::string)) -> error { Result::err(error.to_str()) }
+  let team_name = try decode::run(team, decode::field("name", decode::string)) -> error {
+    Result::err(error.to_str())
+  }
+  let team_key = try decode::run(team, decode::field("key", decode::string)) -> error { Result::err(error.to_str()) }
+  Result::ok(
+    Issue{
+      id: id,
+      identifier: identifier,
+      title: normalize_text(title),
+      description: normalize_nullable_str(description),
+      priority: priority,
+      state_id: state_id,
+      state_name: normalize_text(state_name),
+      state_type: state_type,
+      state_position: state_position,
+      team_id: team_id,
+      team_name: normalize_text(team_name),
+      team_key: team_key,
+      project_id: nested_str(raw, "project", "id", ""),
+      project_name: normalize_text(nested_str(raw, "project", "name", "—")),
+      assignee_id: nested_str(raw, "assignee", "id", ""),
+      assignee_name: normalize_text(user_display_name_opt(raw, "assignee")),
+      cycle_id: cycle_id(raw),
+      cycle_label: cycle_label(raw),
+      url: optional_str(raw, "url", ""),
+    },
+  )
+}
+
+fn decode_issue(raw: Any) Issue {
+  try_decode_issue(raw).expect("Invalid issue payload")
 }
 
 fn decode_column(raw: state::BoardColumn) BoardColumn {
@@ -259,17 +289,26 @@ fn decode_column(raw: state::BoardColumn) BoardColumn {
   }
 }
 
-fn decode_comment(raw: Any) Comment {
-  Comment{
-    id: decode::run(raw, decode::field("id", decode::string)).expect("Missing comment.id"),
-    author: normalize_text(comment_author(raw)),
-    created_at: decode::run(raw, decode::field("createdAt", decode::string)).expect("Missing comment.createdAt"),
-    body: normalize_text(
-      decode::run(raw, decode::field("body", decode::string)).expect("Missing comment.body"),
-    ),
-    parent_id: nested_str(raw, "parent", "id", ""),
-    depth: 0,
+fn try_decode_comment(raw: Any) Comment!Str {
+  let id = try decode::run(raw, decode::field("id", decode::string)) -> error { Result::err(error.to_str()) }
+  let created_at = try decode::run(raw, decode::field("createdAt", decode::string)) -> error {
+    Result::err(error.to_str())
   }
+  let body = try decode::run(raw, decode::field("body", decode::string)) -> error { Result::err(error.to_str()) }
+  Result::ok(
+    Comment{
+      id: id,
+      author: normalize_text(comment_author(raw)),
+      created_at: created_at,
+      body: normalize_text(body),
+      parent_id: nested_str(raw, "parent", "id", ""),
+      depth: 0,
+    },
+  )
+}
+
+fn decode_comment(raw: Any) Comment {
+  try_decode_comment(raw).expect("Invalid comment payload")
 }
 
 // Arrange comments into threaded display order: each top-level comment
@@ -388,10 +427,9 @@ fn create_comment(api_key: Str, issue_id: Str, body: Str, parent_id: Str) Void!S
 fn fetch_issue_comments(api_key: Str, issue_id: Str) [Any]!Str {
   let query = `query {{ issue(id: {client::string_literal(issue_id)}) {{ comments(first: 50) {{ nodes {{ id body createdAt parent {{ id }} user {{ name displayName }} botActor {{ name }} }} }} }} }}`
   let data = try client::graphql(api_key, query)
-  let nodes = decode::run(
-    data,
-    decode::path(["issue", "comments", "nodes"], decode::list(decode::any)),
-  ).expect("Missing issue.comments.nodes")
+  let nodes = try decode::run(data, decode::path(["issue", "comments", "nodes"], decode::list(decode::any))) -> error {
+    Result::err(error.to_str())
+  }
   Result::ok(nodes)
 }
 
@@ -431,7 +469,7 @@ fn issue_fields() Str {
 fn fetch_single_issue(api_key: Str, issue_id: Str) Any!Str {
   let query = `query {{ issue(id: {client::string_literal(issue_id)}) {{ {issue_fields()} }} }}`
   let data = try client::graphql(api_key, query)
-  let issue = decode::run(data, decode::field("issue", decode::any)).expect("Missing issue")
+  let issue = try decode::run(data, decode::field("issue", decode::any)) -> error { Result::err(error.to_str()) }
   Result::ok(issue)
 }
 
@@ -555,7 +593,7 @@ fn load_comments(api_key: Str, issue_id: Str) [Comment]!Str {
   let raw_comments = try fetch_issue_comments(api_key, issue_id)
   let comments: mut [Comment] = mut []
   for raw in raw_comments {
-    comments.push(decode_comment(raw))
+    comments.push(try try_decode_comment(raw))
   }
   Result::ok(thread_comments(comments.@))
 }
@@ -575,14 +613,14 @@ fn load_team_cycles(api_key: Str, team_id: Str) TeamCyclesResult!Str {
 
 fn load_issue(api_key: Str, issue_id: Str) Issue!Str {
   let raw = try fetch_single_issue(api_key, issue_id)
-  Result::ok(decode_issue(raw))
+  try_decode_issue(raw)
 }
 
 fn search(api_key: Str, term: Str) [Issue]!Str {
   let raw_issues = try fetch_issue_search(api_key, term)
   let results: mut [Issue] = mut []
   for raw in raw_issues {
-    results.push(decode_issue(raw))
+    results.push(try try_decode_issue(raw))
   }
   Result::ok(results.@)
 }

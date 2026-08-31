@@ -14,10 +14,12 @@ use tinear/services/auth
 use tinear/services/board_service
 use tinear/services/cache_writer
 use tinear/services/inbox_service
+use tinear/services/issue_detail_service
 use tinear/services/issue_fields_service
 use tinear/tui/application_shell
 use tinear/tui/board_controller
 use tinear/tui/inbox_controller
+use tinear/tui/issue_detail_controller
 use tinear/tui/issue_field_picker_controller
 use tinear/tui/scheduler
 use tinear/tui/shell_controller
@@ -31,6 +33,10 @@ private struct ActiveRoute {
 
 private struct ShellActions {
   open_issue: fn(Str),
+  open_picker: fn(issue_field_picker_controller::Field, issues::Issue),
+}
+
+private struct DetailActions {
   open_picker: fn(issue_field_picker_controller::Field, issues::Issue),
 }
 
@@ -61,11 +67,69 @@ private fn placeholder_screen(ctx: mut context::Context, title: Str, message: St
 }
 
 private fn dynamic_placeholder(ctx: mut context::Context, reference: tabs::TabRef) shell_controller::Screen {
-  let kind = match reference.kind {
-    tabs::Kind::issue => "Issue",
-    tabs::Kind::doc => "Document",
+  placeholder_screen(
+    ctx,
+    "Document · {reference.title}",
+    "Retained document controller coming next",
+  )
+}
+
+private fn issue_detail_screen(
+  ctx: mut context::Context,
+  palette: theme::Theme,
+  api_key: Str,
+  identifier: Str,
+  application_shell: mut application_shell::ApplicationShell,
+) shell_controller::Screen {
+  let actions = mut DetailActions{open_picker: fn(field: issue_field_picker_controller::Field, issue: issues::Issue) {}}
+  let detail = issue_detail_controller::new(
+    ctx,
+    palette,
+    identifier,
+    issue_detail_service::live(ctx, api_key),
+    scheduler::for_context(ctx),
+    fn(target: Str) {
+      match url::open(ctx, target) {
+        ok(_) => (),
+        err(error) => {
+          let _ = application_shell.toasts.show(
+            "Couldn't open URL",
+            error.error(),
+            toast_host::Variant::error,
+            4000,
+          )
+        },
+      }
+    },
+    fn(field: issue_field_picker_controller::Field, issue: issues::Issue) {
+      actions.open_picker(field, issue)
+    },
+    fn(title: Str, message: Str) {
+      let _ = application_shell.toasts.show(title, message, toast_host::Variant::error, 4000)
+    },
+  )
+  let field_pickers = issue_field_picker_controller::new(
+    ctx,
+    application_shell.modal,
+    palette,
+    issue_fields_service::live(ctx, api_key),
+    fn() {
+      detail.focus()
+    },
+    fn() {
+      detail.refresh(true)
+    },
+    fn(title: Str, message: Str) {
+      let _ = application_shell.toasts.show(title, message, toast_host::Variant::error, 4000)
+    },
+  )
+  actions.open_picker = fn(field: issue_field_picker_controller::Field, issue: issues::Issue) {
+    field_pickers.open(field, issue)
   }
-  placeholder_screen(ctx, "{kind} · {reference.title}", "Retained detail controller coming next")
+  detail.start()
+  detail.screen(fn() {
+    field_pickers.dispose()
+  })
 }
 
 private fn show_logged_in(
@@ -146,7 +210,10 @@ private fn show_logged_in(
     inbox.screen(),
     board.screen(),
     fn(reference: tabs::TabRef) shell_controller::Screen {
-      dynamic_placeholder(ctx, reference)
+      match reference.kind {
+        tabs::Kind::issue => issue_detail_screen(ctx, palette, api_key, reference.id, application_shell),
+        tabs::Kind::doc => dynamic_placeholder(ctx, reference),
+      }
     },
     fn(snapshot: cache::LoggedInCache) {
       writer.persist(snapshot)
