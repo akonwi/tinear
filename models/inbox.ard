@@ -103,7 +103,7 @@ private fn dynamic_id_and_title(notif: Any, n_type: Str) IdTitle {
   }
 }
 
-fn try_decode_item(notif: Any) Item!Str {
+fn decode_item(notif: Any) Item!Str {
   let notification_id = try decode::run(
     notif,
     decode::field("id", decode::string),
@@ -146,10 +146,6 @@ fn try_decode_item(notif: Any) Item!Str {
       url: url,
     },
   )
-}
-
-fn decode_item(notif: Any) Item {
-  try_decode_item(notif).expect("valid notification")
 }
 
 fn fetch_inbox(api_key: Str) [Any]!Str {
@@ -265,7 +261,7 @@ fn load(api_key: Str) [Item]!Str {
   let nodes = try fetch_inbox(api_key)
   let items: mut [Item] = mut []
   for node in nodes {
-    items.push(try try_decode_item(node))
+    items.push(try decode_item(node))
   }
   Result::ok(items.@)
 }
@@ -493,7 +489,7 @@ fn decode_issue_detail(notif: Any) Detail {
   }
 }
 
-fn try_decode_detail(notif: Any) Detail!Str {
+fn decode_detail(notif: Any) Detail!Str {
   let n_type = try decode::run(
     notif,
     decode::field("type", decode::string),
@@ -508,11 +504,7 @@ fn try_decode_detail(notif: Any) Detail!Str {
   )
 }
 
-fn decode_detail(notif: Any) Detail {
-  try_decode_detail(notif).expect("valid notification detail")
-}
-
 fn load_detail(api_key: Str, notification_id: Str) Detail!Str {
   let notif = try fetch_notification_detail(api_key, notification_id)
-  try_decode_detail(notif)
+  decode_detail(notif)
 }

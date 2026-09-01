@@ -87,6 +87,11 @@ struct BoardColumn {
   issues: [Issue],
 }
 
+private struct DecodedBoardIssue {
+  issue: Issue,
+  raw_state_name: Str,
+}
+
 struct Comment {
   id: Str,
   author: Str,
@@ -130,25 +135,11 @@ fn optional_str(data: Any, name: Str, fallback: Str) Str {
   }
 }
 
-fn nullable_str(data: Any, name: Str) Str? {
-  decode::run(
-    data,
-    decode::field(name, decode::nullable(decode::string)),
-  ).expect("nullable string field missing")
-}
-
 fn normalize_nullable_str(value: Str?) Str? {
   match value {
     v => Maybe::new(normalize_text(v)),
     _ => Maybe::new(),
   }
-}
-
-fn nullable_int(data: Any, name: Str) Int? {
-  decode::run(
-    data,
-    decode::field(name, decode::nullable(decode::int)),
-  ).expect("nullable int field missing")
 }
 
 fn nested_str(data: Any, name: Str, nested: Str, fallback: Str) Str {
@@ -223,7 +214,7 @@ private fn validate_issue_identity(id: Str, identifier: Str) Void!Str {
   }
 }
 
-fn try_decode_issue(raw: Any) Issue!Str {
+fn decode_issue(raw: Any) Issue!Str {
   let state = try decode::run(raw, decode::field("state", decode::any)) -> error { Result::err(error.to_str()) }
   let team = try decode::run(raw, decode::field("team", decode::any)) -> error { Result::err(error.to_str()) }
   let id = try decode::run(raw, decode::field("id", decode::string)) -> error { Result::err(error.to_str()) }
@@ -280,24 +271,7 @@ fn try_decode_issue(raw: Any) Issue!Str {
   )
 }
 
-fn decode_issue(raw: Any) Issue {
-  try_decode_issue(raw).expect("Invalid issue payload")
-}
-
-fn decode_column(raw: state::BoardColumn) BoardColumn {
-  let issues: mut [Issue] = mut []
-  for issue in raw.issues {
-    issues.push(decode_issue(issue))
-  }
-  BoardColumn{
-    name: normalize_text(raw.name),
-    state_type: raw.state_type,
-    position: raw.position,
-    issues: issues.@,
-  }
-}
-
-fn try_decode_comment(raw: Any) Comment!Str {
+fn decode_comment(raw: Any) Comment!Str {
   let id = try decode::run(raw, decode::field("id", decode::string)) -> error { Result::err(error.to_str()) }
   let created_at = try decode::run(raw, decode::field("createdAt", decode::string)) -> error {
     Result::err(error.to_str())
@@ -313,10 +287,6 @@ fn try_decode_comment(raw: Any) Comment!Str {
       depth: 0,
     },
   )
-}
-
-fn decode_comment(raw: Any) Comment {
-  try_decode_comment(raw).expect("Invalid comment payload")
 }
 
 // Arrange comments into threaded display order: each top-level comment
@@ -381,10 +351,18 @@ fn decode_cycle(raw: Any) Cycle!Str {
   )
 }
 
-fn fetch_viewer(api_key: Str) Any!Str {
+fn decode_viewer_id(data: Any) Str!Str {
+  decode::run(
+    data,
+    decode::path(["viewer", "id"], decode::string),
+  ).map_err(fn(error) {
+    error.to_str()
+  })
+}
+
+fn fetch_viewer_id(api_key: Str) Str!Str {
   let data = try client::graphql(api_key, `query {{ viewer {{ id name displayName email }} }}`)
-  let viewer = decode::run(data, decode::field("viewer", decode::any)).expect("Missing viewer")
-  Result::ok(viewer)
+  decode_viewer_id(data)
 }
 
 fn update_state(api_key: Str, issue_id: Str, state_id: Str) Void!Str {
@@ -497,7 +475,7 @@ fn fetch_issue_search(api_key: Str, term: Str) [Any]!Str {
   Result::ok(nodes)
 }
 
-fn sort_columns_by_position(cols: [state::BoardColumn]) [state::BoardColumn] {
+fn sort_columns_by_position(cols: [BoardColumn]) [BoardColumn] {
   let n = cols.size()
   if n < 2 {
     cols
@@ -523,7 +501,7 @@ fn sort_columns_by_position(cols: [state::BoardColumn]) [state::BoardColumn] {
   }
 }
 
-fn fetch_board(api_key: Str, my_id: Str) [state::BoardColumn]!Str {
+fn fetch_board(api_key: Str, my_id: Str) [BoardColumn]!Str {
   let viewer_id = client::string_literal(my_id)
   let query = `
     query {{
@@ -541,58 +519,61 @@ fn fetch_board(api_key: Str, my_id: Str) [state::BoardColumn]!Str {
     }}
     `
   let data = try client::graphql(api_key, query)
-  let raw_issues = decode::run(
-    data,
-    decode::path(["issues", "nodes"], decode::list(decode::any)),
-  ).expect("Missing issues.nodes")
+  decode_board(data)
+}
+
+fn decode_board(data: Any) [BoardColumn]!Str {
+  let raw_issues = try decode::run(data, decode::path(["issues", "nodes"], decode::list(decode::any))) -> error {
+    Result::err(error.to_str())
+  }
+  let decoded_issues = mut List::new<DecodedBoardIssue>()
+  for raw in raw_issues {
+    let raw_state_name = try decode::run(raw, decode::path(["state", "name"], decode::string)) -> error {
+      Result::err(error.to_str())
+    }
+    decoded_issues.push(
+      DecodedBoardIssue{issue: try decode_issue(raw), raw_state_name: raw_state_name},
+    )
+  }
+  let all_issues = decoded_issues.@
 
   let state_names: mut [Str] = mut []
   let state_types: mut [Str] = mut []
   let state_positions: mut [Float64] = mut []
-  for issue in raw_issues {
-    let s = decode::run(issue, decode::field("state", decode::any)).expect("Missing state")
-    let sname = decode::run(s, decode::field("name", decode::string)).expect("Missing state.name")
-    if not state::is_hidden_state(sname) {
+  for decoded in all_issues {
+    if not state::is_hidden_state(decoded.raw_state_name) {
       mut seen = false
       for existing in state_names {
-        if existing == sname {
+        if existing == decoded.raw_state_name {
           seen = true
         }
       }
       if not seen {
-        state_names.push(sname)
-        state_types.push(
-          decode::run(s, decode::field("type", decode::string)).expect("Missing state.type"),
-        )
-        state_positions.push(
-          decode::run(s, decode::field("position", decode::float)).expect("Missing state.position"),
-        )
+        state_names.push(decoded.raw_state_name)
+        state_types.push(decoded.issue.state_type)
+        state_positions.push(decoded.issue.state_position)
       }
     }
   }
 
-  let columns: mut [state::BoardColumn] = mut []
+  let columns: mut [BoardColumn] = mut []
   for sname, idx in state_names {
     let is_completed = state_types.at(idx).expect("parallel list") == "completed"
     let cap = match is_completed {
       true => 10,
       false => 200,
     }
-    let col_issues: mut [Any] = mut []
+    let col_issues: mut [Issue] = mut []
     mut count = 0
-    for issue in raw_issues {
-      let iss_name = decode::run(
-        issue,
-        decode::path(["state", "name"], decode::string),
-      ).expect("Missing state.name on issue")
-      if iss_name == sname and count < cap {
-        col_issues.push(issue)
+    for decoded in all_issues {
+      if decoded.raw_state_name == sname and count < cap {
+        col_issues.push(decoded.issue)
         count = count + 1
       }
     }
     columns.push(
-      state::BoardColumn{
-        name: sname,
+      BoardColumn{
+        name: normalize_text(sname),
         state_type: state_types.at(idx).expect("parallel list"),
         position: state_positions.at(idx).expect("parallel list"),
         issues: col_issues.@,
@@ -607,7 +588,7 @@ fn load_comments(api_key: Str, issue_id: Str) [Comment]!Str {
   let raw_comments = try fetch_issue_comments(api_key, issue_id)
   let comments: mut [Comment] = mut []
   for raw in raw_comments {
-    comments.push(try try_decode_comment(raw))
+    comments.push(try decode_comment(raw))
   }
   Result::ok(thread_comments(comments.@))
 }
@@ -627,30 +608,21 @@ fn load_team_cycles(api_key: Str, team_id: Str) TeamCyclesResult!Str {
 
 fn load_issue(api_key: Str, issue_id: Str) Issue!Str {
   let raw = try fetch_single_issue(api_key, issue_id)
-  try_decode_issue(raw)
+  decode_issue(raw)
 }
 
 fn search(api_key: Str, term: Str) [Issue]!Str {
   let raw_issues = try fetch_issue_search(api_key, term)
   let results: mut [Issue] = mut []
   for raw in raw_issues {
-    results.push(try try_decode_issue(raw))
+    results.push(try decode_issue(raw))
   }
   Result::ok(results.@)
 }
 
 fn load(api_key: Str) [BoardColumn]!Str {
-  let viewer = try fetch_viewer(api_key)
-  let viewer_id = decode::run(
-    viewer,
-    decode::field("id", decode::string),
-  ).expect("Missing viewer id")
-  let raw_columns = try fetch_board(api_key, viewer_id)
-  let columns: mut [BoardColumn] = mut []
-  for col in raw_columns {
-    columns.push(decode_column(col))
-  }
-  Result::ok(columns.@)
+  let viewer_id = try fetch_viewer_id(api_key)
+  fetch_board(api_key, viewer_id)
 }
 
 fn update_priority(api_key: Str, issue_id: Str, priority: Int) Void!Str {

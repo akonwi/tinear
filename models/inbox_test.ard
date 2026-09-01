@@ -7,7 +7,7 @@ test fn decode_issue_notification_uses_issue_destination() Void!Str {
   let raw = try decode::from_json(
     "{{\"id\":\"notification-1\",\"type\":\"issueNewComment\",\"url\":\"https://linear.app/issue/AKO-1\",\"actor\":{{\"name\":\"Full Name\",\"displayName\":\"shortname\"}},\"issue\":{{\"identifier\":\"AKO-1\",\"title\":\"Fix login\"}}}}",
   )
-  let item = inbox::decode_item(raw)
+  let item = try inbox::decode_item(raw)
   try testing::assert(item.target_id == "AKO-1", "issue identifier should be the destination")
   try testing::assert(item.title == "Fix login", "issue title should decode")
   try testing::assert(item.actor_name == "shortname", "display name should be preferred")
@@ -20,12 +20,9 @@ test fn decode_issue_notification_uses_issue_destination() Void!Str {
 
 test fn required_notification_fields_fail_without_panicking() Void!Str {
   let missing_type = try decode::from_json("{{\"id\":\"notification-1\"}}")
-  try testing::assert(
-    inbox::try_decode_item(missing_type).is_err(),
-    "missing type should fail item decode",
-  )
+  try testing::assert(inbox::decode_item(missing_type).is_err(), "missing type should fail item decode")
   testing::assert(
-    inbox::try_decode_detail(missing_type).is_err(),
+    inbox::decode_detail(missing_type).is_err(),
     "missing type should fail detail decode",
   )
 }
@@ -45,7 +42,7 @@ test fn decode_pull_request_notification_prefers_provider_url() Void!Str {
   let raw = try decode::from_json(
     "{{\"id\":\"notification-2\",\"type\":\"pullRequestApproved\",\"url\":\"https://linear.app/review/2\",\"actor\":null,\"pullRequest\":{{\"number\":42,\"title\":\"Ship it\",\"url\":\"https://github.com/acme/repo/pull/42\"}}}}",
   )
-  let item = inbox::decode_item(raw)
+  let item = try inbox::decode_item(raw)
   try testing::assert(item.target_id == "PR #42", "pull request number should be formatted")
   try testing::assert(item.actor_name == "—", "missing actor should use a dash")
   try testing::assert(item.type_label == "approved", "pull request type should be formatted")

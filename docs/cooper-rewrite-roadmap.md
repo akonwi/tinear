@@ -12,10 +12,10 @@ scratchpad; durable architectural decisions should be recorded as ADRs.
 
 ## Status snapshot
 
-- **Current implementation focus:** Phase 9 parity hardening and the remaining explicit Phase 0/1 framework and transport gates.
+- **Current implementation focus:** Phase 9 parity hardening and the remaining explicit Phase 0/1 framework gates.
 - **Feature slices complete:** authentication, shell/cache, Inbox, My Issues, field picker/mutation flows, Markdown, issue details/comments/editing, document details, global search, and issue creation.
-- **Open framework/foundation gates:** remotely pin Cooper, optional terminal-browser app mode, transport injection/limits, fallible decoder cleanup, and true HTTP cancellation.
-- **Latest validation:** `ard check main.ard`, `ard build main.ard`, 124 Ard tests, and Go Markdown parser tests pass.
+- **Open framework/foundation gates:** remotely pin Cooper and restore optional terminal-browser app mode; true HTTP cancellation is deferred.
+- **Latest validation:** `ard check main.ard`, `ard build main.ard`, 126 Ard tests, and Go Markdown parser tests pass.
 
 ## Parity ledger
 
@@ -163,9 +163,7 @@ ffi/markdown/*
 - [ ] Restore optional terminal-browser app-mode probing without blocking the UI thread.
 - [x] Introduce injectable service closures for controller tests.
 - [x] Encode all GraphQL string arguments safely rather than interpolating IDs.
-- [ ] Make network response decoders fallible instead of panicking on malformed or permission-dependent payloads.
-- [ ] Inject/test the HTTP transport, status/error matrix, and response-size boundary.
-- [ ] Thread per-controller cancellation into HTTP request contexts so closed views interrupt in-flight requests.
+- [x] Remove panic-based decoding from production network paths; propagate malformed or permission-dependent Linear payloads as controller errors.
 - [x] Make config/cache directories and files private and replace files atomically.
 - [x] Serialize/coalesce shell cache writes so older snapshots cannot overwrite newer state.
 - [x] Fix board/picker source defects while porting: fetch assignee/project IDs and exclude canceled projects correctly.
@@ -318,6 +316,10 @@ These are documented ideas, not behavior that the rewrite must reproduce before 
 - [ ] Global `R` refresh
 - [ ] Issue relations
 - [ ] Document creation/editing
+
+## Deferred hardening
+
+- [ ] Thread per-controller cancellation into HTTP request contexts so closed views interrupt in-flight requests.
 
 ## Known framework/app risks to track
 

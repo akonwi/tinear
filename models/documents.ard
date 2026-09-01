@@ -44,7 +44,7 @@ private fn validate_document_identity(id: Str, slug_id: Str) Void!Str {
   }
 }
 
-fn try_decode_meta(raw: Any) DocMeta!Str {
+fn decode_meta(raw: Any) DocMeta!Str {
   let project = issues::nested_str(raw, "project", "name", "")
   let initiative = issues::nested_str(raw, "initiative", "name", "")
   let container = match project.is_empty() {
@@ -77,20 +77,12 @@ fn try_decode_meta(raw: Any) DocMeta!Str {
   )
 }
 
-fn decode_meta(raw: Any) DocMeta {
-  try_decode_meta(raw).expect("Malformed document metadata")
-}
-
-fn try_decode_doc(raw: Any) Doc!Str {
-  let meta = try try_decode_meta(raw)
+fn decode_doc(raw: Any) Doc!Str {
+  let meta = try decode_meta(raw)
   let content = try decode::run(raw, decode::field("content", decode::nullable(decode::string))) -> error {
     Result::err(error.to_str())
   }
   Result::ok(Doc{meta: meta, content: issues::normalize_nullable_str(content)})
-}
-
-fn decode_doc(raw: Any) Doc {
-  try_decode_doc(raw).expect("Malformed document")
 }
 
 // Most recently updated documents across the workspace.
@@ -102,7 +94,7 @@ fn fetch_recent(api_key: Str, limit: Int) [DocMeta]!Str {
   }
   let out: mut [DocMeta] = mut []
   for node in nodes {
-    out.push(try try_decode_meta(node))
+    out.push(try decode_meta(node))
   }
   Result::ok(out.@)
 }
@@ -116,7 +108,7 @@ fn search(api_key: Str, term: Str) [DocMeta]!Str {
   }
   let out: mut [DocMeta] = mut []
   for node in nodes {
-    out.push(try try_decode_meta(node))
+    out.push(try decode_meta(node))
   }
   Result::ok(out.@)
 }
@@ -129,5 +121,5 @@ fn fetch_single(api_key: Str, slug_id: Str) Doc!Str {
   let raw = try decode::run(data, decode::field("document", decode::any)) -> error {
     Result::err(error.to_str())
   }
-  try_decode_doc(raw)
+  decode_doc(raw)
 }
