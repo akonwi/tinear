@@ -1,6 +1,6 @@
 use cooper/box
-use cooper/context
 use cooper/event
+use cooper/runtime
 use cooper/style
 use cooper/text
 use cooper/text_area
@@ -71,7 +71,7 @@ private fn submission_active(guard: Chan<Bool>) Bool {
 }
 
 struct Controller {
-  context: mut context::Context,
+  context: mut runtime::Runtime,
   modal: mut modal_host::ModalHost,
   palette: tinear_theme::Theme,
   service: issue_edit_service::Service,
@@ -85,7 +85,7 @@ struct Controller {
 }
 
 fn new(
-  ctx: mut context::Context,
+  ctx: mut runtime::Runtime,
   modal: mut modal_host::ModalHost,
   palette: tinear_theme::Theme,
   service: issue_edit_service::Service,

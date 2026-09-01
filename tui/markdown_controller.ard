@@ -1,6 +1,6 @@
 use cooper/box
 use cooper/color
-use cooper/context
+use cooper/runtime
 use cooper/style
 use cooper/text
 use go:strings
@@ -21,7 +21,7 @@ private struct LinkedText {
 
 struct MarkdownController {
   root: mut box::Box,
-  context: mut context::Context,
+  context: mut runtime::Runtime,
   records: [BlockRecord],
   source: Str,
   rendered: Bool,
@@ -160,7 +160,7 @@ private fn block_style(spaced: Bool, background: tinear_theme::Theme?, active: B
 }
 
 fn new(
-  ctx: mut context::Context,
+  ctx: mut runtime::Runtime,
   palette: tinear_theme::Theme,
   source: Str,
   on_open_link: fn(Str),

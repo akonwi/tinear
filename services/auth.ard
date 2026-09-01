@@ -1,6 +1,6 @@
 use ard/async
 
-use cooper/context
+use cooper/runtime
 use decode
 use tinear/config
 use tinear/linear/client
@@ -53,7 +53,7 @@ private fn cancelled(app: Receiver<Void>, view: Receiver<Bool>) Bool {
 }
 
 fn with_services(
-  ctx: mut context::Context,
+  ctx: mut runtime::Runtime,
   validate_key: fn(Str) Void!Str,
   save_key: fn(Str) Str!Str,
 ) Authenticate {
@@ -86,6 +86,6 @@ fn with_services(
 
 // Production authentication port. Work runs in a background fiber and the
 // completion always re-enters Cooper's UI thread.
-fn live(ctx: mut context::Context) Authenticate {
+fn live(ctx: mut runtime::Runtime) Authenticate {
   with_services(ctx, validate, config::write)
 }

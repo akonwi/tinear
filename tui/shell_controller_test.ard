@@ -1,8 +1,8 @@
 use ard/testing as assertions
 
 use cooper/box
-use cooper/context
 use cooper/event
+use cooper/runtime
 use cooper/style
 use cooper/testing
 use cooper/text
@@ -35,7 +35,7 @@ private fn key(value: Str) mut event::KeyEvent {
   event::key(value, value, event::KeyEventType::press, modifiers())
 }
 
-private fn fake_screen(ctx: mut context::Context, label: Str, state: mut ScreenState) shell_controller::Screen {
+private fn fake_screen(ctx: mut runtime::Runtime, label: Str, state: mut ScreenState) shell_controller::Screen {
   let root = box::new(
     ctx,
     styles: style::new(
@@ -66,7 +66,7 @@ private fn fake_screen(ctx: mut context::Context, label: Str, state: mut ScreenS
   }
 }
 
-private fn dynamic_factory(ctx: mut context::Context, created: mut Counter, disposed: mut Counter) fn(tabs::TabRef) shell_controller::Screen {
+private fn dynamic_factory(ctx: mut runtime::Runtime, created: mut Counter, disposed: mut Counter) fn(tabs::TabRef) shell_controller::Screen {
   fn(reference: tabs::TabRef) shell_controller::Screen {
     created.value =+ 1
     let state = mut ScreenState{

@@ -1,6 +1,6 @@
 use ard/async
 
-use cooper/context
+use cooper/runtime
 use tinear/models/documents
 
 type LoadDocument = fn(Receiver<Bool>, Str, fn(documents::Doc!Str))
@@ -17,7 +17,7 @@ private fn cancelled(app: Receiver<Void>, view: Receiver<Bool>) Bool {
   }
 }
 
-fn live(ctx: mut context::Context, api_key: Str) Service {
+fn live(ctx: mut runtime::Runtime, api_key: Str) Service {
   let app_cancellation = ctx.cancellation
   let dispatch = ctx.dispatch
   Service{

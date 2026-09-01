@@ -1,5 +1,5 @@
 use cooper/box
-use cooper/context
+use cooper/runtime
 use cooper/style
 use cooper/text
 use tinear/tui/scheduler
@@ -26,7 +26,7 @@ struct ToastHost {
   visible_style: style::Style,
   palette: tinear_theme::Theme,
   schedule: scheduler::Schedule,
-  context: mut context::Context,
+  context: mut runtime::Runtime,
 }
 
 private fn root_style(display: style::Display) style::Style {
@@ -44,7 +44,7 @@ private fn root_style(display: style::Display) style::Style {
   )
 }
 
-fn new(ctx: mut context::Context, palette: tinear_theme::Theme, schedule: scheduler::Schedule) mut ToastHost {
+fn new(ctx: mut runtime::Runtime, palette: tinear_theme::Theme, schedule: scheduler::Schedule) mut ToastHost {
   let hidden_style = root_style(style::Display::none)
   let visible_style = root_style(style::Display::flex)
   let root = box::new(ctx, styles: hidden_style)

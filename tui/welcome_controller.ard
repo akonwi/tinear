@@ -1,7 +1,7 @@
 use cooper/box
-use cooper/context
 use cooper/event
 use cooper/input
+use cooper/runtime
 use cooper/style
 use cooper/text
 use tinear/services/auth
@@ -24,7 +24,7 @@ struct WelcomeController {
 }
 
 fn new(
-  ctx: mut context::Context,
+  ctx: mut runtime::Runtime,
   palette: tinear_theme::Theme,
   authenticate: auth::Authenticate,
   on_success: fn(Str),

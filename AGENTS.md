@@ -27,7 +27,7 @@ The local development dependency points to `../cooper`.
 - Construct retained controls once and mutate them through setters.
 - Build the initial tree before starting the application.
 - After startup, mutate controls only from Cooper callbacks or through
-  `Context.dispatch`.
+  `Runtime.dispatch` (`application.context.dispatch`).
 - Keep Linear fetching and decoding separate from retained UI controllers.
 - Give every view explicit lifecycle/cancellation state before starting
   background work.

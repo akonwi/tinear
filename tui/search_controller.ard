@@ -1,7 +1,7 @@
 use cooper/box
-use cooper/context
 use cooper/event
 use cooper/input
+use cooper/runtime
 use cooper/scroll_box
 use cooper/style
 use cooper/text
@@ -20,7 +20,7 @@ struct SearchRow {
 
 private struct SearchSession {
   root: mut box::Box,
-  context: mut context::Context,
+  context: mut runtime::Runtime,
   query: mut input::Input,
   results: mut scroll_box::ScrollBox,
   status: mut text::Text,
@@ -93,7 +93,7 @@ private fn hit_right(hit: search_service::Hit) Str {
 }
 
 private fn new_session(
-  ctx: mut context::Context,
+  ctx: mut runtime::Runtime,
   palette: tinear_theme::Theme,
   service: search_service::Service,
   schedule: scheduler::Schedule,
@@ -439,7 +439,7 @@ impl Controller {
     }
   }
 
-  fn mut open(context: mut context::Context) {
+  fn mut open(context: mut runtime::Runtime) {
     if not self.disposed {
       let session = new_session(context, self.palette, self.service, self.schedule)
       session.on_open = fn(hit: search_service::Hit) {

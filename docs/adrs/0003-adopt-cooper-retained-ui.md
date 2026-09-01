@@ -28,7 +28,7 @@ Rewrite Tinear's UI using Cooper's public retained controls directly.
   concrete references to the controls it mutates.
 - The initial retained tree is built before the application starts. Later tree
   and control mutations happen only in Cooper callbacks or through
-  `Context.dispatch`.
+  `Runtime.dispatch` through `application.context`.
 - The application owns one mode-aware command router, modal and toast layers,
   tab focus policy, and per-controller lifecycle scopes.
 - Inactive permanent tabs remain mounted and are hidden rather than rebuilt.

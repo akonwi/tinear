@@ -141,6 +141,10 @@ test fn inbox_loads_rows_and_discards_stale_detail_completion() Void!Str {
     ),
   )
   try assertions::assert(controller.rows.size() == 2, "loaded notifications should create rows")
+  try assertions::assert(
+    application.terminal_titles().at(0).expect("Inbox terminal title") == "tinear (2)",
+    "loaded notification count should update the terminal title",
+  )
   try assertions::assert(fake.details.size() == 1, "first item should request detail")
   try assertions::assert(
     controller.detail_text.content().contains("Title AKO-1"),
@@ -257,6 +261,10 @@ test fn inbox_opens_pr_in_browser_and_archives_optimistically() Void!Str {
   try assertions::assert(browser.value.ends_with("/pull/7"), "PR should open provider URL")
   try assertions::assert(controller.handle_key(key("backspace", "")), "Backspace should archive")
   try assertions::assert(controller.items.size() == 1, "archive should remove row immediately")
+  try assertions::assert(
+    application.terminal_titles().at(1).expect("archived Inbox terminal title") == "tinear (1)",
+    "optimistic archive should update the terminal title",
+  )
   try assertions::assert(fake.archives.size() == 1, "archive mutation should start")
   (fake.archives.at(0).expect("archive").completion)(Result::err("denied"))
   try assertions::assert(errors.count == 1, "archive failure should notify")
@@ -267,6 +275,10 @@ test fn inbox_opens_pr_in_browser_and_archives_optimistically() Void!Str {
 
   try assertions::assert(controller.handle_key(key("backspace", "")), "final item should archive")
   try assertions::assert(controller.items.size() == 0, "final archive should empty Inbox")
+  try assertions::assert(
+    application.terminal_titles().at(2).expect("empty Inbox terminal title") == "tinear",
+    "empty Inbox should clear the terminal title count",
+  )
   (fake.details.at(1).expect("removed detail").completion)(
     Result::ok(detail("AKO-2", "Late detail")),
   )

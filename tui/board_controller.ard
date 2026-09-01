@@ -1,6 +1,6 @@
 use cooper/box
-use cooper/context
 use cooper/event
+use cooper/runtime
 use cooper/scroll_box
 use cooper/style
 use cooper/text
@@ -39,7 +39,7 @@ struct ColumnRecord {
 
 struct BoardController {
   root: mut box::Box,
-  context: mut context::Context,
+  context: mut runtime::Runtime,
   status: mut text::Text,
   outer_scroll: mut scroll_box::ScrollBox,
   columns_row: mut box::Box,
@@ -163,7 +163,7 @@ private fn header_content(column: issues::BoardColumn, selected: Bool, palette: 
 }
 
 fn new(
-  ctx: mut context::Context,
+  ctx: mut runtime::Runtime,
   palette: tinear_theme::Theme,
   service: board_service::Service,
   schedule: scheduler::Schedule,

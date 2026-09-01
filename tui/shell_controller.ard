@@ -1,6 +1,6 @@
 use cooper/box
-use cooper/context
 use cooper/event
+use cooper/runtime
 use cooper/style
 use cooper/text
 use go:strings
@@ -29,7 +29,7 @@ struct TabChip {
 
 struct ShellController {
   root: mut box::Box,
-  context: mut context::Context,
+  context: mut runtime::Runtime,
   tab_bar: mut box::Box,
   body_host: mut box::Box,
   hints: mut hints_bar::HintsBar,
@@ -110,7 +110,7 @@ private fn hints_for(model: shell_model::Model) [hints_bar::Hint] {
 }
 
 fn new(
-  ctx: mut context::Context,
+  ctx: mut runtime::Runtime,
   palette: tinear_theme::Theme,
   initial_model: shell_model::Model,
   inbox: Screen,

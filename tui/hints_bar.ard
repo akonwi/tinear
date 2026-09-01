@@ -1,5 +1,5 @@
 use cooper/box
-use cooper/context
+use cooper/runtime
 use cooper/style
 use cooper/text
 use tinear/tui/theme as tinear_theme
@@ -31,7 +31,7 @@ private fn actions_content(hints: [Hint], palette: tinear_theme::Theme) text::St
   text::styled_text(spans.@)
 }
 
-fn new(ctx: mut context::Context, palette: tinear_theme::Theme, hints: [Hint]) mut HintsBar {
+fn new(ctx: mut runtime::Runtime, palette: tinear_theme::Theme, hints: [Hint]) mut HintsBar {
   let root = box::new(
     ctx,
     styles: style::new(

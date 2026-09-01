@@ -1,6 +1,6 @@
 use cooper/box
-use cooper/context
 use cooper/event
+use cooper/runtime
 use cooper/scroll_box
 use cooper/style
 use cooper/text
@@ -29,7 +29,7 @@ struct CommentRecord {
 
 struct IssueDetailController {
   root: mut box::Box,
-  context: mut context::Context,
+  context: mut runtime::Runtime,
   identifier: Str,
   status: mut text::Text,
   content: mut box::Box,
@@ -153,7 +153,7 @@ private fn comment_style(
 }
 
 fn new(
-  ctx: mut context::Context,
+  ctx: mut runtime::Runtime,
   palette: tinear_theme::Theme,
   identifier: Str,
   service: issue_detail_service::Service,

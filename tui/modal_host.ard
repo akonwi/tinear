@@ -1,6 +1,6 @@
 use cooper/box
-use cooper/context
 use cooper/event
+use cooper/runtime
 use cooper/style
 use cooper/text
 use tinear/tui/theme as tinear_theme
@@ -39,7 +39,7 @@ private fn root_style(display: style::Display) style::Style {
   )
 }
 
-fn new(ctx: mut context::Context, palette: tinear_theme::Theme) mut ModalHost {
+fn new(ctx: mut runtime::Runtime, palette: tinear_theme::Theme) mut ModalHost {
   let hidden_style = root_style(style::Display::none)
   let visible_style = root_style(style::Display::flex)
   let root = box::new(ctx, styles: hidden_style)

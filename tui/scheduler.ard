@@ -1,6 +1,6 @@
 use ard/async
 
-use cooper/context
+use cooper/runtime
 use go:time
 
 // Schedule an action and return an idempotent cancellation function.
@@ -10,7 +10,7 @@ private struct TimerState {
   cancelled: Bool,
 }
 
-fn for_context(ctx: mut context::Context) Schedule {
+fn for_context(ctx: mut runtime::Runtime) Schedule {
   let app_cancellation = ctx.cancellation
   let dispatch = ctx.dispatch
   fn(milliseconds: Int, action: fn()) fn() {

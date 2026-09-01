@@ -1,9 +1,9 @@
 use ard/testing as assertions
 
 use cooper/box
-use cooper/context
 use cooper/event
 use cooper/input
+use cooper/runtime
 use cooper/style
 use cooper/testing
 use cooper/text
@@ -23,7 +23,7 @@ private struct DismissGuard {
   allowed: Bool,
 }
 
-private fn body(ctx: mut context::Context, label: Str) mut box::Box {
+private fn body(ctx: mut runtime::Runtime, label: Str) mut box::Box {
   let root = box::new(
     ctx,
     styles: style::new(width: style::percent(100.0), height: style::cells(2)),

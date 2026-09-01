@@ -1,7 +1,7 @@
 use cooper/box
-use cooper/context
 use cooper/event
 use cooper/input
+use cooper/runtime
 use cooper/style
 use cooper/text
 use cooper/text_area
@@ -65,7 +65,7 @@ impl CreationForm {
 
 private struct CreationSession {
   root: mut box::Box,
-  context: mut context::Context,
+  context: mut runtime::Runtime,
   modal: mut modal_host::ModalHost,
   palette: tinear_theme::Theme,
   service: issue_creation_service::Service,
@@ -81,7 +81,7 @@ private struct CreationSession {
 }
 
 private fn new_session(
-  ctx: mut context::Context,
+  ctx: mut runtime::Runtime,
   modal: mut modal_host::ModalHost,
   palette: tinear_theme::Theme,
   service: issue_creation_service::Service,
@@ -429,7 +429,7 @@ impl CreationSession {
 }
 
 struct Controller {
-  context: mut context::Context,
+  context: mut runtime::Runtime,
   modal: mut modal_host::ModalHost,
   palette: tinear_theme::Theme,
   service: issue_creation_service::Service,
@@ -441,7 +441,7 @@ struct Controller {
 }
 
 fn new(
-  ctx: mut context::Context,
+  ctx: mut runtime::Runtime,
   modal: mut modal_host::ModalHost,
   palette: tinear_theme::Theme,
   service: issue_creation_service::Service,

@@ -1,7 +1,7 @@
 use cooper/box
-use cooper/context
 use cooper/event
 use cooper/input
+use cooper/runtime
 use cooper/scroll_box
 use cooper/style
 use cooper/text
@@ -27,7 +27,7 @@ struct Row {
 
 struct PickerController {
   root: mut box::Box,
-  context: mut context::Context,
+  context: mut runtime::Runtime,
   query: mut input::Input,
   results: mut scroll_box::ScrollBox,
   empty_text: mut text::Text,
@@ -86,7 +86,7 @@ private fn empty_style(display: style::Display) style::Style {
 }
 
 fn new(
-  ctx: mut context::Context,
+  ctx: mut runtime::Runtime,
   palette: tinear_theme::Theme,
   placeholder: Str,
   options: [Option],

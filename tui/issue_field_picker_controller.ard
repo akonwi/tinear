@@ -1,5 +1,5 @@
 use cooper/box
-use cooper/context
+use cooper/runtime
 use cooper/style
 use cooper/text
 use tinear/models/issue_state
@@ -37,7 +37,7 @@ impl RequestCancellation {
 }
 
 struct Controller {
-  context: mut context::Context,
+  context: mut runtime::Runtime,
   modal: mut modal_host::ModalHost,
   palette: tinear_theme::Theme,
   service: issue_fields_service::Service,
@@ -128,7 +128,7 @@ fn cycles_for_issue(result: issues::TeamCyclesResult, current_cycle_id: Str) [is
 }
 
 fn new(
-  ctx: mut context::Context,
+  ctx: mut runtime::Runtime,
   modal: mut modal_host::ModalHost,
   palette: tinear_theme::Theme,
   service: issue_fields_service::Service,

@@ -1,6 +1,6 @@
 use cooper/box
-use cooper/context
 use cooper/event
+use cooper/runtime
 use cooper/scroll_box
 use cooper/style
 use cooper/text
@@ -16,7 +16,7 @@ use tinear/tui/timestamp
 
 struct DocumentDetailController {
   root: mut box::Box,
-  context: mut context::Context,
+  context: mut runtime::Runtime,
   slug_id: Str,
   cached_title: Str,
   status: mut text::Text,
@@ -77,7 +77,7 @@ private fn metadata_line(
 }
 
 fn new(
-  ctx: mut context::Context,
+  ctx: mut runtime::Runtime,
   palette: tinear_theme::Theme,
   slug_id: Str,
   cached_title: Str,

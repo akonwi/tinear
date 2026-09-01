@@ -1,7 +1,7 @@
 use cooper/app
 use cooper/box
-use cooper/context
 use cooper/event
+use cooper/runtime
 use cooper/style
 use cooper/text
 use tinear/config
@@ -54,7 +54,7 @@ private struct DetailActions {
   edit_description: fn(issues::Issue),
 }
 
-private fn placeholder_screen(ctx: mut context::Context, title: Str, message: Str) shell_controller::Screen {
+private fn placeholder_screen(ctx: mut runtime::Runtime, title: Str, message: Str) shell_controller::Screen {
   let root = box::new(
     ctx,
     styles: style::new(
@@ -81,7 +81,7 @@ private fn placeholder_screen(ctx: mut context::Context, title: Str, message: St
 }
 
 private fn document_detail_screen(
-  ctx: mut context::Context,
+  ctx: mut runtime::Runtime,
   palette: theme::Theme,
   api_key: Str,
   reference: tabs::TabRef,
@@ -118,7 +118,7 @@ private fn document_detail_screen(
 }
 
 private fn issue_detail_screen(
-  ctx: mut context::Context,
+  ctx: mut runtime::Runtime,
   palette: theme::Theme,
   api_key: Str,
   identifier: Str,
@@ -211,7 +211,7 @@ private fn issue_detail_screen(
 }
 
 private fn show_logged_in(
-  ctx: mut context::Context,
+  ctx: mut runtime::Runtime,
   palette: theme::Theme,
   api_key: Str,
   application_shell: mut application_shell::ApplicationShell,

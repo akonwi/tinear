@@ -14,7 +14,7 @@ scratchpad; durable architectural decisions should be recorded as ADRs.
 
 - **Current implementation focus:** Phase 9 parity hardening and the remaining explicit Phase 0/1 framework and transport gates.
 - **Feature slices complete:** authentication, shell/cache, Inbox, My Issues, field picker/mutation flows, Markdown, issue details/comments/editing, document details, global search, and issue creation.
-- **Open framework/foundation gates:** remotely pin Cooper, terminal-title parity, optional terminal-browser app mode, transport injection/limits, fallible decoder cleanup, and true HTTP cancellation.
+- **Open framework/foundation gates:** remotely pin Cooper, optional terminal-browser app mode, transport injection/limits, fallible decoder cleanup, and true HTTP cancellation.
 - **Latest validation:** `ard check main.ard`, `ard build main.ard`, 121 Ard tests, and Go Markdown parser tests pass.
 
 ## Parity ledger
@@ -32,7 +32,7 @@ scratchpad; durable architectural decisions should be recorded as ADRs.
 - [x] Semantic foreground/background, muted, accent, danger, warning, and success presentation is available.
 - [x] Toasts support info/success/error variants and deterministic configurable expiry.
 - [x] At most one modal is active; it blocks background input and restores focus on close.
-- [ ] Inbox count updates the terminal title, or receives an explicit temporary parity waiver until Cooper exposes a title API.
+- [x] Inbox count updates the terminal title through `Runtime.set_title`.
 
 ### Logged-in shell and persistence
 
@@ -129,7 +129,7 @@ scratchpad; durable architectural decisions should be recorded as ADRs.
 - [ ] Pin the exact Cooper revision used by the rewrite once it is remotely available; use the local path during active joint development.
 - [x] Add an ADR superseding ADR 0002's vaxis/ui implementation decision with direct Cooper retained controls.
 - [x] Decide app-local semantic palette behavior while retaining terminal-default foreground/background.
-- [ ] Decide terminal-title parity: add a Cooper capability or document a temporary waiver.
+- [x] Use Cooper's lifecycle-safe `Runtime.set_title` capability for terminal-title parity.
 - [x] Prove modal layering, mouse barrier, focus restoration, and selection copy in TestApp fixtures.
 - [x] Prove retained hidden-tab roots and nested two-axis scrolling in shell/board fixtures.
 - [x] Define common controller lifecycle and request-generation conventions in working guidance and `tui/lifecycle.ard`.
@@ -189,7 +189,7 @@ tui/theme.ard
 - [x] Implement app-level key routing by active view and interaction mode.
 - [x] Implement modal ticket/generation ownership, background mouse blocking, guarded dismiss, and focus restore.
 - [x] Implement toast stacking, variants, TTL cancellation, and disposal.
-- [x] Implement Super+C using `App.selection()` and `Context.clipboard.write()`.
+- [x] Implement Super+C using `App.selection()` and `Runtime.clipboard.write()`.
 - [x] Add TestApp coverage for modal isolation, toast expiry, selection copy, and teardown.
 
 **Exit criteria:** infrastructure can host either welcome or logged-in content without reconstructing the App.
@@ -230,7 +230,7 @@ tui/tab_bar.ard
 - [x] Implement stale-safe detail requests.
 - [x] Implement issue/PR opening, terminal-browser routing, optimistic archive, and manual refresh.
 - [x] Add five-minute silent refresh with cursor-by-ID preservation.
-- [ ] Add terminal-title count behavior when the framework gate is resolved.
+- [x] Add terminal-title count behavior through `Runtime.set_title`.
 
 **Exit criteria:** Inbox is a complete network-backed daily-use slice with deterministic tests for stale requests, deletion, refresh preservation, routing, and disposal.
 
@@ -294,7 +294,7 @@ coherent language instead of extending the bare parity styling.
 - [ ] Add PTY coverage for startup/restoration, key normalization, mouse/wheel, multiline paste, OSC 52 copy, and clean quit.
 - [ ] Profile 50 notifications, 200 board issues, 50 comments, multiple dynamic tabs, and repeated refreshes.
 - [x] Verify there are no `vaxis/ui`, `ffi/stateful`, or intent-shim imports.
-- [ ] Verify every post-start control mutation occurs inside a Cooper callback or `Context.dispatch`.
+- [ ] Verify every post-start control mutation occurs inside a Cooper callback or `Runtime.dispatch`.
 - [ ] Run `ard check main.ard`, `ard build main.ard`, `ard test`, Go parser tests, and PTY smoke tests.
 - [ ] Restore/update native multi-platform CI and release tooling for Cooper's CGO requirements.
 - [ ] Update README/features docs and mark superseded implementation details accurately.
@@ -321,7 +321,7 @@ These are documented ideas, not behavior that the rewrite must reproduce before 
 
 ## Known framework/app risks to track
 
-- [ ] Cooper has no public terminal-title API.
+- [x] Cooper exposes lifecycle-safe terminal-title updates through `Runtime.set_title`.
 - [ ] Cooper has indexed host-palette colors but no holistic terminal-queried, contrast-derived semantic theme service.
 - [ ] Cooper has no general app-facing modal/focus-trap control; Tinear must own modal policy.
 - [ ] Cooper has no always-expanded ListBox/Combobox; Tinear needs a retained picker/search list.

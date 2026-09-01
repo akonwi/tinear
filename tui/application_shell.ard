@@ -1,6 +1,6 @@
 use cooper/box
-use cooper/context
 use cooper/event
+use cooper/runtime
 use cooper/selection
 use cooper/style
 use tinear/tui/modal_host
@@ -15,11 +15,11 @@ struct ApplicationShell {
   toasts: mut toast_host::ToastHost,
   current_screen: (mut box::Box)?,
   current_dispose: fn()?,
-  context: mut context::Context,
+  context: mut runtime::Runtime,
   disposed: Bool,
 }
 
-fn new(ctx: mut context::Context, palette: tinear_theme::Theme, schedule: scheduler::Schedule) mut ApplicationShell {
+fn new(ctx: mut runtime::Runtime, palette: tinear_theme::Theme, schedule: scheduler::Schedule) mut ApplicationShell {
   let root = box::new(
     ctx,
     styles: style::new(
