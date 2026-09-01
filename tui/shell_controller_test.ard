@@ -35,6 +35,21 @@ private fn key(value: Str) mut event::KeyEvent {
   event::key(value, value, event::KeyEventType::press, modifiers())
 }
 
+test fn tab_chips_use_intrinsic_width_with_a_document_cap() Void!Str {
+  try assertions::assert(
+    shell_controller::tab_chip_width("CCA-1782", true) == 12,
+    "issue tabs should not reserve document-title width",
+  )
+  try assertions::assert(
+    shell_controller::tab_chip_width("A very long document title that needs clipping", true) == 26,
+    "long dynamic labels should retain the existing cap",
+  )
+  assertions::assert(
+    shell_controller::tab_chip_width("Inbox", false) == 7,
+    "permanent tabs should preserve their padding",
+  )
+}
+
 private fn fake_screen(ctx: mut runtime::Runtime, label: Str, state: mut ScreenState) shell_controller::Screen {
   let root = box::new(
     ctx,
@@ -278,7 +293,19 @@ test fn shell_routes_mouse_global_and_active_commands() Void!Str {
   try assertions::assert(board_state.handled == 1, "active board should receive delegated key")
   controller.open(tabs::issue_tab("AKO-1"))
   try assertions::assert(not controller.handle_key(key("c")), "detail tabs should own the c command")
-  assertions::assert(creations.value == 1, "detail c should not start issue creation")
+  try assertions::assert(creations.value == 1, "detail c should not start issue creation")
+  application.render()
+  try assertions::assert(
+    application.frame().cell(25, 0).expect("close button").grapheme == "×",
+    "dynamic tab should render a close target",
+  )
+  application.click(25, 0)
+  try assertions::assert(controller.model.tabs.size() == 0, "clicking × should close the tab")
+  try assertions::assert(
+    controller.model.tab_index == 1,
+    "closing selected tab should return to My Issues",
+  )
+  assertions::assert(disposed.value == 1, "close button should dispose the dynamic screen")
 }
 
 test fn shell_disposal_cleans_screens_and_persistence_once() Void!Str {

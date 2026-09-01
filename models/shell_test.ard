@@ -41,6 +41,25 @@ test fn shell_closes_dynamic_tab_back_to_board() Void!Str {
   testing::assert(closed.tab_index == 1, "selection should return to My Issues")
 }
 
+test fn shell_closes_inactive_tab_without_changing_active_identity() Void!Str {
+  let initial = model(4, ["CCA-9", "CCA-10", "CCA-11"])
+  let closed_before = shell::close(initial, tabs::issue_tab("CCA-9"))
+  try testing::assert(
+    closed_before.tab_index == 3,
+    "selection index should shift with the retained active tab",
+  )
+  try testing::assert(
+    shell::selected_dynamic(closed_before).expect("active tab").id == "CCA-11",
+    "closing an earlier tab should preserve the active identity",
+  )
+  let closed_after = shell::close(closed_before, tabs::issue_tab("CCA-10"))
+  try testing::assert(closed_after.tab_index == 2, "remaining active tab should stay selected")
+  testing::assert(
+    shell::selected_dynamic(closed_after).expect("active tab").id == "CCA-11",
+    "closing an inactive tab should not return to the board",
+  )
+}
+
 test fn shell_retitle_updates_only_matching_identity() Void!Str {
   let initial = shell::open(
     shell::open(model(0, []), tabs::doc_tab("doc-1", "Loading…")),

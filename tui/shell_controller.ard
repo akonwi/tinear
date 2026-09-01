@@ -25,6 +25,7 @@ struct DynamicScreen {
 struct TabChip {
   root: mut box::Box,
   remove_mouse: fn(),
+  remove_close_mouse: fn(),
 }
 
 struct ShellController {
@@ -45,6 +46,19 @@ struct ShellController {
   on_create: fn(),
   palette: tinear_theme::Theme,
   disposed: Bool,
+}
+
+fn tab_chip_width(label: Str, dynamic: Bool) Int {
+  match dynamic {
+    false => label.runes().size() + 2,
+    true => {
+      let intrinsic = label.runes().size() + 4
+      match intrinsic > 26 {
+        true => 26,
+        false => intrinsic,
+      }
+    },
+  }
 }
 
 private fn body_style(current: style::Style, display: style::Display) style::Style {
@@ -223,16 +237,14 @@ impl ShellController {
     self.tab_chips = []
     for chip in chips {
       chip.remove_mouse()
+      chip.remove_close_mouse()
       let _ = self.tab_bar.remove(chip.root)
       chip.root.destroy(recursive: true)
     }
   }
 
   private fn mut add_tab_chip(index: Int, label: Str, dynamic: Bool) {
-    let width = match dynamic {
-      true => 26,
-      false => label.runes().size() + 2,
-    }
+    let width = tab_chip_width(label, dynamic)
     let chip = box::new(
       self.context,
       styles: style::new(
@@ -274,17 +286,29 @@ impl ShellController {
         ),
       ),
     )
+    mut remove_close_mouse = fn() {}
     if dynamic {
-      chip.add(
-        text::new(
-          self.context,
-          content: "× ",
-          selectable: false,
-          wrap: text::TextWrap::none,
-          styles: style::new(width: style::cells(2), height: style::cells(1), flex_shrink: 0.0),
-          text_style: text::style(dim: true),
-        ),
+      let close = text::new(
+        self.context,
+        content: "× ",
+        selectable: false,
+        wrap: text::TextWrap::none,
+        styles: style::new(width: style::cells(2), height: style::cells(1), flex_shrink: 0.0),
+        text_style: text::style(dim: true),
       )
+      chip.add(close)
+      let dynamic_index = index - 2
+      remove_close_mouse = close.on_mouse(fn(received: mut event::MouseEvent) {
+        if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
+          match self.model.tabs.at(dynamic_index) {
+            reference => {
+              let _ = self.close(reference)
+            },
+            _ => (),
+          }
+          received.stop_propagation()
+        }
+      })
     }
     let remove_mouse = chip.on_mouse(fn(received: mut event::MouseEvent) {
       if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
@@ -293,7 +317,13 @@ impl ShellController {
       }
     })
     self.tab_bar.add(chip)
-    self.tab_chips.push(TabChip{root: chip, remove_mouse: remove_mouse})
+    self.tab_chips.push(
+      TabChip{
+        root: chip,
+        remove_mouse: remove_mouse,
+        remove_close_mouse: remove_close_mouse,
+      },
+    )
   }
 
   private fn mut rebuild_tab_bar() {
@@ -380,31 +410,49 @@ impl ShellController {
     }
   }
 
-  fn mut close_current() Bool {
-    if self.disposed or not shell_model::selected_is_dynamic(self.model) {
+  fn mut close(reference: tabs::TabRef) Bool {
+    if self.disposed {
       false
     } else {
-      let selected = shell_model::selected_dynamic(self.model)
-      self.model = shell_model::close_current(self.model)
-      match selected {
-        reference => {
-          let remaining = mut List::new<DynamicScreen>()
-          for dynamic in self.dynamic_screens {
-            if tabs::same(dynamic.reference, reference) {
-              dynamic.screen.dispose()
-              let _ = self.body_host.remove(dynamic.screen.root)
-              dynamic.screen.root.destroy(recursive: true)
-            } else {
-              remaining.push(dynamic)
-            }
-          }
-          self.dynamic_screens = remaining.@
-        },
-        _ => (),
+      mut found = false
+      for dynamic in self.dynamic_screens {
+        if tabs::same(dynamic.reference, reference) {
+          found = true
+        }
       }
-      self.apply_selection(true)
-      self.focus_active()
-      true
+      if not found {
+        false
+      } else {
+        let selected = shell_model::selected_dynamic(self.model)
+        let was_selected = match selected {
+          current => tabs::same(current, reference),
+          _ => false,
+        }
+        self.model = shell_model::close(self.model, reference)
+        let remaining = mut List::new<DynamicScreen>()
+        for dynamic in self.dynamic_screens {
+          if tabs::same(dynamic.reference, reference) {
+            dynamic.screen.dispose()
+            let _ = self.body_host.remove(dynamic.screen.root)
+            dynamic.screen.root.destroy(recursive: true)
+          } else {
+            remaining.push(dynamic)
+          }
+        }
+        self.dynamic_screens = remaining.@
+        self.apply_selection(true)
+        if was_selected {
+          self.focus_active()
+        }
+        true
+      }
+    }
+  }
+
+  fn mut close_current() Bool {
+    match shell_model::selected_dynamic(self.model) {
+      reference => self.close(reference),
+      _ => false,
     }
   }
 

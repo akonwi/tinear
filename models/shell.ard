@@ -103,18 +103,33 @@ fn select_tab(model: Model, index: Int) Model {
   Model{tab_index: clamp_tab_index(index, total_tabs(model)), tabs: model.tabs}
 }
 
-fn close_current(model: Model) Model {
-  let dynamic_index = model.tab_index - 2
-  if dynamic_index < 0 or dynamic_index >= model.tabs.size() {
+fn close(model: Model, reference: tabs::TabRef) Model {
+  mut closed_index = -1
+  let remaining = mut List::new<tabs::TabRef>()
+  for tab, index in model.tabs {
+    if tabs::same(tab, reference) {
+      closed_index = index
+    } else {
+      remaining.push(tab)
+    }
+  }
+  if closed_index < 0 {
     model
   } else {
-    let remaining = mut List::new<tabs::TabRef>()
-    for tab, index in model.tabs {
-      if not index == dynamic_index {
-        remaining.push(tab)
-      }
+    let closed_tab_index = closed_index + 2
+    let selected_index = match {
+      model.tab_index == closed_tab_index => 1,
+      model.tab_index > closed_tab_index => model.tab_index - 1,
+      _ => model.tab_index,
     }
-    Model{tab_index: 1, tabs: remaining.@}
+    Model{tab_index: selected_index, tabs: remaining.@}
+  }
+}
+
+fn close_current(model: Model) Model {
+  match selected_dynamic(model) {
+    reference => close(model, reference),
+    _ => model,
   }
 }
 
