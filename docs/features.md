@@ -311,7 +311,7 @@ The reusable retained picker accepts options with stable IDs, labels, and
 optional searchable descriptions. It reconciles rows by ID as the filter
 changes.
 
-- Rendered as a bordered modal with a filter input and scrollable result list.
+- Rendered as a bordered modal with a scrollable result list; lists longer than five options add a filter input.
 - The selected option uses the accent background; hover uses the host gray background.
 - The issue's current value seeds the initial cursor and scroll position.
 - Async option loads are stale-safe; dismissing a loading modal cancels its local request ownership.
@@ -321,10 +321,10 @@ changes.
 
 | Key | Action |
 |---|---|
-| Typing | Filter by label or description |
-| `Down` | Move cursor down |
-| `Up` | Move cursor up |
-| `Enter` | Confirm selection and start the mutation |
+| Typing | Filter by label or description when the filter is visible |
+| `Down` / `j` | Move cursor down (`j` is available without a filter) |
+| `Up` / `k` | Move cursor up (`k` is available without a filter) |
+| `Enter` / `Space` | Confirm selection (`Space` is available without a filter) |
 | `Escape` | Dismiss the picker or an in-progress option load |
 
 ### 7.3 Picker types

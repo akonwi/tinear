@@ -9,6 +9,8 @@ use go:strings
 use tinear/tui/theme as tinear_theme
 
 let RESULT_RULE: Str = "────────────────────────────────────────────────────────────────────────────────"
+let FILTER_THRESHOLD: Int = 5
+let MAX_VISIBLE_RESULT_ROWS: Int = 12
 
 struct Option {
   id: Str,
@@ -33,6 +35,7 @@ struct PickerController {
   empty_text: mut text::Text,
   options: [Option],
   filtered: [Option],
+  filterable: Bool,
   rows: [Row],
   cursor: Int,
   hovered_id: Str,
@@ -76,6 +79,46 @@ private fn description_style(option: Option) style::Style {
   )
 }
 
+private fn filterable(options: [Option]) Bool {
+  options.size() > FILTER_THRESHOLD
+}
+
+private fn visible_result_rows(options: [Option]) Int {
+  mut rows = 0
+  for option in options {
+    rows = rows + row_height(option)
+  }
+  if rows < 1 {
+    1
+  } else if rows > MAX_VISIBLE_RESULT_ROWS {
+    MAX_VISIBLE_RESULT_ROWS
+  } else {
+    rows
+  }
+}
+
+private fn root_style(options: [Option], has_filter: Bool) style::Style {
+  let filter_rows = match has_filter {
+    true => 2,
+    false => 0,
+  }
+  style::new(
+    width: style::percent(100.0),
+    height: style::cells(visible_result_rows(options) + filter_rows),
+    flex_direction: style::FlexDirection::column,
+    overflow: style::Overflow::hidden,
+  )
+}
+
+private fn filter_control_style(display: style::Display) style::Style {
+  style::new(
+    display: display,
+    width: style::percent(100.0),
+    height: style::cells(1),
+    flex_shrink: 0.0,
+  )
+}
+
 private fn empty_style(display: style::Display) style::Style {
   style::new(
     display: display,
@@ -93,19 +136,16 @@ fn new(
   selected_id: Str,
   on_select: fn(Option),
 ) mut PickerController {
-  let root = box::new(
-    ctx,
-    styles: style::new(
-      width: style::percent(100.0),
-      height: style::cells(12),
-      flex_direction: style::FlexDirection::column,
-      overflow: style::Overflow::hidden,
-    ),
-  )
+  let has_filter = filterable(options)
+  let filter_display = match has_filter {
+    true => style::Display::flex,
+    false => style::Display::none,
+  }
+  let root = box::new(ctx, styles: root_style(options, has_filter))
   let query = input::new(
     ctx,
     placeholder: placeholder,
-    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+    styles: filter_control_style(filter_display),
   )
   let rule = text::new(
     ctx,
@@ -113,7 +153,7 @@ fn new(
     selectable: false,
     wrap: text::TextWrap::none,
     overflow: text::TextOverflow::clip,
-    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+    styles: filter_control_style(filter_display),
     text_style: text::style(dim: true),
   )
   let results = scroll_box::new(
@@ -139,6 +179,7 @@ fn new(
     empty_text: empty_text,
     options: options,
     filtered: [],
+    filterable: has_filter,
     rows: [],
     cursor: 0,
     hovered_id: "",
@@ -151,28 +192,48 @@ fn new(
   if not selected_id.is_empty() {
     picker.select_id(selected_id)
   }
-  picker.listeners.push(
-    query.on_input(fn(value: Str) {
-      picker.apply_filter(value)
-    }),
-  )
-  picker.listeners.push(
-    query.on_key(fn(received: mut event::KeyEvent) {
-      if received.event_type != event::KeyEventType::release {
-        mut handled = true
-        match {
-          received.matches("down") => picker.move_cursor(1),
-          received.matches("up") => picker.move_cursor(-1),
-          received.matches("return") => picker.activate(),
-          _ => { handled = false },
+  if has_filter {
+    picker.listeners.push(
+      query.on_input(fn(value: Str) {
+        picker.apply_filter(value)
+      }),
+    )
+    picker.listeners.push(
+      query.on_key(fn(received: mut event::KeyEvent) {
+        if received.event_type != event::KeyEventType::release {
+          mut handled = true
+          match {
+            received.matches("down") => picker.move_cursor(1),
+            received.matches("up") => picker.move_cursor(-1),
+            received.matches("return") => picker.activate(),
+            _ => { handled = false },
+          }
+          if handled {
+            received.prevent_default()
+            received.stop_propagation()
+          }
         }
-        if handled {
-          received.prevent_default()
-          received.stop_propagation()
+      }),
+    )
+  } else {
+    picker.listeners.push(
+      results.on_key(fn(received: mut event::KeyEvent) {
+        if received.event_type != event::KeyEventType::release {
+          mut handled = true
+          match {
+            received.matches("j") or received.matches("down") => picker.move_cursor(1),
+            received.matches("k") or received.matches("up") => picker.move_cursor(-1),
+            received.matches("return") or received.matches("space") => picker.activate(),
+            _ => { handled = false },
+          }
+          if handled {
+            received.prevent_default()
+            received.stop_propagation()
+          }
         }
-      }
-    }),
-  )
+      }),
+    )
+  }
   picker
 }
 
@@ -338,6 +399,7 @@ impl PickerController {
       }
       self.filtered = filtered.@
       self.cursor = 0
+      self.root.set_style(root_style(self.filtered, self.filterable))
       self.reconcile_rows()
       let _ = self.results.scroll_to(0)
     }
@@ -392,7 +454,14 @@ impl PickerController {
   }
 
   fn mut focus() {
-    let _ = self.query.focus()
+    match self.filterable {
+      true => {
+        let _ = self.query.focus()
+      },
+      false => {
+        let _ = self.results.focus()
+      },
+    }
     let _ = self.results.scroll_to(self.selected_offset())
   }
 

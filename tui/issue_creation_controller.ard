@@ -92,7 +92,6 @@ private fn new_session(
     ctx,
     styles: style::new(
       width: style::percent(100.0),
-      height: style::cells(12),
       flex_direction: style::FlexDirection::column,
       overflow: style::Overflow::hidden,
     ),
@@ -150,7 +149,7 @@ impl CreationSession {
       self.context,
       styles: style::new(
         width: style::percent(100.0),
-        height: style::percent(100.0),
+        height: style::cells(3),
         align_items: style::Align::center,
         justify_content: style::Justify::center,
       ),

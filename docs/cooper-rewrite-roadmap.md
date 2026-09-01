@@ -15,7 +15,7 @@ scratchpad; durable architectural decisions should be recorded as ADRs.
 - **Current implementation focus:** Phase 9 parity hardening and the remaining explicit Phase 0/1 framework and transport gates.
 - **Feature slices complete:** authentication, shell/cache, Inbox, My Issues, field picker/mutation flows, Markdown, issue details/comments/editing, document details, global search, and issue creation.
 - **Open framework/foundation gates:** remotely pin Cooper, optional terminal-browser app mode, transport injection/limits, fallible decoder cleanup, and true HTTP cancellation.
-- **Latest validation:** `ard check main.ard`, `ard build main.ard`, 121 Ard tests, and Go Markdown parser tests pass.
+- **Latest validation:** `ard check main.ard`, `ard build main.ard`, 124 Ard tests, and Go Markdown parser tests pass.
 
 ## Parity ledger
 
@@ -106,8 +106,8 @@ scratchpad; durable architectural decisions should be recorded as ADRs.
 ### Pickers, search, comments, and issue creation
 
 - [x] Reusable modal single-select picker starts on the current value.
-- [ ] Match `main`'s picker filter-visibility threshold for lists of five or fewer options.
-- [ ] Confirm exact 12-result picker viewport parity; the retained picker is bounded and reveals keyboard selection, but its input/divider currently share the 12-row body.
+- [x] Match `main`'s picker filter-visibility threshold for lists of five or fewer options.
+- [x] Cap picker results at 12 visible rows independently of the optional input/divider and reveal keyboard selection.
 - [x] Picker supports keyboard and mouse activation plus null/unassigned options where applicable.
 - [x] `?` opens global issue/document search from logged-in views, including terminal-normalized Shift+`/` events.
 - [x] Search debounces for 300 ms and rejects stale generations.

@@ -30,6 +30,32 @@ private fn options() [picker_controller::Option] {
   ]
 }
 
+private fn filter_options() [picker_controller::Option] {
+  let values = mut options()
+  values.push(
+    picker_controller::Option{
+      id: "canceled",
+      label: "Canceled",
+      description: "Canceled",
+    },
+  )
+  values.push(
+    picker_controller::Option{
+      id: "duplicate",
+      label: "Duplicate",
+      description: "Canceled",
+    },
+  )
+  values.push(
+    picker_controller::Option{
+      id: "backlog",
+      label: "Backlog",
+      description: "Backlog",
+    },
+  )
+  values.@
+}
+
 private fn key(name: Str, text: Str) mut event::KeyEvent {
   event::key(
     name,
@@ -52,7 +78,7 @@ test fn picker_filters_navigates_and_selects() Void!Str {
     application.context,
     theme::new(),
     "Filter states",
-    options(),
+    filter_options(),
     "doing",
     fn(option: picker_controller::Option) {
       selection.id = option.id
@@ -132,6 +158,35 @@ test fn picker_filters_navigates_and_selects() Void!Str {
   )
 }
 
+test fn small_picker_hides_filter_and_supports_direct_navigation() Void!Str {
+  let application = testing::new(50, 16)
+  defer application.destroy()
+  let selection = mut Selection{id: "", count: 0}
+  let picker = picker_controller::new(
+    application.context,
+    theme::new(),
+    "Filter states",
+    options(),
+    "",
+    fn(option: picker_controller::Option) {
+      selection.id = option.id
+      selection.count =+ 1
+    },
+  )
+  application.root.add(picker.root)
+  picker.focus()
+  application.render()
+  try assertions::assert(not picker.filterable, "five or fewer options should not show a filter")
+  try assertions::assert(
+    not application.frame().text().contains("Filter states"),
+    "small picker should omit its filter placeholder",
+  )
+  application.key(key("j", "j"))
+  application.key(key("space", " "))
+  try assertions::assert(selection.id == "doing", "j and Space should navigate and activate directly")
+  assertions::assert(selection.count == 1, "small picker should activate once")
+}
+
 test fn picker_renders_empty_state_and_ignores_empty_activation() Void!Str {
   let application = testing::new(50, 16)
   defer application.destroy()
@@ -140,7 +195,7 @@ test fn picker_renders_empty_state_and_ignores_empty_activation() Void!Str {
     application.context,
     theme::new(),
     "Filter",
-    options(),
+    filter_options(),
     "",
     fn(option: picker_controller::Option) {
       selection.count =+ 1
@@ -163,7 +218,7 @@ test fn picker_mouse_selects_visible_row() Void!Str {
     application.context,
     theme::new(),
     "Filter",
-    options(),
+    filter_options(),
     "",
     fn(option: picker_controller::Option) {
       selection.id = option.id
