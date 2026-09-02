@@ -312,6 +312,11 @@ test fn state_picker_ignores_dismissed_load_and_reports_mutation_failure() Void!
     ),
   )
   application.render()
+  for size in [[60, 20], [100, 30], [160, 40]] {
+    application.resize(size.at(0).expect("width"), size.at(1).expect("height"))
+    try assertions::assert(modal.is_open(), "field picker should survive resize")
+    try testing::assert_contains(application.frame().text(), "Backlog")
+  }
   application.key(key("up"))
   application.key(key("return"))
   try assertions::assert(state.state_updates.size() == 1, "selection should start state mutation")
@@ -325,6 +330,25 @@ test fn state_picker_ignores_dismissed_load_and_reports_mutation_failure() Void!
   try assertions::assert(outcome.changed == 0, "failed mutation should not refresh")
   try assertions::assert(outcome.errors == 1, "failed mutation should notify")
   assertions::assert(outcome.error_title == "Update state", "error should identify mutation")
+}
+
+test fn field_picker_load_failure_closes_and_reports() Void!Str {
+  let application = testing::new(80, 24)
+  defer application.destroy()
+  let modal = modal_host::new(application.context, theme::new())
+  application.root.add(modal.root)
+  let state = fake_state()
+  let outcome = mut Outcome{
+    changed: 0,
+    errors: 0,
+    error_title: "",
+  }
+  let picker = controller(application, modal, state, outcome)
+  picker.open(issue_field_picker_controller::Field::state, issue())
+  (state.state_loads.at(0).expect("state load"))(Result::err("forbidden"))
+  try assertions::assert(not modal.is_open(), "picker load failure should close loading modal")
+  try assertions::assert(outcome.errors == 1, "picker load failure should notify")
+  assertions::assert(outcome.error_title == "State picker", "load error should identify the picker")
 }
 
 test fn priority_cycle_assignee_and_project_pickers_apply_and_refresh() Void!Str {

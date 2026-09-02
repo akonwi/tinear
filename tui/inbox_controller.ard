@@ -738,9 +738,11 @@ impl InboxController {
           item.notification_id,
           self.scope.stop.receiver(),
           fn(result: Void!Str) {
-            match result {
-              ok(_) => (),
-              err(message) => self.notify_error("Couldn't archive notification", message),
+            if not self.scope.disposed {
+              match result {
+                ok(_) => (),
+                err(message) => self.notify_error("Couldn't archive notification", message),
+              }
             }
           },
         )

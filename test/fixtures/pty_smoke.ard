@@ -1,0 +1,131 @@
+use cooper/app
+use cooper/box
+use cooper/event
+use cooper/runtime
+use cooper/scroll_box
+use cooper/style
+use cooper/text
+use cooper/text_area
+use go:strings
+use tinear/models/cache
+use tinear/models/shell as shell_model
+use tinear/models/tabs
+use tinear/tui/application_shell
+use tinear/tui/shell_controller
+use tinear/tui/theme
+
+private fn basic_screen(ctx: mut runtime::Runtime, label: Str) shell_controller::Screen {
+  let root = box::new(
+    ctx,
+    styles: style::new(
+      width: style::percent(100.0),
+      height: style::percent(100.0),
+      flex_direction: style::FlexDirection::column,
+    ),
+  )
+  root.set_focusable(true)
+  root.add(text::new(ctx, content: label, selectable: true))
+  shell_controller::Screen{
+    root: root,
+    focus: fn() {
+      let _ = root.focus()
+    },
+    handle_key: fn(received: mut event::KeyEvent) Bool {
+      false
+    },
+    dispose: fn() {},
+  }
+}
+
+private fn inbox_screen(ctx: mut runtime::Runtime) shell_controller::Screen {
+  let root = box::new(
+    ctx,
+    styles: style::new(
+      width: style::percent(100.0),
+      height: style::percent(100.0),
+      flex_direction: style::FlexDirection::column,
+    ),
+  )
+  let copy = text::new(ctx, content: "COPY-ME", selectable: true)
+  let editor = text_area::new(
+    ctx,
+    placeholder: "Paste here…",
+    styles: style::new(width: style::percent(100.0), height: style::cells(3), flex_shrink: 0.0),
+  )
+  let status = text::new(ctx, content: "value: empty", selectable: false)
+  let scroll = scroll_box::new(
+    ctx,
+    styles: style::new(width: style::percent(100.0), height: style::cells(5), flex_shrink: 0.0),
+  )
+  mut index = 0
+  while index < 20 {
+    scroll.add(text::new(ctx, content: "scroll row {index}", selectable: true))
+    index =+ 1
+  }
+  root.add(copy)
+  root.add(editor)
+  root.add(status)
+  root.add(scroll)
+  let _ = editor.on_input(fn(value: Str) {
+    status.set_content("value: {strings::ReplaceAll(value, "\n", "↵")}")
+  })
+  shell_controller::Screen{
+    root: root,
+    focus: fn() {
+      let _ = editor.focus()
+    },
+    handle_key: fn(received: mut event::KeyEvent) Bool {
+      false
+    },
+    dispose: fn() {},
+  }
+}
+
+fn main() {
+  let application = app::new(exit_on_ctrl_c: false).expect("create Tinear PTY fixture")
+  defer application.destroy()
+  let ctx = application.context
+  let palette = theme::new()
+  let shell_host = application_shell::new(ctx, palette, fn(milliseconds: Int, action: fn()) fn() {
+    fn() {}
+  })
+  application.root.add(shell_host.root)
+  let restored = tabs::doc_tab("restored", "Restored doc")
+  cache::save_logged_in(
+    cache::LoggedInCache{tab_index: 2, tabs: [restored]},
+  ).expect("seed shell cache")
+  let restored_model = shell_model::restore(cache::load_logged_in())
+  let controller = shell_controller::new(
+    ctx,
+    palette,
+    restored_model,
+    inbox_screen(ctx),
+    basic_screen(ctx, "BOARD BODY"),
+    fn(reference: tabs::TabRef) shell_controller::Screen {
+      basic_screen(ctx, "RESTORED DETAIL {reference.title}")
+    },
+    fn(value: cache::LoggedInCache) {},
+    fn() {},
+    fn() {},
+    fn() {},
+  )
+  shell_host.set_screen(controller.root, fn() {
+    controller.dispose()
+  })
+  controller.focus_active()
+
+  let _ = application.on_key(fn(received: mut event::KeyEvent) {
+    if received.event_type != event::KeyEventType::release and received.matches("c", ctrl: true) {
+      shell_host.dispose()
+      application.destroy()
+      received.prevent_default()
+      received.stop_propagation()
+    } else {
+      let handled = shell_host.handle_key(received, application.selection())
+      if (not handled) and not shell_host.modal.is_open() {
+        let _ = controller.handle_key(received)
+      }
+    }
+  })
+  application.run().expect("run Tinear PTY fixture")
+}

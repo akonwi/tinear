@@ -56,6 +56,17 @@ private fn filter_options() [picker_controller::Option] {
   values.@
 }
 
+private fn five_options() [picker_controller::Option] {
+  let values = filter_options()
+  [
+    values.at(0).expect("first"),
+    values.at(1).expect("second"),
+    values.at(2).expect("third"),
+    values.at(3).expect("fourth"),
+    values.at(4).expect("fifth"),
+  ]
+}
+
 private fn key(name: Str, text: Str) mut event::KeyEvent {
   event::key(
     name,
@@ -185,6 +196,47 @@ test fn small_picker_hides_filter_and_supports_direct_navigation() Void!Str {
   application.key(key("space", " "))
   try assertions::assert(selection.id == "doing", "j and Space should navigate and activate directly")
   assertions::assert(selection.count == 1, "small picker should activate once")
+}
+
+test fn picker_filter_threshold_order_and_reset_match_main() Void!Str {
+  let application = testing::new(50, 16)
+  defer application.destroy()
+  let small = picker_controller::new(
+    application.context,
+    theme::new(),
+    "Filter",
+    five_options(),
+    "",
+    fn(option: picker_controller::Option) {},
+  )
+  try assertions::assert(not small.filterable, "exactly five options should not show a filter")
+  small.dispose()
+  small.root.destroy(recursive: true)
+
+  let filterable = picker_controller::new(
+    application.context,
+    theme::new(),
+    "Filter",
+    filter_options(),
+    "",
+    fn(option: picker_controller::Option) {},
+  )
+  try assertions::assert(filterable.filterable, "six options should show a filter")
+  filterable.apply_filter("CANCEL")
+  try assertions::assert(filterable.filtered.size() == 2, "filtering should remain case-insensitive")
+  try assertions::assert(
+    filterable.filtered.at(0).expect("first match").id == "canceled" and filterable.filtered.at(1).expect("second match").id == "duplicate",
+    "multiple matches should preserve source order",
+  )
+  filterable.apply_filter("   ")
+  try assertions::assert(
+    filterable.filtered.size() == 6,
+    "whitespace-only filters should match every option",
+  )
+  assertions::assert(
+    filterable.filtered.at(0).expect("restored first").id == "todo" and filterable.filtered.at(5).expect("restored last").id == "backlog",
+    "clearing the filter should restore original order",
+  )
 }
 
 test fn picker_renders_empty_state_and_ignores_empty_activation() Void!Str {

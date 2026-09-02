@@ -205,6 +205,19 @@ test fn inbox_loads_rows_and_discards_stale_detail_completion() Void!Str {
   try testing::assert_contains(application.frame().text(), "Current detail")
   try testing::assert_contains(application.frame().text(), "── Details")
   try testing::assert_contains(application.frame().text(), "Alex commented")
+  for size in [[60, 20], [100, 30], [160, 40]] {
+    application.resize(size.at(0).expect("width"), size.at(1).expect("height"))
+    try assertions::assert(controller.cursor == 1, "resize should preserve Inbox selection")
+    try assertions::assert(
+      controller.list_scroll.layout().screen.width > 0,
+      "list pane should remain visible",
+    )
+    try assertions::assert(
+      controller.detail_scroll.layout().screen.width > 0,
+      "detail pane should remain visible",
+    )
+    try testing::assert_contains(application.frame().text(), "Current detail")
+  }
 
   let _ = controller.handle_key(key("up", ""))
   (fake.details.at(2).expect("first detail refresh").completion)(
@@ -326,6 +339,83 @@ test fn inbox_refresh_preserves_selection_by_notification_id() Void!Str {
   )
   controller.dispose()
   assertions::assert(scheduled.cancellations == 2, "reschedule and disposal should cancel timers")
+}
+
+test fn inbox_initial_error_retries_to_empty_and_detail_errors_render() Void!Str {
+  let application = testing::new(80, 16)
+  defer application.destroy()
+  let fake = mut FakeState{
+    loads: [],
+    details: [],
+    archives: [],
+  }
+  let controller = inbox_controller::new(
+    application.context,
+    theme::new(),
+    fake_service(fake),
+    no_schedule,
+    fn(identifier: Str) {},
+    fn(url: Str) {},
+    fn(title: Str, message: Str) {},
+  )
+  application.root.add(controller.root)
+  controller.start()
+  (fake.loads.at(0).expect("initial load"))(Result::err("offline"))
+  try assertions::assert(
+    controller.list_status.content().contains("offline"),
+    "initial list errors should be visible",
+  )
+  let _ = controller.handle_key(key("r", "r"))
+  (fake.loads.at(1).expect("retry"))(Result::ok([]))
+  try assertions::assert(
+    controller.list_status.content().contains("No notifications"),
+    "successful empty retry should render empty state",
+  )
+
+  let _ = controller.handle_key(key("r", "r"))
+  (fake.loads.at(2).expect("populated retry"))(
+    Result::ok([item("n1", "AKO-1", "issueMention", "")]),
+  )
+  (fake.details.at(0).expect("detail").completion)(Result::err("forbidden"))
+  assertions::assert(
+    controller.detail_text.content().contains("Couldn't load details") and controller.detail_text.content().contains("forbidden"),
+    "detail errors should render without clearing the selected notification summary",
+  )
+}
+
+test fn inbox_disposal_suppresses_late_detail_and_archive_completions() Void!Str {
+  let application = testing::new(60, 12)
+  defer application.destroy()
+  let fake = mut FakeState{
+    loads: [],
+    details: [],
+    archives: [],
+  }
+  let errors = mut Calls{value: "", count: 0}
+  let controller = inbox_controller::new(
+    application.context,
+    theme::new(),
+    fake_service(fake),
+    no_schedule,
+    fn(identifier: Str) {},
+    fn(url: Str) {},
+    fn(title: Str, message: Str) {
+      errors.value = title
+      errors.count =+ 1
+    },
+  )
+  application.root.add(controller.root)
+  controller.start()
+  (fake.loads.at(0).expect("load"))(Result::ok([item("n1", "AKO-1", "issueMention", "")]))
+  let _ = controller.handle_key(key("backspace", ""))
+  controller.dispose()
+  (fake.details.at(0).expect("detail").completion)(Result::ok(detail("AKO-1", "Late detail")))
+  (fake.archives.at(0).expect("archive").completion)(Result::err("denied"))
+  try assertions::assert(
+    not controller.detail_text.content().contains("Late detail"),
+    "disposed Inbox should ignore detail completion",
+  )
+  assertions::assert(errors.count == 0, "disposed Inbox should ignore archive completion")
 }
 
 test fn inbox_disposal_suppresses_late_list_completion() Void!Str {

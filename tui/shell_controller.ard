@@ -48,11 +48,11 @@ struct ShellController {
   disposed: Bool,
 }
 
-fn tab_chip_width(label: Str, dynamic: Bool) Int {
+fn tab_chip_width(label_cells: Int, dynamic: Bool) Int {
   match dynamic {
-    false => label.runes().size() + 2,
+    false => label_cells + 2,
     true => {
-      let intrinsic = label.runes().size() + 4
+      let intrinsic = label_cells + 4
       match intrinsic > 26 {
         true => 26,
         false => intrinsic,
@@ -244,7 +244,7 @@ impl ShellController {
   }
 
   private fn mut add_tab_chip(index: Int, label: Str, dynamic: Bool) {
-    let width = tab_chip_width(label, dynamic)
+    let width = tab_chip_width(self.context.measure_text(label), dynamic)
     let chip = box::new(
       self.context,
       styles: style::new(

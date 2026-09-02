@@ -19,7 +19,7 @@ ard run main.ard
 ard test
 ```
 
-The local development dependency points to `../cooper`.
+The Ard dependency is pinned to a remote Cooper commit; `../cooper` remains the local framework source checkout for joint development and reference.
 
 ## Architecture guidance
 

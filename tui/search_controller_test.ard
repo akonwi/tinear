@@ -128,6 +128,7 @@ test fn search_debounces_rejects_stale_results_and_opens_document() Void!Str {
   let search = controller(application, modal, fake, scheduled, opened)
   search.open(application.context)
   application.render()
+  try testing::assert_contains(application.frame().text(), "Type to search issues and docs")
 
   application.paste(event::paste("a"))
   application.paste(event::paste("b"))
@@ -160,10 +161,44 @@ test fn search_debounces_rejects_stale_results_and_opens_document() Void!Str {
       search_service::Outcome{hits: [issue(), document()], warning: "Document search unavailable"},
     ),
   )
+  application.render()
+  try testing::assert_contains(application.frame().text(), "Document search unavailable")
   application.key(key("down"))
   application.key(key("return"))
   try assertions::assert(opened.document_slug == "doc-slug", "down and enter should open document result")
   assertions::assert(not modal.is_open(), "opening a result should close search")
+}
+
+test fn search_renders_loading_empty_and_error_states() Void!Str {
+  let application = testing::new(70, 22)
+  defer application.destroy()
+  let modal = modal_host::new(application.context, theme::new())
+  application.root.add(modal.root)
+  let fake = mut FakeState{requests: []}
+  let scheduled = mut Scheduled{actions: [], cancellations: 0}
+  let opened = mut Opened{issue_id: "", document_slug: ""}
+  let search = controller(application, modal, fake, scheduled, opened)
+  search.open(application.context)
+  for size in [[60, 20], [100, 30], [160, 40]] {
+    application.resize(size.at(0).expect("width"), size.at(1).expect("height"))
+    try assertions::assert(modal.is_open(), "search modal should survive resize")
+    try testing::assert_contains(application.frame().text(), "Type to search issues and docs")
+  }
+  application.paste(event::paste("query"))
+  application.render()
+  try testing::assert_contains(application.frame().text(), "Searching…")
+  (scheduled.actions.at(0).expect("empty debounce"))()
+  fake.requests.at(
+    0,
+  ).expect("empty request").completion(Result::ok(search_service::Outcome{hits: [], warning: ""}))
+  application.render()
+  try testing::assert_contains(application.frame().text(), "No results found")
+
+  application.paste(event::paste("x"))
+  (scheduled.actions.at(1).expect("error debounce"))()
+  fake.requests.at(1).expect("error request").completion(Result::err("both sources failed"))
+  application.render()
+  testing::assert_contains(application.frame().text(), "Unable to search: both sources failed")
 }
 
 test fn search_disposal_cancels_debounce_and_ignores_late_response() Void!Str {

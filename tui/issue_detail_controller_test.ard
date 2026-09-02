@@ -167,6 +167,11 @@ test fn issue_detail_loads_issue_and_comments_independently_and_routes_commands(
   try testing::assert_contains(application.frame().text(), "Core")
   try testing::assert_contains(application.frame().text(), "Description")
   try testing::assert_contains(application.frame().text(), "Body with markdown")
+  for size in [[60, 20], [100, 30], [160, 40]] {
+    application.resize(size.at(0).expect("width"), size.at(1).expect("height"))
+    try assertions::assert(controller.issue.is_some(), "resize should preserve loaded issue")
+    try testing::assert_contains(application.frame().text(), "Body with markdown")
+  }
 
   try assertions::assert(controller.handle_key(key("c")), "c should switch to comments")
   application.render()
@@ -239,6 +244,45 @@ test fn issue_detail_loads_issue_and_comments_independently_and_routes_commands(
       controller.comment_cursor,
     ).expect("revealed comment").root.is_focused(),
     "post refresh should focus and reveal the created comment",
+  )
+}
+
+test fn issue_detail_independent_errors_retry_to_issue_and_empty_comments() Void!Str {
+  let application = testing::new(80, 24)
+  defer application.destroy()
+  let fake = mut FakeState{issue_loads: [], comment_loads: []}
+  let scheduled = mut Scheduled{actions: [], cancellations: 0}
+  let actions = mut Actions{
+    opened_url: "",
+    picked: [],
+    comments: [],
+    edits: 0,
+    errors: 0,
+  }
+  let controller = make_controller(application, fake, scheduled, actions)
+  application.root.add(controller.root)
+  controller.start()
+  (fake.issue_loads.at(0).expect("issue load"))(Result::err("forbidden"))
+  (fake.comment_loads.at(0).expect("comments load"))(Result::err("offline"))
+  try assertions::assert(
+    controller.status.content().contains("forbidden"),
+    "issue errors should render independently",
+  )
+  try assertions::assert(
+    controller.comments_status.content().contains("offline"),
+    "comment errors should render independently",
+  )
+
+  controller.refresh(false)
+  (fake.issue_loads.at(1).expect("issue retry"))(Result::ok(issue("Recovered", "Body")))
+  (fake.comment_loads.at(1).expect("comments retry"))(Result::ok([]))
+  try assertions::assert(
+    controller.title_text.content() == "Recovered",
+    "issue retry should recover content",
+  )
+  assertions::assert(
+    controller.comments_status.content() == "No comments",
+    "empty comments retry should render empty state",
   )
 }
 

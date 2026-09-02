@@ -191,7 +191,14 @@ test fn board_builds_nested_retained_columns_and_navigates_cards() Void!Str {
   try assertions::assert(controller.card_index == 0, "cursor should clamp to target column")
   try assertions::assert(controller.handle_key(key("return")), "Enter should open issue")
   try assertions::assert(opened.identifier == "AKO-3", "selected issue should open")
-  assertions::assert(opened.count == 2, "mouse and keyboard activation should each open once")
+  try assertions::assert(opened.count == 2, "mouse and keyboard activation should each open once")
+  for size in [[60, 20], [100, 30], [160, 40]] {
+    application.resize(size.at(0).expect("width"), size.at(1).expect("height"))
+    try assertions::assert(controller.selected_issue_id() == "i3", "resize should preserve selected issue")
+    try assertions::assert(controller.column_records.size() == 2, "resize should preserve retained columns")
+    try testing::assert_contains(application.frame().text(), "AKO-3")
+  }
+  assertions::assert(fake.loads.size() == 1, "resize should not trigger network loads")
 }
 
 test fn board_refresh_preserves_selected_issue_across_column_move() Void!Str {
@@ -319,6 +326,35 @@ test fn board_routes_field_picker_commands_for_selected_issue() Void!Str {
   try assertions::assert(picked.names.at(2).expect("priority") == "priority:i1", "p should edit priority")
   try assertions::assert(picked.names.at(3).expect("assignee") == "assignee:i1", "a should edit assignee")
   assertions::assert(picked.names.at(4).expect("project") == "project:i1", "P should edit project")
+}
+
+test fn board_initial_error_retries_to_empty_state() Void!Str {
+  let application = testing::new(80, 16)
+  defer application.destroy()
+  let fake = mut FakeState{loads: []}
+  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
+  let controller = board_controller::new(
+    application.context,
+    theme::new(),
+    fake_service(fake),
+    fake_schedule(scheduled),
+    fn(identifier: Str) {},
+    ignore_picker,
+    fn(title: Str, message: Str) {},
+  )
+  application.root.add(controller.root)
+  controller.start()
+  (fake.loads.at(0).expect("initial load"))(Result::err("offline"))
+  try assertions::assert(
+    controller.status.content().contains("offline"),
+    "initial board errors should be visible",
+  )
+  let _ = controller.handle_key(key("r"))
+  (fake.loads.at(1).expect("retry"))(Result::ok([]))
+  assertions::assert(
+    controller.status.content().contains("No assigned issues"),
+    "empty retry should render board empty state",
+  )
 }
 
 test fn board_failed_manual_refresh_restores_existing_columns() Void!Str {

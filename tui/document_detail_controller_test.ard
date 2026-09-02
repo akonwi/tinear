@@ -128,9 +128,50 @@ test fn document_detail_loads_retitles_renders_and_routes_commands() Void!Str {
   try assertions::assert(detail.handle_key(key("j")), "j should scroll document")
   try assertions::assert(detail.handle_key(key("k")), "k should scroll document")
   try assertions::assert(detail.handle_key(key("o")), "o should open document URL")
-  assertions::assert(
+  try assertions::assert(
     actions.opened_url == "https://linear.app/document/doc-slug",
     "document URL should be routed through launcher",
+  )
+  for size in [[60, 20], [100, 30], [160, 40]] {
+    application.resize(size.at(0).expect("width"), size.at(1).expect("height"))
+    try assertions::assert(
+      detail.markdown.source == "# Heading\n\nBody",
+      "resize should preserve Markdown source",
+    )
+    try assertions::assert(
+      detail.title_text.content() == "Fresh title",
+      "resize should preserve document identity",
+    )
+  }
+  assertions::assert(fake.loads.size() == 1, "resize should not trigger document loads")
+}
+
+test fn document_detail_initial_error_retries_to_empty_content() Void!Str {
+  let application = testing::new(70, 20)
+  defer application.destroy()
+  let fake = mut FakeState{loads: []}
+  let scheduled = mut Scheduled{actions: [], cancellations: 0}
+  let actions = mut Actions{
+    titles: [],
+    opened_url: "",
+    errors: 0,
+  }
+  let detail = controller(application, fake, scheduled, actions)
+  application.root.add(detail.root)
+  detail.start()
+  (fake.loads.at(0).expect("initial load"))(Result::err("forbidden"))
+  try assertions::assert(
+    detail.status.content().contains("Couldn't load Cached title: forbidden"),
+    "initial document errors should be visible",
+  )
+  detail.refresh(false)
+  let empty = mut document("Empty document", "ignored")
+  empty.content = Maybe::new<Str>()
+  (fake.loads.at(1).expect("retry"))(Result::ok(empty.@))
+  try assertions::assert(detail.document.is_some(), "successful retry should retain document metadata")
+  assertions::assert(
+    detail.markdown.source.is_empty(),
+    "null document content should render as empty",
   )
 }
 

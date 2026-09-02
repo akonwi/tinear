@@ -112,6 +112,11 @@ test fn creation_with_one_team_validates_retries_and_opens_issue() Void!Str {
   try assertions::assert(state.team_loads.size() == 1, "opening should load teams")
   (state.team_loads.at(0).expect("team load"))(Result::ok([team("team-1", "Core")]))
   application.render()
+  for size in [[60, 20], [100, 30], [160, 40]] {
+    application.resize(size.at(0).expect("width"), size.at(1).expect("height"))
+    try assertions::assert(modal.is_open(), "creation form should survive resize")
+    try assertions::assert(state.creates.size() == 0, "resize should not submit the form")
+  }
 
   application.key(key("return", ctrl: true))
   try assertions::assert(state.creates.size() == 0, "empty title should not submit")
@@ -189,6 +194,28 @@ test fn creation_handles_zero_and_many_team_flows() Void!Str {
   assertions::assert(
     outcome.created.at(0).expect("created") == "MOBILE-1",
     "many-team flow should open issue",
+  )
+}
+
+test fn creation_team_load_error_closes_and_reports() Void!Str {
+  let application = testing::new(70, 22)
+  defer application.destroy()
+  let modal = modal_host::new(application.context, theme::new())
+  application.root.add(modal.root)
+  let state = mut FakeState{team_loads: [], creates: []}
+  let outcome = mut Outcome{
+    errors: [],
+    successes: [],
+    created: [],
+  }
+  let creation = controller(application, modal, state, outcome)
+  creation.open()
+  try assertions::assert(modal.is_open(), "loading teams should own the modal")
+  (state.team_loads.at(0).expect("team load"))(Result::err("workspace unavailable"))
+  try assertions::assert(not modal.is_open(), "team load failure should close creation")
+  assertions::assert(
+    outcome.errors.at(0).expect("load error") == "workspace unavailable",
+    "team load failure should report its error",
   )
 }
 

@@ -3,6 +3,14 @@
   "root": "root",
   "packages": [
     {
+      "id": "git:383a36ce72376853:848bac2d9e995b9f143b36ff5f7210824159684a",
+      "name": "cooper",
+      "git": "https://github.com/akonwi/cooper.git",
+      "commit": "848bac2d9e995b9f143b36ff5f7210824159684a",
+      "requested": "848bac2d9e995b9f143b36ff5f7210824159684a",
+      "integrity": "sha256:30fb16e3bb0bb9ad20d05c0aad68a48299588545e029dea1e64ecdc81a4c506f"
+    },
+    {
       "id": "git:c5125d0dd6cd13cc:c590f42ec43c5d362844925a8a978d64a1846c5c",
       "name": "decode",
       "git": "https://github.com/akonwi/ard-decode.git",
@@ -15,6 +23,7 @@
       "name": "tinear",
       "path": ".",
       "dependencies": {
+        "cooper": "git:383a36ce72376853:848bac2d9e995b9f143b36ff5f7210824159684a",
         "decode": "git:c5125d0dd6cd13cc:c590f42ec43c5d362844925a8a978d64a1846c5c"
       }
     }

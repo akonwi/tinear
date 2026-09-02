@@ -12,6 +12,15 @@ private fn model(tab_index: Int, identifiers: [Str]) shell::Model {
   shell::Model{tab_index: tab_index, tabs: references.@}
 }
 
+test fn shell_clamps_tab_selection_boundaries() Void!Str {
+  try testing::assert(shell::clamp_tab_index(-1, 3) == 0, "negative indexes should clamp to Inbox")
+  try testing::assert(shell::clamp_tab_index(1, 3) == 1, "in-range indexes should remain unchanged")
+  testing::assert(
+    shell::clamp_tab_index(9, 3) == 2,
+    "overflow indexes should clamp to the last tab",
+  )
+}
+
 test fn shell_cycles_across_fixed_and_dynamic_tabs() Void!Str {
   try testing::assert(shell::total_tabs(model(0, ["CCA-1"])) == 3, "two fixed tabs plus one dynamic tab")
   try testing::assert(shell::cycle_next(model(2, ["CCA-1"])) == 0, "next should wrap to Inbox")

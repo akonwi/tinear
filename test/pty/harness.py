@@ -1,0 +1,242 @@
+#!/usr/bin/env python3
+"""Shared PTY test harness for Cooper example smoke tests."""
+
+import codecs
+import fcntl
+import os
+import pty
+import select
+import shlex
+import signal
+import struct
+import subprocess
+import sys
+import termios
+import time
+
+ARD_CMD = shlex.split(os.environ.get("ARD", "ard"))
+ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+ARD_OUT = os.path.join(ROOT, "ard-out", "pty")
+
+
+# ── Screen emulator ────────────────────────────────────────────────────
+
+class Screen:
+    """Minimal terminal screen emulator for smoke-test assertions."""
+
+    def __init__(self, rows=24, cols=80):
+        self.rows = rows
+        self.cols = cols
+        self.row = 0
+        self.col = 0
+        self.cells = [[" " for _ in range(cols)] for _ in range(rows)]
+        self._decoder = codecs.getincrementaldecoder("utf-8")(errors="ignore")
+        self._pending = ""
+
+    def text(self):
+        return "\n".join("".join(row).rstrip() for row in self.cells)
+
+    def line(self, n):
+        """Return the n-th row (0-indexed) as a string."""
+        return "".join(self.cells[n]).rstrip()
+
+    def feed(self, data):
+        text = self._pending + self._decoder.decode(data).replace("\x00", "")
+        self._pending = ""
+        i = 0
+        while i < len(text):
+            ch = text[i]
+            if ch == "\x1b":
+                escaped = self._escape(text, i + 1)
+                if escaped is None:
+                    self._pending = text[i:]
+                    break
+                i = escaped
+                continue
+            if ch == "\r":
+                self.col = 0
+            elif ch == "\n":
+                self.row = min(self.rows - 1, self.row + 1)
+                self.col = 0
+            elif ch == "\b":
+                self.col = max(0, self.col - 1)
+            elif ch >= " ":
+                if 0 <= self.row < self.rows and 0 <= self.col < self.cols:
+                    self.cells[self.row][self.col] = ch
+                self.col += 1
+                if self.col >= self.cols:
+                    self.col = 0
+                    self.row = min(self.rows - 1, self.row + 1)
+            i += 1
+
+    def _escape(self, text, i):
+        if i >= len(text):
+            return None
+        kind = text[i]
+        if kind == "[":
+            j = i + 1
+            while j < len(text) and not ("@" <= text[j] <= "~"):
+                j += 1
+            if j >= len(text):
+                return None
+            body = text[i + 1 : j]
+            final = text[j]
+            self._csi(body, final)
+            return j + 1
+        if kind in "]P_":
+            end = text.find("\x1b\\", i + 1)
+            if end == -1:
+                bel = text.find("\a", i + 1)
+                return None if bel == -1 else bel + 1
+            return end + 2
+        return i + 1
+
+    def _csi(self, body, final):
+        # SGR (Select Graphic Rendition) — just consume it.
+        if final == "m":
+            return
+        clean = body.lstrip("?")
+        parts = [p for p in clean.split(";") if p]
+        nums = []
+        for part in parts:
+            # Colons denote sub-parameters (e.g. 38:5:89 for indexed fg color).
+            # Take only the first sub-param for cursor/clear operations.
+            first = part.split(":")[0]
+            try:
+                nums.append(int(first))
+            except ValueError:
+                nums.append(0)
+        if final in "Hf":
+            row = nums[0] if len(nums) >= 1 and nums[0] else 1
+            col = nums[1] if len(nums) >= 2 and nums[1] else 1
+            self.row = max(0, min(self.rows - 1, row - 1))
+            self.col = max(0, min(self.cols - 1, col - 1))
+        elif final == "J" and (not nums or nums[0] in (2, 3)):
+            self.cells = [[" " for _ in range(self.cols)] for _ in range(self.rows)]
+            self.row = 0
+            self.col = 0
+        elif final == "m":
+            pass
+
+
+# ── Build / spawn / IO ─────────────────────────────────────────────────
+
+def binary_path(name):
+    """Return the absolute path for an example binary in ard-out."""
+    return os.path.join(ARD_OUT, name)
+
+
+def build(name, source=None):
+    """Build an example or fixture binary into ard-out and return its path."""
+    os.makedirs(ARD_OUT, exist_ok=True)
+    output = binary_path(name)
+    source = source or f"{name}.ard"
+    subprocess.run(
+        [*ARD_CMD, "build", "--out", output, source],
+        cwd=ROOT,
+        check=True,
+    )
+    return output
+
+
+def spawn(binary, rows=24, cols=80, env=None):
+    """Fork a PTY and exec the binary. Returns (pid, fd)."""
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.environ["TERM"] = "xterm-256color"
+        os.environ["VAXIS_LOG_LEVEL"] = "error"
+        if env:
+            os.environ.update(env)
+        os.execv(binary, [binary])
+        sys.exit(1)
+    _set_winsize(fd, rows, cols)
+    return pid, fd
+
+
+def _set_winsize(fd, rows, cols):
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+
+
+def resize(fd, rows, cols):
+    """Resize a running PTY and notify its foreground process."""
+    _set_winsize(fd, rows, cols)
+
+
+def read_for(fd, screen, seconds=0.05):
+    """Read available output, update screen, answer terminal queries."""
+    data = b""
+    ready, _, _ = select.select([fd], [], [], seconds)
+    if ready:
+        try:
+            data = os.read(fd, 65536)
+        except OSError:
+            pass
+    if data:
+        _respond_to_queries(fd, data)
+        if screen is not None:
+            screen.feed(data)
+    return data
+
+
+_QUERY_BUFFERS = {}
+
+
+def _respond_to_queries(fd, data):
+    """Answer capability queries, including escape sequences split across PTY reads."""
+    pending = _QUERY_BUFFERS.get(fd, b"") + data
+    responses = []
+    # DA1 — primary device attributes
+    if b"\x1b[c" in pending or b"\x1b[0c" in pending:
+        responses.append(b"\x1b[?62;4;6c")
+        pending = pending.replace(b"\x1b[c", b"").replace(b"\x1b[0c", b"")
+    # DA3 — tertiary attributes
+    if b"\x1b[=c" in pending:
+        responses.append(b"\x1b[>0;0;0c")
+        pending = pending.replace(b"\x1b[=c", b"")
+    # DSRCPR — cursor position report
+    if b"\x1b[6n" in pending:
+        responses.append(b"\x1b[1;1R")
+        pending = pending.replace(b"\x1b[6n", b"")
+    # CSIu — kitty keyboard protocol ack
+    if b"\x1b[?u" in pending or b"\x1b[?1u" in pending:
+        responses.append(b"\x1b[?1u")
+        pending = pending.replace(b"\x1b[?u", b"").replace(b"\x1b[?1u", b"")
+    _QUERY_BUFFERS[fd] = pending[-16:]
+    for r in responses:
+        os.write(fd, r)
+
+
+def wait_for(fd, screen, needle, timeout=4.0):
+    """Read until `needle` appears in the screen text."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        read_for(fd, screen, 0.05)
+        if needle in screen.text():
+            return screen.text()
+    raise AssertionError(
+        f"did not see {needle!r} after {timeout}s\nscreen:\n{screen.text()}"
+    )
+
+
+def send(fd, text):
+    os.write(fd, text.encode())
+
+
+def wait_exit(pid, fd, screen=None, timeout=2.0):
+    """Wait for the child process to exit after sending 'q'. Returns exit status."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        done, status = os.waitpid(pid, os.WNOHANG)
+        if done == pid:
+            _QUERY_BUFFERS.pop(fd, None)
+            return status
+        if screen:
+            read_for(fd, screen, 0.05)
+    return None
+
+
+def drain(fd, screen, seconds=0.3):
+    """Read and discard output for `seconds` to let rendering settle."""
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        read_for(fd, screen, 0.03)

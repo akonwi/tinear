@@ -35,18 +35,27 @@ private fn key(value: Str) mut event::KeyEvent {
   event::key(value, value, event::KeyEventType::press, modifiers())
 }
 
-test fn tab_chips_use_intrinsic_width_with_a_document_cap() Void!Str {
+test fn tab_chips_use_intrinsic_cell_width_with_a_document_cap() Void!Str {
+  let application = testing::new(80, 12)
+  defer application.destroy()
   try assertions::assert(
-    shell_controller::tab_chip_width("CCA-1782", true) == 12,
+    shell_controller::tab_chip_width(application.context.measure_text("CCA-1782"), true) == 12,
     "issue tabs should not reserve document-title width",
   )
   try assertions::assert(
-    shell_controller::tab_chip_width("A very long document title that needs clipping", true) == 26,
+    shell_controller::tab_chip_width(
+      application.context.measure_text("A very long document title that needs clipping"),
+      true,
+    ) == 26,
     "long dynamic labels should retain the existing cap",
   )
   assertions::assert(
-    shell_controller::tab_chip_width("Inbox", false) == 7,
+    shell_controller::tab_chip_width(application.context.measure_text("Inbox"), false) == 7,
     "permanent tabs should preserve their padding",
+  )
+  assertions::assert(
+    shell_controller::tab_chip_width(application.context.measure_text("界界"), true) == 8,
+    "wide graphemes should use terminal cell width rather than rune count",
   )
 }
 
@@ -94,6 +103,39 @@ private fn dynamic_factory(ctx: mut runtime::Runtime, created: mut Counter, disp
       root: base.root,
       focus: base.focus,
       handle_key: base.handle_key,
+      dispose: fn() {
+        base.dispose()
+        disposed.value =+ 1
+      },
+    }
+  }
+}
+
+private fn tracked_dynamic_factory(
+  ctx: mut runtime::Runtime,
+  created: mut Counter,
+  disposed: mut Counter,
+  handled: mut Counter,
+) fn(tabs::TabRef) shell_controller::Screen {
+  fn(reference: tabs::TabRef) shell_controller::Screen {
+    created.value =+ 1
+    let state = mut ScreenState{
+      focuses: 0,
+      handled: 0,
+      disposals: 0,
+    }
+    let base = fake_screen(ctx, "Detail {reference.title}", state)
+    shell_controller::Screen{
+      root: base.root,
+      focus: base.focus,
+      handle_key: fn(received: mut event::KeyEvent) Bool {
+        if received.matches("x") {
+          handled.value =+ 1
+          true
+        } else {
+          false
+        }
+      },
       dispose: fn() {
         base.dispose()
         disposed.value =+ 1
@@ -180,10 +222,24 @@ test fn shell_switches_persistent_tabs_and_persists_selection() Void!Str {
   try assertions::assert(board_state.focuses == 1, "new active screen should reclaim focus")
   try assertions::assert(snapshots.size() == 1, "selection should persist")
   try testing::assert_contains(application.frame().text(), "Board body")
-  assertions::assert(
+  try assertions::assert(
     controller.inbox.root.style().display == style::Display::none,
     "Inbox should remain mounted but hidden",
   )
+  for size in [[60, 20], [100, 30], [160, 40]] {
+    application.resize(size.at(0).expect("width"), size.at(1).expect("height"))
+    try assertions::assert(controller.model.tab_index == 1, "resize should preserve active tab")
+    try assertions::assert(
+      application.frame().width() == size.at(0).expect("frame width"),
+      "frame should adopt width",
+    )
+    try assertions::assert(
+      application.frame().height() == size.at(1).expect("frame height"),
+      "frame should adopt height",
+    )
+    try testing::assert_contains(application.frame().text(), "Board body")
+  }
+  assertions::assert(snapshots.size() == 1, "resize must not persist or mutate shell selection")
 }
 
 test fn shell_restores_opens_reuses_retitles_and_closes_dynamic_tabs() Void!Str {
@@ -225,6 +281,9 @@ test fn shell_restores_opens_reuses_retitles_and_closes_dynamic_tabs() Void!Str 
   controller.retitle(restored_ref, "Renamed doc")
   application.render()
   try testing::assert_contains(application.frame().text(), "Renamed doc")
+  controller.retitle(restored_ref, "界界界界界界界界界界界界界界界界")
+  application.render()
+  try testing::assert_contains(application.frame().text(), "…")
 
   try assertions::assert(controller.handle_key(key("escape")), "Escape should close dynamic tab")
   try assertions::assert(controller.model.tab_index == 1, "closing detail should return to board")
@@ -249,13 +308,14 @@ test fn shell_routes_mouse_global_and_active_commands() Void!Str {
   let disposed = mut Counter{value: 0}
   let searches = mut Counter{value: 0}
   let creations = mut Counter{value: 0}
+  let dynamic_handled = mut Counter{value: 0}
   let controller = shell_controller::new(
     application.context,
     theme::new(),
     shell_model::empty(),
     fake_screen(application.context, "Inbox", inbox_state),
     fake_screen(application.context, "Board", board_state),
-    dynamic_factory(application.context, created, disposed),
+    tracked_dynamic_factory(application.context, created, disposed, dynamic_handled),
     fn(value: cache::LoggedInCache) {},
     fn() {},
     fn() {
@@ -267,6 +327,11 @@ test fn shell_routes_mouse_global_and_active_commands() Void!Str {
   )
   application.root.add(controller.root)
   application.render()
+  try assertions::assert(controller.handle_key(key("x")), "active Inbox should handle delegated key")
+  try assertions::assert(
+    inbox_state.handled == 1 and board_state.handled == 0,
+    "hidden board must not receive Inbox commands",
+  )
   application.click(8, 0)
   try assertions::assert(controller.model.tab_index == 1, "clicking My Issues tab should select it")
   try assertions::assert(controller.handle_key(key("?")), "search should be globally handled")
@@ -291,7 +356,26 @@ test fn shell_routes_mouse_global_and_active_commands() Void!Str {
   try assertions::assert(searches.value == 2, "both normalized search key shapes should run the callback")
   try assertions::assert(creations.value == 1, "create callback should run")
   try assertions::assert(board_state.handled == 1, "active board should receive delegated key")
+  try assertions::assert(inbox_state.handled == 1, "hidden Inbox must not receive board commands")
   controller.open(tabs::issue_tab("AKO-1"))
+  try assertions::assert(
+    controller.handle_key(key("x")),
+    "active dynamic tab should receive delegated key",
+  )
+  try assertions::assert(
+    dynamic_handled.value == 1 and board_state.handled == 1,
+    "hidden board must not receive dynamic-tab commands",
+  )
+  controller.select_tab(0)
+  try assertions::assert(
+    controller.handle_key(key("x")),
+    "Inbox should handle after returning from detail",
+  )
+  try assertions::assert(
+    inbox_state.handled == 2 and dynamic_handled.value == 1,
+    "hidden dynamic tabs must not receive Inbox commands",
+  )
+  controller.select_tab(2)
   try assertions::assert(not controller.handle_key(key("c")), "detail tabs should own the c command")
   try assertions::assert(creations.value == 1, "detail c should not start issue creation")
   application.render()
@@ -305,7 +389,12 @@ test fn shell_routes_mouse_global_and_active_commands() Void!Str {
     controller.model.tab_index == 1,
     "closing selected tab should return to My Issues",
   )
-  assertions::assert(disposed.value == 1, "close button should dispose the dynamic screen")
+  try assertions::assert(disposed.value == 1, "close button should dispose the dynamic screen")
+  try assertions::assert(controller.handle_key(key("x")), "board should handle after detail closes")
+  assertions::assert(
+    board_state.handled == 2 and dynamic_handled.value == 1,
+    "closed dynamic screens must not receive later commands",
+  )
 }
 
 test fn shell_disposal_cleans_screens_and_persistence_once() Void!Str {

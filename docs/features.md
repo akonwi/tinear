@@ -1,21 +1,19 @@
 # tinear — feature reference
 
-CLI / TUI for [Linear.app](https://linear.app). Two interfaces share the same
-config and API layer:
-
-- **CLI** (`ard run main.ard login`) — one-shot API key setup
-- **TUI** (default, no command) — interactive terminal dashboard
+Retained terminal UI for [Linear.app](https://linear.app). Tinear has one
+no-argument interactive entrypoint; authentication is completed in the welcome
+screen when no API key is configured.
 
 ---
 
 ## 1. Startup
 
-1. `main()` dispatches to `commands/tui.ard` (default) or `commands/login.ard`.
+1. `main()` constructs the Cooper application, root shell, modal host, and toast host before startup.
 2. Config loaded via `config.ard`:
    - `$LINEAR_API_KEY` env var (takes priority)
    - `~/.tinear/config.json` (fallback)
-3. If no key found → render `welcome_screen` (login form).
-4. If key found → validate with a lightweight query, then render `logged_in_screen`.
+3. If no key is found, install the retained `WelcomeController` login form.
+4. If a key is found, install the retained logged-in shell and start Inbox/board loading.
 
 **Config schema (`~/.tinear/config.json`):**
 
@@ -42,7 +40,7 @@ Enter your Linear API key
 
 - **Text field**: on change updates local draft. Enter submits. Obscured=false
   (so user can verify pasted key).
-- **Login button**: calls `login::login(key)` which:
+- **Login button**: calls the asynchronous authentication service, which:
   1. Calls Linear GraphQL `viewer { id name displayName email }` to validate.
   2. On success: saves key to `~/.tinear/config.json`, transitions to
      logged-in screen.
@@ -53,16 +51,14 @@ Enter your Linear API key
 
 ## 3. Logged-in screen (tabbed shell)
 
-After authentication, the app shows a persistent tabbed interface.
+After authentication, the app shows a persistent retained tabbed interface.
 
 ### 3.1 State shape
 
 ```ard
-struct LoggedInUiState {
-  tab: Str,                    // active tab: "Inbox" | "My Issues" | issue-identifier
-  issue_tabs: [Issue],         // dynamically opened issue detail tabs
-  active_picker: PickerProps?, // non-none when a picker overlay is open
-  search_open: Bool,           // search overlay visible
+struct Model {
+  tab_index: Int,       // 0 = Inbox, 1 = My Issues, 2+ = dynamic tabs
+  tabs: [TabRef],       // issue/document identity + cached display title
 }
 ```
 
@@ -75,23 +71,24 @@ Horizontal row of tabs across the top of the screen:
 ```
 
 - **Inbox** and **My Issues** are permanent (always present, leftmost).
-- **Issue tabs** (e.g. `ENG-123`) are added dynamically when an issue is opened
-  from Inbox, My Issues, or Search. Max one tab per issue (re-selecting an
-  already-open issue switches to its existing tab).
+- **Issue and document tabs** are added dynamically from Inbox, My Issues, or
+  Search. Tabs are deduplicated by `(kind, id)`; opening an existing identity
+  selects its retained controller.
 - **Selected tab** is accent-colored and bold; inactive tabs are dim.
 - Tab bar is a horizontal row followed by a dim rule. See
   [design-language.md](design-language.md) for the current visual standard.
 
 ### 3.3 Tab body
 
-Below the tab bar, a single body region shows the active tab's content. Tabs are
-mounted in an `indexed_stack` so inactive tab state survives switches.
+Below the tab bar, a single body region shows the active tab's content. Each
+screen has one stable retained root; inactive roots remain mounted with
+`Display::none` so local state survives switches.
 
 | Tab | Content |
 |---|---|
 | **Inbox** | Scrollable notification list (see §4) |
 | **My Issues** | Kanban board grouped by workflow state (see §5) |
-| **Issue detail** | Full issue view (see §6) |
+| **Issue/document detail** | Full retained detail view (see §6) |
 
 Footer bar below the body shows left-aligned, context-sensitive key hints without repeating the active tab title.
 
@@ -105,24 +102,27 @@ Footer bar below the body shows left-aligned, context-sensitive key hints withou
 | `2` | Jump to My Issues |
 | `Escape` | If picker open → close picker. If issue tab active → close it and switch to My Issues. Otherwise ignored. |
 
-After switching tabs, focus is requested on the new tab's content via
-`dispatch_after(ctx, 0, ...)` to ensure keyboard events route correctly.
+After switching tabs, the shell focuses the selected retained screen. Only the
+active screen receives delegated commands.
 
 ### 3.5 Tab persistence
 
-When tabs change (new issue opened, issue closed), the state is written to
-`~/.tinear/cache.json` via `models/cache.ard`. On next launch, the cached
-tab set and active tab are restored.
+When tabs change, the state is serialized/coalesced to
+`~/.tinear/data.json` via `models/cache.ard` and `services/cache_writer.ard`.
+On next launch, the active index and issue/document tab references are restored.
 
 **Cache schema:**
 
 ```json
 {
-  "version": 1,
-  "tab": "Inbox",
-  "issue_tabs": [
-    { "id": "...", "identifier": "ENG-123", "title": "...", ... }
-  ]
+  "version": 2,
+  "logged_in": {
+    "tab_index": 2,
+    "tabs": [
+      { "kind": "issue", "id": "ENG-123", "title": "ENG-123" },
+      { "kind": "doc", "id": "doc-slug", "title": "Architecture" }
+    ]
+  }
 }
 ```
 
@@ -189,18 +189,23 @@ Issues are fetched from the Linear API via `models/issues.ard`. Each issue:
 ```ard
 struct Issue {
   id: Str,
-  identifier: Str,      // e.g. "ENG-123"
+  identifier: Str,
   title: Str,
   description: Str?,
-  state: WorkflowState, // { id, name, type, color }
-  cycle: WorkflowState?,
-  priority_label: Str,  // "Urgent", "High", "Medium", "Low", "No Priority"
-  assignee_name: Str?,
-  project_name: Str?,
-  team_key: Str?,
-  parent_issue: IssueRef?,
-  labels: [Str],
-  // ...
+  priority: Int?,
+  state_id: Str,
+  state_name: Str,
+  state_type: Str,
+  team_id: Str,
+  team_name: Str,
+  team_key: Str,
+  cycle_id: Str,
+  cycle_label: Str,
+  assignee_id: Str,
+  assignee_name: Str,
+  project_id: Str,
+  project_name: Str,
+  url: Str,
 }
 ```
 
@@ -302,8 +307,8 @@ Linear URL, and closing the tab cancels its periodic refresh worker.
 ## 7. Pickers (modal overlays)
 
 State, cycle, priority, assignee, and project pickers are modal overlays that
-appear centered over the current view. They trap focus and auto-focus the filter
-input on open.
+appear centered over the current view. They trap focus; lists longer than five
+auto-focus a filter input, while smaller lists focus direct keyboard navigation.
 
 ### 7.1 Picker controller (`tui/picker_controller.ard`)
 
@@ -382,11 +387,12 @@ dismissal; success shows a toast and opens the new issue tab.
 
 ## 10. Persistence
 
-`models/cache.ard` handles saving and restoring tab state:
+`models/cache.ard` and `services/cache_writer.ard` save and restore tab state:
 
-- **Save**: called after tab open, tab close, tab switch. Writes `LoggedInCache`
-  (active tab + list of open issue/document tabs) to `~/.tinear/cache.json`.
-- **Load**: called on `logged_in_screen` init. Reads cache file. On parse error
-  or missing file, returns defaults (Inbox tab, no issue tabs).
-- **Version**: schema version `1` — if future versions change the shape, old
-  caches are discarded.
+- **Save**: tab open, close, and selection changes enqueue a `LoggedInCache`
+  snapshot. The writer serializes and coalesces pending writes so an older
+  snapshot cannot overwrite a newer one.
+- **Load**: startup reads `~/.tinear/data.json`. Missing, malformed, unknown-version,
+  or unknown-tab-kind data safely falls back to Inbox with no dynamic tabs.
+- **Version**: schema version `2`, storing an active index and typed issue/document
+  `TabRef` identities rather than stale full API records.
