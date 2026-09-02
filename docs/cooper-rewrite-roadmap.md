@@ -18,12 +18,6 @@ Completed behavior is documented in [features.md](features.md), architecture in
 - The PTY suite covers startup, terminal/cache restoration, resize, normalized
   keys, mouse/wheel input, multiline paste, OSC 52 copy, and clean quit.
 
-## Deferred hardening
-
-- [ ] Thread per-controller cancellation into HTTP request contexts so closing a
-  view interrupts its in-flight request. Current lifecycle generations already
-  suppress every late UI completion.
-
 ## Explicitly out of parity scope
 
 These are future product ideas, not Cooper rewrite requirements:
