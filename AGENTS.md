@@ -31,5 +31,7 @@ The Ard dependency is pinned to a remote Cooper commit; `../cooper` remains the 
 - Keep Linear fetching and decoding separate from retained UI controllers.
 - Give every view explicit lifecycle/cancellation state before starting
   background work.
+- Because `Runtime.dispatch` is app-scoped, every async completion must check
+  its controller's disposal and request-generation state before mutating controls.
 - Prefer deterministic Cooper `TestApp` coverage for UI behavior and PTY tests
   only for terminal integration.

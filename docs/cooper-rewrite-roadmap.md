@@ -18,11 +18,6 @@ Completed behavior is documented in [features.md](features.md), architecture in
 - The PTY suite covers startup, terminal/cache restoration, resize, normalized
   keys, mouse/wheel input, multiline paste, OSC 52 copy, and clean quit.
 
-## Explicit parity waiver
-
-- `terminal-browser --app-mode` capability probing is intentionally omitted.
-  Tinear retains non-blocking split launch and system-browser fallback.
-
 ## Deferred hardening
 
 - [ ] Thread per-controller cancellation into HTTP request contexts so closing a
@@ -46,16 +41,3 @@ These are future product ideas, not Cooper rewrite requirements:
 - [ ] Global `R` refresh
 - [ ] Issue relations
 - [ ] Document creation/editing
-
-## Framework constraints to monitor
-
-- Cooper has indexed host-palette colors but no holistic terminal-queried,
-  contrast-derived semantic theme service.
-- Tinear owns modal/focus-trap policy and its retained picker/search lists.
-- Cooper has no built-in virtualization; use bounded eager retained rows and
-  profile only if real workloads show a regression.
-- Cooper has no animation/frame API; deterministic toast TTL takes precedence
-  over slide animation.
-- App-scoped dispatch outlives individual controllers, so every async completion
-  must retain disposal/generation checks.
-- Automatic `ScrollBox` bars reserve cells and can affect wrapping/layout.
