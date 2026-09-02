@@ -11,8 +11,12 @@ fn issue_json(description: Str) Str {
   issue_json_with_title("Title â\u0080\u0094 quoted â\u0080\u009ctextâ\u0080\u009d", description)
 }
 
+fn board_issue_json_type(id: Str, identifier: Str, state_name: Str, state_type: Str) Str {
+  `{{"id":"{id}","identifier":"{identifier}","title":"Title","description":null,"priority":2,"state":{{"id":"state-{id}","name":"{state_name}","type":"{state_type}","position":1.0}},"team":{{"id":"team-1","name":"Core","key":"AKO"}},"project":null,"assignee":null,"cycle":null}}`
+}
+
 fn board_issue_json(id: Str, identifier: Str, state_name: Str) Str {
-  `{{"id":"{id}","identifier":"{identifier}","title":"Title","description":null,"priority":2,"state":{{"id":"state-{id}","name":"{state_name}","type":"started","position":1.0}},"team":{{"id":"team-1","name":"Core","key":"AKO"}},"project":null,"assignee":null,"cycle":null}}`
+  board_issue_json_type(id, identifier, state_name, "started")
 }
 
 test fn empty_issue_identity_returns_error() Void!Str {
@@ -213,9 +217,18 @@ test fn board_grouping_preserves_raw_state_identity() Void!Str {
   )
   let columns = try issues::decode_board(data)
   try testing::assert(columns.size() == 2, "distinct raw workflow names should remain separate columns")
-  testing::assert(
+  try testing::assert(
     columns.at(0).expect("first column").name == columns.at(1).expect("second column").name,
     "column labels should still normalize for display",
+  )
+
+  let mixed_types = try decode::from_json(
+    `{{"issues":{{"nodes":[{board_issue_json_type("issue-1", "AKO-1", "Review", "started")},{board_issue_json_type("issue-2", "AKO-2", "Review", "unstarted")} ]}}}}`,
+  )
+  let typed_columns = try issues::decode_board(mixed_types)
+  testing::assert(
+    typed_columns.size() == 1 and typed_columns.at(0).expect("shared column").issues.size() == 2,
+    "same raw workflow names should share one visible column across teams",
   )
 }
 

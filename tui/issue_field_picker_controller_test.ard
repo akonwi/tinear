@@ -183,24 +183,28 @@ test fn field_picker_sorts_states_and_filters_cycles() Void!Str {
     [
       issues::WorkflowState{
         id: "done",
+        raw_name: "Done",
         name: "Done",
         state_type: "completed",
         position: 1.0,
       },
       issues::WorkflowState{
         id: "doing",
+        raw_name: "Doing",
         name: "Doing",
         state_type: "started",
         position: 2.0,
       },
       issues::WorkflowState{
         id: "todo",
+        raw_name: "Todo",
         name: "Todo",
         state_type: "unstarted",
         position: 3.0,
       },
       issues::WorkflowState{
         id: "started",
+        raw_name: "Started",
         name: "Started",
         state_type: "started",
         position: 1.0,
@@ -283,6 +287,7 @@ test fn state_picker_ignores_dismissed_load_and_reports_mutation_failure() Void!
       [
         issues::WorkflowState{
           id: "started",
+          raw_name: "In Progress",
           name: "In Progress",
           state_type: "started",
           position: 1.0,
@@ -298,12 +303,14 @@ test fn state_picker_ignores_dismissed_load_and_reports_mutation_failure() Void!
       [
         issues::WorkflowState{
           id: "backlog",
+          raw_name: "Backlog",
           name: "Backlog",
           state_type: "backlog",
           position: 1.0,
         },
         issues::WorkflowState{
           id: "started",
+          raw_name: "In Progress",
           name: "In Progress",
           state_type: "started",
           position: 1.0,

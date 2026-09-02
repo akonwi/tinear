@@ -213,7 +213,7 @@ struct Issue {
 
 Horizontal scroll of columns, one per workflow state. Columns are ordered by
 `state_type_rank` (triage < backlog < unstarted < started < completed <
-canceled). States from different teams merge by rank.
+canceled). States with the same raw name share a column across teams.
 
 Each column:
 ```
@@ -229,6 +229,12 @@ Each column:
   cycle/project metadata.
 - Hovered card: host gray background with contrasting text.
 - Selected card: accent background with contrasting text and a bold identifier.
+- Dragging lifts a full card surface that follows the pointer and highlights a
+  destination column with an accent heavy rule. Dropping moves the card
+  optimistically and updates its Linear status; failures restore the original
+  column, mark the card briefly, and show an error toast.
+- Multi-team moves resolve the equivalent state for the dragged issue's team and
+  never reuse another team's state ID.
 - Visible column count adapts to terminal width.
 
 ### 5.3 Keys
@@ -240,6 +246,7 @@ Each column:
 | `h` / `Left` | Move to previous column |
 | `l` / `Right` | Move to next column |
 | `Enter` | Open selected issue in a new tab |
+| Mouse drag | Drop an issue on another visible column to change its status |
 | `s` | Open **state picker** (move issue to different workflow state) |
 | `y` | Open **cycle picker** (move issue to different cycle) |
 | `p` | Open **priority picker** |

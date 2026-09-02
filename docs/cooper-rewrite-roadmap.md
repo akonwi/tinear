@@ -13,7 +13,7 @@ Completed behavior is documented in [features.md](features.md), architecture in
 
 - Cooper is pinned to remote revision `848bac2`.
 - Native Linux/macOS amd64/arm64 CI and release workflows are restored.
-- Latest validation: `ard check main.ard`, `ard build main.ard`, 136 Ard tests,
+- Latest validation: `ard check main.ard`, `ard build main.ard`, 147 Ard tests,
   Go Markdown parser tests, and the live PTY suite pass.
 - The PTY suite covers startup, terminal/cache restoration, resize, normalized
   keys, mouse/wheel input, multiline paste, OSC 52 copy, and clean quit.

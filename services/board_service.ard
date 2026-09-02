@@ -3,10 +3,29 @@ use ard/async
 use cooper/runtime
 use tinear/models/issues
 
+struct StateTarget {
+  raw_name: Str,
+  name: Str,
+  state_type: Str,
+  position: Float64,
+}
+
+struct MoveRequest {
+  issue_id: Str,
+  team_id: Str,
+  target: StateTarget,
+}
+
+struct MoveResult {
+  state: issues::WorkflowState,
+}
+
 type Load = fn(Receiver<Bool>, fn([issues::BoardColumn]!Str))
+type Move = fn(Receiver<Bool>, MoveRequest, fn(MoveResult!Str))
 
 struct Service {
   load: Load,
+  move: Move,
 }
 
 private fn cancelled(app: Receiver<Void>, view: Receiver<Bool>) Bool {
@@ -17,6 +36,43 @@ private fn cancelled(app: Receiver<Void>, view: Receiver<Bool>) Bool {
   }
 }
 
+private fn disambiguate_target(target: StateTarget, candidates: [issues::WorkflowState]) issues::WorkflowState!Str {
+  if candidates.size() == 1 {
+    Result::ok(candidates.at(0).expect("one matching state"))
+  } else if candidates.size() > 1 {
+    Result::err("More than one {target.name} state is available for this issue's team")
+  } else {
+    Result::err("{target.name} isn't available for this issue's team")
+  }
+}
+
+fn resolve_target_state(target: StateTarget, states: [issues::WorkflowState]) issues::WorkflowState!Str {
+  let exact = mut List::new<issues::WorkflowState>()
+  for state in states {
+    if state.raw_name == target.raw_name {
+      exact.push(state)
+    }
+  }
+  if exact.size() > 0 {
+    disambiguate_target(target, exact.@)
+  } else {
+    let normalized = mut List::new<issues::WorkflowState>()
+    for state in states {
+      if state.name == target.name {
+        normalized.push(state)
+      }
+    }
+    disambiguate_target(target, normalized.@)
+  }
+}
+
+private fn move_issue(api_key: Str, request: MoveRequest) MoveResult!Str {
+  let states = try issues::load_team_states(api_key, request.team_id)
+  let state = try resolve_target_state(request.target, states)
+  try issues::update_state(api_key, request.issue_id, state.id)
+  Result::ok(MoveResult{state: state})
+}
+
 fn live(ctx: mut runtime::Runtime, api_key: Str) Service {
   let app_cancellation = ctx.cancellation
   let dispatch = ctx.dispatch
@@ -25,6 +81,18 @@ fn live(ctx: mut runtime::Runtime, api_key: Str) Service {
       async::start(fn() {
         if not cancelled(app_cancellation, view_cancellation) {
           let result = issues::load(api_key)
+          if not cancelled(app_cancellation, view_cancellation) {
+            let _ = dispatch(fn() {
+              completion(result)
+            })
+          }
+        }
+      })
+    },
+    move: fn(view_cancellation: Receiver<Bool>, request: MoveRequest, completion: fn(MoveResult!Str)) {
+      async::start(fn() {
+        if not cancelled(app_cancellation, view_cancellation) {
+          let result = move_issue(api_key, request)
           if not cancelled(app_cancellation, view_cancellation) {
             let _ = dispatch(fn() {
               completion(result)

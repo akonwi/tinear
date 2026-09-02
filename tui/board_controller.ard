@@ -1,5 +1,6 @@
 use cooper/box
 use cooper/event
+use cooper/geometry
 use cooper/runtime
 use cooper/scroll_box
 use cooper/style
@@ -16,7 +17,9 @@ use tinear/tui/theme as tinear_theme
 let COLUMN_WIDTH: Int = 38
 let COLUMN_GAP: Int = 2
 let CARD_HEIGHT: Int = 5
+let COMPLETED_COLUMN_CAP: Int = 10
 let COLUMN_RULE: Str = "──────────────────────────────────────"
+let DROP_COLUMN_RULE: Str = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 struct CardRecord {
   issue_id: Str,
@@ -35,6 +38,7 @@ struct ColumnRecord {
   header_rule: mut text::Text,
   scroll: mut scroll_box::ScrollBox,
   cards: [CardRecord],
+  remove_mouse: fn(),
 }
 
 struct BoardController {
@@ -43,16 +47,44 @@ struct BoardController {
   status: mut text::Text,
   outer_scroll: mut scroll_box::ScrollBox,
   columns_row: mut box::Box,
+  drag_layer: mut box::Box,
+  drag_ghost: mut box::Box,
+  drag_ghost_id: mut text::Text,
+  drag_ghost_title: mut text::Text,
+  drag_ghost_metadata: mut text::Text,
+  remove_drag_layer_mouse: fn(),
+  remove_focus_blur: fn(),
+  remove_terminal_focus: fn(),
+  drag_offset_x: Int,
+  drag_offset_y: Int,
+  drag_width: Int,
+  drag_height: Int,
   columns: [issues::BoardColumn],
   column_records: [ColumnRecord],
   column_index: Int,
   card_index: Int,
   hovered_issue_id: Str,
+  pointer_issue_id: Str,
+  pointer_start_x: Int,
+  pointer_start_y: Int,
+  suppress_open_issue_id: Str,
+  dragging_issue_id: Str,
+  drag_target_key: Str,
+  drag_generation: Int,
+  moving_issue_id: Str,
+  failed_move_issue_id: Str,
+  move_generation: Int,
+  move_snapshot: [issues::BoardColumn]?,
+  refresh_pending: Bool,
+  refresh_pending_silent: Bool,
+  load_in_flight: Bool,
+  load_silent: Bool,
   generation: Int,
   scope: mut lifecycle::Scope,
   service: board_service::Service,
   schedule: scheduler::Schedule,
   cancel_refresh: fn(),
+  cancel_failed_move: fn(),
   on_open_issue: fn(Str),
   on_pick_field: fn(issue_field_picker_controller::Field, issues::Issue),
   notify_error: fn(Str, Str),
@@ -60,7 +92,7 @@ struct BoardController {
 }
 
 private fn column_key(column: issues::BoardColumn) Str {
-  "{column.state_type}:{column.name}"
+  column.raw_state_name
 }
 
 private fn status_style(display: style::Display) style::Style {
@@ -79,6 +111,72 @@ private fn board_style(display: style::Display) style::Style {
     height: style::cells(1),
     flex_grow: 1.0,
   )
+}
+
+private fn drag_layer_style(display: style::Display) style::Style {
+  style::new(
+    display: display,
+    position: style::Position::absolute,
+    left: style::cells(0),
+    top: style::cells(0),
+    width: style::percent(100.0),
+    height: style::percent(100.0),
+    overflow: style::Overflow::hidden,
+    z_index: 100,
+  )
+}
+
+private fn drag_ghost_style(
+  left: Int,
+  top: Int,
+  width: Int,
+  height: Int,
+  palette: tinear_theme::Theme,
+) style::Style {
+  style::new(
+    position: style::Position::absolute,
+    left: style::cells(left),
+    top: style::cells(top),
+    width: style::cells(width),
+    height: style::cells(height),
+    padding: style::Edges{
+      top: style::cells(0),
+      right: style::cells(1),
+      bottom: style::cells(0),
+      left: style::cells(1),
+    },
+    overflow: style::Overflow::hidden,
+    background: palette.item_active_background,
+    z_index: 1,
+  )
+}
+
+private fn absolute(value: Int) Int {
+  match value < 0 {
+    true => 0 - value,
+    false => value,
+  }
+}
+
+private fn wheel_step(value: Int) Int {
+  match value < 0 {
+    true => -3,
+    false => 3,
+  }
+}
+
+private fn clamp_position(value: Int, maximum: Int) Int {
+  let safe_maximum = match maximum < 0 {
+    true => 0,
+    false => maximum,
+  }
+  if value < 0 {
+    0
+  } else if value > safe_maximum {
+    safe_maximum
+  } else {
+    value
+  }
 }
 
 private fn columns_row_style(count: Int) style::Style {
@@ -162,6 +260,119 @@ private fn header_content(column: issues::BoardColumn, selected: Bool, palette: 
   )
 }
 
+private fn target_for(column: issues::BoardColumn) board_service::StateTarget {
+  board_service::StateTarget{
+    raw_name: column.raw_state_name,
+    name: column.name,
+    state_type: column.state_type,
+    position: column.position,
+  }
+}
+
+private fn issue_with_state(issue: issues::Issue, state_id: Str, target: board_service::StateTarget) issues::Issue {
+  issues::Issue{
+    id: issue.id,
+    identifier: issue.identifier,
+    title: issue.title,
+    description: issue.description,
+    priority: issue.priority,
+    state_id: state_id,
+    state_name: target.name,
+    state_type: target.state_type,
+    state_position: target.position,
+    team_id: issue.team_id,
+    team_name: issue.team_name,
+    team_key: issue.team_key,
+    project_id: issue.project_id,
+    project_name: issue.project_name,
+    assignee_id: issue.assignee_id,
+    assignee_name: issue.assignee_name,
+    cycle_id: issue.cycle_id,
+    cycle_label: issue.cycle_label,
+    url: issue.url,
+  }
+}
+
+private fn apply_confirmed_state(
+  columns: [issues::BoardColumn],
+  issue_id: Str,
+  state: issues::WorkflowState,
+) [issues::BoardColumn] {
+  let updated = mut List::new<issues::BoardColumn>()
+  let target = board_service::StateTarget{
+    raw_name: state.raw_name,
+    name: state.name,
+    state_type: state.state_type,
+    position: state.position,
+  }
+  for column in columns {
+    let cards = mut List::new<issues::Issue>()
+    for issue in column.issues {
+      match issue.id == issue_id {
+        true => cards.push(issue_with_state(issue, state.id, target)),
+        false => cards.push(issue),
+      }
+    }
+    updated.push(
+      issues::BoardColumn{
+        raw_state_name: column.raw_state_name,
+        name: column.name,
+        state_type: column.state_type,
+        position: column.position,
+        issues: cards.@,
+      },
+    )
+  }
+  updated.@
+}
+
+private fn move_between_columns(
+  columns: [issues::BoardColumn],
+  issue_id: Str,
+  target_key: Str,
+  target_state_id: Str,
+) [issues::BoardColumn]!Str {
+  mut moving: issues::Issue? = Maybe::new()
+  mut target: issues::BoardColumn? = Maybe::new()
+  for column in columns {
+    if column_key(column) == target_key {
+      target = Maybe::new(column)
+    }
+    for issue in column.issues {
+      if issue.id == issue_id {
+        moving = Maybe::new(issue)
+      }
+    }
+  }
+  let selected = try moving -> _ { Result::err("The dragged issue is no longer on the board") }
+  let destination = try target -> _ { Result::err("The target status is no longer on the board") }
+  let moved = issue_with_state(selected, target_state_id, target_for(destination))
+  let updated = mut List::new<issues::BoardColumn>()
+  for column in columns {
+    let cards = mut List::new<issues::Issue>()
+    let is_target = column_key(column) == target_key
+    let reserves_completed_slot = is_target and column.state_type == "completed"
+    for issue in column.issues {
+      if (not issue.id == issue_id) and ((not reserves_completed_slot) or cards.size() < COMPLETED_COLUMN_CAP - 1) {
+        cards.push(issue)
+      }
+    }
+    if is_target {
+      cards.push(moved)
+    }
+    updated.push(
+      issues::BoardColumn{
+        raw_state_name: column.raw_state_name,
+        name: column.name,
+        state_type: column.state_type,
+        position: column.position,
+        issues: cards.@,
+      },
+    )
+  }
+  Result::ok(updated.@)
+}
+
 fn new(
   ctx: mut runtime::Runtime,
   palette: tinear_theme::Theme,
@@ -189,29 +400,117 @@ fn new(
   let outer_scroll = scroll_box::new(ctx, styles: board_style(style::Display::none))
   let columns_row = box::new(ctx, styles: columns_row_style(0))
   outer_scroll.add(columns_row)
+  let drag_layer = box::new(ctx, styles: drag_layer_style(style::Display::none))
+  let drag_ghost = box::new(
+    ctx,
+    styles: drag_ghost_style(0, 0, COLUMN_WIDTH, CARD_HEIGHT - 1, palette),
+  )
+  let drag_ghost_id = text::new(
+    ctx,
+    content: "",
+    selectable: false,
+    wrap: text::TextWrap::none,
+    overflow: text::TextOverflow::ellipsis,
+    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+  )
+  let drag_ghost_title = text::new(
+    ctx,
+    content: "",
+    selectable: false,
+    wrap: text::TextWrap::word,
+    overflow: text::TextOverflow::ellipsis,
+    styles: style::new(width: style::percent(100.0), height: style::cells(2), flex_shrink: 0.0),
+    text_style: text::style(foreground: palette.item_active_foreground, bold: true),
+  )
+  let drag_ghost_metadata = text::new(
+    ctx,
+    content: "",
+    selectable: false,
+    wrap: text::TextWrap::none,
+    overflow: text::TextOverflow::ellipsis,
+    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+    text_style: text::style(foreground: palette.item_active_foreground, dim: true),
+  )
+  drag_ghost.add(drag_ghost_id)
+  drag_ghost.add(drag_ghost_title)
+  drag_ghost.add(drag_ghost_metadata)
+  drag_layer.add(drag_ghost)
   root.add(status)
   root.add(outer_scroll)
-  (mut BoardController{
+  root.add(drag_layer)
+  let controller = mut BoardController{
     root: root,
     context: ctx,
     status: status,
     outer_scroll: outer_scroll,
     columns_row: columns_row,
+    drag_layer: drag_layer,
+    drag_ghost: drag_ghost,
+    drag_ghost_id: drag_ghost_id,
+    drag_ghost_title: drag_ghost_title,
+    drag_ghost_metadata: drag_ghost_metadata,
+    remove_drag_layer_mouse: fn() {},
+    remove_focus_blur: fn() {},
+    remove_terminal_focus: fn() {},
+    drag_offset_x: 0,
+    drag_offset_y: 0,
+    drag_width: COLUMN_WIDTH,
+    drag_height: CARD_HEIGHT - 1,
     columns: [],
     column_records: [],
     column_index: 0,
     card_index: 0,
     hovered_issue_id: "",
+    pointer_issue_id: "",
+    pointer_start_x: 0,
+    pointer_start_y: 0,
+    suppress_open_issue_id: "",
+    dragging_issue_id: "",
+    drag_target_key: "",
+    drag_generation: 0,
+    moving_issue_id: "",
+    failed_move_issue_id: "",
+    move_generation: 0,
+    move_snapshot: Maybe::new<[issues::BoardColumn]>(),
+    refresh_pending: false,
+    refresh_pending_silent: true,
+    load_in_flight: false,
+    load_silent: true,
     generation: 0,
     scope: lifecycle::new(),
     service: service,
     schedule: schedule,
     cancel_refresh: fn() {},
+    cancel_failed_move: fn() {},
     on_open_issue: on_open_issue,
     on_pick_field: on_pick_field,
     notify_error: notify_error,
     palette: palette,
+  }
+  controller.remove_drag_layer_mouse = drag_layer.on_mouse(fn(received: mut event::MouseEvent) {
+    if received.event_type == event::MouseEventType::drop and received.button == event::MouseButton::left {
+      controller.drop_on_column(controller.column_key_at(received.x, received.y))
+      received.stop_propagation()
+    } else if received.event_type == event::MouseEventType::scroll and not controller.dragging_issue_id.is_empty() {
+      controller.scroll_during_drag(received)
+      received.stop_propagation()
+    }
   })
+  controller.remove_focus_blur = outer_scroll.on_blur(fn() {
+    controller.pointer_issue_id = ""
+    controller.suppress_open_issue_id = ""
+    controller.clear_drag_visuals()
+    controller.run_pending_refresh()
+  })
+  controller.remove_terminal_focus = ctx.on_terminal_focus(fn(value: event::TerminalFocus) {
+    if value == event::TerminalFocus::lost {
+      controller.pointer_issue_id = ""
+      controller.suppress_open_issue_id = ""
+      controller.clear_drag_visuals()
+      controller.run_pending_refresh()
+    }
+  })
+  controller
 }
 
 impl BoardController {
@@ -232,6 +531,57 @@ impl BoardController {
       column => column.issues.at(self.card_index),
       _ => Maybe::new<issues::Issue>(),
     }
+  }
+
+  private fn issue_by_id(issue_id: Str) issues::Issue? {
+    mut found: issues::Issue? = Maybe::new()
+    for column in self.columns {
+      for issue in column.issues {
+        if issue.id == issue_id {
+          found = Maybe::new(issue)
+        }
+      }
+    }
+    found
+  }
+
+  private fn column_by_key(key: Str) issues::BoardColumn? {
+    mut found: issues::BoardColumn? = Maybe::new()
+    for column in self.columns {
+      if column_key(column) == key {
+        found = Maybe::new(column)
+      }
+    }
+    found
+  }
+
+  private fn mut arm_drag(issue_id: Str, width: Int, height: Int, offset_x: Int, offset_y: Int) {
+    match self.issue_by_id(issue_id) {
+      issue => {
+        self.drag_offset_x = offset_x
+        self.drag_offset_y = offset_y
+        self.drag_width = width
+        self.drag_height = height
+        self.drag_ghost_id.set_content(id_content(issue, self.palette, true, false))
+        self.drag_ghost_title.set_content(issue.title)
+        self.drag_ghost_metadata.set_content(card_metadata(issue))
+      },
+      _ => (),
+    }
+  }
+
+  private fn mut move_drag_ghost(x: Int, y: Int) {
+    let screen = self.root.layout().screen
+    let left = clamp_position(x - screen.x - self.drag_offset_x, screen.width - self.drag_width)
+    let top = clamp_position(y - screen.y - self.drag_offset_y, screen.height - self.drag_height)
+    self.drag_ghost.set_style(
+      drag_ghost_style(left, top, self.drag_width, self.drag_height, self.palette),
+    )
+    self.drag_layer.set_style(drag_layer_style(style::Display::flex))
+  }
+
+  private fn passed_drag_threshold(x: Int, y: Int) Bool {
+    absolute(x - self.pointer_start_x) >= 2 or absolute(y - self.pointer_start_y) >= 2
   }
 
   private fn mut create_card(issue: issues::Issue) CardRecord {
@@ -296,8 +646,61 @@ impl BoardController {
       } else if received.event_type == event::MouseEventType::out {
         self.clear_hovered(issue_id)
       } else if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
+        if self.load_in_flight {
+          self.generation =+ 1
+          self.load_in_flight = false
+          self.queue_refresh(self.load_silent)
+        }
+        let _ = self.outer_scroll.focus()
         self.select_issue(issue_id)
-        self.open_selected()
+        self.pointer_issue_id = issue_id
+        self.suppress_open_issue_id = ""
+        self.dragging_issue_id = ""
+        self.drag_target_key = ""
+        self.drag_generation =+ 1
+        received.prevent_default()
+        let bounds = surface.layout().screen
+        self.pointer_start_x = received.x
+        self.pointer_start_y = received.y
+        self.arm_drag(issue_id, bounds.width, bounds.height, received.local_x, received.local_y)
+        received.stop_propagation()
+      } else if received.event_type == event::MouseEventType::drag and received.button == event::MouseButton::left {
+        if self.pointer_issue_id == issue_id and self.passed_drag_threshold(received.x, received.y) {
+          self.suppress_open_issue_id = issue_id
+          if self.moving_issue_id.is_empty() {
+            let started = self.dragging_issue_id.is_empty()
+            self.dragging_issue_id = issue_id
+            self.move_drag_ghost(received.x, received.y)
+            let previous_target = self.drag_target_key
+            self.update_drag_target(received.x, received.y)
+            if started and previous_target == self.drag_target_key {
+              self.refresh_selection_styles()
+            }
+          }
+        }
+        received.stop_propagation()
+      } else if received.event_type == event::MouseEventType::drag_end and received.button == event::MouseButton::left {
+        if self.dragging_issue_id == issue_id {
+          let generation = self.drag_generation
+          let _ = self.context.dispatch(fn() {
+            if self.drag_generation == generation and self.dragging_issue_id == issue_id {
+              self.clear_drag_visuals()
+              self.run_pending_refresh()
+            }
+          })
+        }
+        received.stop_propagation()
+      } else if received.event_type == event::MouseEventType::up and received.button == event::MouseButton::left {
+        if self.pointer_issue_id == issue_id {
+          let suppress_open = self.suppress_open_issue_id == issue_id
+          self.pointer_issue_id = ""
+          self.suppress_open_issue_id = ""
+          if not suppress_open {
+            self.select_issue(issue_id)
+            self.open_selected()
+          }
+          self.run_pending_refresh()
+        }
         received.stop_propagation()
       }
     })
@@ -387,13 +790,21 @@ impl BoardController {
     root.add(header_label)
     root.add(header_rule)
     root.add(scroll)
+    let key = column_key(column)
+    let remove_mouse = root.on_mouse(fn(received: mut event::MouseEvent) {
+      if received.event_type == event::MouseEventType::drop and received.button == event::MouseButton::left {
+        self.drop_on_column(key)
+        received.stop_propagation()
+      }
+    })
     ColumnRecord{
-      key: column_key(column),
+      key: key,
       root: root,
       header_label: header_label,
       header_rule: header_rule,
       scroll: scroll,
       cards: [],
+      remove_mouse: remove_mouse,
     }
   }
 
@@ -425,6 +836,7 @@ impl BoardController {
         header_rule: base.header_rule,
         scroll: base.scroll,
         cards: cards,
+        remove_mouse: base.remove_mouse,
       }
       next.push(updated)
       self.columns_row.add(updated.root)
@@ -437,6 +849,7 @@ impl BoardController {
         }
       }
       if not retained {
+        old.remove_mouse()
         for card in old.cards {
           card.remove_mouse()
         }
@@ -446,6 +859,172 @@ impl BoardController {
     self.column_records = next.@
     self.columns_row.set_style(columns_row_style(self.column_records.size()))
     self.refresh_selection_styles()
+  }
+
+  private fn issue_column_key(issue_id: Str) Str {
+    mut found = ""
+    for column in self.columns {
+      for issue in column.issues {
+        if issue.id == issue_id {
+          found = column_key(column)
+        }
+      }
+    }
+    found
+  }
+
+  private fn column_key_at(x: Int, y: Int) Str {
+    let viewport = self.outer_scroll.layout().screen
+    mut found = ""
+    mut closest = COLUMN_GAP + 1
+    if geometry::contains(viewport, x, y) {
+      for column in self.column_records {
+        let visible = geometry::intersect(column.root.layout().screen, viewport)
+        if visible.width > 0 and visible.height > 0 and y >= visible.y and y < visible.y + visible.height {
+          let distance = match {
+            x < visible.x => visible.x - x,
+            x >= visible.x + visible.width => x - (visible.x + visible.width - 1),
+            _ => 0,
+          }
+          if distance < closest and distance <= COLUMN_GAP {
+            closest = distance
+            found = column.key
+          }
+        }
+      }
+    }
+    found
+  }
+
+  private fn mut scroll_during_drag(received: mut event::MouseEvent) {
+    mut changed = false
+    if received.scroll_x != 0 {
+      changed = self.outer_scroll.scroll_by_x(wheel_step(received.scroll_x)) or changed
+    }
+    if received.scroll_y != 0 {
+      if received.modifiers.shift {
+        changed = self.outer_scroll.scroll_by_x(wheel_step(received.scroll_y)) or changed
+      } else {
+        let key = self.column_key_at(received.x, received.y)
+        for column in self.column_records {
+          if column.key == key {
+            changed = column.scroll.scroll_by(wheel_step(received.scroll_y)) or changed
+          }
+        }
+      }
+    }
+    if changed {
+      let x = received.x
+      let y = received.y
+      let generation = self.drag_generation
+      let _ = self.context.dispatch(fn() {
+        if self.drag_generation == generation and not self.dragging_issue_id.is_empty() {
+          self.update_drag_target(x, y)
+        }
+      })
+    }
+  }
+
+  private fn mut update_drag_target(x: Int, y: Int) {
+    let source = self.issue_column_key(self.dragging_issue_id)
+    let hovered = self.column_key_at(x, y)
+    let target = match hovered == source {
+      true => "",
+      false => hovered,
+    }
+    if not self.drag_target_key == target {
+      self.drag_target_key = target
+      self.refresh_selection_styles()
+    }
+  }
+
+  private fn mut clear_drag_visuals() {
+    self.drag_generation =+ 1
+    self.dragging_issue_id = ""
+    self.drag_target_key = ""
+    self.hovered_issue_id = ""
+    self.drag_layer.set_style(drag_layer_style(style::Display::none))
+    self.refresh_selection_styles()
+  }
+
+  private fn mut confirm_move(issue_id: Str, state: issues::WorkflowState) {
+    self.replace_columns(apply_confirmed_state(self.columns, issue_id, state), true)
+  }
+
+  private fn mut show_move_failure(issue_id: Str, generation: Int) {
+    self.cancel_failed_move()
+    self.failed_move_issue_id = issue_id
+    self.refresh_selection_styles()
+    self.cancel_failed_move = self.schedule(4000, fn() {
+      if (not self.scope.disposed) and self.move_generation == generation and self.failed_move_issue_id == issue_id {
+        self.failed_move_issue_id = ""
+        self.refresh_selection_styles()
+      }
+    })
+  }
+
+  private fn mut drop_on_column(target_key: Str) {
+    let issue_id = self.dragging_issue_id
+    let source_key = self.issue_column_key(issue_id)
+    self.clear_drag_visuals()
+    if (not issue_id.is_empty()) and (not source_key.is_empty()) and (not target_key == source_key) and self.moving_issue_id.is_empty() {
+      match self.issue_by_id(issue_id) {
+        issue => {
+          match self.column_by_key(target_key) {
+            target_column => {
+              match move_between_columns(self.columns, issue.id, target_key, "") {
+                ok(columns) => {
+                  let previous = self.columns
+                  self.cancel_failed_move()
+                  self.failed_move_issue_id = ""
+                  self.move_generation =+ 1
+                  let move_generation = self.move_generation
+                  self.generation =+ 1
+                  self.moving_issue_id = issue.id
+                  self.move_snapshot = Maybe::new(previous)
+                  self.replace_columns(columns, false)
+                  self.select_issue(issue.id)
+                  self.service.move(
+                    self.scope.stop.receiver(),
+                    board_service::MoveRequest{
+                      issue_id: issue.id,
+                      team_id: issue.team_id,
+                      target: target_for(target_column),
+                    },
+                    fn(result: board_service::MoveResult!Str) {
+                      if (not self.scope.disposed) and move_generation == self.move_generation {
+                        self.moving_issue_id = ""
+                        match result {
+                          ok(moved) => {
+                            self.move_snapshot = Maybe::new<[issues::BoardColumn]>()
+                            self.confirm_move(issue.id, moved.state)
+                            self.queue_refresh(true)
+                          },
+                          err(message) => {
+                            match self.move_snapshot {
+                              snapshot => self.replace_columns(snapshot, true),
+                              _ => self.refresh_selection_styles(),
+                            }
+                            self.move_snapshot = Maybe::new<[issues::BoardColumn]>()
+                            self.show_move_failure(issue.id, move_generation)
+                            self.notify_error("Couldn't move {issue.identifier}", message)
+                          },
+                        }
+                        self.run_pending_refresh()
+                      }
+                    },
+                  )
+                },
+                err(message) => self.notify_error("Couldn't move {issue.identifier}", message),
+              }
+            },
+            _ => (),
+          }
+        },
+        _ => (),
+      }
+    }
+    self.run_pending_refresh()
   }
 
   private fn mut set_hovered(issue_id: Str) {
@@ -467,8 +1046,22 @@ impl BoardController {
     for column, column_index in self.column_records {
       match self.columns.at(column_index) {
         value => {
+          let drop_target = column.key == self.drag_target_key
+          let selected_column = column_index == self.column_index and self.dragging_issue_id.is_empty()
           column.header_label.set_content(
-            header_content(value, column_index == self.column_index, self.palette),
+            header_content(value, selected_column or drop_target, self.palette),
+          )
+          column.header_rule.set_content(
+            match drop_target {
+              true => DROP_COLUMN_RULE,
+              false => COLUMN_RULE,
+            },
+          )
+          column.header_rule.set_text_style(
+            match drop_target {
+              true => text::style(foreground: self.palette.accent, bold: true),
+              false => text::style(dim: true),
+            },
           )
         },
         _ => (),
@@ -478,26 +1071,52 @@ impl BoardController {
           if issue.id == card.issue_id {
             let active = card.issue_id == selected
             let hovered = (not active) and card.issue_id == self.hovered_issue_id
+            let is_dragging = card.issue_id == self.dragging_issue_id
+            let is_moving = card.issue_id == self.moving_issue_id
+            let move_failed = card.issue_id == self.failed_move_issue_id
             let foreground = match {
-              active => self.palette.item_active_foreground,
+              active and not is_dragging => self.palette.item_active_foreground,
               hovered => self.palette.item_hover_foreground,
               _ => self.palette.foreground,
             }
             let background = match {
-              active => self.palette.item_active_background,
+              active and not is_dragging => self.palette.item_active_background,
               hovered => self.palette.item_hover_background,
               _ => self.palette.background,
             }
             let surface_style = mut card.surface.style()
             surface_style.background = Maybe::new(background)
             card.surface.set_style(surface_style.@)
-            card.id_line.set_content(id_content(issue, self.palette, active, hovered))
-            card.title.set_content(issue.title)
-            card.title.set_text_style(text::style(foreground: foreground, bold: active))
-            card.metadata.set_content(card_metadata(issue))
-            card.metadata.set_text_style(
-              text::style(foreground: foreground, dim: (not active) and not hovered),
-            )
+            if is_dragging {
+              card.id_line.set_content(
+                text::styled_text(
+                  [
+                    text::span("  ↳ {issue.identifier} · drop on a column", style: text::span_style(dim: true)),
+                  ],
+                ),
+              )
+              card.title.set_content("")
+              card.title.set_text_style(text::style(dim: true))
+              card.metadata.set_content("")
+              card.metadata.set_text_style(text::style(dim: true))
+            } else {
+              card.id_line.set_content(id_content(issue, self.palette, active, hovered))
+              card.title.set_content(issue.title)
+              card.title.set_text_style(text::style(foreground: foreground, bold: active))
+              card.metadata.set_content(
+                match {
+                  move_failed => "! move failed",
+                  is_moving => "⋯ updating…",
+                  _ => card_metadata(issue),
+                },
+              )
+              card.metadata.set_text_style(
+                match move_failed {
+                  true => text::style(foreground: self.palette.danger, bold: true),
+                  false => text::style(foreground: foreground, dim: is_moving or (not active) and (not hovered)),
+                },
+              )
+            }
           }
         }
       }
@@ -561,6 +1180,12 @@ impl BoardController {
   }
 
   private fn mut replace_columns(columns: [issues::BoardColumn], preserve_selection: Bool) {
+    self.drag_generation =+ 1
+    self.pointer_issue_id = ""
+    self.suppress_open_issue_id = ""
+    self.dragging_issue_id = ""
+    self.drag_target_key = ""
+    self.drag_layer.set_style(drag_layer_style(style::Display::none))
     let previous_id = match preserve_selection {
       true => self.selected_issue_id(),
       false => "",
@@ -588,6 +1213,24 @@ impl BoardController {
     }
   }
 
+  private fn mut queue_refresh(silent: Bool) {
+    if not self.refresh_pending {
+      self.refresh_pending_silent = silent
+    } else if not silent {
+      self.refresh_pending_silent = false
+    }
+    self.refresh_pending = true
+  }
+
+  private fn mut run_pending_refresh() {
+    if self.refresh_pending and self.pointer_issue_id.is_empty() and self.dragging_issue_id.is_empty() and self.moving_issue_id.is_empty() {
+      let silent = self.refresh_pending_silent
+      self.refresh_pending = false
+      self.refresh_pending_silent = true
+      self.refresh(silent)
+    }
+  }
+
   private fn mut schedule_refresh() {
     self.cancel_refresh()
     self.cancel_refresh = self.schedule(5 * 60 * 1000, fn() {
@@ -607,26 +1250,37 @@ impl BoardController {
 
   fn mut refresh(silent: Bool) {
     if not self.scope.disposed {
-      self.generation =+ 1
-      let generation = self.generation
-      if not silent {
-        self.show_status("Loading My Issues…", false)
-      }
-      self.service.load(self.scope.stop.receiver(), fn(result: [issues::BoardColumn]!Str) {
-        if (not self.scope.disposed) and generation == self.generation {
-          match result {
-            ok(columns) => self.replace_columns(columns, silent),
-            err(message) => {
-              if self.columns.size() == 0 {
-                self.show_status(message, true)
-              } else {
-                self.show_status("", false)
-                self.notify_error("Couldn't refresh My Issues", message)
-              }
-            },
-          }
+      if not self.moving_issue_id.is_empty() or not self.pointer_issue_id.is_empty() or not self.dragging_issue_id.is_empty() {
+        self.queue_refresh(silent)
+      } else {
+        self.generation =+ 1
+        let generation = self.generation
+        self.load_in_flight = true
+        self.load_silent = silent
+        if not silent {
+          self.show_status("Loading My Issues…", false)
         }
-      })
+        self.service.load(self.scope.stop.receiver(), fn(result: [issues::BoardColumn]!Str) {
+          if (not self.scope.disposed) and generation == self.generation {
+            self.load_in_flight = false
+            if not self.pointer_issue_id.is_empty() or not self.dragging_issue_id.is_empty() {
+              self.queue_refresh(silent)
+            } else {
+              match result {
+                ok(columns) => self.replace_columns(columns, silent),
+                err(message) => {
+                  if self.columns.size() == 0 {
+                    self.show_status(message, true)
+                  } else {
+                    self.show_status("", false)
+                    self.notify_error("Couldn't refresh My Issues", message)
+                  }
+                },
+              }
+            }
+          }
+        })
+      }
     }
   }
 
@@ -707,18 +1361,36 @@ impl BoardController {
 
   private fn mut pick_selected(field: issue_field_picker_controller::Field) {
     match self.selected_issue() {
-      issue => self.on_pick_field(field, issue),
+      issue => {
+        if not issue.id == self.moving_issue_id {
+          self.on_pick_field(field, issue)
+        }
+      },
       _ => (),
     }
   }
 
   fn mut focus() {
+    if not self.pointer_issue_id.is_empty() or not self.dragging_issue_id.is_empty() {
+      self.pointer_issue_id = ""
+      self.suppress_open_issue_id = ""
+      self.clear_drag_visuals()
+      self.run_pending_refresh()
+    }
     let _ = self.outer_scroll.focus()
   }
 
   fn mut handle_key(received: mut event::KeyEvent) Bool {
     if self.scope.disposed or received.event_type == event::KeyEventType::release {
       false
+    } else if not self.dragging_issue_id.is_empty() {
+      if received.matches("escape") {
+        self.pointer_issue_id = ""
+        self.suppress_open_issue_id = ""
+        self.clear_drag_visuals()
+        self.run_pending_refresh()
+      }
+      true
     } else {
       mut handled = true
       match {
@@ -758,9 +1430,21 @@ impl BoardController {
 
   fn mut dispose() {
     if not self.scope.disposed {
+      if not self.dragging_issue_id.is_empty() {
+        self.clear_drag_visuals()
+      }
       self.cancel_refresh()
+      self.cancel_failed_move()
       self.scope.dispose()
+      self.drag_generation =+ 1
+      self.move_generation =+ 1
+      self.refresh_pending = false
+      self.load_in_flight = false
+      self.remove_drag_layer_mouse()
+      self.remove_focus_blur()
+      self.remove_terminal_focus()
       for column in self.column_records {
+        column.remove_mouse()
         for card in column.cards {
           card.remove_mouse()
         }

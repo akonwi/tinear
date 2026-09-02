@@ -91,6 +91,11 @@ placement so color is never the only signal.
 - Priority combines glyph and semantic color:
   urgent = danger `!`, high = warning `↑`, medium = default `~`, low = dim `↓`.
 - Selected cards use the shared active background and bold identifier treatment.
+- During a card drag, a full card surface follows the pointer above the board,
+  its source position becomes a dim placeholder, and the destination column uses
+  an accent header and heavy rule. After drop, the selected card moves
+  optimistically and shows a dim `⋯ updating…` status until confirmed. A
+  failed move returns to its source with a brief danger `! move failed` marker.
 - Horizontal and vertical scrolling must keep the full selected card visible.
 
 ## Pickers and search

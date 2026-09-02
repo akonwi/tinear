@@ -27,7 +27,7 @@ tinear
 The TUI provides:
 
 - A notification Inbox with preview, archive, and browser routing
-- A retained My Issues board with state, cycle, priority, assignee, and project editing
+- A retained My Issues board with drag-to-change status plus state, cycle, priority, assignee, and project editing
 - Persistent issue and document tabs with Markdown detail views
 - Threaded comments, replies, and issue-description editing
 - Global issue/document search and issue creation

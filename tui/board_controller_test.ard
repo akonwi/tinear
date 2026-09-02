@@ -9,8 +9,14 @@ use tinear/tui/board_controller
 use tinear/tui/issue_field_picker_controller
 use tinear/tui/theme
 
+private struct MoveCall {
+  request: board_service::MoveRequest,
+  completion: fn(board_service::MoveResult!Str),
+}
+
 private struct FakeState {
   loads: [fn([issues::BoardColumn]!Str)],
+  moves: [MoveCall],
 }
 
 private struct ScheduledState {
@@ -33,6 +39,14 @@ private fn fake_service(state: mut FakeState) board_service::Service {
       state.loads.push(completion)
       ()
     },
+    move: fn(
+      cancellation: Receiver<Bool>,
+      request: board_service::MoveRequest,
+      completion: fn(board_service::MoveResult!Str),
+    ) {
+      state.moves.push(MoveCall{request: request, completion: completion})
+      ()
+    },
   }
 }
 
@@ -45,7 +59,7 @@ private fn fake_schedule(state: mut ScheduledState) fn(Int, fn()) fn() {
   }
 }
 
-private fn issue(id: Str, identifier: Str, title: Str, state_name: Str) issues::Issue {
+private fn issue_for_team(id: Str, identifier: Str, title: Str, state_name: Str, team_id: Str) issues::Issue {
   issues::Issue{
     id: id,
     identifier: identifier,
@@ -56,7 +70,7 @@ private fn issue(id: Str, identifier: Str, title: Str, state_name: Str) issues::
     state_name: state_name,
     state_type: "started",
     state_position: 1.0,
-    team_id: "team-1",
+    team_id: team_id,
     team_name: "Core",
     team_key: "COR",
     project_id: "project-1",
@@ -69,8 +83,13 @@ private fn issue(id: Str, identifier: Str, title: Str, state_name: Str) issues::
   }
 }
 
+private fn issue(id: Str, identifier: Str, title: Str, state_name: Str) issues::Issue {
+  issue_for_team(id, identifier, title, state_name, "team-1")
+}
+
 private fn column(name: Str, position: Float64, cards: [issues::Issue]) issues::BoardColumn {
   issues::BoardColumn{
+    raw_state_name: name,
     name: name,
     state_type: "started",
     position: position,
@@ -79,6 +98,24 @@ private fn column(name: Str, position: Float64, cards: [issues::Issue]) issues::
 }
 
 private fn ignore_picker(field: issue_field_picker_controller::Field, selected: issues::Issue) {}
+
+private fn modifiers() event::Modifiers {
+  event::Modifiers{
+    shift: false,
+    ctrl: false,
+    alt: false,
+    super: false,
+  }
+}
+
+private fn shift_modifiers() event::Modifiers {
+  event::Modifiers{
+    shift: true,
+    ctrl: false,
+    alt: false,
+    super: false,
+  }
+}
 
 private fn shifted_key(name: Str) mut event::KeyEvent {
   event::key(
@@ -111,7 +148,7 @@ private fn key(name: Str) mut event::KeyEvent {
 test fn board_builds_nested_retained_columns_and_navigates_cards() Void!Str {
   let application = testing::new(100, 18)
   defer application.destroy()
-  let fake = mut FakeState{loads: []}
+  let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
   let opened = mut Opened{identifier: "", count: 0}
   let controller = board_controller::new(
@@ -201,10 +238,519 @@ test fn board_builds_nested_retained_columns_and_navigates_cards() Void!Str {
   assertions::assert(fake.loads.size() == 1, "resize should not trigger network loads")
 }
 
+test fn board_drag_moves_issue_optimistically_and_confirms_team_state() Void!Str {
+  let application = testing::new(100, 18)
+  defer application.destroy()
+  let fake = mut FakeState{loads: [], moves: []}
+  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
+  let opened = mut Opened{identifier: "", count: 0}
+  let controller = board_controller::new(
+    application.context,
+    theme::new(),
+    fake_service(fake),
+    fake_schedule(scheduled),
+    fn(identifier: Str) {
+      opened.count =+ 1
+    },
+    ignore_picker,
+    fn(title: Str, message: Str) {},
+  )
+  application.root.add(controller.root)
+  controller.start()
+  (fake.loads.at(0).expect("load"))(
+    Result::ok(
+      [
+        column("Todo", 1.0, [issue("i1", "AKO-1", "First", "Todo")]),
+        column("Doing", 2.0, [issue("i2", "AKO-2", "Second", "Doing")]),
+      ],
+    ),
+  )
+  controller.refresh(true)
+  try assertions::assert(fake.loads.size() == 2, "test should keep one board refresh in flight")
+  application.render()
+  let source = controller.column_records.at(
+    0,
+  ).expect("source column").cards.at(0).expect("source card").surface.layout().screen
+  let target = controller.column_records.at(1).expect("target column").root.layout().screen
+  application.mouse_down(source.x + 1, source.y + 1)
+  try assertions::assert(
+    opened.count == 0,
+    "mouse down should select without opening before a possible drag",
+  )
+  application.mouse(
+    event::mouse(
+      event::MouseEventType::drag,
+      event::MouseButton::left,
+      source.x + 12,
+      source.y + 1,
+      modifiers(),
+    ),
+  )
+  application.render()
+  let intermediate_x = controller.drag_ghost.layout().screen.x
+  application.mouse(
+    event::mouse(
+      event::MouseEventType::drag,
+      event::MouseButton::left,
+      target.x - 1,
+      target.y,
+      modifiers(),
+    ),
+  )
+  application.render()
+  try assertions::assert(
+    controller.drag_target_key == "Doing",
+    "drag should snap a one-cell gap near-miss to the visible target column",
+  )
+  try assertions::assert(
+    controller.column_records.at(1).expect("target").header_rule.content() == "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    "drop target should use a visible heavy rule",
+  )
+  try assertions::assert(
+    controller.drag_layer.style().display == style::Display::flex,
+    "drag should show the floating card layer",
+  )
+  try assertions::assert(
+    controller.drag_ghost_title.content() == "First",
+    "floating card should preserve its title",
+  )
+  try assertions::assert(
+    controller.drag_ghost.layout().screen.x == target.x - 2 and controller.drag_ghost.layout().screen.x > intermediate_x,
+    "floating card should physically follow successive pointer movement into the target column",
+  )
+  try assertions::assert(
+    controller.column_records.at(
+      0,
+    ).expect("source").cards.at(0).expect("card").id_line.content().contains("drop on a column"),
+    "source position should explain the active gesture",
+  )
+  try assertions::assert(controller.pointer_issue_id == "i1", "drag should retain pointer ownership")
+  try assertions::assert(controller.dragging_issue_id == "i1", "drag should retain card ownership")
+  try assertions::assert(controller.outer_scroll.is_focused(), "drag should keep board focus")
+  (fake.loads.at(1).expect("refresh completing during drag"))(
+    Result::ok([column("Stale", 1.0, [issue("old", "OLD-1", "Old", "Stale")])]),
+  )
+  try assertions::assert(controller.dragging_issue_id == "i1", "load completion should preserve drag ownership")
+  try assertions::assert(
+    controller.drag_layer.style().display == style::Display::flex,
+    "a load completing during drag should preserve the floating card",
+  )
+  try assertions::assert(controller.columns.size() == 2, "a load completing during drag should preserve board data")
+  application.mouse_up(target.x - 1, target.y)
+
+  try assertions::assert(
+    controller.drag_layer.style().display == style::Display::none,
+    "drop should remove the floating card layer",
+  )
+  try assertions::assert(fake.moves.size() == 1, "drop should start one state mutation")
+  try assertions::assert(opened.count == 0, "dragging must not open an issue tab")
+  let request = fake.moves.at(0).expect("move").request
+  try assertions::assert(request.issue_id == "i1", "move should use dragged issue identity")
+  try assertions::assert(
+    request.team_id == "team-1",
+    "move should resolve states for the dragged issue's team",
+  )
+  try assertions::assert(request.target.raw_name == "Doing", "move should preserve raw target identity")
+  try assertions::assert(
+    controller.columns.at(0).expect("source").issues.size() == 0,
+    "optimistic move should empty source",
+  )
+  try assertions::assert(
+    controller.columns.at(1).expect("target").issues.size() == 2,
+    "optimistic move should append target",
+  )
+  try assertions::assert(controller.selected_issue_id() == "i1", "selection should follow the moved card")
+  try testing::assert_contains(application.frame().text(), "updating")
+  controller.refresh(false)
+  try assertions::assert(fake.loads.size() == 2, "refresh should wait for the pending state mutation")
+  application.render()
+  let pending = controller.column_records.at(
+    1,
+  ).expect("pending column").cards.at(1).expect("pending card").surface.layout().screen
+  let original = controller.column_records.at(0).expect("original column").root.layout().screen
+  application.drag(pending.x + 1, pending.y + 1, original.x + 1, original.y)
+  try assertions::assert(
+    fake.moves.size() == 1,
+    "a second drag should be ignored while the first move is pending",
+  )
+  try assertions::assert(
+    opened.count == 0,
+    "a refused second drag should not unexpectedly open the issue",
+  )
+  let unrelated = controller.column_records.at(
+    1,
+  ).expect("pending column").cards.at(0).expect("unrelated card").surface.layout().screen
+  application.click(unrelated.x + 1, unrelated.y + 1)
+  try assertions::assert(opened.count == 1, "pending move should not block clicking an unrelated card")
+
+  (fake.moves.at(0).expect("move").completion)(
+    Result::ok(
+      board_service::MoveResult{
+        state: issues::WorkflowState{
+          id: "state-Doing",
+          raw_name: "Doing",
+          name: "Doing",
+          state_type: "started",
+          position: 2.0,
+        },
+      },
+    ),
+  )
+  try assertions::assert(
+    controller.moving_issue_id.is_empty(),
+    "successful move should clear pending state",
+  )
+  try assertions::assert(fake.loads.size() == 3, "queued refresh should start after move completion")
+  assertions::assert(
+    controller.columns.at(1).expect("target").issues.at(1).expect("moved issue").state_id == "state-Doing",
+    "successful move should retain the resolved state id",
+  )
+}
+
+test fn board_drag_rolls_back_failure_and_never_reuses_another_teams_state() Void!Str {
+  let application = testing::new(100, 18)
+  defer application.destroy()
+  let fake = mut FakeState{loads: [], moves: []}
+  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
+  let errors = mut Opened{identifier: "", count: 0}
+  let controller = board_controller::new(
+    application.context,
+    theme::new(),
+    fake_service(fake),
+    fake_schedule(scheduled),
+    fn(identifier: Str) {},
+    ignore_picker,
+    fn(title: Str, message: Str) {
+      errors.identifier = title
+      errors.count =+ 1
+    },
+  )
+  application.root.add(controller.root)
+  controller.start()
+  (fake.loads.at(0).expect("load"))(
+    Result::ok(
+      [
+        column("Todo", 1.0, [issue("i1", "AKO-1", "First", "Todo")]),
+        column("Review", 2.0, [issue_for_team("i2", "OTHER-2", "Second", "Review", "team-2")]),
+      ],
+    ),
+  )
+  application.render()
+  let source = controller.column_records.at(
+    0,
+  ).expect("source").cards.at(0).expect("card").surface.layout().screen
+  let target = controller.column_records.at(1).expect("target").root.layout().screen
+  application.drag(source.x + 1, source.y + 1, target.x + 1, target.y)
+  try assertions::assert(fake.moves.size() == 1, "cross-team drop should still attempt resolution")
+  try assertions::assert(
+    fake.moves.at(0).expect("move").request.team_id == "team-1",
+    "cross-team target must still resolve states for the dragged issue's team",
+  )
+  try assertions::assert(
+    controller.columns.at(1).expect("target").issues.size() == 2,
+    "move should be optimistic",
+  )
+  (fake.moves.at(0).expect("move").completion)(
+    Result::err("Review isn't available for this issue's team"),
+  )
+  try assertions::assert(
+    controller.columns.at(0).expect("source").issues.size() == 1,
+    "failed move should restore source",
+  )
+  try assertions::assert(
+    controller.columns.at(1).expect("target").issues.size() == 1,
+    "failed move should restore target",
+  )
+  try assertions::assert(
+    controller.selected_issue_id() == "i1",
+    "rollback should preserve dragged issue selection",
+  )
+  try assertions::assert(errors.count == 1, "failed move should notify once")
+  application.render()
+  try testing::assert_contains(application.frame().text(), "move failed")
+  try assertions::assert(
+    controller.failed_move_issue_id == "i1",
+    "rollback should mark the failed card where the user was looking",
+  )
+  (scheduled.actions.at(1).expect("failure expiry"))()
+  try assertions::assert(controller.failed_move_issue_id.is_empty(), "failed marker should expire")
+  assertions::assert(
+    errors.identifier == "Couldn't move AKO-1",
+    "move error should identify the issue",
+  )
+}
+
+test fn board_drag_threshold_same_column_and_interrupted_drops_are_safe() Void!Str {
+  let application = testing::new(100, 18)
+  defer application.destroy()
+  let fake = mut FakeState{loads: [], moves: []}
+  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
+  let opened = mut Opened{identifier: "", count: 0}
+  let controller = board_controller::new(
+    application.context,
+    theme::new(),
+    fake_service(fake),
+    fake_schedule(scheduled),
+    fn(identifier: Str) {
+      opened.count =+ 1
+    },
+    ignore_picker,
+    fn(title: Str, message: Str) {},
+  )
+  application.root.add(controller.root)
+  controller.start()
+  (fake.loads.at(0).expect("load"))(
+    Result::ok([column("Todo", 1.0, [issue("i1", "AKO-1", "First", "Todo")])]),
+  )
+  application.render()
+  let card = controller.column_records.at(
+    0,
+  ).expect("column").cards.at(0).expect("card").surface.layout().screen
+  application.drag(card.x + 1, card.y + 1, card.x + 2, card.y + 1)
+  try assertions::assert(opened.count == 1, "one-cell pointer jitter should remain an ordinary click")
+  try assertions::assert(
+    controller.drag_layer.style().display == style::Display::none,
+    "one-cell pointer jitter should not lift the card",
+  )
+  application.drag(card.x + 1, card.y + 1, card.x + 4, card.y + 1)
+  try assertions::assert(fake.moves.size() == 0, "same-column drop should not mutate")
+  try assertions::assert(opened.count == 1, "same-column drag should not open again")
+
+  application.drag(card.x + 1, card.y + 1, 95, 16)
+  let _ = application.flush()
+  try assertions::assert(fake.moves.size() == 0, "drop outside a column should not mutate")
+  try assertions::assert(controller.dragging_issue_id.is_empty(), "outside drop should clear drag state")
+  try assertions::assert(opened.count == 1, "outside drag should not open")
+
+  application.mouse_down(card.x + 1, card.y + 1)
+  application.mouse(
+    event::mouse(
+      event::MouseEventType::drag,
+      event::MouseButton::left,
+      card.x + 8,
+      card.y + 1,
+      modifiers(),
+    ),
+  )
+  try assertions::assert(controller.handle_key(key("r")), "board commands should be gated during drag")
+  try assertions::assert(fake.loads.size() == 1, "gated refresh command should not replace the gesture")
+  try assertions::assert(controller.handle_key(key("escape")), "Escape should cancel an active drag")
+  try assertions::assert(
+    controller.drag_layer.style().display == style::Display::none,
+    "Escape should remove the floating card",
+  )
+  application.mouse_up(card.x + 8, card.y + 1)
+
+  controller.focus()
+  application.mouse_down(card.x + 1, card.y + 1)
+  application.mouse(
+    event::mouse(
+      event::MouseEventType::drag,
+      event::MouseButton::left,
+      card.x + 8,
+      card.y + 1,
+      modifiers(),
+    ),
+  )
+  try assertions::assert(
+    controller.drag_layer.style().display == style::Display::flex,
+    "active drag should show the floating layer",
+  )
+  try assertions::assert(controller.outer_scroll.is_focused(), "drag should keep the board scroll focused")
+  controller.outer_scroll.blur()
+  application.render()
+  try assertions::assert(
+    controller.drag_layer.style().display == style::Display::none,
+    "losing board focus should clear an interrupted drag layer",
+  )
+  application.mouse_up(card.x + 8, card.y + 1)
+  try assertions::assert(fake.moves.size() == 0, "release after deactivation should not mutate")
+
+  application.set_terminal_focus(event::TerminalFocus::gained)
+  application.mouse_down(card.x + 1, card.y + 1)
+  application.mouse(
+    event::mouse(
+      event::MouseEventType::drag,
+      event::MouseButton::left,
+      card.x + 8,
+      card.y + 1,
+      modifiers(),
+    ),
+  )
+  application.set_terminal_focus(event::TerminalFocus::lost)
+  try assertions::assert(
+    controller.drag_layer.style().display == style::Display::none,
+    "terminal focus loss should clear a drag released outside the app",
+  )
+  application.mouse_up(card.x + 8, card.y + 1)
+  assertions::assert(fake.moves.size() == 0, "release after terminal focus loss should not mutate")
+}
+
+test fn board_refresh_completion_waits_for_pointer_gesture() Void!Str {
+  let application = testing::new(80, 18)
+  defer application.destroy()
+  let fake = mut FakeState{loads: [], moves: []}
+  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
+  let opened = mut Opened{identifier: "", count: 0}
+  let controller = board_controller::new(
+    application.context,
+    theme::new(),
+    fake_service(fake),
+    fake_schedule(scheduled),
+    fn(identifier: Str) {
+      opened.count =+ 1
+    },
+    ignore_picker,
+    fn(title: Str, message: Str) {},
+  )
+  application.root.add(controller.root)
+  controller.start()
+  (fake.loads.at(0).expect("load"))(
+    Result::ok([column("Todo", 1.0, [issue("i1", "AKO-1", "First", "Todo")])]),
+  )
+  controller.refresh(true)
+  application.render()
+  let card = controller.column_records.at(
+    0,
+  ).expect("column").cards.at(0).expect("card").surface.layout().screen
+  application.mouse_down(card.x + 1, card.y + 1)
+  (fake.loads.at(1).expect("refresh during press"))(
+    Result::ok([column("Stale", 1.0, [issue("old", "OLD-1", "Old", "Stale")])]),
+  )
+  try assertions::assert(
+    controller.columns.at(0).expect("preserved board").issues.at(0).expect("issue").id == "i1",
+    "refresh completion should not invalidate a pointer press before drag threshold",
+  )
+  application.mouse_up(card.x + 1, card.y + 1)
+  try assertions::assert(opened.count == 1, "pointer release should still open the original issue")
+  assertions::assert(
+    fake.loads.size() == 3,
+    "deferred refresh should restart after pointer release",
+  )
+}
+
+test fn board_drag_layer_forwards_horizontal_wheel_to_reach_offscreen_column() Void!Str {
+  let application = testing::new(60, 18)
+  defer application.destroy()
+  let fake = mut FakeState{loads: [], moves: []}
+  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
+  let controller = board_controller::new(
+    application.context,
+    theme::new(),
+    fake_service(fake),
+    fake_schedule(scheduled),
+    fn(identifier: Str) {},
+    ignore_picker,
+    fn(title: Str, message: Str) {},
+  )
+  application.root.add(controller.root)
+  controller.start()
+  (fake.loads.at(0).expect("load"))(
+    Result::ok(
+      [
+        column("One", 1.0, [issue("i1", "AKO-1", "First", "One")]),
+        column("Two", 2.0, [issue("i2", "AKO-2", "Second", "Two")]),
+        column("Three", 3.0, [issue("i3", "AKO-3", "Third", "Three")]),
+      ],
+    ),
+  )
+  application.render()
+  let source = controller.column_records.at(
+    0,
+  ).expect("source").cards.at(0).expect("card").surface.layout().screen
+  application.mouse_down(source.x + 1, source.y + 1)
+  application.mouse(
+    event::mouse(event::MouseEventType::drag, event::MouseButton::left, 55, 2, modifiers()),
+  )
+  application.render()
+  try assertions::assert(
+    controller.dragging_issue_id == "i1",
+    "drag should remain active before wheel input",
+  )
+  try assertions::assert(
+    controller.drag_layer.layout().screen.width == 60,
+    "drag layer should cover the board",
+  )
+  for index in 0..9 {
+    application.mouse(
+      event::mouse(
+        event::MouseEventType::scroll,
+        event::MouseButton::none,
+        55,
+        2,
+        shift_modifiers(),
+        scroll_y: 1,
+      ),
+    )
+    application.render()
+  }
+  let _ = application.flush()
+  try assertions::assert(
+    controller.outer_scroll.scroll_left() > 0,
+    "drag layer should forward shifted wheel scrolling",
+  )
+  application.mouse(
+    event::mouse(event::MouseEventType::drag, event::MouseButton::left, 55, 2, modifiers()),
+  )
+  application.mouse_up(55, 2)
+  try assertions::assert(fake.moves.size() == 1, "newly revealed column should accept the drop")
+  assertions::assert(
+    fake.moves.at(0).expect("move").request.target.raw_name == "Three",
+    "horizontal drag scrolling should reach the offscreen status",
+  )
+}
+
+test fn board_drag_into_full_completed_column_keeps_moved_issue_visible_with_cap() Void!Str {
+  let application = testing::new(100, 60)
+  defer application.destroy()
+  let fake = mut FakeState{loads: [], moves: []}
+  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
+  let completed = mut List::new<issues::Issue>()
+  for index in 0..9 {
+    completed.push(issue("done-{index}", "AKO-{index}", "Done {index}", "Done"))
+  }
+  let controller = board_controller::new(
+    application.context,
+    theme::new(),
+    fake_service(fake),
+    fake_schedule(scheduled),
+    fn(identifier: Str) {},
+    ignore_picker,
+    fn(title: Str, message: Str) {},
+  )
+  application.root.add(controller.root)
+  controller.start()
+  let done = issues::BoardColumn{
+    raw_state_name: "Done",
+    name: "Done",
+    state_type: "completed",
+    position: 2.0,
+    issues: completed.@,
+  }
+  (fake.loads.at(0).expect("load"))(
+    Result::ok([column("Todo", 1.0, [issue("i1", "AKO-100", "Move me", "Todo")]), done]),
+  )
+  application.render()
+  let source = controller.column_records.at(
+    0,
+  ).expect("source").cards.at(0).expect("card").surface.layout().screen
+  let target = controller.column_records.at(1).expect("done").root.layout().screen
+  application.drag(source.x + 1, source.y + 1, target.x + 1, target.y)
+  try assertions::assert(
+    controller.columns.at(1).expect("done").issues.size() == 10,
+    "optimistic completed column should retain its cap",
+  )
+  try assertions::assert(
+    controller.selected_issue_id() == "i1",
+    "the newly moved issue should remain visible",
+  )
+  assertions::assert(fake.moves.size() == 1, "completed drop should update status")
+}
+
 test fn board_refresh_preserves_selected_issue_across_column_move() Void!Str {
   let application = testing::new(80, 16)
   defer application.destroy()
-  let fake = mut FakeState{loads: []}
+  let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
   let controller = board_controller::new(
     application.context,
@@ -252,7 +798,7 @@ test fn board_refresh_preserves_selected_issue_across_column_move() Void!Str {
 test fn board_ignores_stale_load_and_handles_narrow_horizontal_navigation() Void!Str {
   let application = testing::new(40, 12)
   defer application.destroy()
-  let fake = mut FakeState{loads: []}
+  let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
   let controller = board_controller::new(
     application.context,
@@ -289,7 +835,7 @@ test fn board_ignores_stale_load_and_handles_narrow_horizontal_navigation() Void
 test fn board_routes_field_picker_commands_for_selected_issue() Void!Str {
   let application = testing::new(60, 12)
   defer application.destroy()
-  let fake = mut FakeState{loads: []}
+  let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
   let picked = mut Picked{names: []}
   let controller = board_controller::new(
@@ -331,7 +877,7 @@ test fn board_routes_field_picker_commands_for_selected_issue() Void!Str {
 test fn board_initial_error_retries_to_empty_state() Void!Str {
   let application = testing::new(80, 16)
   defer application.destroy()
-  let fake = mut FakeState{loads: []}
+  let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
   let controller = board_controller::new(
     application.context,
@@ -360,7 +906,7 @@ test fn board_initial_error_retries_to_empty_state() Void!Str {
 test fn board_failed_manual_refresh_restores_existing_columns() Void!Str {
   let application = testing::new(60, 12)
   defer application.destroy()
-  let fake = mut FakeState{loads: []}
+  let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
   let errors = mut Opened{identifier: "", count: 0}
   let controller = board_controller::new(
@@ -397,10 +943,53 @@ test fn board_failed_manual_refresh_restores_existing_columns() Void!Str {
   )
 }
 
+test fn board_disposal_suppresses_late_move_completion() Void!Str {
+  let application = testing::new(100, 18)
+  defer application.destroy()
+  let fake = mut FakeState{loads: [], moves: []}
+  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
+  let errors = mut Opened{identifier: "", count: 0}
+  let controller = board_controller::new(
+    application.context,
+    theme::new(),
+    fake_service(fake),
+    fake_schedule(scheduled),
+    fn(identifier: Str) {},
+    ignore_picker,
+    fn(title: Str, message: Str) {
+      errors.count =+ 1
+    },
+  )
+  application.root.add(controller.root)
+  controller.start()
+  (fake.loads.at(0).expect("load"))(
+    Result::ok(
+      [
+        column("Todo", 1.0, [issue("i1", "AKO-1", "First", "Todo")]),
+        column("Doing", 2.0, [issue("i2", "AKO-2", "Second", "Doing")]),
+      ],
+    ),
+  )
+  application.render()
+  let source = controller.column_records.at(
+    0,
+  ).expect("source").cards.at(0).expect("card").surface.layout().screen
+  let target = controller.column_records.at(1).expect("target").root.layout().screen
+  application.drag(source.x + 1, source.y + 1, target.x + 1, target.y)
+  try assertions::assert(fake.moves.size() == 1, "drop should start a move")
+  controller.dispose()
+  (fake.moves.at(0).expect("move").completion)(Result::err("late failure"))
+  try assertions::assert(errors.count == 0, "disposed board should suppress late move errors")
+  assertions::assert(
+    controller.column_records.size() == 0,
+    "disposed board should release retained columns",
+  )
+}
+
 test fn board_disposal_cancels_refresh_and_late_completion() Void!Str {
   let application = testing::new(60, 12)
   defer application.destroy()
-  let fake = mut FakeState{loads: []}
+  let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
   let controller = board_controller::new(
     application.context,

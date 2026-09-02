@@ -81,6 +81,7 @@ struct Issue {
 // A column on the My Issues board: a workflow state name + the issues currently
 // in it. Issues are decoded into typed `Issue` structs at this model boundary.
 struct BoardColumn {
+  raw_state_name: Str,
   name: Str,
   state_type: Str,
   position: Float64,
@@ -106,6 +107,7 @@ struct Comment {
 
 struct WorkflowState {
   id: Str,
+  raw_name: Str,
   name: Str,
   state_type: Str,
   position: Float64,
@@ -325,6 +327,7 @@ fn decode_workflow_state(raw: Any) WorkflowState!Str {
   Result::ok(
     WorkflowState{
       id: id,
+      raw_name: name,
       name: normalize_text(name),
       state_type: state_type,
       position: position,
@@ -573,6 +576,7 @@ fn decode_board(data: Any) [BoardColumn]!Str {
     }
     columns.push(
       BoardColumn{
+        raw_state_name: sname,
         name: normalize_text(sname),
         state_type: state_types.at(idx).expect("parallel list"),
         position: state_positions.at(idx).expect("parallel list"),
