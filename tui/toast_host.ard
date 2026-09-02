@@ -1,3 +1,4 @@
+use cooper/animation
 use cooper/box
 use cooper/runtime
 use cooper/style
@@ -14,6 +15,7 @@ enum Variant {
 struct Entry {
   id: Int,
   root: mut box::Box,
+  timeline: mut animation::Timeline,
   cancel_expiry: fn(),
 }
 
@@ -39,7 +41,9 @@ private fn root_style(display: style::Display) style::Style {
     max_height: style::percent(80.0),
     flex_direction: style::FlexDirection::column,
     align_items: style::Align::end,
+    justify_content: style::Justify::end,
     gap: style::cells(1),
+    overflow: style::Overflow::hidden,
     z_index: 900,
   )
 }
@@ -61,13 +65,30 @@ fn new(ctx: mut runtime::Runtime, palette: tinear_theme::Theme, schedule: schedu
   })
 }
 
-private fn toast_content(title: Str, description: Str) text::StyledText {
-  let spans = mut List::new<text::Span>()
-  spans.push(text::span(title, style: text::span_style(bold: true)))
+private fn toast_width(ctx: mut runtime::Runtime, title: Str, description: Str) Int {
+  mut content_width = ctx.measure_text(title)
   if not description.is_empty() {
-    spans.push(text::span(" · {description}", style: text::span_style(dim: true)))
+    let description_width = ctx.measure_text(description)
+    if description_width > content_width {
+      content_width = description_width
+    }
   }
-  text::styled_text(spans.@)
+  let measured = content_width + 6
+  match measured > 52 {
+    true => 52,
+    false => measured,
+  }
+}
+
+private fn entrance_duration(ttl_ms: Int) Int {
+  let requested = ttl_ms / 20
+  if requested < 1 {
+    1
+  } else if requested > 250 {
+    250
+  } else {
+    requested
+  }
 }
 
 impl ToastHost {
@@ -80,6 +101,7 @@ impl ToastHost {
       for entry in self.entries {
         if entry.id == id {
           entry.cancel_expiry()
+          entry.timeline.destroy()
           let _ = self.root.remove(entry.root)
           entry.root.destroy(recursive: true)
           removed = true
@@ -95,7 +117,7 @@ impl ToastHost {
     }
   }
 
-  fn mut show(title: Str, description: Str, variant: Variant, ttl_ms: Int) Int {
+  fn mut show(title: Str, description: Str?, variant: Variant, ttl_ms: Int) Int {
     if self.disposed {
       panic("cannot show a toast on a disposed host")
     }
@@ -103,6 +125,7 @@ impl ToastHost {
       panic("toast TTL must be non-negative")
     }
 
+    let detail = description.or("")
     self.next_id =+ 1
     let id = self.next_id
     let marker = match variant {
@@ -115,14 +138,24 @@ impl ToastHost {
       Variant::success => self.palette.success,
       Variant::error => self.palette.danger,
     }
+    let target_width = toast_width(self.context, title, detail)
+    let content_height = match detail.is_empty() {
+      true => 1,
+      false => 2,
+    }
     let toast = box::new(
       self.context,
       styles: style::new(
         background: self.palette.background,
-        width: style::fit_content(),
-        max_width: style::percent(100.0),
-        height: style::cells(1),
+        border: style::Border::rounded,
+        border_color: marker_color,
+        position: style::Position::relative,
+        left: style::cells(target_width),
+        width: style::cells(target_width),
+        height: style::cells(content_height + 2),
         flex_direction: style::FlexDirection::row,
+        align_items: style::Align::start,
+        flex_shrink: 0.0,
         padding: style::Edges{
           top: style::cells(0),
           right: style::cells(1),
@@ -141,18 +174,56 @@ impl ToastHost {
         text_style: text::style(foreground: marker_color, bold: true),
       ),
     )
-    toast.add(
+    let content = box::new(
+      self.context,
+      styles: style::new(
+        width: style::fit_content(),
+        max_width: style::cells(46),
+        height: style::cells(content_height),
+        flex_direction: style::FlexDirection::column,
+      ),
+    )
+    content.add(
       text::new(
         self.context,
-        content: toast_content(title, description),
+        content: title,
         wrap: text::TextWrap::none,
         overflow: text::TextOverflow::ellipsis,
         styles: style::new(
           width: style::fit_content(),
-          max_width: style::cells(48),
+          max_width: style::cells(46),
           height: style::cells(1),
         ),
+        text_style: text::style(bold: true),
       ),
+    )
+    if not detail.is_empty() {
+      content.add(
+        text::new(
+          self.context,
+          content: detail,
+          wrap: text::TextWrap::none,
+          overflow: text::TextOverflow::ellipsis,
+          styles: style::new(
+            width: style::fit_content(),
+            max_width: style::cells(46),
+            height: style::cells(1),
+          ),
+          text_style: text::style(dim: true),
+        ),
+      )
+    }
+    toast.add(content)
+
+    let timeline = self.context.timeline(entrance_duration(ttl_ms))
+    timeline.add(
+      timeline.duration(),
+      fn(frame: animation::Frame) {
+        let applied = mut toast.style()
+        applied.left = style::cells(animation::lerp_int(target_width, 0, frame.progress))
+        toast.set_style(applied.@)
+      },
+      ease: animation::out_quad,
     )
     let cancel_expiry = self.schedule(ttl_ms, fn() {
       let _ = self.remove(id)
@@ -161,11 +232,13 @@ impl ToastHost {
       Entry{
         id: id,
         root: toast,
+        timeline: timeline,
         cancel_expiry: cancel_expiry,
       },
     )
     self.root.add(toast)
     self.root.set_style(self.visible_style)
+    let _ = timeline.play()
     id
   }
 
@@ -180,6 +253,7 @@ impl ToastHost {
       self.disposed = true
       for entry in entries {
         entry.cancel_expiry()
+        entry.timeline.destroy()
         let _ = self.root.remove(entry.root)
         entry.root.destroy(recursive: true)
       }
