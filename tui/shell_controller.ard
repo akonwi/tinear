@@ -85,11 +85,12 @@ private fn hints_for(model: shell_model::Model) [hints_bar::Hint] {
     },
     1 => {
       [
-        hints_bar::Hint{key: "←↑↓→", label: "select"},
-        hints_bar::Hint{key: "drag", label: "status"},
-        hints_bar::Hint{key: "↵", label: "open"},
         hints_bar::Hint{key: "r", label: "refresh"},
-        hints_bar::Hint{key: "s/y/p/a/P", label: "edit"},
+        hints_bar::Hint{key: "s", label: "status"},
+        hints_bar::Hint{key: "y", label: "cycle"},
+        hints_bar::Hint{key: "p", label: "priority"},
+        hints_bar::Hint{key: "a", label: "assignee"},
+        hints_bar::Hint{key: "P", label: "project"},
         hints_bar::Hint{key: "c", label: "new issue"},
         hints_bar::Hint{key: "?", label: "search"},
       ]

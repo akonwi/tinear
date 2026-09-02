@@ -216,8 +216,17 @@ test fn shell_switches_persistent_tabs_and_persists_selection() Void!Str {
   )
   let board_hint = application.frame().cell(0, 15).expect("board footer hint")
   try assertions::assert(
-    board_hint.grapheme == "←",
+    board_hint.grapheme == "r",
     "updated footer hints should remain left-aligned without a tab-title prefix",
+  )
+  let board_hints = controller.hints.actions_text.content()
+  try assertions::assert(
+    board_hints.contains("s status") and board_hints.contains("y cycle") and board_hints.contains("p priority") and board_hints.contains("a assignee") and board_hints.contains("P project"),
+    "board edit bindings should name each field action",
+  )
+  try assertions::assert(
+    (not board_hints.contains("←")) and (not board_hints.contains("drag")) and (not board_hints.contains("↵")),
+    "board footer should omit redundant selection, drag, and open hints",
   )
   try assertions::assert(board_state.focuses == 1, "new active screen should reclaim focus")
   try assertions::assert(snapshots.size() == 1, "selection should persist")
