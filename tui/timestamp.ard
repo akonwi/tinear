@@ -1,0 +1,14 @@
+use go:time
+
+// Format Linear's RFC3339 timestamps in the user's local timezone. Preserve
+// unknown values rather than hiding potentially useful API data.
+fn friendly(value: Str) Str {
+  if value.trim().is_empty() {
+    ""
+  } else {
+    match time::Parse(time::RFC3339Nano, value) {
+      ok(parsed) => parsed.Local().Format("Jan 2, 2006 · 3:04 PM"),
+      err(_) => value,
+    }
+  }
+}

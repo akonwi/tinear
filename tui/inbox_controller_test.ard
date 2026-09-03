@@ -1,0 +1,443 @@
+use ard/testing as assertions
+
+use cooper/event
+use cooper/testing
+use tinear/models/inbox
+use tinear/services/inbox_service
+use tinear/tui/inbox_controller
+use tinear/tui/theme
+
+private struct DetailAttempt {
+  notification_id: Str,
+  completion: fn(inbox::Detail!Str),
+}
+
+private struct ArchiveAttempt {
+  notification_id: Str,
+  completion: fn(Void!Str),
+}
+
+private struct FakeState {
+  loads: [fn([inbox::Item]!Str)],
+  details: [DetailAttempt],
+  archives: [ArchiveAttempt],
+}
+
+private struct Calls {
+  value: Str,
+  count: Int,
+}
+
+private struct ScheduledState {
+  actions: [fn()],
+  cancellations: Int,
+}
+
+private fn fake_service(state: mut FakeState) inbox_service::Service {
+  inbox_service::Service{
+    load: fn(cancellation: Receiver<Bool>, completion: fn([inbox::Item]!Str)) {
+      state.loads.push(completion)
+      ()
+    },
+    load_detail: fn(notification_id: Str, cancellation: Receiver<Bool>, completion: fn(inbox::Detail!Str)) {
+      state.details.push(DetailAttempt{notification_id: notification_id, completion: completion})
+      ()
+    },
+    archive: fn(notification_id: Str, cancellation: Receiver<Bool>, completion: fn(Void!Str)) {
+      state.archives.push(ArchiveAttempt{notification_id: notification_id, completion: completion})
+      ()
+    },
+  }
+}
+
+private fn item(id: Str, target: Str, notification_type: Str, url: Str) inbox::Item {
+  inbox::Item{
+    notification_id: id,
+    notification_type: notification_type,
+    type_label: "commented",
+    actor_name: "Alex",
+    target_id: target,
+    title: "Title {target}",
+    url: url,
+  }
+}
+
+private fn detail(identifier: Str, title: Str) inbox::Detail {
+  inbox::Detail{
+    is_pr: false,
+    identifier: identifier,
+    title: title,
+    description: "Description {identifier}",
+    state_name: "In Progress",
+    priority: 2,
+    assignee_name: "Sam",
+    team_name: "Core",
+    team_key: "COR",
+    project_name: "Tinear",
+    url: "https://linear.app/{identifier}",
+    triggering_comment: Maybe::new<inbox::DetailComment>(),
+    comments: [],
+    history: [],
+  }
+}
+
+private fn no_schedule(milliseconds: Int, action: fn()) fn() {
+  fn() {}
+}
+
+private fn fake_schedule(state: mut ScheduledState) fn(Int, fn()) fn() {
+  fn(milliseconds: Int, action: fn()) fn() {
+    state.actions.push(action)
+    fn() {
+      state.cancellations =+ 1
+    }
+  }
+}
+
+private fn key(name: Str, text: Str) mut event::KeyEvent {
+  event::key(
+    name,
+    text,
+    event::KeyEventType::press,
+    event::Modifiers{
+      shift: false,
+      ctrl: false,
+      alt: false,
+      super: false,
+    },
+  )
+}
+
+test fn inbox_loads_rows_and_discards_stale_detail_completion() Void!Str {
+  let application = testing::new(170, 20)
+  defer application.destroy()
+  let fake = mut FakeState{
+    loads: [],
+    details: [],
+    archives: [],
+  }
+  let opened = mut Calls{value: "", count: 0}
+  let controller = inbox_controller::new(
+    application.context,
+    theme::new(),
+    fake_service(fake),
+    no_schedule,
+    fn(identifier: Str) {
+      opened.value = identifier
+      opened.count =+ 1
+    },
+    fn(url: Str) {},
+    fn(title: Str, message: Str) {},
+  )
+  application.root.add(controller.root)
+  controller.start()
+  try assertions::assert(fake.loads.size() == 1, "start should request Inbox")
+  (fake.loads.at(0).expect("load"))(
+    Result::ok(
+      [
+        item("n1", "AKO-1", "issueNewComment", "https://linear.app/AKO-1"),
+        item("n2", "AKO-2", "issueMention", "https://linear.app/AKO-2"),
+      ],
+    ),
+  )
+  try assertions::assert(controller.rows.size() == 2, "loaded notifications should create rows")
+  try assertions::assert(
+    application.terminal_titles().at(0).expect("Inbox terminal title") == "tinear (2)",
+    "loaded notification count should update the terminal title",
+  )
+  try assertions::assert(fake.details.size() == 1, "first item should request detail")
+  try assertions::assert(
+    controller.detail_text.content().contains("Title AKO-1"),
+    "selected notification summary should render before detail returns",
+  )
+  application.render()
+  let selected_surface = application.frame().cell(0, 0).expect("selected Inbox surface")
+  try assertions::assert(
+    selected_surface.style.background.expect("active background").index.expect("host palette index") == Uint8::from(4),
+    "selected Inbox row should use the active background",
+  )
+  let selected_title = application.frame().cell(1, 0).expect("selected Inbox title")
+  try assertions::assert(
+    selected_title.style.foreground.expect("active foreground").index.expect("host palette index") == Uint8::from(15) and selected_title.style.background.expect("active text background").index.expect("host palette index") == Uint8::from(4) and selected_title.style.bold,
+    "selected Inbox row should use readable active text",
+  )
+  application.mouse_move(3, 3)
+  application.render()
+  let hovered_surface = application.frame().cell(0, 3).expect("hovered Inbox surface")
+  try assertions::assert(
+    hovered_surface.style.background.expect("hover background").index.expect("host palette index") == Uint8::from(8),
+    "hovered Inbox row should use the hover background",
+  )
+  application.mouse_move(3, 2)
+  application.render()
+  try assertions::assert(
+    application.frame().cell(
+      0,
+      3,
+    ).expect("restored Inbox surface").style.background.expect("default background").terminal_default,
+    "leaving a row should restore its terminal-default background",
+  )
+  application.click(3, 5)
+  try assertions::assert(controller.cursor == 0, "clicking row spacing should not select an item")
+  let divider = application.frame().cell(59, 0).expect("Inbox pane divider")
+  try assertions::assert(
+    divider.grapheme == "│" and divider.style.dim,
+    "Inbox panes should use a dim divider",
+  )
+  try assertions::assert(
+    controller.detail_scroll.layout().screen.width > controller.list_scroll.layout().screen.width,
+    "notification list should be a sidebar beside a larger detail pane",
+  )
+  try assertions::assert(controller.handle_key(key("down", "")), "Down should move selection")
+  try assertions::assert(controller.cursor == 1, "cursor should move to second item")
+  try assertions::assert(fake.details.size() == 2, "selection should request new detail")
+  try assertions::assert(
+    controller.detail_text.content().contains("Title AKO-2") and not controller.detail_text.content().contains("Title AKO-1"),
+    "detail preview should follow the cursor immediately",
+  )
+  (fake.details.at(0).expect("stale").completion)(Result::ok(detail("AKO-1", "Stale detail")))
+  try assertions::assert(
+    not controller.detail_text.content().contains("Stale detail"),
+    "stale detail should be ignored",
+  )
+  (fake.details.at(1).expect("current").completion)(Result::ok(detail("AKO-2", "Current detail")))
+  application.render()
+  try testing::assert_contains(application.frame().text(), "Current detail")
+  try testing::assert_contains(application.frame().text(), "── Details")
+  try testing::assert_contains(application.frame().text(), "Alex commented")
+  for size in [[60, 20], [100, 30], [160, 40]] {
+    application.resize(size.at(0).expect("width"), size.at(1).expect("height"))
+    try assertions::assert(controller.cursor == 1, "resize should preserve Inbox selection")
+    try assertions::assert(
+      controller.list_scroll.layout().screen.width > 0,
+      "list pane should remain visible",
+    )
+    try assertions::assert(
+      controller.detail_scroll.layout().screen.width > 0,
+      "detail pane should remain visible",
+    )
+    try testing::assert_contains(application.frame().text(), "Current detail")
+  }
+
+  let _ = controller.handle_key(key("up", ""))
+  (fake.details.at(2).expect("first detail refresh").completion)(
+    Result::ok(detail("AKO-1", "First detail")),
+  )
+  let _ = controller.handle_key(key("down", ""))
+  try assertions::assert(
+    controller.detail_text.content().contains("Current detail"),
+    "returning to a loaded notification should render cached detail immediately",
+  )
+
+  try assertions::assert(controller.handle_key(key("return", "")), "Enter should open issue")
+  try assertions::assert(opened.value == "AKO-2", "selected issue identifier should open")
+  assertions::assert(opened.count == 1, "open callback should run once")
+}
+
+test fn inbox_opens_pr_in_browser_and_archives_optimistically() Void!Str {
+  let application = testing::new(90, 18)
+  defer application.destroy()
+  let fake = mut FakeState{
+    loads: [],
+    details: [],
+    archives: [],
+  }
+  let browser = mut Calls{value: "", count: 0}
+  let errors = mut Calls{value: "", count: 0}
+  let controller = inbox_controller::new(
+    application.context,
+    theme::new(),
+    fake_service(fake),
+    no_schedule,
+    fn(identifier: Str) {},
+    fn(url: Str) {
+      browser.value = url
+      browser.count =+ 1
+    },
+    fn(title: Str, message: Str) {
+      errors.value = title
+      errors.count =+ 1
+    },
+  )
+  application.root.add(controller.root)
+  controller.start()
+  (fake.loads.at(0).expect("load"))(
+    Result::ok(
+      [
+        item("n1", "PR #7", "pullRequestApproved", "https://github.com/acme/repo/pull/7"),
+        item("n2", "AKO-2", "issueMention", "https://linear.app/AKO-2"),
+      ],
+    ),
+  )
+
+  try assertions::assert(controller.handle_key(key("return", "")), "Enter should open PR")
+  try assertions::assert(browser.value.ends_with("/pull/7"), "PR should open provider URL")
+  try assertions::assert(controller.handle_key(key("backspace", "")), "Backspace should archive")
+  try assertions::assert(controller.items.size() == 1, "archive should remove row immediately")
+  try assertions::assert(
+    application.terminal_titles().at(1).expect("archived Inbox terminal title") == "tinear (1)",
+    "optimistic archive should update the terminal title",
+  )
+  try assertions::assert(fake.archives.size() == 1, "archive mutation should start")
+  (fake.archives.at(0).expect("archive").completion)(Result::err("denied"))
+  try assertions::assert(errors.count == 1, "archive failure should notify")
+  try assertions::assert(
+    errors.value == "Couldn't archive notification",
+    "archive error title should be clear",
+  )
+
+  try assertions::assert(controller.handle_key(key("backspace", "")), "final item should archive")
+  try assertions::assert(controller.items.size() == 0, "final archive should empty Inbox")
+  try assertions::assert(
+    application.terminal_titles().at(2).expect("empty Inbox terminal title") == "tinear",
+    "empty Inbox should clear the terminal title count",
+  )
+  (fake.details.at(1).expect("removed detail").completion)(
+    Result::ok(detail("AKO-2", "Late detail")),
+  )
+  assertions::assert(
+    controller.detail_text.content() == "You're all caught up.",
+    "late detail must not replace empty state",
+  )
+}
+
+test fn inbox_refresh_preserves_selection_by_notification_id() Void!Str {
+  let application = testing::new(80, 16)
+  defer application.destroy()
+  let fake = mut FakeState{
+    loads: [],
+    details: [],
+    archives: [],
+  }
+  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
+  let controller = inbox_controller::new(
+    application.context,
+    theme::new(),
+    fake_service(fake),
+    fake_schedule(scheduled),
+    fn(identifier: Str) {},
+    fn(url: Str) {},
+    fn(title: Str, message: Str) {},
+  )
+  application.root.add(controller.root)
+  controller.start()
+  (fake.loads.at(0).expect("load"))(
+    Result::ok([item("n1", "AKO-1", "issueMention", ""), item("n2", "AKO-2", "issueMention", "")]),
+  )
+  let _ = controller.handle_key(key("down", ""))
+  try assertions::assert(scheduled.actions.size() == 1, "start should schedule periodic refresh")
+  (scheduled.actions.at(0).expect("periodic refresh"))()
+  try assertions::assert(fake.loads.size() == 2, "periodic refresh should request new list")
+  try assertions::assert(scheduled.actions.size() == 2, "periodic refresh should reschedule itself")
+  (fake.loads.at(1).expect("refresh"))(
+    Result::ok([item("n2", "AKO-2", "issueMention", ""), item("n3", "AKO-3", "issueMention", "")]),
+  )
+  try assertions::assert(controller.cursor == 0, "selected id should move with reordered results")
+  try assertions::assert(
+    controller.items.at(0).expect("selected").notification_id == "n2",
+    "same notification should remain selected",
+  )
+  controller.dispose()
+  assertions::assert(scheduled.cancellations == 2, "reschedule and disposal should cancel timers")
+}
+
+test fn inbox_initial_error_retries_to_empty_and_detail_errors_render() Void!Str {
+  let application = testing::new(80, 16)
+  defer application.destroy()
+  let fake = mut FakeState{
+    loads: [],
+    details: [],
+    archives: [],
+  }
+  let controller = inbox_controller::new(
+    application.context,
+    theme::new(),
+    fake_service(fake),
+    no_schedule,
+    fn(identifier: Str) {},
+    fn(url: Str) {},
+    fn(title: Str, message: Str) {},
+  )
+  application.root.add(controller.root)
+  controller.start()
+  (fake.loads.at(0).expect("initial load"))(Result::err("offline"))
+  try assertions::assert(
+    controller.list_status.content().contains("offline"),
+    "initial list errors should be visible",
+  )
+  let _ = controller.handle_key(key("r", "r"))
+  (fake.loads.at(1).expect("retry"))(Result::ok([]))
+  try assertions::assert(
+    controller.list_status.content().contains("No notifications"),
+    "successful empty retry should render empty state",
+  )
+
+  let _ = controller.handle_key(key("r", "r"))
+  (fake.loads.at(2).expect("populated retry"))(
+    Result::ok([item("n1", "AKO-1", "issueMention", "")]),
+  )
+  (fake.details.at(0).expect("detail").completion)(Result::err("forbidden"))
+  assertions::assert(
+    controller.detail_text.content().contains("Couldn't load details") and controller.detail_text.content().contains("forbidden"),
+    "detail errors should render without clearing the selected notification summary",
+  )
+}
+
+test fn inbox_disposal_suppresses_late_detail_and_archive_completions() Void!Str {
+  let application = testing::new(60, 12)
+  defer application.destroy()
+  let fake = mut FakeState{
+    loads: [],
+    details: [],
+    archives: [],
+  }
+  let errors = mut Calls{value: "", count: 0}
+  let controller = inbox_controller::new(
+    application.context,
+    theme::new(),
+    fake_service(fake),
+    no_schedule,
+    fn(identifier: Str) {},
+    fn(url: Str) {},
+    fn(title: Str, message: Str) {
+      errors.value = title
+      errors.count =+ 1
+    },
+  )
+  application.root.add(controller.root)
+  controller.start()
+  (fake.loads.at(0).expect("load"))(Result::ok([item("n1", "AKO-1", "issueMention", "")]))
+  let _ = controller.handle_key(key("backspace", ""))
+  controller.dispose()
+  (fake.details.at(0).expect("detail").completion)(Result::ok(detail("AKO-1", "Late detail")))
+  (fake.archives.at(0).expect("archive").completion)(Result::err("denied"))
+  try assertions::assert(
+    not controller.detail_text.content().contains("Late detail"),
+    "disposed Inbox should ignore detail completion",
+  )
+  assertions::assert(errors.count == 0, "disposed Inbox should ignore archive completion")
+}
+
+test fn inbox_disposal_suppresses_late_list_completion() Void!Str {
+  let application = testing::new(60, 12)
+  defer application.destroy()
+  let fake = mut FakeState{
+    loads: [],
+    details: [],
+    archives: [],
+  }
+  let controller = inbox_controller::new(
+    application.context,
+    theme::new(),
+    fake_service(fake),
+    no_schedule,
+    fn(identifier: Str) {},
+    fn(url: Str) {},
+    fn(title: Str, message: Str) {},
+  )
+  application.root.add(controller.root)
+  controller.start()
+  controller.dispose()
+  (fake.loads.at(0).expect("load"))(Result::ok([item("n1", "AKO-1", "issueMention", "")]))
+  assertions::assert(controller.items.size() == 0, "disposed controller should ignore late load")
+}

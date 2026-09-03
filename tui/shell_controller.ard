@@ -1,0 +1,515 @@
+use cooper/box
+use cooper/event
+use cooper/runtime
+use cooper/style
+use cooper/text
+use go:strings
+use tinear/models/cache
+use tinear/models/shell as shell_model
+use tinear/models/tabs
+use tinear/tui/hints_bar
+use tinear/tui/theme as tinear_theme
+
+struct Screen {
+  root: mut box::Box,
+  focus: fn(),
+  handle_key: fn(mut event::KeyEvent) Bool,
+  dispose: fn(),
+}
+
+struct DynamicScreen {
+  reference: tabs::TabRef,
+  screen: Screen,
+}
+
+struct TabChip {
+  root: mut box::Box,
+  remove_mouse: fn(),
+  remove_close_mouse: fn(),
+}
+
+struct ShellController {
+  root: mut box::Box,
+  context: mut runtime::Runtime,
+  tab_bar: mut box::Box,
+  body_host: mut box::Box,
+  hints: mut hints_bar::HintsBar,
+  model: shell_model::Model,
+  inbox: Screen,
+  board: Screen,
+  dynamic_screens: [DynamicScreen],
+  tab_chips: [TabChip],
+  make_dynamic: fn(tabs::TabRef) Screen,
+  persist: fn(cache::LoggedInCache),
+  dispose_persistence: fn(),
+  on_search: fn(),
+  on_create: fn(),
+  palette: tinear_theme::Theme,
+  disposed: Bool,
+}
+
+fn tab_chip_width(label_cells: Int, dynamic: Bool) Int {
+  match dynamic {
+    false => label_cells + 2,
+    true => {
+      let intrinsic = label_cells + 4
+      match intrinsic > 26 {
+        true => 26,
+        false => intrinsic,
+      }
+    },
+  }
+}
+
+private fn body_style(current: style::Style, display: style::Display) style::Style {
+  let updated = mut current
+  updated.display = display
+  updated.width = style::percent(100.0)
+  updated.height = style::percent(100.0)
+  updated.flex_grow = 1.0
+  updated.overflow = style::Overflow::hidden
+  updated.@
+}
+
+private fn hints_for(model: shell_model::Model) [hints_bar::Hint] {
+  match model.tab_index {
+    0 => {
+      [
+        hints_bar::Hint{key: "Tab", label: "switch"},
+        hints_bar::Hint{key: "↑↓", label: "select"},
+        hints_bar::Hint{key: "↵", label: "open"},
+        hints_bar::Hint{key: "r", label: "refresh"},
+        hints_bar::Hint{key: "c", label: "new issue"},
+        hints_bar::Hint{key: "?", label: "search"},
+      ]
+    },
+    1 => {
+      [
+        hints_bar::Hint{key: "r", label: "refresh"},
+        hints_bar::Hint{key: "s", label: "status"},
+        hints_bar::Hint{key: "y", label: "cycle"},
+        hints_bar::Hint{key: "p", label: "priority"},
+        hints_bar::Hint{key: "a", label: "assignee"},
+        hints_bar::Hint{key: "P", label: "project"},
+        hints_bar::Hint{key: "c", label: "new issue"},
+        hints_bar::Hint{key: "?", label: "search"},
+      ]
+    },
+    _ => {
+      match model.tabs.at(model.tab_index - 2) {
+        reference => {
+          match reference.kind {
+            tabs::Kind::doc => {
+              [
+                hints_bar::Hint{key: "↑↓", label: "scroll"},
+                hints_bar::Hint{key: "o", label: "browser"},
+                hints_bar::Hint{key: "Esc", label: "close"},
+              ]
+            },
+            _ => {
+              [
+                hints_bar::Hint{key: "d/c", label: "section"},
+                hints_bar::Hint{key: "↑↓", label: "scroll"},
+                hints_bar::Hint{key: "n/r", label: "comment"},
+                hints_bar::Hint{key: "e", label: "description"},
+                hints_bar::Hint{key: "s/y/p/a/P", label: "fields"},
+                hints_bar::Hint{key: "o", label: "browser"},
+                hints_bar::Hint{key: "Esc", label: "close"},
+              ]
+            },
+          }
+        },
+        _ => [],
+      }
+    },
+  }
+}
+
+fn new(
+  ctx: mut runtime::Runtime,
+  palette: tinear_theme::Theme,
+  initial_model: shell_model::Model,
+  inbox: Screen,
+  board: Screen,
+  make_dynamic: fn(tabs::TabRef) Screen,
+  persist: fn(cache::LoggedInCache),
+  dispose_persistence: fn(),
+  on_search: fn(),
+  on_create: fn(),
+) mut ShellController {
+  let root = box::new(
+    ctx,
+    styles: style::new(
+      width: style::percent(100.0),
+      height: style::percent(100.0),
+      flex_direction: style::FlexDirection::column,
+      overflow: style::Overflow::hidden,
+    ),
+  )
+  let tab_bar = box::new(
+    ctx,
+    styles: style::new(
+      width: style::percent(100.0),
+      height: style::cells(1),
+      flex_shrink: 0.0,
+      flex_direction: style::FlexDirection::row,
+      overflow: style::Overflow::hidden,
+    ),
+  )
+  let body_host = box::new(
+    ctx,
+    styles: style::new(
+      width: style::percent(100.0),
+      height: style::cells(1),
+      flex_grow: 1.0,
+      overflow: style::Overflow::hidden,
+    ),
+  )
+  let tab_rule = text::new(
+    ctx,
+    content: strings::Repeat("─", 512),
+    selectable: false,
+    wrap: text::TextWrap::none,
+    overflow: text::TextOverflow::clip,
+    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+    text_style: text::style(dim: true),
+  )
+  let footer_rule = text::new(
+    ctx,
+    content: strings::Repeat("─", 512),
+    selectable: false,
+    wrap: text::TextWrap::none,
+    overflow: text::TextOverflow::clip,
+    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+    text_style: text::style(dim: true),
+  )
+  let hints = hints_bar::new(ctx, palette, hints_for(initial_model))
+  root.add(tab_bar)
+  root.add(tab_rule)
+  root.add(body_host)
+  root.add(footer_rule)
+  root.add(hints.root)
+  body_host.add(inbox.root)
+  body_host.add(board.root)
+
+  let controller = mut ShellController{
+    root: root,
+    context: ctx,
+    tab_bar: tab_bar,
+    body_host: body_host,
+    hints: hints,
+    model: initial_model,
+    inbox: inbox,
+    board: board,
+    dynamic_screens: [],
+    tab_chips: [],
+    make_dynamic: make_dynamic,
+    persist: persist,
+    dispose_persistence: dispose_persistence,
+    on_search: on_search,
+    on_create: on_create,
+    palette: palette,
+    disposed: false,
+  }
+  for reference in initial_model.tabs {
+    controller.ensure_dynamic(reference)
+  }
+  controller.apply_selection(false)
+  controller
+}
+
+impl ShellController {
+  private fn mut ensure_dynamic(reference: tabs::TabRef) {
+    mut found = false
+    for existing in self.dynamic_screens {
+      if tabs::same(existing.reference, reference) {
+        found = true
+      }
+    }
+    if not found {
+      let screen = self.make_dynamic(reference)
+      screen.root.set_style(body_style(screen.root.style(), style::Display::none))
+      self.body_host.add(screen.root)
+      self.dynamic_screens.push(DynamicScreen{reference: reference, screen: screen})
+    }
+  }
+
+  private fn mut clear_tab_chips() {
+    let chips = self.tab_chips
+    self.tab_chips = []
+    for chip in chips {
+      chip.remove_mouse()
+      chip.remove_close_mouse()
+      let _ = self.tab_bar.remove(chip.root)
+      chip.root.destroy(recursive: true)
+    }
+  }
+
+  private fn mut add_tab_chip(index: Int, label: Str, dynamic: Bool) {
+    let width = tab_chip_width(self.context.measure_text(label), dynamic)
+    let chip = box::new(
+      self.context,
+      styles: style::new(
+        width: style::cells(width),
+        height: style::cells(1),
+        flex_shrink: 0.0,
+        flex_direction: style::FlexDirection::row,
+        overflow: style::Overflow::hidden,
+      ),
+    )
+    let selected = index == self.model.tab_index
+    let label_width = match dynamic {
+      true => width - 2,
+      false => width,
+    }
+    chip.add(
+      text::new(
+        self.context,
+        content: text::styled_text(
+          [
+            text::span(" "),
+            text::span(
+              label,
+              style: match selected {
+                true => text::span_style(foreground: self.palette.accent, bold: true),
+                false => text::span_style(dim: true),
+              },
+            ),
+            text::span(" "),
+          ],
+        ),
+        selectable: false,
+        wrap: text::TextWrap::none,
+        overflow: text::TextOverflow::ellipsis,
+        styles: style::new(
+          width: style::cells(label_width),
+          height: style::cells(1),
+          flex_shrink: 0.0,
+        ),
+      ),
+    )
+    mut remove_close_mouse = fn() {}
+    if dynamic {
+      let close = text::new(
+        self.context,
+        content: "× ",
+        selectable: false,
+        wrap: text::TextWrap::none,
+        styles: style::new(width: style::cells(2), height: style::cells(1), flex_shrink: 0.0),
+        text_style: text::style(dim: true),
+      )
+      chip.add(close)
+      let dynamic_index = index - 2
+      remove_close_mouse = close.on_mouse(fn(received: mut event::MouseEvent) {
+        if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
+          match self.model.tabs.at(dynamic_index) {
+            reference => {
+              let _ = self.close(reference)
+            },
+            _ => (),
+          }
+          received.stop_propagation()
+        }
+      })
+    }
+    let remove_mouse = chip.on_mouse(fn(received: mut event::MouseEvent) {
+      if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
+        self.select_tab(index)
+        received.stop_propagation()
+      }
+    })
+    self.tab_bar.add(chip)
+    self.tab_chips.push(
+      TabChip{
+        root: chip,
+        remove_mouse: remove_mouse,
+        remove_close_mouse: remove_close_mouse,
+      },
+    )
+  }
+
+  private fn mut rebuild_tab_bar() {
+    self.clear_tab_chips()
+    self.add_tab_chip(0, "Inbox", false)
+    self.add_tab_chip(1, "My Issues", false)
+    for reference, index in self.model.tabs {
+      self.add_tab_chip(2 + index, reference.title, true)
+    }
+  }
+
+  private fn mut apply_selection(should_persist: Bool) {
+    self.inbox.root.set_style(
+      body_style(
+        self.inbox.root.style(),
+        match self.model.tab_index == 0 {
+          true => style::Display::flex,
+          false => style::Display::none,
+        },
+      ),
+    )
+    self.board.root.set_style(
+      body_style(
+        self.board.root.style(),
+        match self.model.tab_index == 1 {
+          true => style::Display::flex,
+          false => style::Display::none,
+        },
+      ),
+    )
+    for dynamic, index in self.dynamic_screens {
+      dynamic.screen.root.set_style(
+        body_style(
+          dynamic.screen.root.style(),
+          match self.model.tab_index == 2 + index {
+            true => style::Display::flex,
+            false => style::Display::none,
+          },
+        ),
+      )
+    }
+    self.rebuild_tab_bar()
+    self.hints.set(hints_for(self.model))
+    if should_persist {
+      self.persist(shell_model::snapshot(self.model))
+    }
+  }
+
+  fn mut focus_active() {
+    match self.model.tab_index {
+      0 => self.inbox.focus(),
+      1 => self.board.focus(),
+      _ => {
+        let dynamic_index = self.model.tab_index - 2
+        match self.dynamic_screens.at(dynamic_index) {
+          dynamic => dynamic.screen.focus(),
+          _ => (),
+        }
+      },
+    }
+  }
+
+  fn mut select_tab(index: Int) {
+    if not self.disposed {
+      self.model = shell_model::select_tab(self.model, index)
+      self.apply_selection(true)
+      self.focus_active()
+    }
+  }
+
+  fn mut open(reference: tabs::TabRef) {
+    if not self.disposed {
+      self.ensure_dynamic(reference)
+      self.model = shell_model::open(self.model, reference)
+      self.apply_selection(true)
+      self.focus_active()
+    }
+  }
+
+  fn mut retitle(reference: tabs::TabRef, title: Str) {
+    if (not self.disposed) and not shell_model::title(self.model, reference).or("") == title {
+      self.model = shell_model::retitle(self.model, reference, title)
+      self.apply_selection(true)
+    }
+  }
+
+  fn mut close(reference: tabs::TabRef) Bool {
+    if self.disposed {
+      false
+    } else {
+      mut found = false
+      for dynamic in self.dynamic_screens {
+        if tabs::same(dynamic.reference, reference) {
+          found = true
+        }
+      }
+      if not found {
+        false
+      } else {
+        let selected = shell_model::selected_dynamic(self.model)
+        let was_selected = match selected {
+          current => tabs::same(current, reference),
+          _ => false,
+        }
+        self.model = shell_model::close(self.model, reference)
+        let remaining = mut List::new<DynamicScreen>()
+        for dynamic in self.dynamic_screens {
+          if tabs::same(dynamic.reference, reference) {
+            dynamic.screen.dispose()
+            let _ = self.body_host.remove(dynamic.screen.root)
+            dynamic.screen.root.destroy(recursive: true)
+          } else {
+            remaining.push(dynamic)
+          }
+        }
+        self.dynamic_screens = remaining.@
+        self.apply_selection(true)
+        if was_selected {
+          self.focus_active()
+        }
+        true
+      }
+    }
+  }
+
+  fn mut close_current() Bool {
+    match shell_model::selected_dynamic(self.model) {
+      reference => self.close(reference),
+      _ => false,
+    }
+  }
+
+  private fn mut handle_active(received: mut event::KeyEvent) Bool {
+    match self.model.tab_index {
+      0 => self.inbox.handle_key(received),
+      1 => self.board.handle_key(received),
+      _ => {
+        let dynamic_index = self.model.tab_index - 2
+        match self.dynamic_screens.at(dynamic_index) {
+          dynamic => dynamic.screen.handle_key(received),
+          _ => false,
+        }
+      },
+    }
+  }
+
+  fn mut handle_key(received: mut event::KeyEvent) Bool {
+    if self.disposed or received.event_type == event::KeyEventType::release {
+      false
+    } else {
+      mut handled = true
+      match {
+        received.matches("tab", shift: true) => self.select_tab(shell_model::cycle_previous(self.model)),
+        received.matches("tab") => self.select_tab(shell_model::cycle_next(self.model)),
+        received.matches("1") => self.select_tab(0),
+        received.matches("2") => self.select_tab(1),
+        received.matches("escape") and shell_model::selected_is_dynamic(self.model) => {
+          let _ = self.close_current()
+        },
+        received.matches("?") or received.matches("?", shift: true) or received.matches("/", shift: true) => {
+          self.on_search()
+        },
+        received.matches("c") and self.model.tab_index <= 1 => self.on_create(),
+        _ => { handled = self.handle_active(received) },
+      }
+      if handled {
+        received.prevent_default()
+        received.stop_propagation()
+      }
+      handled
+    }
+  }
+
+  fn mut dispose() {
+    if not self.disposed {
+      self.disposed = true
+      self.clear_tab_chips()
+      self.inbox.dispose()
+      self.board.dispose()
+      for dynamic in self.dynamic_screens {
+        dynamic.screen.dispose()
+      }
+      self.dynamic_screens = []
+      self.dispose_persistence()
+    }
+  }
+}

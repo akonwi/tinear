@@ -1,0 +1,129 @@
+use cooper/box
+use cooper/event
+use cooper/runtime
+use cooper/selection
+use cooper/style
+use tinear/tui/modal_host
+use tinear/tui/scheduler
+use tinear/tui/theme as tinear_theme
+use tinear/tui/toast_host
+
+struct ApplicationShell {
+  root: mut box::Box,
+  screen_host: mut box::Box,
+  modal: mut modal_host::ModalHost,
+  toasts: mut toast_host::ToastHost,
+  current_screen: (mut box::Box)?,
+  current_dispose: fn()?,
+  context: mut runtime::Runtime,
+  disposed: Bool,
+}
+
+fn new(ctx: mut runtime::Runtime, palette: tinear_theme::Theme, schedule: scheduler::Schedule) mut ApplicationShell {
+  let root = box::new(
+    ctx,
+    styles: style::new(
+      position: style::Position::relative,
+      width: style::percent(100.0),
+      height: style::percent(100.0),
+    ),
+  )
+  let screen_host = box::new(
+    ctx,
+    styles: style::new(width: style::percent(100.0), height: style::percent(100.0)),
+  )
+  let modal = modal_host::new(ctx, palette)
+  let toasts = toast_host::new(ctx, palette, schedule)
+  root.add(screen_host)
+  root.add(toasts.root)
+  root.add(modal.root)
+  (mut ApplicationShell{
+    root: root,
+    screen_host: screen_host,
+    modal: modal,
+    toasts: toasts,
+    current_screen: Maybe::new<mut box::Box>(),
+    current_dispose: Maybe::new<fn()>(),
+    context: ctx,
+    disposed: false,
+  })
+}
+
+impl ApplicationShell {
+  fn mut set_screen(screen: mut box::Box, dispose: fn()) {
+    if self.disposed {
+      panic("cannot set the screen on a disposed application shell")
+    }
+    let previous = self.current_screen
+    let previous_dispose = self.current_dispose
+    self.current_screen = Maybe::new<mut box::Box>(screen)
+    self.current_dispose = Maybe::new<fn()>(dispose)
+
+    match previous {
+      old => {
+        let _ = self.screen_host.remove(old)
+      },
+      _ => (),
+    }
+    match previous_dispose {
+      cleanup => cleanup(),
+      _ => (),
+    }
+    match previous {
+      old => old.destroy(recursive: true),
+      _ => (),
+    }
+    self.screen_host.add(screen)
+  }
+
+  fn mut handle_key(received: mut event::KeyEvent, current_selection: selection::Selection?) Bool {
+    if self.disposed or received.event_type == event::KeyEventType::release {
+      false
+    } else if self.modal.is_open() and received.matches("escape") {
+      let _ = self.modal.dismiss()
+      received.prevent_default()
+      received.stop_propagation()
+      true
+    } else if received.matches("c", super: true) {
+      match current_selection {
+        selected => {
+          if not selected.selected_text.is_empty() {
+            self.context.clipboard.write(selected.selected_text)
+          }
+        },
+        _ => (),
+      }
+      received.prevent_default()
+      received.stop_propagation()
+      true
+    } else {
+      false
+    }
+  }
+
+  fn mut dispose() {
+    if not self.disposed {
+      self.disposed = true
+      let previous = self.current_screen
+      let previous_dispose = self.current_dispose
+      self.current_screen = Maybe::new<mut box::Box>()
+      self.current_dispose = Maybe::new<fn()>()
+      match previous {
+        old => {
+          let _ = self.screen_host.remove(old)
+        },
+        _ => (),
+      }
+      match previous_dispose {
+        cleanup => cleanup(),
+        _ => (),
+      }
+      match previous {
+        old => old.destroy(recursive: true),
+        _ => (),
+      }
+      let _ = self.modal.close()
+      self.toasts.dispose()
+    }
+  }
+}

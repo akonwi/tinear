@@ -55,5 +55,6 @@ Not commitments — a parking lot for what to build next.
 
 ## Suggested next
 
-**Issue creation**, then **priority/assignee pickers** — together they
-make tinear a complete daily driver rather than a viewer.
+Choose from the remaining discovery/polish items after the Cooper rewrite's
+parity and release gate is complete. Issue creation and all single-value field
+pickers are already shipped.

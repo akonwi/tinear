@@ -1,0 +1,189 @@
+use ard/testing as assertions
+
+use cooper/animation
+use cooper/style
+use cooper/testing
+use tinear/tui/theme
+use tinear/tui/toast_host
+
+test fn toast_host_stacks_and_expires_entries() Void!Str {
+  let application = testing::new(80, 24)
+  defer application.destroy()
+  let actions = mut List::new<fn()>()
+  let delays = mut List::new<Int>()
+  mut cancellations = 0
+  let host = toast_host::new(application.context, theme::new(), fn(delay: Int, action: fn()) fn() {
+    delays.push(delay)
+    actions.push(action)
+    fn() {
+      cancellations =+ 1
+    }
+  })
+  application.root.add(host.root)
+
+  let first = host.show("Saved", "Issue updated", toast_host::Variant::success, 5000)
+  let second = host.show("Warning", "Partial results", toast_host::Variant::info, 2500)
+  let first_timeline = host.entries.at(0).expect("success toast").timeline
+  let second_timeline = host.entries.at(1).expect("info toast").timeline
+  application.advance_time(0)
+  application.render()
+  try assertions::assert(
+    not application.frame().text().contains("Saved"),
+    "toast should begin clipped at the right edge",
+  )
+  application.advance_time(50)
+  application.render()
+  let intermediate = host.entries.at(0).expect("animating toast").root
+  let intermediate_x = intermediate.layout().screen.x
+  try assertions::assert(
+    intermediate.style().left.value > 0.0,
+    "toast should remain offset while sliding",
+  )
+  try testing::assert_contains(application.frame().text(), "✓")
+  application.advance_time(200)
+  application.render()
+  let settled = host.entries.at(0).expect("settled toast").root
+  try assertions::assert(
+    settled.style().left.value == 0.0 and settled.layout().screen.x < intermediate_x,
+    "toast should slide left into its final retained position",
+  )
+  try assertions::assert(host.entries.size() == 2, "toasts should stack")
+  try assertions::assert(
+    host.entries.at(0).expect("success toast").root.style().border == style::Border::rounded,
+    "toasts should use a rounded border",
+  )
+  try assertions::assert(
+    host.entries.at(
+      0,
+    ).expect(
+      "success toast",
+    ).root.style().border_color.expect("variant border").index.expect("success slot") == Uint8::from(2),
+    "toast border should use the variant color",
+  )
+  try assertions::assert(
+    host.entries.at(
+      0,
+    ).expect("success toast").root.style().background.expect("toast fill").terminal_default,
+    "toast should occlude content with the host background",
+  )
+  try assertions::assert(delays.at(0).or(0) == 5000, "first TTL should be scheduled")
+  try assertions::assert(delays.at(1).or(0) == 2500, "second TTL should be scheduled")
+  try testing::assert_contains(application.frame().text(), "✓ Saved")
+  try testing::assert_contains(application.frame().text(), "Warning")
+  let first_bounds = host.entries.at(0).expect("success toast").root.layout().screen
+  try assertions::assert(first_bounds.height == 4, "described toast should include two content rows")
+  try assertions::assert(
+    application.frame().cell(first_bounds.x + 4, first_bounds.y + 1).expect("title cell").grapheme == "S",
+    "toast title should occupy the first content row",
+  )
+  try assertions::assert(
+    application.frame().cell(first_bounds.x + 4, first_bounds.y + 2).expect("description cell").grapheme == "I",
+    "toast description should occupy the second content row",
+  )
+  try assertions::assert(
+    first_timeline.status() == animation::Status::completed and second_timeline.status() == animation::Status::completed,
+    "toast entrance timelines should settle",
+  )
+
+  (actions.at(0).expect("first expiry"))()
+  application.render()
+  try assertions::assert(host.entries.size() == 1, "first expiry should remove one toast")
+  try assertions::assert(
+    first_timeline.status() == animation::Status::destroyed,
+    "expiry should destroy its Timeline",
+  )
+  try assertions::assert(not host.dismiss(first), "expired toast should already be gone")
+  try assertions::assert(host.dismiss(second), "remaining toast should dismiss")
+  try assertions::assert(
+    second_timeline.status() == animation::Status::destroyed,
+    "dismissal should destroy its Timeline",
+  )
+  try assertions::assert(cancellations == 2, "expiry and dismissal should cancel both timers")
+  assertions::assert(host.root.style().display == style::Display::none, "empty host should hide")
+}
+
+test fn toast_host_disposal_suppresses_late_expiry() Void!Str {
+  let application = testing::new(60, 16)
+  defer application.destroy()
+  let actions = mut List::new<fn()>()
+  mut cancellations = 0
+  let host = toast_host::new(application.context, theme::new(), fn(delay: Int, action: fn()) fn() {
+    actions.push(action)
+    fn() {
+      cancellations =+ 1
+    }
+  })
+  application.root.add(host.root)
+  let _ = host.show("Error", "Network failed", toast_host::Variant::error, 5000)
+  let timeline = host.entries.at(0).expect("error toast").timeline
+  application.advance_time(0)
+  application.advance_time(50)
+  try assertions::assert(timeline.is_playing(), "toast Timeline should still be entering")
+  host.dispose()
+  (actions.at(0).expect("expiry"))()
+  application.advance_time(1000)
+  application.render()
+  try assertions::assert(host.disposed, "host should remain disposed")
+  try assertions::assert(cancellations == 1, "disposal should cancel pending expiry")
+  try assertions::assert(
+    timeline.status() == animation::Status::destroyed,
+    "disposal should destroy its Timeline",
+  )
+  try assertions::assert(
+    not application.animations_active(),
+    "destroyed toast should leave no animation work",
+  )
+  try assertions::assert(
+    not application.frame().text().contains("Network failed"),
+    "destroyed toast should not repaint",
+  )
+  assertions::assert(host.entries.size() == 0, "late expiry should not restore entries")
+}
+
+test fn toast_host_omits_the_description_row_when_empty() Void!Str {
+  let application = testing::new(60, 10)
+  defer application.destroy()
+  let host = toast_host::new(application.context, theme::new(), fn(delay: Int, action: fn()) fn() {
+    fn() {}
+  })
+  defer host.dispose()
+  application.root.add(host.root)
+  let _ = host.show("Title only", variant: toast_host::Variant::info, ttl_ms: 5000)
+  application.advance_time(0)
+  application.advance_time(250)
+  application.render()
+
+  try assertions::assert(
+    host.entries.at(0).expect("title-only toast").root.layout().screen.height == 3,
+    "title-only toast should omit the description row",
+  )
+  testing::assert_contains(application.frame().text(), "Title only")
+}
+
+test fn toast_host_clips_overflow_while_keeping_newest_entries_visible() Void!Str {
+  let application = testing::new(60, 10)
+  defer application.destroy()
+  let host = toast_host::new(application.context, theme::new(), fn(delay: Int, action: fn()) fn() {
+    fn() {}
+  })
+  defer host.dispose()
+  application.root.add(host.root)
+  mut index = 1
+  while index <= 10 {
+    let _ = host.show("Toast {index}", "stacked notification", toast_host::Variant::info, 5000)
+    index =+ 1
+  }
+  application.advance_time(0)
+  application.advance_time(250)
+  application.render()
+
+  try assertions::assert(
+    host.root.layout().screen.height <= 8,
+    "toast stack should respect its height cap",
+  )
+  try testing::assert_contains(application.frame().text(), "Toast 10")
+  assertions::assert(
+    not application.frame().text().contains("Toast 1 ·"),
+    "overflow should clip older entries before the newest toast",
+  )
+}

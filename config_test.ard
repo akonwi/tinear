@@ -1,0 +1,18 @@
+use ard/testing
+
+use tinear/config
+
+test fn config_parse_decodes_api_key() Void!Str {
+  let parsed = try config::parse("{{\"api_key\":\"lin_api_test\"}}")
+  try testing::assert(parsed.api_key == "lin_api_test", "API key should decode")
+  testing::assert(parsed.has_auth(), "non-empty API key should authenticate")
+}
+
+test fn config_parse_rejects_invalid_shape() Void!Str {
+  match config::parse("{{\"api_key\":42}}") {
+    ok(_) => testing::assert(false, "invalid config should fail"),
+    err(message) => {
+      testing::assert(message.starts_with("invalid config:"), "error should include context")
+    },
+  }
+}

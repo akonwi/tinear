@@ -1,7 +1,6 @@
 use decode
-use go:encoding/json
 use tinear/linear/client
-use tinear/tui/state
+use tinear/models/issue_state as state
 
 fn replace_common_mojibake(value: Str) Str {
   mut normalized = value
@@ -14,7 +13,7 @@ fn replace_common_mojibake(value: Str) Str {
   normalized = normalized.replace_all("â\u0080\u009d", "\"")
   normalized = normalized.replace_all("â\u0080¦", "...")
   normalized = normalized.replace_all("â\u0080¢", "*")
-  
+
   // Same mojibake after further Windows-1252-ish display/clipboard conversion.
   normalized = normalized.replace_all("â€”", "-")
   normalized = normalized.replace_all("â€“", "-")
@@ -24,7 +23,7 @@ fn replace_common_mojibake(value: Str) Str {
   normalized = normalized.replace_all("â€�", "\"")
   normalized = normalized.replace_all("â€¦", "...")
   normalized = normalized.replace_all("â€¢", "*")
-  
+
   // macOS/NS-style mojibake variants.
   normalized = normalized.replace_all("‚Äî", "-")
   normalized = normalized.replace_all("‚Äì", "-")
@@ -34,7 +33,7 @@ fn replace_common_mojibake(value: Str) Str {
   normalized = normalized.replace_all("‚Äù", "\"")
   normalized = normalized.replace_all("‚Ä¶", "...")
   normalized = normalized.replace_all("‚Ä¢", "*")
-  
+
   normalized.replace_all("\u00a0", " ")
 }
 
@@ -56,7 +55,7 @@ fn normalize_text(value: Str) Str {
   normalize_degraded_mojibake(replace_common_mojibake(value))
 }
 
-// Typed issue model used by the TUI.
+// Typed issue model shared by the retained controllers.
 struct Issue {
   id: Str,
   identifier: Str,
@@ -80,13 +79,18 @@ struct Issue {
 }
 
 // A column on the My Issues board: a workflow state name + the issues currently
-// in it. Unlike the legacy app's `tui/state::BoardColumn`, issues are decoded
-// into typed `Issue` structs.
+// in it. Issues are decoded into typed `Issue` structs at this model boundary.
 struct BoardColumn {
+  raw_state_name: Str,
   name: Str,
   state_type: Str,
   position: Float64,
   issues: [Issue],
+}
+
+private struct DecodedBoardIssue {
+  issue: Issue,
+  raw_state_name: Str,
 }
 
 struct Comment {
@@ -103,6 +107,7 @@ struct Comment {
 
 struct WorkflowState {
   id: Str,
+  raw_name: Str,
   name: Str,
   state_type: Str,
   position: Float64,
@@ -132,25 +137,11 @@ fn optional_str(data: Any, name: Str, fallback: Str) Str {
   }
 }
 
-fn nullable_str(data: Any, name: Str) Str? {
-  decode::run(
-    data,
-    decode::field(name, decode::nullable(decode::string)),
-  ).expect("nullable string field missing")
-}
-
 fn normalize_nullable_str(value: Str?) Str? {
   match value {
     v => Maybe::new(normalize_text(v)),
     _ => Maybe::new(),
   }
-}
-
-fn nullable_int(data: Any, name: Str) Int? {
-  decode::run(
-    data,
-    decode::field(name, decode::nullable(decode::int)),
-  ).expect("nullable int field missing")
 }
 
 fn nested_str(data: Any, name: Str, nested: Str, fallback: Str) Str {
@@ -218,60 +209,86 @@ fn cycle_label(raw: Any) Str {
   }
 }
 
-fn decode_issue(raw: Any) Issue {
-  let state = decode::run(raw, decode::field("state", decode::any)).expect("Missing state")
-  let team = decode::run(raw, decode::field("team", decode::any)).expect("Missing team")
-  Issue{
-    id: decode::run(raw, decode::field("id", decode::string)).expect("Missing issue.id"),
-    identifier: decode::run(raw, decode::field("identifier", decode::string)).expect("Missing issue.identifier"),
-    title: normalize_text(
-      decode::run(raw, decode::field("title", decode::string)).expect("Missing issue.title"),
-    ),
-    description: normalize_nullable_str(nullable_str(raw, "description")),
-    priority: nullable_int(raw, "priority"),
-    state_id: decode::run(state, decode::field("id", decode::string)).expect("Missing state.id"),
-    state_name: normalize_text(
-      decode::run(state, decode::field("name", decode::string)).expect("Missing state.name"),
-    ),
-    state_type: decode::run(state, decode::field("type", decode::string)).expect("Missing state.type"),
-    state_position: decode::run(state, decode::field("position", decode::float)).expect("Missing state.position"),
-    team_id: decode::run(team, decode::field("id", decode::string)).expect("Missing team.id"),
-    team_name: normalize_text(decode::run(team, decode::field("name", decode::string)).expect("Missing team.name")),
-    team_key: decode::run(team, decode::field("key", decode::string)).expect("Missing team.key"),
-    project_id: nested_str(raw, "project", "id", ""),
-    project_name: normalize_text(nested_str(raw, "project", "name", "—")),
-    assignee_id: nested_str(raw, "assignee", "id", ""),
-    assignee_name: normalize_text(user_display_name_opt(raw, "assignee")),
-    cycle_id: cycle_id(raw),
-    cycle_label: cycle_label(raw),
-    url: optional_str(raw, "url", ""),
+private fn validate_issue_identity(id: Str, identifier: Str) Void!Str {
+  match id.trim().is_empty() or identifier.trim().is_empty() {
+    true => Result::err("Issue search identity cannot be empty"),
+    false => Result::ok(()),
   }
 }
 
-fn decode_column(raw: state::BoardColumn) BoardColumn {
-  let issues: mut [Issue] = mut []
-  for issue in raw.issues {
-    issues.push(decode_issue(issue))
+fn decode_issue(raw: Any) Issue!Str {
+  let state = try decode::run(raw, decode::field("state", decode::any)) -> error { Result::err(error.to_str()) }
+  let team = try decode::run(raw, decode::field("team", decode::any)) -> error { Result::err(error.to_str()) }
+  let id = try decode::run(raw, decode::field("id", decode::string)) -> error { Result::err(error.to_str()) }
+  let identifier = try decode::run(raw, decode::field("identifier", decode::string)) -> error {
+    Result::err(error.to_str())
   }
-  BoardColumn{
-    name: normalize_text(raw.name),
-    state_type: raw.state_type,
-    position: raw.position,
-    issues: issues.@,
+  let title = try decode::run(raw, decode::field("title", decode::string)) -> error {
+    Result::err(error.to_str())
   }
+  try validate_issue_identity(id, identifier)
+  let description = try decode::run(raw, decode::field("description", decode::nullable(decode::string))) -> error {
+    Result::err(error.to_str())
+  }
+  let priority = try decode::run(raw, decode::field("priority", decode::nullable(decode::int))) -> error {
+    Result::err(error.to_str())
+  }
+  let state_id = try decode::run(state, decode::field("id", decode::string)) -> error { Result::err(error.to_str()) }
+  let state_name = try decode::run(state, decode::field("name", decode::string)) -> error {
+    Result::err(error.to_str())
+  }
+  let state_type = try decode::run(state, decode::field("type", decode::string)) -> error {
+    Result::err(error.to_str())
+  }
+  let state_position = try decode::run(state, decode::field("position", decode::float)) -> error {
+    Result::err(error.to_str())
+  }
+  let team_id = try decode::run(team, decode::field("id", decode::string)) -> error { Result::err(error.to_str()) }
+  let team_name = try decode::run(team, decode::field("name", decode::string)) -> error {
+    Result::err(error.to_str())
+  }
+  let team_key = try decode::run(team, decode::field("key", decode::string)) -> error { Result::err(error.to_str()) }
+  Result::ok(
+    Issue{
+      id: id,
+      identifier: identifier,
+      title: normalize_text(title),
+      description: normalize_nullable_str(description),
+      priority: priority,
+      state_id: state_id,
+      state_name: normalize_text(state_name),
+      state_type: state_type,
+      state_position: state_position,
+      team_id: team_id,
+      team_name: normalize_text(team_name),
+      team_key: team_key,
+      project_id: nested_str(raw, "project", "id", ""),
+      project_name: normalize_text(nested_str(raw, "project", "name", "—")),
+      assignee_id: nested_str(raw, "assignee", "id", ""),
+      assignee_name: normalize_text(user_display_name_opt(raw, "assignee")),
+      cycle_id: cycle_id(raw),
+      cycle_label: cycle_label(raw),
+      url: optional_str(raw, "url", ""),
+    },
+  )
 }
 
-fn decode_comment(raw: Any) Comment {
-  Comment{
-    id: decode::run(raw, decode::field("id", decode::string)).expect("Missing comment.id"),
-    author: normalize_text(comment_author(raw)),
-    created_at: decode::run(raw, decode::field("createdAt", decode::string)).expect("Missing comment.createdAt"),
-    body: normalize_text(
-      decode::run(raw, decode::field("body", decode::string)).expect("Missing comment.body"),
-    ),
-    parent_id: nested_str(raw, "parent", "id", ""),
-    depth: 0,
+fn decode_comment(raw: Any) Comment!Str {
+  let id = try decode::run(raw, decode::field("id", decode::string)) -> error { Result::err(error.to_str()) }
+  let created_at = try decode::run(raw, decode::field("createdAt", decode::string)) -> error {
+    Result::err(error.to_str())
   }
+  let body = try decode::run(raw, decode::field("body", decode::string)) -> error { Result::err(error.to_str()) }
+  Result::ok(
+    Comment{
+      id: id,
+      author: normalize_text(comment_author(raw)),
+      created_at: created_at,
+      body: normalize_text(body),
+      parent_id: nested_str(raw, "parent", "id", ""),
+      depth: 0,
+    },
+  )
 }
 
 // Arrange comments into threaded display order: each top-level comment
@@ -300,46 +317,63 @@ fn thread_comments(comments: [Comment]) [Comment] {
   ordered.@
 }
 
-fn decode_workflow_state(raw: Any) WorkflowState {
-  WorkflowState{
-    id: decode::run(raw, decode::field("id", decode::string)).expect("Missing workflow state.id"),
-    name: normalize_text(
-      decode::run(raw, decode::field("name", decode::string)).expect("Missing workflow state.name"),
-    ),
-    state_type: decode::run(raw, decode::field("type", decode::string)).expect("Missing workflow state.type"),
-    position: decode::run(raw, decode::field("position", decode::float)).expect("Missing workflow state.position"),
+fn decode_workflow_state(raw: Any) WorkflowState!Str {
+  let id = try decode::run(raw, decode::field("id", decode::string)) -> error { Result::err(error.to_str()) }
+  let name = try decode::run(raw, decode::field("name", decode::string)) -> error { Result::err(error.to_str()) }
+  let state_type = try decode::run(raw, decode::field("type", decode::string)) -> error { Result::err(error.to_str()) }
+  let position = try decode::run(raw, decode::field("position", decode::float)) -> error {
+    Result::err(error.to_str())
   }
-}
-
-fn decode_cycle(raw: Any) Cycle {
-  let name = decode::run(
-    raw,
-    decode::field("name", decode::nullable(decode::string)),
-  ).expect("Missing cycle.name")
-  Cycle{
-    id: decode::run(raw, decode::field("id", decode::string)).expect("Missing cycle.id"),
-    number: decode::run(raw, decode::field("number", decode::int)).expect("Missing cycle.number"),
-    name: match name {
-      n => normalize_text(n),
-      _ => "",
+  Result::ok(
+    WorkflowState{
+      id: id,
+      raw_name: name,
+      name: normalize_text(name),
+      state_type: state_type,
+      position: position,
     },
-    starts_at: optional_str(raw, "startsAt", ""),
-  }
+  )
 }
 
-fn fetch_viewer(api_key: Str) Any!Str {
+fn decode_cycle(raw: Any) Cycle!Str {
+  let id = try decode::run(raw, decode::field("id", decode::string)) -> error { Result::err(error.to_str()) }
+  let number = try decode::run(raw, decode::field("number", decode::int)) -> error { Result::err(error.to_str()) }
+  let name = try decode::run(raw, decode::field("name", decode::nullable(decode::string))) -> error {
+    Result::err(error.to_str())
+  }
+  Result::ok(
+    Cycle{
+      id: id,
+      number: number,
+      name: match name {
+        n => normalize_text(n),
+        _ => "",
+      },
+      starts_at: optional_str(raw, "startsAt", ""),
+    },
+  )
+}
+
+fn decode_viewer_id(data: Any) Str!Str {
+  decode::run(
+    data,
+    decode::path(["viewer", "id"], decode::string),
+  ).map_err(fn(error) {
+    error.to_str()
+  })
+}
+
+fn fetch_viewer_id(api_key: Str) Str!Str {
   let data = try client::graphql(api_key, `query {{ viewer {{ id name displayName email }} }}`)
-  let viewer = decode::run(data, decode::field("viewer", decode::any)).expect("Missing viewer")
-  Result::ok(viewer)
+  decode_viewer_id(data)
 }
 
 fn update_state(api_key: Str, issue_id: Str, state_id: Str) Void!Str {
-  let mutation = `mutation {{ issueUpdate(id: "{issue_id}", input: {{ stateId: "{state_id}" }}) {{ success }} }}`
+  let mutation = `mutation {{ issueUpdate(id: {client::string_literal(issue_id)}, input: {{ stateId: {client::string_literal(state_id)} }}) {{ success }} }}`
   let data = try client::graphql(api_key, mutation)
-  let success = decode::run(
-    data,
-    decode::path(["issueUpdate", "success"], decode::boolean),
-  ).expect("Missing issueUpdate.success")
+  let success = try decode::run(data, decode::path(["issueUpdate", "success"], decode::boolean)) -> error {
+    Result::err(error.to_str())
+  }
   match success {
     true => Result::ok(()),
     false => Result::err("issueUpdate returned success=false"),
@@ -347,16 +381,12 @@ fn update_state(api_key: Str, issue_id: Str, state_id: Str) Void!Str {
 }
 
 fn update_cycle(api_key: Str, issue_id: Str, cycle_id: Str) Void!Str {
-  let cycle_part = match cycle_id.is_empty() {
-    true => "cycleId: null",
-    false => "cycleId: \"{cycle_id}\"",
-  }
-  let mutation = `mutation {{ issueUpdate(id: "{issue_id}", input: {{ {cycle_part} }}) {{ success }} }}`
+  let cycle_value = client::nullable_string_literal(cycle_id)
+  let mutation = `mutation {{ issueUpdate(id: {client::string_literal(issue_id)}, input: {{ cycleId: {cycle_value} }}) {{ success }} }}`
   let data = try client::graphql(api_key, mutation)
-  let success = decode::run(
-    data,
-    decode::path(["issueUpdate", "success"], decode::boolean),
-  ).expect("Missing issueUpdate.success")
+  let success = try decode::run(data, decode::path(["issueUpdate", "success"], decode::boolean)) -> error {
+    Result::err(error.to_str())
+  }
   match success {
     true => Result::ok(()),
     false => Result::err("issueUpdate returned success=false"),
@@ -366,64 +396,64 @@ fn update_cycle(api_key: Str, issue_id: Str, cycle_id: Str) Void!Str {
 // Empty parent_id posts a top-level comment; otherwise a threaded
 // reply. Linear threads are one level deep, so parent_id must be a
 // top-level comment's id.
-fn create_comment(api_key: Str, issue_id: Str, body: Str, parent_id: Str) Void!Str {
-  mut body_bytes = json::Marshal(body).expect("encode body")
-  let body_json = Str::from(body_bytes)
-  mut input = "issueId: \"{issue_id}\", body: {body_json}"
+fn create_comment(api_key: Str, issue_id: Str, body: Str, parent_id: Str) Str!Str {
+  mut input = "issueId: {client::string_literal(issue_id)}, body: {client::string_literal(body)}"
   if not parent_id.is_empty() {
-    mut parent_bytes = json::Marshal(parent_id).expect("encode parent id")
-    let parent_json = Str::from(parent_bytes)
-    input = "{input}, parentId: {parent_json}"
+    input = "{input}, parentId: {client::string_literal(parent_id)}"
   }
-  let mutation = `mutation {{ commentCreate(input: {{ {input} }}) {{ success }} }}`
+  let mutation = `mutation {{ commentCreate(input: {{ {input} }}) {{ success comment {{ id }} }} }}`
   let data = try client::graphql(api_key, mutation)
-  let success = decode::run(
-    data,
-    decode::path(["commentCreate", "success"], decode::boolean),
-  ).expect("Missing commentCreate.success")
+  let success = try decode::run(data, decode::path(["commentCreate", "success"], decode::boolean)) -> error {
+    Result::err(error.to_str())
+  }
   match success {
-    true => Result::ok(()),
+    true => {
+      // The mutation already landed when success=true. A missing ID must not
+      // turn that success into a retryable failure and duplicate the comment.
+      let comment_id = decode::run(
+        data,
+        decode::path(["commentCreate", "comment", "id"], decode::string),
+      ).or("")
+      Result::ok(comment_id)
+    },
     false => Result::err("commentCreate returned success=false"),
   }
 }
 
 fn fetch_issue_comments(api_key: Str, issue_id: Str) [Any]!Str {
-  let query = `query {{ issue(id: "{issue_id}") {{ comments(first: 50) {{ nodes {{ id body createdAt parent {{ id }} user {{ name displayName }} botActor {{ name }} }} }} }} }}`
+  let query = `query {{ issue(id: {client::string_literal(issue_id)}) {{ comments(first: 50) {{ nodes {{ id body createdAt parent {{ id }} user {{ name displayName }} botActor {{ name }} }} }} }} }}`
   let data = try client::graphql(api_key, query)
-  let nodes = decode::run(
-    data,
-    decode::path(["issue", "comments", "nodes"], decode::list(decode::any)),
-  ).expect("Missing issue.comments.nodes")
+  let nodes = try decode::run(data, decode::path(["issue", "comments", "nodes"], decode::list(decode::any))) -> error {
+    Result::err(error.to_str())
+  }
   Result::ok(nodes)
 }
 
 fn fetch_team_states(api_key: Str, team_id: Str) [Any]!Str {
-  let query = `query {{ team(id: "{team_id}") {{ states {{ nodes {{ id name type position }} }} }} }}`
+  let query = `query {{ team(id: {client::string_literal(team_id)}) {{ states {{ nodes {{ id name type position }} }} }} }}`
   let data = try client::graphql(api_key, query)
-  let nodes = decode::run(
-    data,
-    decode::path(["team", "states", "nodes"], decode::list(decode::any)),
-  ).expect("Missing team.states.nodes")
+  let nodes = try decode::run(data, decode::path(["team", "states", "nodes"], decode::list(decode::any))) -> error {
+    Result::err(error.to_str())
+  }
   Result::ok(nodes)
 }
 
 fn fetch_team_cycles(api_key: Str, team_id: Str) TeamCyclesResult!Str {
-  let query = `query {{ team(id: "{team_id}") {{ activeCycle {{ number }} cycles(first: 50) {{ nodes {{ id number name startsAt }} }} }} }}`
+  let query = `query {{ team(id: {client::string_literal(team_id)}) {{ activeCycle {{ number }} cycles(first: 50) {{ nodes {{ id number name startsAt }} }} }} }}`
   let data = try client::graphql(api_key, query)
-  let team_obj = decode::run(data, decode::field("team", decode::any)).expect("Missing team")
-  let nodes = decode::run(
-    team_obj,
-    decode::path(["cycles", "nodes"], decode::list(decode::any)),
-  ).expect("Missing team.cycles.nodes")
-  
+  let team_obj = try decode::run(data, decode::field("team", decode::any)) -> error { Result::err(error.to_str()) }
+  let nodes = try decode::run(team_obj, decode::path(["cycles", "nodes"], decode::list(decode::any))) -> error {
+    Result::err(error.to_str())
+  }
+
   let active_number = match decode::run(team_obj, decode::path(["activeCycle", "number"], decode::nullable(decode::int))) {
     ok(value) => value,
     err(_) => Maybe::new(),
   }
-  
+
   let cycles: mut [Cycle] = mut []
   for raw in nodes {
-    cycles.push(decode_cycle(raw))
+    cycles.push(try decode_cycle(raw))
   }
   Result::ok(TeamCyclesResult{active_cycle_number: active_number, cycles: cycles.@})
 }
@@ -433,25 +463,22 @@ fn issue_fields() Str {
 }
 
 fn fetch_single_issue(api_key: Str, issue_id: Str) Any!Str {
-  let query = `query {{ issue(id: "{issue_id}") {{ {issue_fields()} }} }}`
+  let query = `query {{ issue(id: {client::string_literal(issue_id)}) {{ {issue_fields()} }} }}`
   let data = try client::graphql(api_key, query)
-  let issue = decode::run(data, decode::field("issue", decode::any)).expect("Missing issue")
+  let issue = try decode::run(data, decode::field("issue", decode::any)) -> error { Result::err(error.to_str()) }
   Result::ok(issue)
 }
 
 fn fetch_issue_search(api_key: Str, term: Str) [Any]!Str {
-  mut q_bytes = json::Marshal(term).expect("encode search query")
-  let q = Str::from(q_bytes)
-  let query = `query {{ searchIssues(term: {q}, first: 20) {{ nodes {{ {issue_fields()} }} }} }}`
+  let query = `query {{ searchIssues(term: {client::string_literal(term)}, first: 20) {{ nodes {{ {issue_fields()} }} }} }}`
   let data = try client::graphql(api_key, query)
-  let nodes = decode::run(
-    data,
-    decode::path(["searchIssues", "nodes"], decode::list(decode::any)),
-  ).expect("Missing searchIssues.nodes")
+  let nodes = try decode::run(data, decode::path(["searchIssues", "nodes"], decode::list(decode::any))) -> error {
+    Result::err(error.to_str())
+  }
   Result::ok(nodes)
 }
 
-fn sort_columns_by_position(cols: [state::BoardColumn]) [state::BoardColumn] {
+fn sort_columns_by_position(cols: [BoardColumn]) [BoardColumn] {
   let n = cols.size()
   if n < 2 {
     cols
@@ -477,91 +504,87 @@ fn sort_columns_by_position(cols: [state::BoardColumn]) [state::BoardColumn] {
   }
 }
 
-fn fetch_board(api_key: Str, my_id: Str) [state::BoardColumn]!Str {
+fn fetch_board(api_key: Str, my_id: Str) [BoardColumn]!Str {
+  let viewer_id = client::string_literal(my_id)
   let query = `
     query {{
       issues(
         first: 200
         filter: {{
-          assignee: {{ id: {{ eq: "{my_id}" }} }}
+          assignee: {{ id: {{ eq: {viewer_id} }} }}
           state: {{ type: {{ nin: ["canceled"] }} }}
         }}
       ) {{
         nodes {{
-          id
-          identifier
-          title
-          description
-          priority
-          state {{ id name type position }}
-          team {{ id name key }}
-          project {{ name }}
-          assignee {{ name displayName }}
-          cycle {{ id number name }}
+          {issue_fields()}
         }}
       }}
     }}
     `
   let data = try client::graphql(api_key, query)
-  let raw_issues = decode::run(
-    data,
-    decode::path(["issues", "nodes"], decode::list(decode::any)),
-  ).expect("Missing issues.nodes")
-  
+  decode_board(data)
+}
+
+fn decode_board(data: Any) [BoardColumn]!Str {
+  let raw_issues = try decode::run(data, decode::path(["issues", "nodes"], decode::list(decode::any))) -> error {
+    Result::err(error.to_str())
+  }
+  let decoded_issues = mut List::new<DecodedBoardIssue>()
+  for raw in raw_issues {
+    let raw_state_name = try decode::run(raw, decode::path(["state", "name"], decode::string)) -> error {
+      Result::err(error.to_str())
+    }
+    decoded_issues.push(
+      DecodedBoardIssue{issue: try decode_issue(raw), raw_state_name: raw_state_name},
+    )
+  }
+  let all_issues = decoded_issues.@
+
   let state_names: mut [Str] = mut []
   let state_types: mut [Str] = mut []
   let state_positions: mut [Float64] = mut []
-  for issue in raw_issues {
-    let s = decode::run(issue, decode::field("state", decode::any)).expect("Missing state")
-    let sname = decode::run(s, decode::field("name", decode::string)).expect("Missing state.name")
-    if not state::is_hidden_state(sname) {
+  for decoded in all_issues {
+    if not state::is_hidden_state(decoded.raw_state_name) {
       mut seen = false
       for existing in state_names {
-        if existing == sname {
+        if existing == decoded.raw_state_name {
           seen = true
         }
       }
       if not seen {
-        state_names.push(sname)
-        state_types.push(
-          decode::run(s, decode::field("type", decode::string)).expect("Missing state.type"),
-        )
-        state_positions.push(
-          decode::run(s, decode::field("position", decode::float)).expect("Missing state.position"),
-        )
+        state_names.push(decoded.raw_state_name)
+        state_types.push(decoded.issue.state_type)
+        state_positions.push(decoded.issue.state_position)
       }
     }
   }
-  
-  let columns: mut [state::BoardColumn] = mut []
+
+  let columns: mut [BoardColumn] = mut []
   for sname, idx in state_names {
     let is_completed = state_types.at(idx).expect("parallel list") == "completed"
     let cap = match is_completed {
       true => 10,
       false => 200,
     }
-    let col_issues: mut [Any] = mut []
+    let col_issues: mut [Issue] = mut []
     mut count = 0
-    for issue in raw_issues {
-      let iss_name = decode::run(
-        issue,
-        decode::path(["state", "name"], decode::string),
-      ).expect("Missing state.name on issue")
-      if iss_name == sname and count < cap {
-        col_issues.push(issue)
+    for decoded in all_issues {
+      if decoded.raw_state_name == sname and count < cap {
+        col_issues.push(decoded.issue)
         count = count + 1
       }
     }
     columns.push(
-      state::BoardColumn{
-        name: sname,
+      BoardColumn{
+        raw_state_name: sname,
+        name: normalize_text(sname),
         state_type: state_types.at(idx).expect("parallel list"),
         position: state_positions.at(idx).expect("parallel list"),
         issues: col_issues.@,
       },
     )
   }
-  
+
   Result::ok(sort_columns_by_position(columns.@))
 }
 
@@ -569,7 +592,7 @@ fn load_comments(api_key: Str, issue_id: Str) [Comment]!Str {
   let raw_comments = try fetch_issue_comments(api_key, issue_id)
   let comments: mut [Comment] = mut []
   for raw in raw_comments {
-    comments.push(decode_comment(raw))
+    comments.push(try decode_comment(raw))
   }
   Result::ok(thread_comments(comments.@))
 }
@@ -578,7 +601,7 @@ fn load_team_states(api_key: Str, team_id: Str) [WorkflowState]!Str {
   let raw_states = try fetch_team_states(api_key, team_id)
   let states: mut [WorkflowState] = mut []
   for raw in raw_states {
-    states.push(decode_workflow_state(raw))
+    states.push(try decode_workflow_state(raw))
   }
   Result::ok(states.@)
 }
@@ -589,34 +612,25 @@ fn load_team_cycles(api_key: Str, team_id: Str) TeamCyclesResult!Str {
 
 fn load_issue(api_key: Str, issue_id: Str) Issue!Str {
   let raw = try fetch_single_issue(api_key, issue_id)
-  Result::ok(decode_issue(raw))
+  decode_issue(raw)
 }
 
 fn search(api_key: Str, term: Str) [Issue]!Str {
   let raw_issues = try fetch_issue_search(api_key, term)
   let results: mut [Issue] = mut []
   for raw in raw_issues {
-    results.push(decode_issue(raw))
+    results.push(try decode_issue(raw))
   }
   Result::ok(results.@)
 }
 
 fn load(api_key: Str) [BoardColumn]!Str {
-  let viewer = try fetch_viewer(api_key)
-  let viewer_id = decode::run(
-    viewer,
-    decode::field("id", decode::string),
-  ).expect("Missing viewer id")
-  let raw_columns = try fetch_board(api_key, viewer_id)
-  let columns: mut [BoardColumn] = mut []
-  for col in raw_columns {
-    columns.push(decode_column(col))
-  }
-  Result::ok(columns.@)
+  let viewer_id = try fetch_viewer_id(api_key)
+  fetch_board(api_key, viewer_id)
 }
 
 fn update_priority(api_key: Str, issue_id: Str, priority: Int) Void!Str {
-  let mutation = `mutation {{ issueUpdate(id: "{issue_id}", input: {{ priority: {priority} }}) {{ success }} }}`
+  let mutation = `mutation {{ issueUpdate(id: {client::string_literal(issue_id)}, input: {{ priority: {priority} }}) {{ success }} }}`
   let data = try client::graphql(api_key, mutation)
   let success = try decode::run(data, decode::path(["issueUpdate", "success"], decode::boolean)) -> e {
     Result::err(e.to_str())
@@ -629,11 +643,8 @@ fn update_priority(api_key: Str, issue_id: Str, priority: Int) Void!Str {
 
 // Empty assignee_id unassigns (GraphQL null).
 fn update_assignee(api_key: Str, issue_id: Str, assignee_id: Str) Void!Str {
-  let value = match assignee_id.is_empty() {
-    true => "null",
-    false => "\"{assignee_id}\"",
-  }
-  let mutation = `mutation {{ issueUpdate(id: "{issue_id}", input: {{ assigneeId: {value} }}) {{ success }} }}`
+  let value = client::nullable_string_literal(assignee_id)
+  let mutation = `mutation {{ issueUpdate(id: {client::string_literal(issue_id)}, input: {{ assigneeId: {value} }}) {{ success }} }}`
   let data = try client::graphql(api_key, mutation)
   let success = try decode::run(data, decode::path(["issueUpdate", "success"], decode::boolean)) -> e {
     Result::err(e.to_str())
@@ -646,11 +657,8 @@ fn update_assignee(api_key: Str, issue_id: Str, assignee_id: Str) Void!Str {
 
 // Empty project_id clears the project (GraphQL null).
 fn update_project(api_key: Str, issue_id: Str, project_id: Str) Void!Str {
-  let value = match project_id.is_empty() {
-    true => "null",
-    false => "\"{project_id}\"",
-  }
-  let mutation = `mutation {{ issueUpdate(id: "{issue_id}", input: {{ projectId: {value} }}) {{ success }} }}`
+  let value = client::nullable_string_literal(project_id)
+  let mutation = `mutation {{ issueUpdate(id: {client::string_literal(issue_id)}, input: {{ projectId: {value} }}) {{ success }} }}`
   let data = try client::graphql(api_key, mutation)
   let success = try decode::run(data, decode::path(["issueUpdate", "success"], decode::boolean)) -> e {
     Result::err(e.to_str())
@@ -668,7 +676,7 @@ struct Member {
 
 // Active members of a team, for the assignee picker.
 fn fetch_team_members(api_key: Str, team_id: Str) [Member]!Str {
-  let query = `query {{ team(id: "{team_id}") {{ members(first: 250) {{ nodes {{ id name displayName active }} }} }} }}`
+  let query = `query {{ team(id: {client::string_literal(team_id)}) {{ members(first: 250) {{ nodes {{ id name displayName active }} }} }} }}`
   let data = try client::graphql(api_key, query)
   let nodes = try decode::run(data, decode::path(["team", "members", "nodes"], decode::list(decode::any))) -> e {
     Result::err(e.to_str())
@@ -698,9 +706,13 @@ struct Project {
   name: Str,
 }
 
+fn project_is_available(project_state: Str) Bool {
+  (not project_state == "completed") and not project_state == "canceled"
+}
+
 // Projects available to a team, for the project picker.
 fn fetch_team_projects(api_key: Str, team_id: Str) [Project]!Str {
-  let query = `query {{ team(id: "{team_id}") {{ projects(first: 250) {{ nodes {{ id name state }} }} }} }}`
+  let query = `query {{ team(id: {client::string_literal(team_id)}) {{ projects(first: 250) {{ nodes {{ id name state }} }} }} }}`
   let data = try client::graphql(api_key, query)
   let nodes = try decode::run(data, decode::path(["team", "projects", "nodes"], decode::list(decode::any))) -> e {
     Result::err(e.to_str())
@@ -709,7 +721,7 @@ fn fetch_team_projects(api_key: Str, team_id: Str) [Project]!Str {
   for node in nodes {
     // Hide finished projects; issues shouldn't be filed into them.
     let project_state = decode::run(node, decode::field("state", decode::string)).or("")
-    if not project_state == "completed" or project_state == "canceled" {
+    if project_is_available(project_state) {
       let id = try decode::run(node, decode::field("id", decode::string)) -> e { Result::err(e.to_str()) }
       let name = try decode::run(node, decode::field("name", decode::string)) -> e { Result::err(e.to_str()) }
       projects.push(Project{id: id, name: normalize_text(name)})
@@ -719,11 +731,7 @@ fn fetch_team_projects(api_key: Str, team_id: Str) [Project]!Str {
 }
 
 fn update_description(api_key: Str, issue_id: Str, description: Str) Void!Str {
-  mut desc_bytes = json::Marshal(description).expect("encode description")
-  let desc_json = Str::from(desc_bytes)
-  mut id_bytes = json::Marshal(issue_id).expect("encode issue id")
-  let id_json = Str::from(id_bytes)
-  let mutation = `mutation {{ issueUpdate(id: {id_json}, input: {{ description: {desc_json} }}) {{ success }} }}`
+  let mutation = `mutation {{ issueUpdate(id: {client::string_literal(issue_id)}, input: {{ description: {client::string_literal(description)} }}) {{ success }} }}`
   let data = try client::graphql(api_key, mutation)
   let success = try decode::run(data, decode::path(["issueUpdate", "success"], decode::boolean)) -> e {
     Result::err(e.to_str())
@@ -742,6 +750,27 @@ struct Team {
   key: Str,
 }
 
+private fn validate_team_identity(id: Str, key: Str) Void!Str {
+  match id.trim().is_empty() or key.trim().is_empty() {
+    true => Result::err("Team identity cannot be empty"),
+    false => Result::ok(()),
+  }
+}
+
+fn try_decode_team(raw: Any) Team!Str {
+  let id = try decode::run(raw, decode::field("id", decode::string)) -> error { Result::err(error.to_str()) }
+  let name = try decode::run(raw, decode::field("name", decode::string)) -> error { Result::err(error.to_str()) }
+  let key = try decode::run(raw, decode::field("key", decode::string)) -> error { Result::err(error.to_str()) }
+  try validate_team_identity(id, key)
+  Result::ok(
+    Team{
+      id: id,
+      name: normalize_text(name),
+      key: key,
+    },
+  )
+}
+
 fn fetch_teams(api_key: Str) [Team]!Str {
   // first: 250 is Linear's page-size cap; workspaces beyond that need
   // pagination (unlikely for now, but the default page is smaller).
@@ -752,16 +781,7 @@ fn fetch_teams(api_key: Str) [Team]!Str {
   }
   let teams: mut [Team] = mut []
   for node in nodes {
-    let id = try decode::run(node, decode::field("id", decode::string)) -> e { Result::err(e.to_str()) }
-    let name = try decode::run(node, decode::field("name", decode::string)) -> e { Result::err(e.to_str()) }
-    let key = try decode::run(node, decode::field("key", decode::string)) -> e { Result::err(e.to_str()) }
-    teams.push(
-      Team{
-        id: id,
-        name: normalize_text(name),
-        key: key,
-      },
-    )
+    teams.push(try try_decode_team(node))
   }
   Result::ok(teams.@)
 }
@@ -769,15 +789,9 @@ fn fetch_teams(api_key: Str) [Team]!Str {
 // Create an issue and report the new identifier (e.g. "CCA-123") so the
 // caller can open it as a tab. Description may be empty.
 fn create_issue(api_key: Str, team_id: Str, title: Str, description: Str) Str!Str {
-  mut title_bytes = json::Marshal(title).expect("encode title")
-  let title_json = Str::from(title_bytes)
-  mut team_bytes = json::Marshal(team_id).expect("encode team id")
-  let team_json = Str::from(team_bytes)
-  mut input = "teamId: {team_json}, title: {title_json}"
+  mut input = "teamId: {client::string_literal(team_id)}, title: {client::string_literal(title)}"
   if not description.trim().is_empty() {
-    mut desc_bytes = json::Marshal(description).expect("encode description")
-    let desc_json = Str::from(desc_bytes)
-    input = "{input}, description: {desc_json}"
+    input = "{input}, description: {client::string_literal(description)}"
   }
   let mutation = `mutation {{ issueCreate(input: {{ {input} }}) {{ success issue {{ identifier }} }} }}`
   let data = try client::graphql(api_key, mutation)
@@ -789,9 +803,12 @@ fn create_issue(api_key: Str, team_id: Str, title: Str, description: Str) Str!St
     // GraphQL errors, which client::graphql already extracts; a bare
     // success=false without one is unexpected.
     true => {
-      let identifier = try decode::run(data, decode::path(["issueCreate", "issue", "identifier"], decode::string)) -> e {
-        Result::err(e.to_str())
-      }
+      // The mutation already landed when success=true. Missing response
+      // metadata must not make the form retry and create a duplicate issue.
+      let identifier = decode::run(
+        data,
+        decode::path(["issueCreate", "issue", "identifier"], decode::string),
+      ).or("").trim()
       Result::ok(identifier)
     },
     false => Result::err("Linear rejected the issue (no error detail returned)"),

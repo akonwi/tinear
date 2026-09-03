@@ -35,15 +35,18 @@ fn get_config_path() Str!Str {
 
 fn write(api_key: Str) Str!Str {
   let config_dir = try get_config_dir()
-  // 0o755: rwxr-xr-x. MkdirAll is a no-op when the directory exists.
-  try os::MkdirAll(config_dir, 493).map_err(error_message)
-  
+  // Keep the credential directory and file private to the current user.
+  try os::MkdirAll(config_dir, 448).map_err(error_message)
+  try os::Chmod(config_dir, 448).map_err(error_message)
+
   let encoded = try json::Marshal(Config{api_key: api_key}).map_err(error_message)
   let config_path = try get_config_path()
-  // 0o600: rw------- — the config holds an API key.
+  let temp_path = "{config_path}.tmp"
   mut content = encoded
-  try os::WriteFile(config_path, mut content, 384).map_err(error_message)
-  
+  try os::WriteFile(temp_path, mut content, 384).map_err(error_message)
+  try os::Rename(temp_path, config_path).map_err(error_message)
+  try os::Chmod(config_path, 384).map_err(error_message)
+
   Result::ok(config_path)
 }
 

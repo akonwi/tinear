@@ -1,0 +1,225 @@
+use ard/testing as assertions
+
+use cooper/event
+use cooper/testing
+use tinear/models/documents
+use tinear/models/issues
+use tinear/services/search_service
+use tinear/tui/modal_host
+use tinear/tui/search_controller
+use tinear/tui/theme
+
+struct Request {
+  term: Str,
+  completion: fn(search_service::Outcome!Str),
+}
+
+struct FakeState {
+  requests: [Request],
+}
+
+struct Scheduled {
+  actions: [fn()],
+  cancellations: Int,
+}
+
+struct Opened {
+  issue_id: Str,
+  document_slug: Str,
+}
+
+private fn service(state: mut FakeState) search_service::Service {
+  search_service::Service{
+    search: fn(cancellation: Receiver<Bool>, term: Str, completion: fn(search_service::Outcome!Str)) {
+      state.requests.push(Request{term: term, completion: completion})
+    },
+  }
+}
+
+private fn schedule(state: mut Scheduled) fn(Int, fn()) fn() {
+  fn(milliseconds: Int, action: fn()) fn() {
+    state.actions.push(action)
+    fn() {
+      state.cancellations =+ 1
+    }
+  }
+}
+
+private fn issue() issues::Issue {
+  issues::Issue{
+    id: "issue-1",
+    identifier: "AKO-1",
+    title: "Issue result",
+    description: Maybe::new<Str>(),
+    priority: 2,
+    state_id: "started",
+    state_name: "In Progress",
+    state_type: "started",
+    state_position: 1.0,
+    team_id: "team-1",
+    team_name: "Core",
+    team_key: "AKO",
+    project_id: "",
+    project_name: "—",
+    assignee_id: "",
+    assignee_name: "—",
+    cycle_id: "",
+    cycle_label: "—",
+    url: "https://linear.app/AKO-1",
+  }
+}
+
+private fn document() documents::DocMeta {
+  documents::DocMeta{
+    id: "doc-1",
+    slug_id: "doc-slug",
+    title: "Document result",
+    container: "Tinear",
+    creator: "Alex",
+    updated_at: "",
+    url: "https://linear.app/document/doc-slug",
+  }
+}
+
+private fn key(name: Str) mut event::KeyEvent {
+  event::key(
+    name,
+    "",
+    event::KeyEventType::press,
+    event::Modifiers{
+      shift: false,
+      ctrl: false,
+      alt: false,
+      super: false,
+    },
+  )
+}
+
+private fn controller(
+  application: testing::TestApp,
+  modal: mut modal_host::ModalHost,
+  fake: mut FakeState,
+  scheduled: mut Scheduled,
+  opened: mut Opened,
+) mut search_controller::Controller {
+  search_controller::new(
+    modal,
+    theme::new(),
+    service(fake),
+    schedule(scheduled),
+    fn() {},
+    fn(found: issues::Issue) {
+      opened.issue_id = found.identifier
+    },
+    fn(found: documents::DocMeta) {
+      opened.document_slug = found.slug_id
+    },
+  )
+}
+
+test fn search_debounces_rejects_stale_results_and_opens_document() Void!Str {
+  let application = testing::new(90, 28)
+  defer application.destroy()
+  let modal = modal_host::new(application.context, theme::new())
+  application.root.add(modal.root)
+  let fake = mut FakeState{requests: []}
+  let scheduled = mut Scheduled{actions: [], cancellations: 0}
+  let opened = mut Opened{issue_id: "", document_slug: ""}
+  let search = controller(application, modal, fake, scheduled, opened)
+  search.open(application.context)
+  application.render()
+  try testing::assert_contains(application.frame().text(), "Type to search issues and docs")
+
+  application.paste(event::paste("a"))
+  application.paste(event::paste("b"))
+  try assertions::assert(scheduled.actions.size() == 2, "each query generation should schedule debounce")
+  (scheduled.actions.at(0).expect("stale debounce"))()
+  try assertions::assert(fake.requests.size() == 0, "stale debounce should not search")
+  (scheduled.actions.at(1).expect("current debounce"))()
+  try assertions::assert(fake.requests.size() == 1, "current debounce should search")
+  try assertions::assert(
+    fake.requests.at(0).expect("request").term == "ab",
+    "trimmed query should be searched",
+  )
+
+  application.paste(event::paste("c"))
+  fake.requests.at(
+    0,
+  ).expect(
+    "stale request",
+  ).completion(Result::ok(search_service::Outcome{hits: [issue()], warning: ""}))
+  application.key(key("return"))
+  try assertions::assert(opened.issue_id.is_empty(), "stale results should not be activated")
+  (scheduled.actions.at(2).expect("latest debounce"))()
+  try assertions::assert(fake.requests.size() == 2, "latest query should search")
+  fake.requests.at(
+    1,
+  ).expect(
+    "latest request",
+  ).completion(
+    Result::ok(
+      search_service::Outcome{hits: [issue(), document()], warning: "Document search unavailable"},
+    ),
+  )
+  application.render()
+  try testing::assert_contains(application.frame().text(), "Document search unavailable")
+  application.key(key("down"))
+  application.key(key("return"))
+  try assertions::assert(opened.document_slug == "doc-slug", "down and enter should open document result")
+  assertions::assert(not modal.is_open(), "opening a result should close search")
+}
+
+test fn search_renders_loading_empty_and_error_states() Void!Str {
+  let application = testing::new(70, 22)
+  defer application.destroy()
+  let modal = modal_host::new(application.context, theme::new())
+  application.root.add(modal.root)
+  let fake = mut FakeState{requests: []}
+  let scheduled = mut Scheduled{actions: [], cancellations: 0}
+  let opened = mut Opened{issue_id: "", document_slug: ""}
+  let search = controller(application, modal, fake, scheduled, opened)
+  search.open(application.context)
+  for size in [[60, 20], [100, 30], [160, 40]] {
+    application.resize(size.at(0).expect("width"), size.at(1).expect("height"))
+    try assertions::assert(modal.is_open(), "search modal should survive resize")
+    try testing::assert_contains(application.frame().text(), "Type to search issues and docs")
+  }
+  application.paste(event::paste("query"))
+  application.render()
+  try testing::assert_contains(application.frame().text(), "Searching…")
+  (scheduled.actions.at(0).expect("empty debounce"))()
+  fake.requests.at(
+    0,
+  ).expect("empty request").completion(Result::ok(search_service::Outcome{hits: [], warning: ""}))
+  application.render()
+  try testing::assert_contains(application.frame().text(), "No results found")
+
+  application.paste(event::paste("x"))
+  (scheduled.actions.at(1).expect("error debounce"))()
+  fake.requests.at(1).expect("error request").completion(Result::err("both sources failed"))
+  application.render()
+  testing::assert_contains(application.frame().text(), "Unable to search: both sources failed")
+}
+
+test fn search_disposal_cancels_debounce_and_ignores_late_response() Void!Str {
+  let application = testing::new(70, 22)
+  defer application.destroy()
+  let modal = modal_host::new(application.context, theme::new())
+  application.root.add(modal.root)
+  let fake = mut FakeState{requests: []}
+  let scheduled = mut Scheduled{actions: [], cancellations: 0}
+  let opened = mut Opened{issue_id: "", document_slug: ""}
+  let search = controller(application, modal, fake, scheduled, opened)
+  search.open(application.context)
+  application.paste(event::paste("query"))
+  (scheduled.actions.at(0).expect("debounce"))()
+  search.dispose()
+  try assertions::assert(not modal.is_open(), "disposing search should close its modal")
+  fake.requests.at(
+    0,
+  ).expect(
+    "late request",
+  ).completion(Result::ok(search_service::Outcome{hits: [issue()], warning: ""}))
+  try assertions::assert(opened.issue_id.is_empty(), "disposed search should ignore late results")
+  assertions::assert(scheduled.cancellations > 0, "disposing search should cancel debounce")
+}

@@ -1,0 +1,83 @@
+use ard/async
+use ard/testing
+
+use cooper/testing as cooper_testing
+use go:time
+use tinear/models/cache
+use tinear/services/cache_writer
+
+private fn snapshot(index: Int) cache::LoggedInCache {
+  cache::LoggedInCache{tab_index: index, tabs: []}
+}
+
+test fn cache_writer_serializes_and_coalesces_pending_snapshots() Void!Str {
+  let application = cooper_testing::new(20, 5)
+  defer application.destroy()
+  let started = Chan::new<Int>(2)
+  let release_first = Chan::new<Bool>()
+  let writer = cache_writer::new(application.context, fn(value: cache::LoggedInCache) Void!Str {
+    started.send(value.tab_index)
+    if value.tab_index == 1 {
+      let _ = release_first.receiver().recv()
+    }
+    Result::ok(())
+  })
+
+  writer.persist(snapshot(1))
+  try testing::assert(started.receiver().recv().or(0) == 1, "first snapshot should begin immediately")
+  writer.persist(snapshot(2))
+  writer.persist(snapshot(3))
+  release_first.send(true)
+  try testing::assert(
+    started.receiver().recv().or(0) == 3,
+    "latest pending snapshot should replace older state",
+  )
+  time::Sleep(time::Millisecond)
+  let unexpected = select {
+    started.receiver().recv() => true,
+    _ => false,
+  }
+  writer.dispose()
+  testing::assert(not unexpected, "coalesced snapshot should never be written")
+}
+
+test fn cache_writer_disposal_flushes_latest_pending_snapshot() Void!Str {
+  let application = cooper_testing::new(20, 5)
+  defer application.destroy()
+  let started = Chan::new<Int>(2)
+  let release_first = Chan::new<Bool>()
+  let writer = cache_writer::new(application.context, fn(value: cache::LoggedInCache) Void!Str {
+    started.send(value.tab_index)
+    if value.tab_index == 1 {
+      let _ = release_first.receiver().recv()
+    }
+    Result::ok(())
+  })
+  writer.persist(snapshot(1))
+  try testing::assert(started.receiver().recv().or(0) == 1, "first write should start")
+  writer.persist(snapshot(2))
+  async::start(fn() {
+    time::Sleep(time::Millisecond)
+    release_first.send(true)
+  })
+  writer.dispose()
+  testing::assert(started.receiver().recv().or(0) == 2, "dispose should flush latest pending state")
+}
+
+test fn cache_writer_ignores_updates_after_disposal() Void!Str {
+  let application = cooper_testing::new(20, 5)
+  defer application.destroy()
+  let saves = Chan::new<Bool>(1)
+  let writer = cache_writer::new(application.context, fn(value: cache::LoggedInCache) Void!Str {
+    saves.send(true)
+    Result::ok(())
+  })
+  writer.dispose()
+  writer.persist(snapshot(1))
+  time::Sleep(time::Millisecond)
+  let wrote = select {
+    saves.receiver().recv() => true,
+    _ => false,
+  }
+  testing::assert(not wrote, "disposed writer should reject updates")
+}

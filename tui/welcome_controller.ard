@@ -1,0 +1,211 @@
+use cooper/box
+use cooper/event
+use cooper/input
+use cooper/runtime
+use cooper/style
+use cooper/text
+use tinear/services/auth
+use tinear/tui/lifecycle
+use tinear/tui/theme as tinear_theme
+
+struct WelcomeController {
+  root: mut box::Box,
+  api_key: mut input::Input,
+  login_button: mut box::Box,
+  login_label: mut text::Text,
+  status_text: mut text::Text,
+  error_text: mut text::Text,
+  scope: mut lifecycle::Scope,
+  authenticate: auth::Authenticate,
+  on_success: fn(Str),
+  listeners: [fn()],
+  loading: Bool,
+  palette: tinear_theme::Theme,
+}
+
+fn new(
+  ctx: mut runtime::Runtime,
+  palette: tinear_theme::Theme,
+  authenticate: auth::Authenticate,
+  on_success: fn(Str),
+) mut WelcomeController {
+  let root = box::new(
+    ctx,
+    styles: style::new(
+      width: style::percent(100.0),
+      height: style::percent(100.0),
+      align_items: style::Align::center,
+      justify_content: style::Justify::center,
+    ),
+  )
+  let form = box::new(
+    ctx,
+    styles: style::new(
+      width: style::cells(48),
+      flex_direction: style::FlexDirection::column,
+      align_items: style::Align::center,
+      gap: style::cells(1),
+    ),
+  )
+  form.add(
+    text::new(
+      ctx,
+      content: "▀█▀ ▀ █▀█ █▀▀ ▄▀█ █▀█\n █  █ █ █ ██▄ █▀█ █▀▄",
+      selectable: false,
+      text_style: text::style(foreground: palette.accent, bold: true),
+    ),
+  )
+  form.add(text::new(ctx, content: "Enter your Linear API key", selectable: false))
+  let api_key = input::new(
+    ctx,
+    placeholder: "lin_api_…",
+    min_length: 1,
+    styles: style::new(width: style::cells(44), height: style::cells(1)),
+  )
+  let login_button = box::new(
+    ctx,
+    styles: style::new(
+      border: style::Border::rounded,
+      border_color: palette.border,
+      width: style::cells(14),
+      height: style::cells(3),
+      align_items: style::Align::center,
+      justify_content: style::Justify::center,
+    ),
+  )
+  login_button.set_focusable(true)
+  let login_label = text::new(ctx, content: "Login", selectable: false)
+  login_button.add(login_label)
+  let status_text = text::new(
+    ctx,
+    content: "",
+    selectable: false,
+    styles: style::new(height: style::cells(1)),
+    text_style: text::style(dim: true),
+  )
+  let error_text = text::new(
+    ctx,
+    content: "",
+    selectable: false,
+    styles: style::new(height: style::cells(1)),
+    text_style: text::style(foreground: palette.danger, bold: true),
+  )
+  form.add(api_key)
+  form.add(login_button)
+  form.add(status_text)
+  form.add(error_text)
+  root.add(form)
+
+  let controller = mut WelcomeController{
+    root: root,
+    api_key: api_key,
+    login_button: login_button,
+    login_label: login_label,
+    status_text: status_text,
+    error_text: error_text,
+    scope: lifecycle::new(),
+    authenticate: authenticate,
+    on_success: on_success,
+    listeners: [],
+    loading: false,
+    palette: palette,
+  }
+  controller.listeners.push(
+    api_key.on_submit(fn(value: Str) {
+      controller.submit()
+    }),
+  )
+  controller.listeners.push(
+    login_button.on_key(fn(received: mut event::KeyEvent) {
+      if received.event_type != event::KeyEventType::release and (received.matches("return") or received.matches("space")) {
+        controller.submit()
+        received.prevent_default()
+        received.stop_propagation()
+      }
+    }),
+  )
+  controller.listeners.push(
+    login_button.on_mouse(fn(received: mut event::MouseEvent) {
+      if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
+        controller.submit()
+        received.stop_propagation()
+      }
+    }),
+  )
+  controller.listeners.push(
+    login_button.on_focus(fn() {
+      controller.render()
+    }),
+  )
+  controller.listeners.push(
+    login_button.on_blur(fn() {
+      controller.render()
+    }),
+  )
+  controller
+}
+
+impl WelcomeController {
+  private fn mut render() {
+    match self.loading {
+      true => {
+        self.login_label.set_content("Signing in…")
+        self.status_text.set_content("Validating with Linear")
+      },
+      false => {
+        self.login_label.set_content("Login")
+        self.status_text.set_content("")
+      },
+    }
+    let applied = mut self.login_button.style()
+    match self.login_button.is_focused() {
+      true => { applied.border_color = Maybe::new(self.palette.accent) },
+      false => { applied.border_color = Maybe::new(self.palette.border) },
+    }
+    self.login_button.set_style(applied.@)
+  }
+
+  fn mut submit() {
+    if (not self.loading) and not self.scope.disposed {
+      let api_key = self.api_key.value().trim()
+      if api_key.is_empty() {
+        self.error_text.set_content("Enter an API key")
+      } else {
+        self.error_text.set_content("")
+        self.loading = true
+        self.render()
+        let request = self.scope.begin_request()
+        self.authenticate(api_key, self.scope.stop.receiver(), fn(result: Void!Str) {
+          if self.scope.is_current(request) {
+            self.loading = false
+            match result {
+              ok(_) => {
+                self.render()
+                self.on_success(api_key)
+              },
+              err(message) => {
+                self.error_text.set_content(message)
+                self.render()
+              },
+            }
+          }
+        })
+      }
+    }
+  }
+
+  fn mut focus() Bool {
+    self.api_key.focus()
+  }
+
+  fn mut dispose() {
+    if not self.scope.disposed {
+      self.scope.dispose()
+      let removers = self.listeners
+      self.listeners = []
+      for remove in removers {
+        remove()
+      }
+    }
+  }
+}

@@ -1,0 +1,482 @@
+use cooper/box
+use cooper/event
+use cooper/input
+use cooper/runtime
+use cooper/scroll_box
+use cooper/style
+use cooper/text
+use go:strings
+use tinear/tui/theme as tinear_theme
+
+let RESULT_RULE: Str = "────────────────────────────────────────────────────────────────────────────────"
+let FILTER_THRESHOLD: Int = 5
+let MAX_VISIBLE_RESULT_ROWS: Int = 12
+
+struct Option {
+  id: Str,
+  label: Str,
+  description: Str,
+}
+
+struct Row {
+  option_id: Str,
+  root: mut box::Box,
+  surface: mut box::Box,
+  label: mut text::Text,
+  description: mut text::Text,
+  remove_mouse: fn(),
+}
+
+struct PickerController {
+  root: mut box::Box,
+  context: mut runtime::Runtime,
+  query: mut input::Input,
+  results: mut scroll_box::ScrollBox,
+  empty_text: mut text::Text,
+  options: [Option],
+  filtered: [Option],
+  filterable: Bool,
+  rows: [Row],
+  cursor: Int,
+  hovered_id: Str,
+  on_select: fn(Option),
+  listeners: [fn()],
+  disposed: Bool,
+  palette: tinear_theme::Theme,
+}
+
+private fn matches(option: Option, query: Str) Bool {
+  let normalized = strings::ToLower(query.trim())
+  normalized.is_empty() or strings::ToLower(option.label).contains(normalized) or strings::ToLower(option.description).contains(normalized)
+}
+
+private fn row_height(option: Option) Int {
+  match option.description.is_empty() {
+    true => 1,
+    false => 2,
+  }
+}
+
+private fn row_style(option: Option) style::Style {
+  style::new(
+    width: style::percent(100.0),
+    height: style::cells(row_height(option)),
+    flex_shrink: 0.0,
+    flex_direction: style::FlexDirection::row,
+    overflow: style::Overflow::hidden,
+  )
+}
+
+private fn description_style(option: Option) style::Style {
+  style::new(
+    display: match option.description.is_empty() {
+      true => style::Display::none,
+      false => style::Display::flex,
+    },
+    width: style::percent(100.0),
+    height: style::cells(1),
+    flex_shrink: 0.0,
+  )
+}
+
+private fn filterable(options: [Option]) Bool {
+  options.size() > FILTER_THRESHOLD
+}
+
+private fn visible_result_rows(options: [Option]) Int {
+  mut rows = 0
+  for option in options {
+    rows = rows + row_height(option)
+  }
+  if rows < 1 {
+    1
+  } else if rows > MAX_VISIBLE_RESULT_ROWS {
+    MAX_VISIBLE_RESULT_ROWS
+  } else {
+    rows
+  }
+}
+
+private fn root_style(options: [Option], has_filter: Bool) style::Style {
+  let filter_rows = match has_filter {
+    true => 2,
+    false => 0,
+  }
+  style::new(
+    width: style::percent(100.0),
+    height: style::cells(visible_result_rows(options) + filter_rows),
+    flex_direction: style::FlexDirection::column,
+    overflow: style::Overflow::hidden,
+  )
+}
+
+private fn filter_control_style(display: style::Display) style::Style {
+  style::new(
+    display: display,
+    width: style::percent(100.0),
+    height: style::cells(1),
+    flex_shrink: 0.0,
+  )
+}
+
+private fn empty_style(display: style::Display) style::Style {
+  style::new(
+    display: display,
+    width: style::percent(100.0),
+    height: style::cells(1),
+    flex_shrink: 0.0,
+  )
+}
+
+fn new(
+  ctx: mut runtime::Runtime,
+  palette: tinear_theme::Theme,
+  placeholder: Str,
+  options: [Option],
+  selected_id: Str,
+  on_select: fn(Option),
+) mut PickerController {
+  let has_filter = filterable(options)
+  let filter_display = match has_filter {
+    true => style::Display::flex,
+    false => style::Display::none,
+  }
+  let root = box::new(ctx, styles: root_style(options, has_filter))
+  let query = input::new(
+    ctx,
+    placeholder: placeholder,
+    styles: filter_control_style(filter_display),
+  )
+  let rule = text::new(
+    ctx,
+    content: RESULT_RULE,
+    selectable: false,
+    wrap: text::TextWrap::none,
+    overflow: text::TextOverflow::clip,
+    styles: filter_control_style(filter_display),
+    text_style: text::style(dim: true),
+  )
+  let results = scroll_box::new(
+    ctx,
+    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_grow: 1.0),
+  )
+  let empty_text = text::new(
+    ctx,
+    content: "  No matches",
+    selectable: false,
+    styles: empty_style(style::Display::none),
+    text_style: text::style(dim: true),
+  )
+  results.add(empty_text)
+  root.add(query)
+  root.add(rule)
+  root.add(results)
+  let picker = mut PickerController{
+    root: root,
+    context: ctx,
+    query: query,
+    results: results,
+    empty_text: empty_text,
+    options: options,
+    filtered: [],
+    filterable: has_filter,
+    rows: [],
+    cursor: 0,
+    hovered_id: "",
+    on_select: on_select,
+    listeners: [],
+    disposed: false,
+    palette: palette,
+  }
+  picker.apply_filter("")
+  if not selected_id.is_empty() {
+    picker.select_id(selected_id)
+  }
+  if has_filter {
+    picker.listeners.push(
+      query.on_input(fn(value: Str) {
+        picker.apply_filter(value)
+      }),
+    )
+    picker.listeners.push(
+      query.on_key(fn(received: mut event::KeyEvent) {
+        if received.event_type != event::KeyEventType::release {
+          mut handled = true
+          match {
+            received.matches("down") => picker.move_cursor(1),
+            received.matches("up") => picker.move_cursor(-1),
+            received.matches("return") => picker.activate(),
+            _ => { handled = false },
+          }
+          if handled {
+            received.prevent_default()
+            received.stop_propagation()
+          }
+        }
+      }),
+    )
+  } else {
+    picker.listeners.push(
+      results.on_key(fn(received: mut event::KeyEvent) {
+        if received.event_type != event::KeyEventType::release {
+          mut handled = true
+          match {
+            received.matches("j") or received.matches("down") => picker.move_cursor(1),
+            received.matches("k") or received.matches("up") => picker.move_cursor(-1),
+            received.matches("return") or received.matches("space") => picker.activate(),
+            _ => { handled = false },
+          }
+          if handled {
+            received.prevent_default()
+            received.stop_propagation()
+          }
+        }
+      }),
+    )
+  }
+  picker
+}
+
+impl PickerController {
+  private fn mut create_row(option: Option) Row {
+    let root = box::new(self.context, styles: row_style(option))
+    let content = box::new(
+      self.context,
+      styles: style::new(
+        width: style::cells(1),
+        height: style::cells(row_height(option)),
+        flex_grow: 1.0,
+        background: self.palette.background,
+        padding: style::Edges{
+          top: style::cells(0),
+          right: style::cells(1),
+          bottom: style::cells(0),
+          left: style::cells(1),
+        },
+      ),
+    )
+    let label = text::new(
+      self.context,
+      content: option.label,
+      selectable: false,
+      wrap: text::TextWrap::none,
+      overflow: text::TextOverflow::ellipsis,
+      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+    )
+    let description = text::new(
+      self.context,
+      content: option.description,
+      selectable: false,
+      wrap: text::TextWrap::none,
+      overflow: text::TextOverflow::ellipsis,
+      styles: description_style(option),
+      text_style: text::style(dim: true),
+    )
+    content.add(label)
+    content.add(description)
+    root.add(content)
+    let option_id = option.id
+    let remove_mouse = content.on_mouse(fn(received: mut event::MouseEvent) {
+      if received.event_type == event::MouseEventType::move {
+        self.set_hovered(option_id)
+      } else if received.event_type == event::MouseEventType::out {
+        self.clear_hovered(option_id)
+      } else if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
+        self.select_id(option_id)
+        self.activate()
+        received.stop_propagation()
+      }
+    })
+    Row{
+      option_id: option.id,
+      root: root,
+      surface: content,
+      label: label,
+      description: description,
+      remove_mouse: remove_mouse,
+    }
+  }
+
+  private fn mut reconcile_rows() {
+    self.hovered_id = ""
+    let previous = self.rows
+    for row in previous {
+      let _ = self.results.remove(row.root)
+    }
+    let next = mut List::new<Row>()
+    for option in self.filtered {
+      mut found: Row? = Maybe::new()
+      for row in previous {
+        if row.option_id == option.id {
+          found = Maybe::new(row)
+        }
+      }
+      let row = match found {
+        existing => existing,
+        _ => self.create_row(option),
+      }
+      row.root.set_style(row_style(option))
+      row.label.set_content(option.label)
+      row.description.set_content(option.description)
+      row.description.set_style(description_style(option))
+      next.push(row)
+      self.results.add(row.root)
+    }
+    for old in previous {
+      mut retained = false
+      for row in next {
+        if row.option_id == old.option_id {
+          retained = true
+        }
+      }
+      if not retained {
+        old.remove_mouse()
+        old.root.destroy(recursive: true)
+      }
+    }
+    self.rows = next.@
+    self.empty_text.set_style(
+      empty_style(
+        match self.filtered.size() == 0 {
+          true => style::Display::flex,
+          false => style::Display::none,
+        },
+      ),
+    )
+    self.refresh_row_styles()
+  }
+
+  private fn mut set_hovered(option_id: Str) {
+    if not self.hovered_id == option_id {
+      self.hovered_id = option_id
+      self.refresh_row_styles()
+    }
+  }
+
+  private fn mut clear_hovered(option_id: Str) {
+    if self.hovered_id == option_id {
+      self.hovered_id = ""
+      self.refresh_row_styles()
+    }
+  }
+
+  private fn mut refresh_row_styles() {
+    for row, index in self.rows {
+      match self.filtered.at(index) {
+        option => {
+          let active = index == self.cursor
+          let hovered = (not active) and row.option_id == self.hovered_id
+          let foreground = match {
+            active => self.palette.item_active_foreground,
+            hovered => self.palette.item_hover_foreground,
+            _ => self.palette.foreground,
+          }
+          let background = match {
+            active => self.palette.item_active_background,
+            hovered => self.palette.item_hover_background,
+            _ => self.palette.background,
+          }
+          let surface_style = mut row.surface.style()
+          surface_style.background = Maybe::new(background)
+          row.surface.set_style(surface_style.@)
+          row.label.set_text_style(text::style(foreground: foreground, bold: active))
+          row.description.set_text_style(
+            text::style(foreground: foreground, dim: (not active) and not hovered),
+          )
+        },
+        _ => (),
+      }
+    }
+  }
+
+  fn mut apply_filter(value: Str) {
+    if not self.disposed {
+      let filtered = mut List::new<Option>()
+      for option in self.options {
+        if matches(option, value) {
+          filtered.push(option)
+        }
+      }
+      self.filtered = filtered.@
+      self.cursor = 0
+      self.root.set_style(root_style(self.filtered, self.filterable))
+      self.reconcile_rows()
+      let _ = self.results.scroll_to(0)
+    }
+  }
+
+  private fn selected_offset() Int {
+    mut offset = 0
+    for option, index in self.filtered {
+      if index < self.cursor {
+        offset = offset + row_height(option)
+      }
+    }
+    offset
+  }
+
+  fn mut select_id(option_id: Str) {
+    for option, index in self.filtered {
+      if option.id == option_id {
+        self.cursor = index
+      }
+    }
+    self.refresh_row_styles()
+    let _ = self.results.scroll_to(self.selected_offset())
+  }
+
+  private fn mut move_cursor(delta: Int) {
+    if self.filtered.size() > 0 {
+      mut next = self.cursor + delta
+      if next < 0 {
+        next = 0
+      }
+      if next >= self.filtered.size() {
+        next = self.filtered.size() - 1
+      }
+      self.cursor = next
+      self.hovered_id = ""
+      self.refresh_row_styles()
+      match self.rows.at(self.cursor) {
+        row => {
+          let _ = self.results.scroll_child_into_view(row.root)
+        },
+        _ => (),
+      }
+    }
+  }
+
+  private fn mut activate() {
+    match self.filtered.at(self.cursor) {
+      option => self.on_select(option),
+      _ => (),
+    }
+  }
+
+  fn mut focus() {
+    match self.filterable {
+      true => {
+        let _ = self.query.focus()
+      },
+      false => {
+        let _ = self.results.focus()
+      },
+    }
+    let _ = self.results.scroll_to(self.selected_offset())
+  }
+
+  fn mut dispose() {
+    if not self.disposed {
+      self.disposed = true
+      let listeners = self.listeners
+      self.listeners = []
+      for remove in listeners {
+        remove()
+      }
+      for row in self.rows {
+        row.remove_mouse()
+      }
+      self.rows = []
+    }
+  }
+}

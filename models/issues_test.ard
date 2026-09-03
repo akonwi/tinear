@@ -11,14 +11,32 @@ fn issue_json(description: Str) Str {
   issue_json_with_title("Title â\u0080\u0094 quoted â\u0080\u009ctextâ\u0080\u009d", description)
 }
 
+fn board_issue_json_type(id: Str, identifier: Str, state_name: Str, state_type: Str) Str {
+  `{{"id":"{id}","identifier":"{identifier}","title":"Title","description":null,"priority":2,"state":{{"id":"state-{id}","name":"{state_name}","type":"{state_type}","position":1.0}},"team":{{"id":"team-1","name":"Core","key":"AKO"}},"project":null,"assignee":null,"cycle":null}}`
+}
+
+fn board_issue_json(id: Str, identifier: Str, state_name: Str) Str {
+  board_issue_json_type(id, identifier, state_name, "started")
+}
+
+test fn empty_issue_identity_returns_error() Void!Str {
+  let raw = decode::from_json(
+    `{{"id":"issue-1","identifier":"","title":"Title","description":null,"priority":2,"state":{{"id":"state-1","name":"In Progress","type":"started","position":1.0}},"team":{{"id":"team-1","name":"Core","key":"AKO"}},"project":null,"assignee":null,"cycle":null}}`,
+  ).expect("parse issue")
+  testing::assert(
+    issues::decode_issue(raw).is_err(),
+    "empty identifiers must not create invalid tabs",
+  )
+}
+
 test fn test_decode_issue_normalizes_mojibake_text() Void!Str {
   let raw = decode::from_json(
     issue_json(
       "\"clean completions â\u0080\u0094 no workflow code runs â\u0080\u009cinsideâ\u0080\u009dâ\u0080¦\"",
     ),
   ).expect("parse issue")
-  let issue = issues::decode_issue(raw)
-  
+  let issue = try issues::decode_issue(raw)
+
   try testing::assert(
     issue.title == "Title - quoted \"text\"",
     "title should normalize mojibake punctuation",
@@ -41,8 +59,8 @@ test fn test_decode_issue_normalizes_windows_1252_mojibake_text() Void!Str {
       "\"body â€“ with â€™ apostrophe â€¦\"",
     ),
   ).expect("parse issue")
-  let issue = issues::decode_issue(raw)
-  
+  let issue = try issues::decode_issue(raw)
+
   try testing::assert(
     issue.title == "Title - quoted \"text\"",
     "title should normalize Windows-1252 mojibake",
@@ -62,8 +80,8 @@ test fn test_decode_issue_normalizes_degraded_cent_mojibake_in_description() Voi
   let raw = decode::from_json(
     issue_json_with_title("Title", "\"being undeliverable ÂÂ¢ÂÂ Iterable rejected it\""),
   ).expect("parse issue")
-  let issue = issues::decode_issue(raw)
-  
+  let issue = try issues::decode_issue(raw)
+
   match issue.description {
     desc => {
       testing::assert(
@@ -81,8 +99,8 @@ test fn test_decode_issue_normalizes_bare_mojibake_dash_in_title() Void!Str {
   ).expect("parse issue")
   // The board query can return a degraded mojibake variant where the bytes
   // after `â` have already been stripped before rendering.
-  let issue = issues::decode_issue(raw)
-  
+  let issue = try issues::decode_issue(raw)
+
   testing::assert(
     issue.title == "ProcessWorkflowReconciler - scheduled workflow",
     "bare mojibake dash should normalize in title",
@@ -93,8 +111,8 @@ test fn test_decode_issue_normalizes_card_metadata_fields() Void!Str {
   let raw = decode::from_json(
     "{{\"id\":\"issue-1\",\"identifier\":\"AKO-123\",\"title\":\"Title\",\"description\":null,\"priority\":2,\"state\":{{\"id\":\"state-1\",\"name\":\"In Progress â\u0080\u0094 Review\",\"type\":\"started\",\"position\":1.0}},\"team\":{{\"id\":\"team-1\",\"name\":\"Core â\u0080\u009cPlatformâ\u0080\u009d\",\"key\":\"AKO\"}},\"project\":{{\"name\":\"Auth â\u0080\u0093 Infra\"}},\"assignee\":{{\"name\":\"Jane\",\"displayName\":\"Jane â\u0080\u0099 Doe\"}},\"cycle\":{{\"id\":\"cycle-1\",\"number\":12,\"name\":\"Cycle â\u0080\u0094 12\"}}}}",
   ).expect("parse issue")
-  let issue = issues::decode_issue(raw)
-  
+  let issue = try issues::decode_issue(raw)
+
   try testing::assert(issue.state_name == "In Progress - Review", "state should normalize")
   try testing::assert(issue.team_name == "Core \"Platform\"", "team should normalize")
   try testing::assert(issue.project_name == "Auth - Infra", "project should normalize")
@@ -106,8 +124,8 @@ test fn test_decode_comment_normalizes_mojibake_body() Void!Str {
   let raw = decode::from_json(
     "{{\"id\":\"comment-1\",\"body\":\"one â\u0080\u0093 two â\u0080\u0099 three\",\"createdAt\":\"2026-01-02T03:04:05.000Z\",\"user\":{{\"name\":\"Jane\",\"displayName\":\"Jane\"}}}}",
   ).expect("parse comment")
-  let comment = issues::decode_comment(raw)
-  
+  let comment = try issues::decode_comment(raw)
+
   testing::assert(
     comment.body == "one - two ' three",
     "comment body should normalize mojibake punctuation",
@@ -152,22 +170,112 @@ test fn thread_comments_multiple_replies_keep_order() Void!Str {
   testing::assert(ordered.at(2).expect("bounds").id == "r2", "replies keep original order")
 }
 
+test fn project_picker_excludes_finished_projects() Void!Str {
+  try testing::assert(issues::project_is_available("planned"), "planned project should be available")
+  try testing::assert(issues::project_is_available("started"), "started project should be available")
+  try testing::assert(
+    not issues::project_is_available("completed"),
+    "completed project should be excluded",
+  )
+  testing::assert(
+    not issues::project_is_available("canceled"),
+    "canceled project should be excluded",
+  )
+}
+
 test fn decode_comment_handles_bot_and_missing_authors() Void!Str {
   // Integration comment: user is null, botActor carries the name.
   let bot = decode::from_json(
     "{{\"id\": \"c1\", \"body\": \"synced\", \"createdAt\": \"2026-01-01\", \"parent\": null, \"user\": null, \"botActor\": {{\"name\": \"GitHub\"}}}}",
   ).expect("parse")
-  try testing::assert(issues::decode_comment(bot).author == "GitHub", "bot comments use botActor name")
-  
+  let bot_comment = try issues::decode_comment(bot)
+  try testing::assert(bot_comment.author == "GitHub", "bot comments use botActor name")
+
   // Deleted user: object present but empty-ish.
   let ghost = decode::from_json(
     "{{\"id\": \"c2\", \"body\": \"x\", \"createdAt\": \"2026-01-01\", \"parent\": null, \"user\": {{\"displayName\": \"\"}}, \"botActor\": null}}",
   ).expect("parse")
-  try testing::assert(issues::decode_comment(ghost).author == "—", "missing names fall back to a dash")
-  
+  let ghost_comment = try issues::decode_comment(ghost)
+  try testing::assert(ghost_comment.author == "—", "missing names fall back to a dash")
+
   // Normal user still resolves displayName first.
   let human = decode::from_json(
     "{{\"id\": \"c3\", \"body\": \"x\", \"createdAt\": \"2026-01-01\", \"parent\": null, \"user\": {{\"name\": \"Full Name\", \"displayName\": \"shortname\"}}, \"botActor\": null}}",
   ).expect("parse")
-  testing::assert(issues::decode_comment(human).author == "shortname", "displayName preferred")
+  let human_comment = try issues::decode_comment(human)
+  testing::assert(human_comment.author == "shortname", "displayName preferred")
+}
+
+test fn malformed_team_identity_returns_error_without_panicking() Void!Str {
+  let malformed = decode::from_json(`{{"id":"", "name":"Core", "key":"AKO"}}`).expect("parse team")
+  testing::assert(issues::try_decode_team(malformed).is_err(), "empty team IDs should be rejected")
+}
+
+test fn board_grouping_preserves_raw_state_identity() Void!Str {
+  let data = try decode::from_json(
+    `{{"issues":{{"nodes":[{board_issue_json("issue-1", "AKO-1", "Review â\u0080\u0094")},{board_issue_json("issue-2", "AKO-2", "Review -")} ]}}}}`,
+  )
+  let columns = try issues::decode_board(data)
+  try testing::assert(columns.size() == 2, "distinct raw workflow names should remain separate columns")
+  try testing::assert(
+    columns.at(0).expect("first column").name == columns.at(1).expect("second column").name,
+    "column labels should still normalize for display",
+  )
+
+  let mixed_types = try decode::from_json(
+    `{{"issues":{{"nodes":[{board_issue_json_type("issue-1", "AKO-1", "Review", "started")},{board_issue_json_type("issue-2", "AKO-2", "Review", "unstarted")} ]}}}}`,
+  )
+  let typed_columns = try issues::decode_board(mixed_types)
+  testing::assert(
+    typed_columns.size() == 1 and typed_columns.at(0).expect("shared column").issues.size() == 2,
+    "same raw workflow names should share one visible column across teams",
+  )
+}
+
+test fn malformed_board_envelopes_and_issues_return_errors_without_panicking() Void!Str {
+  let missing_viewer = try decode::from_json(`{{}}`)
+  try testing::assert(
+    issues::decode_viewer_id(missing_viewer).is_err(),
+    "missing viewer identity should fail board loading",
+  )
+
+  let missing_nodes = try decode::from_json(`{{"issues":{{}}}}`)
+  try testing::assert(
+    issues::decode_board(missing_nodes).is_err(),
+    "missing board nodes should return an error",
+  )
+
+  let malformed_issue = try decode::from_json(`{{"issues":{{"nodes":[{{"id":"issue-1"}}]}}}}`)
+  testing::assert(
+    issues::decode_board(malformed_issue).is_err(),
+    "a malformed board issue should fail the board without panicking",
+  )
+}
+
+test fn malformed_picker_models_return_errors_without_panicking() Void!Str {
+  let malformed_state = decode::from_json(
+    `{{"id":"state-1","name":"Todo","type":"unstarted"}}`,
+  ).expect("parse state")
+  match issues::decode_workflow_state(malformed_state) {
+    ok(_) => try testing::assert(false, "workflow state without position should fail"),
+    err(_) => (),
+  }
+
+  let malformed_cycle = decode::from_json(`{{"id":"cycle-1","name":null}}`).expect("parse cycle")
+  match issues::decode_cycle(malformed_cycle) {
+    ok(_) => try testing::assert(false, "cycle without number should fail"),
+    err(_) => (),
+  }
+
+  let malformed_issue = decode::from_json(`{{"id":"issue-1"}}`).expect("parse issue")
+  match issues::decode_issue(malformed_issue) {
+    ok(_) => try testing::assert(false, "issue without required fields should fail"),
+    err(_) => (),
+  }
+
+  let malformed_comment = decode::from_json(`{{"id":"comment-1"}}`).expect("parse comment")
+  match issues::decode_comment(malformed_comment) {
+    ok(_) => testing::assert(false, "comment without body and creation time should fail"),
+    err(_) => testing::assert(true, "malformed detail models should return errors"),
+  }
 }

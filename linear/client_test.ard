@@ -1,0 +1,39 @@
+use ard/testing
+
+use decode
+use tinear/linear/client
+
+test fn string_literal_round_trips_graphql_input() Void!Str {
+  let original = "id\" with newline\nand slash\\"
+  let encoded = client::string_literal(original)
+  let parsed = try decode::from_json(encoded)
+  let restored = try decode::run(
+    parsed,
+    decode::string,
+  ).map_err(fn(e) {
+    e.error()
+  })
+  testing::assert(restored == original, "GraphQL string literal should preserve its input")
+}
+
+test fn graphql_response_extracts_data_and_reports_errors() Void!Str {
+  let data = try client::extract_data("{{\"data\":{{\"viewer\":{{\"id\":\"user-1\"}}}}}}")
+  let viewer_id = try decode::run(data, decode::path(["viewer", "id"], decode::string)).map_err(fn(error) {
+    error.error()
+  })
+  try testing::assert(viewer_id == "user-1", "data payload should decode")
+  try testing::assert(
+    client::extract_data("{{\"errors\":[{{\"message\":\"denied\"}}],\"data\":null}}").is_err(),
+    "GraphQL errors should fail",
+  )
+  try testing::assert(client::extract_data("{{\"other\":1}}").is_err(), "missing data should fail")
+  testing::assert(client::extract_data("not json").is_err(), "malformed JSON should fail")
+}
+
+test fn nullable_string_literal_maps_empty_to_null() Void!Str {
+  try testing::assert(client::nullable_string_literal("") == "null", "empty value should become null")
+  testing::assert(
+    client::nullable_string_literal("id") == "\"id\"",
+    "non-empty value should be encoded",
+  )
+}

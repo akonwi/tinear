@@ -1,0 +1,91 @@
+use ard/async
+
+use cooper/runtime
+use decode
+use tinear/config
+use tinear/linear/client
+
+type Authenticate = fn(Str, Receiver<Bool>, fn(Void!Str))
+
+fn validate_viewer(data: Any) Void!Str {
+  let viewer_id = try decode::run(
+    data,
+    decode::path(["viewer", "id"], decode::string),
+  ).map_err(fn(error) {
+    "invalid viewer response: {error.to_str()}"
+  })
+  match viewer_id.is_empty() {
+    true => Result::err("invalid viewer response: empty viewer id"),
+    false => Result::ok(()),
+  }
+}
+
+private fn validation_error(message: Str) Str {
+  "Invalid key"
+}
+
+fn validate_result(response: Any!Str) Void!Str {
+  match response {
+    ok(data) => {
+      match validate_viewer(data) {
+        ok(_) => Result::ok(()),
+        err(_) => Result::err("Invalid key"),
+      }
+    },
+    err(message) => Result::err(validation_error(message)),
+  }
+}
+
+private fn validate(api_key: Str) Void!Str {
+  if api_key.trim().is_empty() {
+    Result::err("Enter an API key")
+  } else {
+    validate_result(client::graphql(api_key, "query {{ viewer {{ id }} }}"))
+  }
+}
+
+private fn cancelled(app: Receiver<Void>, view: Receiver<Bool>) Bool {
+  select {
+    app.recv() => true,
+    view.recv() => true,
+    _ => false,
+  }
+}
+
+fn with_services(
+  ctx: mut runtime::Runtime,
+  validate_key: fn(Str) Void!Str,
+  save_key: fn(Str) Str!Str,
+) Authenticate {
+  let app_cancellation = ctx.cancellation
+  let dispatch = ctx.dispatch
+  fn(api_key: Str, view_cancellation: Receiver<Bool>, completion: fn(Void!Str)) {
+    async::start(fn() {
+      if not cancelled(app_cancellation, view_cancellation) {
+        let validation = validate_key(api_key)
+        if not cancelled(app_cancellation, view_cancellation) {
+          let result: Void!Str = match validation {
+            ok(_) => {
+              match save_key(api_key) {
+                ok(_) => Result::ok(()),
+                err(message) => Result::err(message),
+              }
+            },
+            err(message) => Result::err(message),
+          }
+          if not cancelled(app_cancellation, view_cancellation) {
+            let _ = dispatch(fn() {
+              completion(result)
+            })
+          }
+        }
+      }
+    })
+  }
+}
+
+// Production authentication port. Work runs in a background fiber and the
+// completion always re-enters Cooper's UI thread.
+fn live(ctx: mut runtime::Runtime) Authenticate {
+  with_services(ctx, validate, config::write)
+}

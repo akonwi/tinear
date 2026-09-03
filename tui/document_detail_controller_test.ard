@@ -1,0 +1,230 @@
+use ard/testing as assertions
+
+use cooper/event
+use cooper/testing
+use tinear/models/documents
+use tinear/services/document_detail_service
+use tinear/tui/document_detail_controller
+use tinear/tui/theme
+
+struct FakeState {
+  loads: [fn(documents::Doc!Str)],
+}
+
+struct Scheduled {
+  actions: [fn()],
+  cancellations: Int,
+}
+
+struct Actions {
+  titles: [Str],
+  opened_url: Str,
+  errors: Int,
+}
+
+private fn service(state: mut FakeState) document_detail_service::Service {
+  document_detail_service::Service{
+    load: fn(cancellation: Receiver<Bool>, slug_id: Str, completion: fn(documents::Doc!Str)) {
+      state.loads.push(completion)
+    },
+  }
+}
+
+private fn schedule(state: mut Scheduled) fn(Int, fn()) fn() {
+  fn(milliseconds: Int, action: fn()) fn() {
+    state.actions.push(action)
+    fn() {
+      state.cancellations =+ 1
+    }
+  }
+}
+
+private fn document(title: Str, content: Str) documents::Doc {
+  documents::Doc{
+    meta: documents::DocMeta{
+      id: "doc-1",
+      slug_id: "doc-slug",
+      title: title,
+      container: "Tinear",
+      creator: "Alex",
+      updated_at: "2026-05-26T20:17:01.313Z",
+      url: "https://linear.app/document/doc-slug",
+    },
+    content: Maybe::new(content),
+  }
+}
+
+private fn key(name: Str) mut event::KeyEvent {
+  event::key(
+    name,
+    "",
+    event::KeyEventType::press,
+    event::Modifiers{
+      shift: false,
+      ctrl: false,
+      alt: false,
+      super: false,
+    },
+  )
+}
+
+private fn controller(
+  application: testing::TestApp,
+  fake: mut FakeState,
+  scheduled: mut Scheduled,
+  actions: mut Actions,
+) mut document_detail_controller::DocumentDetailController {
+  document_detail_controller::new(
+    application.context,
+    theme::new(),
+    "doc-slug",
+    "Cached title",
+    service(fake),
+    schedule(scheduled),
+    fn(title: Str) {
+      actions.titles.push(title)
+    },
+    fn(url: Str) {
+      actions.opened_url = url
+    },
+    fn(title: Str, message: Str) {
+      actions.errors =+ 1
+    },
+  )
+}
+
+test fn document_detail_loads_retitles_renders_and_routes_commands() Void!Str {
+  let application = testing::new(80, 24)
+  defer application.destroy()
+  let fake = mut FakeState{loads: []}
+  let scheduled = mut Scheduled{actions: [], cancellations: 0}
+  let actions = mut Actions{
+    titles: [],
+    opened_url: "",
+    errors: 0,
+  }
+  let detail = controller(application, fake, scheduled, actions)
+  application.root.add(detail.root)
+  detail.start()
+  try assertions::assert(fake.loads.size() == 1, "document should load once")
+  try assertions::assert(scheduled.actions.size() == 1, "document should schedule refresh")
+  (fake.loads.at(0).expect("load"))(Result::ok(document("Fresh title", "# Heading\n\nBody")))
+  application.render()
+
+  try assertions::assert(detail.title_text.content() == "Fresh title", "title should render")
+  try assertions::assert(detail.metadata_first.content().contains("Tinear"), "container should render")
+  try assertions::assert(
+    detail.metadata_second.content().contains("May 26, 2026"),
+    "updated timestamp should be friendly",
+  )
+  try assertions::assert(
+    detail.markdown.source == "# Heading\n\nBody",
+    "content should render as markdown",
+  )
+  try assertions::assert(
+    actions.titles.at(0).expect("retitle") == "Fresh title",
+    "fresh title should retitle tab",
+  )
+  try assertions::assert(detail.handle_key(key("j")), "j should scroll document")
+  try assertions::assert(detail.handle_key(key("k")), "k should scroll document")
+  try assertions::assert(detail.handle_key(key("o")), "o should open document URL")
+  try assertions::assert(
+    actions.opened_url == "https://linear.app/document/doc-slug",
+    "document URL should be routed through launcher",
+  )
+  for size in [[60, 20], [100, 30], [160, 40]] {
+    application.resize(size.at(0).expect("width"), size.at(1).expect("height"))
+    try assertions::assert(
+      detail.markdown.source == "# Heading\n\nBody",
+      "resize should preserve Markdown source",
+    )
+    try assertions::assert(
+      detail.title_text.content() == "Fresh title",
+      "resize should preserve document identity",
+    )
+  }
+  assertions::assert(fake.loads.size() == 1, "resize should not trigger document loads")
+}
+
+test fn document_detail_initial_error_retries_to_empty_content() Void!Str {
+  let application = testing::new(70, 20)
+  defer application.destroy()
+  let fake = mut FakeState{loads: []}
+  let scheduled = mut Scheduled{actions: [], cancellations: 0}
+  let actions = mut Actions{
+    titles: [],
+    opened_url: "",
+    errors: 0,
+  }
+  let detail = controller(application, fake, scheduled, actions)
+  application.root.add(detail.root)
+  detail.start()
+  (fake.loads.at(0).expect("initial load"))(Result::err("forbidden"))
+  try assertions::assert(
+    detail.status.content().contains("Couldn't load Cached title: forbidden"),
+    "initial document errors should be visible",
+  )
+  detail.refresh(false)
+  let empty = mut document("Empty document", "ignored")
+  empty.content = Maybe::new<Str>()
+  (fake.loads.at(1).expect("retry"))(Result::ok(empty.@))
+  try assertions::assert(detail.document.is_some(), "successful retry should retain document metadata")
+  assertions::assert(
+    detail.markdown.source.is_empty(),
+    "null document content should render as empty",
+  )
+}
+
+test fn document_detail_rejects_stale_load_and_preserves_content_on_refresh_failure() Void!Str {
+  let application = testing::new(70, 20)
+  defer application.destroy()
+  let fake = mut FakeState{loads: []}
+  let scheduled = mut Scheduled{actions: [], cancellations: 0}
+  let actions = mut Actions{
+    titles: [],
+    opened_url: "",
+    errors: 0,
+  }
+  let detail = controller(application, fake, scheduled, actions)
+  application.root.add(detail.root)
+  detail.start()
+  detail.refresh(true)
+  try assertions::assert(
+    detail.generation == 2,
+    "two loads should advance generation to {detail.generation}",
+  )
+  (fake.loads.at(0).expect("stale load"))(Result::ok(document("Stale", "Old")))
+  try assertions::assert(detail.document.is_none(), "older load should be ignored")
+  (fake.loads.at(1).expect("current load"))(Result::ok(document("Current", "Visible")))
+  detail.refresh(true)
+  (fake.loads.at(2).expect("failed refresh"))(Result::err("offline"))
+  try assertions::assert(
+    detail.title_text.content() == "Current",
+    "failed refresh should preserve visible document",
+  )
+  assertions::assert(actions.errors == 1, "failed silent refresh should report a toast")
+}
+
+test fn document_detail_disposal_stops_refresh_and_late_completion() Void!Str {
+  let application = testing::new(60, 18)
+  defer application.destroy()
+  let fake = mut FakeState{loads: []}
+  let scheduled = mut Scheduled{actions: [], cancellations: 0}
+  let actions = mut Actions{
+    titles: [],
+    opened_url: "",
+    errors: 0,
+  }
+  let detail = controller(application, fake, scheduled, actions)
+  application.root.add(detail.root)
+  detail.start()
+  detail.dispose()
+  try assertions::assert(scheduled.cancellations == 1, "dispose should cancel periodic refresh")
+  (fake.loads.at(0).expect("late load"))(Result::ok(document("Late", "Ignored")))
+  try assertions::assert(detail.document.is_none(), "disposed detail should ignore late completion")
+  (scheduled.actions.at(0).expect("scheduled refresh"))()
+  assertions::assert(
+    fake.loads.size() == 1,
+    "disposed scheduled action should not start another load",
+  )
+}

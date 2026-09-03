@@ -2,7 +2,7 @@
 
 ## Status
 
-Superseded — the active TUI now uses the vaxis/ui implementation
+Superseded by [ADR 0003](0003-adopt-cooper-retained-ui.md). The active TUI uses direct Cooper retained controls; this ADR remains historical context for durable product decisions such as permanent Inbox navigation, tabs, footer hints, and modal overlays.
 
 ## Context
 

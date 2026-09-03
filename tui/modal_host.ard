@@ -1,0 +1,208 @@
+use cooper/box
+use cooper/event
+use cooper/runtime
+use cooper/style
+use cooper/text
+use tinear/tui/theme as tinear_theme
+
+struct Ticket {
+  generation: Int,
+}
+
+struct ModalHost {
+  root: mut box::Box,
+  frame: mut box::Box,
+  title_text: mut text::Text,
+  body_slot: mut box::Box,
+  footer_text: mut text::Text,
+  current_root: (mut box::Box)?,
+  current_dispose: fn()?,
+  current_restore_focus: fn()?,
+  current_can_dismiss: (fn() Bool)?,
+  generation: Int,
+  presented: Bool,
+  hidden_style: style::Style,
+  visible_style: style::Style,
+}
+
+private fn root_style(display: style::Display) style::Style {
+  style::new(
+    display: display,
+    position: style::Position::absolute,
+    left: style::cells(0),
+    top: style::cells(0),
+    width: style::percent(100.0),
+    height: style::percent(100.0),
+    align_items: style::Align::center,
+    justify_content: style::Justify::center,
+    z_index: 1000,
+  )
+}
+
+fn new(ctx: mut runtime::Runtime, palette: tinear_theme::Theme) mut ModalHost {
+  let hidden_style = root_style(style::Display::none)
+  let visible_style = root_style(style::Display::flex)
+  let root = box::new(ctx, styles: hidden_style)
+  let frame = box::new(
+    ctx,
+    styles: style::new(
+      width: style::percent(70.0),
+      max_width: style::cells(72),
+      max_height: style::percent(80.0),
+      background: palette.background,
+      border: style::Border::rounded,
+      border_color: palette.accent,
+      flex_direction: style::FlexDirection::column,
+      padding: style::Edges{
+        top: style::cells(0),
+        right: style::cells(1),
+        bottom: style::cells(0),
+        left: style::cells(1),
+      },
+      gap: style::cells(1),
+    ),
+  )
+  frame.set_focusable(true)
+  let title_text = text::new(ctx, content: "", text_style: text::style(bold: true))
+  let body_slot = box::new(
+    ctx,
+    styles: style::new(width: style::percent(100.0), flex_direction: style::FlexDirection::column),
+  )
+  let footer_text = text::new(ctx, content: "", text_style: text::style(dim: true))
+
+  frame.add(title_text)
+  frame.add(body_slot)
+  frame.add(footer_text)
+  root.add(frame)
+
+  // The full-screen, high-z root wins hit testing over background controls.
+  // Preserve normal autofocus for controls inside the modal.
+  let _ = root.on_mouse(fn(received: mut event::MouseEvent) {
+    received.stop_propagation()
+  })
+
+  (mut ModalHost{
+    root: root,
+    frame: frame,
+    title_text: title_text,
+    body_slot: body_slot,
+    footer_text: footer_text,
+    current_root: Maybe::new<mut box::Box>(),
+    current_dispose: Maybe::new<fn()>(),
+    current_restore_focus: Maybe::new<fn()>(),
+    current_can_dismiss: Maybe::new<fn() Bool>(),
+    generation: 0,
+    presented: false,
+    hidden_style: hidden_style,
+    visible_style: visible_style,
+  })
+}
+
+impl ModalHost {
+  fn is_open() Bool {
+    self.presented
+  }
+
+  fn is_current(ticket: Ticket) Bool {
+    self.presented and ticket.generation == self.generation
+  }
+
+  private fn mut clear_current(restore_focus: Bool) Bool {
+    if not self.presented {
+      false
+    } else {
+      let old_root = self.current_root
+      let old_dispose = self.current_dispose
+      let old_restore_focus = self.current_restore_focus
+      let closing_generation = self.generation
+
+      self.presented = false
+      self.current_root = Maybe::new<mut box::Box>()
+      self.current_dispose = Maybe::new<fn()>()
+      self.current_restore_focus = Maybe::new<fn()>()
+      self.current_can_dismiss = Maybe::new<fn() Bool>()
+      self.root.set_style(self.hidden_style)
+
+      match old_root {
+        body => {
+          let _ = self.body_slot.remove(body)
+        },
+        _ => (),
+      }
+      match old_dispose {
+        dispose => dispose(),
+        _ => (),
+      }
+      match old_root {
+        body => body.destroy(recursive: true),
+        _ => (),
+      }
+
+      if restore_focus and (not self.presented) and self.generation == closing_generation {
+        match old_restore_focus {
+          restore => restore(),
+          _ => (),
+        }
+      }
+      true
+    }
+  }
+
+  fn mut present(
+    title: Str,
+    body: mut box::Box,
+    footer: Str,
+    dispose: fn(),
+    initial_focus: fn(),
+    restore_focus: fn(),
+    can_dismiss: fn() Bool,
+  ) Ticket {
+    let _ = self.clear_current(false)
+    self.generation =+ 1
+    self.current_root = Maybe::new<mut box::Box>(body)
+    self.current_dispose = Maybe::new<fn()>(dispose)
+    self.current_restore_focus = Maybe::new<fn()>(restore_focus)
+    self.current_can_dismiss = Maybe::new<fn() Bool>(can_dismiss)
+    self.presented = true
+    self.title_text.set_content(title)
+    self.footer_text.set_content(footer)
+    self.body_slot.add(body)
+    self.root.set_style(self.visible_style)
+    let _ = self.frame.focus()
+    initial_focus()
+    Ticket{generation: self.generation}
+  }
+
+  fn mut close() Bool {
+    if not self.presented {
+      false
+    } else {
+      self.generation =+ 1
+      self.clear_current(true)
+    }
+  }
+
+  fn mut dismiss() Bool {
+    if not self.presented {
+      false
+    } else {
+      let allowed = match self.current_can_dismiss {
+        check => check(),
+        _ => true,
+      }
+      if allowed {
+        self.close()
+      } else {
+        false
+      }
+    }
+  }
+
+  fn mut close_if_current(ticket: Ticket) Bool {
+    if self.is_current(ticket) {
+      self.close()
+    } else {
+      false
+    }
+  }
+}

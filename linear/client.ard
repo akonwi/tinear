@@ -5,6 +5,8 @@ use go:net/http
 use go:strings
 use go:time
 
+let MAX_RESPONSE_BYTES: Int = 4 * 1024 * 1024
+
 private fn error_message(error: Error) Str {
   error.error()
 }
@@ -21,23 +23,27 @@ private fn post(api_key: Str, body: Str) Str!Str {
   ).map_err(error_message)
   req.Header.Set("Content-Type", "application/json")
   req.Header.Set("Authorization", api_key)
-  
+
   let client = mut http::Client{Timeout: 30 * time::Second}
   let res = try client.Do(req).map_err(error_message)
   defer res.Body.Close()
-  
-  mut bytes = try io::ReadAll(res.Body).map_err(error_message)
-  let text = Str::from(bytes)
-  
-  match res.StatusCode >= 200 and res.StatusCode < 300 {
-    true => Result::ok(text),
-    false => Result::err("HTTP {res.StatusCode}: {text}"),
+
+  let limited = io::LimitReader(res.Body, Int64::from(MAX_RESPONSE_BYTES + 1))
+  mut bytes = try io::ReadAll(limited).map_err(error_message)
+  if bytes.size() > MAX_RESPONSE_BYTES {
+    Result::err("Linear response exceeded {MAX_RESPONSE_BYTES} bytes")
+  } else {
+    let text = Str::from(bytes)
+    match res.StatusCode >= 200 and res.StatusCode < 300 {
+      true => Result::ok(text),
+      false => Result::err("HTTP {res.StatusCode}: {text}"),
+    }
   }
 }
 
-private fn extract_data(res_body: Str) Any!Str {
+fn extract_data(res_body: Str) Any!Str {
   let parsed = try decode::from_json(res_body)
-  
+
   // Check for GraphQL errors — if "errors" field exists, report it
   match decode::run(parsed, decode::field("errors", decode::any)) {
     ok(errs) => {
@@ -61,4 +67,17 @@ fn send_query(api_key: Str, body: Str) Any!Str {
 fn graphql(api_key: Str, query: Str) Any!Str {
   mut encoded = json::Marshal(["query": query]).expect("encode body")
   send_query(api_key, Str::from(encoded))
+}
+
+// Encode untrusted strings before interpolating them into GraphQL source.
+fn string_literal(value: Str) Str {
+  mut encoded = json::Marshal(value).expect("encode GraphQL string")
+  Str::from(encoded)
+}
+
+fn nullable_string_literal(value: Str) Str {
+  match value.is_empty() {
+    true => "null",
+    false => string_literal(value),
+  }
 }

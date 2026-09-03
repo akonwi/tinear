@@ -1,0 +1,113 @@
+use ard/testing as assertions
+
+use cooper/testing
+use tinear/services/auth
+use tinear/tui/theme
+use tinear/tui/welcome_controller
+
+struct Attempt {
+  api_key: Str,
+  completion: fn(Void!Str),
+}
+
+private fn fake_auth(attempts: mut [Attempt]) auth::Authenticate {
+  fn(api_key: Str, view_cancellation: Receiver<Bool>, completion: fn(Void!Str)) {
+    attempts.push(Attempt{api_key: api_key, completion: completion})
+    ()
+  }
+}
+
+test fn welcome_requires_an_api_key() Void!Str {
+  let application = testing::new(60, 18)
+  defer application.destroy()
+  let attempts = mut List::new<Attempt>()
+  let controller = welcome_controller::new(
+    application.context,
+    theme::new(),
+    fake_auth(attempts),
+    fn(api_key: Str) {},
+  )
+  application.root.add(controller.root)
+  controller.submit()
+  application.render()
+  try testing::assert_contains(application.frame().text(), "Enter an API key")
+  assertions::assert(attempts.size() == 0, "blank submission should not authenticate")
+}
+
+test fn welcome_surfaces_authentication_failure_and_allows_retry() Void!Str {
+  let application = testing::new(60, 18)
+  defer application.destroy()
+  let attempts = mut List::new<Attempt>()
+  let controller = welcome_controller::new(
+    application.context,
+    theme::new(),
+    fake_auth(attempts),
+    fn(api_key: Str) {},
+  )
+  application.root.add(controller.root)
+  controller.api_key.set_value("lin_api_bad")
+  controller.submit()
+  try assertions::assert(attempts.size() == 1, "submission should start authentication")
+  try assertions::assert(
+    attempts.at(0).expect("attempt").api_key == "lin_api_bad",
+    "draft should be passed through",
+  )
+  attempts.at(0).expect("attempt").completion(Result::err("Invalid API token"))
+  application.render()
+  try testing::assert_contains(application.frame().text(), "Invalid API token")
+  let actual_error = controller.error_text.text_style().foreground.expect("error foreground")
+  let expected_error = theme::new().danger
+  let matches_danger = actual_error.red == expected_error.red and actual_error.green == expected_error.green and actual_error.blue == expected_error.blue
+  try assertions::assert(matches_danger, "authentication errors should use the danger color")
+
+  controller.api_key.set_value("lin_api_retry")
+  controller.submit()
+  assertions::assert(attempts.size() == 2, "failed authentication should permit retry")
+}
+
+test fn welcome_reports_success_once() Void!Str {
+  let application = testing::new(60, 18)
+  defer application.destroy()
+  let attempts = mut List::new<Attempt>()
+  mut authenticated = ""
+  let controller = welcome_controller::new(
+    application.context,
+    theme::new(),
+    fake_auth(attempts),
+    fn(api_key: Str) {
+      authenticated = api_key
+    },
+  )
+  application.root.add(controller.root)
+  controller.api_key.set_value("lin_api_valid")
+  let _ = controller.api_key.submit()
+  try assertions::assert(attempts.size() == 1, "Input submit should authenticate")
+  controller.submit()
+  try assertions::assert(attempts.size() == 1, "loading state should reject duplicate submit")
+  attempts.at(0).expect("attempt").completion(Result::ok(()))
+  assertions::assert(
+    authenticated == "lin_api_valid",
+    "success should report the authenticated key",
+  )
+}
+
+test fn welcome_disposal_rejects_late_authentication() Void!Str {
+  let application = testing::new(60, 18)
+  defer application.destroy()
+  let attempts = mut List::new<Attempt>()
+  mut successes = 0
+  let controller = welcome_controller::new(
+    application.context,
+    theme::new(),
+    fake_auth(attempts),
+    fn(api_key: Str) {
+      successes =+ 1
+    },
+  )
+  application.root.add(controller.root)
+  controller.api_key.set_value("lin_api_valid")
+  controller.submit()
+  controller.dispose()
+  attempts.at(0).expect("attempt").completion(Result::ok(()))
+  assertions::assert(successes == 0, "disposed controller should suppress late success")
+}

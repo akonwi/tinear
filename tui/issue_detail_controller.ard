@@ -1,0 +1,878 @@
+use cooper/box
+use cooper/event
+use cooper/runtime
+use cooper/scroll_box
+use cooper/style
+use cooper/text
+use go:strings
+use tinear/models/issue_state
+use tinear/models/issues
+use tinear/services/issue_detail_service
+use tinear/tui/issue_field_picker_controller
+use tinear/tui/lifecycle
+use tinear/tui/markdown_controller
+use tinear/tui/scheduler
+use tinear/tui/shell_controller
+use tinear/tui/theme as tinear_theme
+use tinear/tui/timestamp
+
+let DESCRIPTION_SECTION: Int = 0
+let COMMENTS_SECTION: Int = 1
+
+struct CommentRecord {
+  id: Str,
+  root: mut box::Box,
+  header: mut text::Text,
+  body: mut markdown_controller::MarkdownController,
+  remove_mouse: fn(),
+}
+
+struct IssueDetailController {
+  root: mut box::Box,
+  context: mut runtime::Runtime,
+  identifier: Str,
+  status: mut text::Text,
+  content: mut box::Box,
+  identifier_text: mut text::Text,
+  title_text: mut text::Text,
+  metadata_first: mut text::Text,
+  metadata_second: mut text::Text,
+  metadata_third: mut text::Text,
+  description_tab: mut text::Text,
+  comments_tab: mut text::Text,
+  body_scroll: mut scroll_box::ScrollBox,
+  description: mut markdown_controller::MarkdownController,
+  comments_root: mut box::Box,
+  comments_status: mut text::Text,
+  comment_records: [CommentRecord],
+  issue: issues::Issue?,
+  comments: [issues::Comment],
+  active_section: Int,
+  pending_comment_id: Str,
+  focus_pending_comment: Bool,
+  comment_cursor: Int,
+  hovered_comment_id: Str,
+  issue_generation: Int,
+  comments_generation: Int,
+  scope: mut lifecycle::Scope,
+  service: issue_detail_service::Service,
+  schedule: scheduler::Schedule,
+  cancel_refresh: fn(),
+  on_open_url: fn(Str),
+  on_pick_field: fn(issue_field_picker_controller::Field, issues::Issue),
+  on_comment: fn(issues::Issue, Str, Str),
+  on_edit_description: fn(issues::Issue),
+  notify_error: fn(Str, Str),
+  remove_description_mouse: fn(),
+  remove_comments_mouse: fn(),
+  palette: tinear_theme::Theme,
+}
+
+private fn root_child_style(display: style::Display) style::Style {
+  style::new(
+    display: display,
+    width: style::percent(100.0),
+    height: style::cells(1),
+    flex_grow: 1.0,
+    overflow: style::Overflow::hidden,
+  )
+}
+
+private fn value(value: Str) Str {
+  match value.is_empty() or value == "—" {
+    true => "—",
+    false => value,
+  }
+}
+
+private fn metadata_line(
+  first_label: Str,
+  first_value: Str,
+  second_label: Str,
+  second_value: Str,
+  palette: tinear_theme::Theme,
+) text::StyledText {
+  text::styled_text(
+    [
+      text::span(first_label, style: text::span_style(dim: true)),
+      text::span("  {value(first_value)}", style: text::span_style(foreground: palette.foreground)),
+      text::span("     {second_label}", style: text::span_style(dim: true)),
+      text::span("  {value(second_value)}", style: text::span_style(foreground: palette.foreground)),
+    ],
+  )
+}
+
+private fn priority(issue: issues::Issue) Str {
+  match issue.priority {
+    number => {
+      match number {
+        0 => "—",
+        _ => "{issue_state::priority_glyph(issue.priority)} {issue_state::priority_label(issue.priority)}",
+      }
+    },
+    _ => "—",
+  }
+}
+
+private fn status_style(display: style::Display) style::Style {
+  style::new(
+    display: display,
+    width: style::percent(100.0),
+    height: style::cells(1),
+    flex_shrink: 0.0,
+  )
+}
+
+private fn comment_style(
+  comment: issues::Comment,
+  active: Bool,
+  hovered: Bool,
+  palette: tinear_theme::Theme,
+) style::Style {
+  style::new(
+    width: style::percent(100.0),
+    flex_shrink: 0.0,
+    background: match {
+      active => palette.item_active_background,
+      hovered => palette.item_hover_background,
+      _ => palette.background,
+    },
+    margin: style::Edges{
+      top: style::cells(1),
+      right: style::cells(0),
+      bottom: style::cells(0),
+      left: style::cells(comment.depth * 2),
+    },
+    padding: style::Edges{
+      top: style::cells(0),
+      right: style::cells(1),
+      bottom: style::cells(0),
+      left: style::cells(1),
+    },
+  )
+}
+
+fn new(
+  ctx: mut runtime::Runtime,
+  palette: tinear_theme::Theme,
+  identifier: Str,
+  service: issue_detail_service::Service,
+  schedule: scheduler::Schedule,
+  on_open_url: fn(Str),
+  on_pick_field: fn(issue_field_picker_controller::Field, issues::Issue),
+  on_comment: fn(issues::Issue, Str, Str),
+  on_edit_description: fn(issues::Issue),
+  notify_error: fn(Str, Str),
+) mut IssueDetailController {
+  let root = box::new(
+    ctx,
+    styles: style::new(
+      width: style::percent(100.0),
+      height: style::percent(100.0),
+      overflow: style::Overflow::hidden,
+      padding: style::Edges{
+        top: style::cells(0),
+        right: style::cells(1),
+        bottom: style::cells(0),
+        left: style::cells(1),
+      },
+    ),
+  )
+  let status = text::new(
+    ctx,
+    content: "Loading {identifier}…",
+    selectable: false,
+    styles: status_style(style::Display::flex),
+    text_style: text::style(dim: true),
+  )
+  let content = box::new(ctx, styles: root_child_style(style::Display::none))
+  let identifier_text = text::new(
+    ctx,
+    content: identifier,
+    selectable: true,
+    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+    text_style: text::style(foreground: palette.accent, bold: true),
+  )
+  let title_text = text::new(
+    ctx,
+    content: "",
+    selectable: true,
+    wrap: text::TextWrap::word,
+    overflow: text::TextOverflow::ellipsis,
+    styles: style::new(width: style::percent(100.0), max_height: style::cells(2), flex_shrink: 0.0),
+    text_style: text::style(bold: true),
+  )
+  let metadata_first = text::new(
+    ctx,
+    content: "",
+    selectable: true,
+    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+  )
+  let metadata_second = text::new(
+    ctx,
+    content: "",
+    selectable: true,
+    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+  )
+  let metadata_third = text::new(
+    ctx,
+    content: "",
+    selectable: true,
+    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+  )
+  let header_rule = text::new(
+    ctx,
+    content: strings::Repeat("─", 512),
+    selectable: false,
+    wrap: text::TextWrap::none,
+    overflow: text::TextOverflow::clip,
+    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+    text_style: text::style(foreground: palette.border, dim: true),
+  )
+  let section_bar = box::new(
+    ctx,
+    styles: style::new(
+      width: style::percent(100.0),
+      height: style::cells(1),
+      flex_shrink: 0.0,
+      flex_direction: style::FlexDirection::row,
+      gap: style::cells(3),
+    ),
+  )
+  let description_tab = text::new(
+    ctx,
+    content: "Description",
+    selectable: false,
+    styles: style::new(width: style::cells(14), height: style::cells(1), flex_shrink: 0.0),
+  )
+  let comments_tab = text::new(
+    ctx,
+    content: "Comments (…)",
+    selectable: false,
+    styles: style::new(width: style::cells(20), height: style::cells(1), flex_shrink: 0.0),
+  )
+  section_bar.add(description_tab)
+  section_bar.add(comments_tab)
+  let section_rule = text::new(
+    ctx,
+    content: strings::Repeat("─", 512),
+    selectable: false,
+    wrap: text::TextWrap::none,
+    overflow: text::TextOverflow::clip,
+    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+    text_style: text::style(foreground: palette.border, dim: true),
+  )
+  let body_scroll = scroll_box::new(
+    ctx,
+    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_grow: 1.0),
+  )
+  let description = markdown_controller::new(ctx, palette, "", on_open_url)
+  let comments_root = box::new(
+    ctx,
+    styles: style::new(
+      width: style::percent(100.0),
+      flex_direction: style::FlexDirection::column,
+      align_items: style::Align::stretch,
+    ),
+  )
+  let comments_status = text::new(
+    ctx,
+    content: "Loading comments…",
+    selectable: false,
+    styles: status_style(style::Display::flex),
+    text_style: text::style(dim: true),
+  )
+  comments_root.add(comments_status)
+  body_scroll.add(description.root)
+  content.add(identifier_text)
+  content.add(title_text)
+  content.add(metadata_first)
+  content.add(metadata_second)
+  content.add(metadata_third)
+  content.add(header_rule)
+  content.add(section_bar)
+  content.add(section_rule)
+  content.add(body_scroll)
+  root.add(status)
+  root.add(content)
+
+  let controller = mut IssueDetailController{
+    root: root,
+    context: ctx,
+    identifier: identifier,
+    status: status,
+    content: content,
+    identifier_text: identifier_text,
+    title_text: title_text,
+    metadata_first: metadata_first,
+    metadata_second: metadata_second,
+    metadata_third: metadata_third,
+    description_tab: description_tab,
+    comments_tab: comments_tab,
+    body_scroll: body_scroll,
+    description: description,
+    comments_root: comments_root,
+    comments_status: comments_status,
+    comment_records: [],
+    issue: Maybe::new<issues::Issue>(),
+    comments: [],
+    active_section: DESCRIPTION_SECTION,
+    pending_comment_id: "",
+    focus_pending_comment: false,
+    comment_cursor: 0,
+    hovered_comment_id: "",
+    issue_generation: 0,
+    comments_generation: 0,
+    scope: lifecycle::new(),
+    service: service,
+    schedule: schedule,
+    cancel_refresh: fn() {},
+    on_open_url: on_open_url,
+    on_pick_field: on_pick_field,
+    on_comment: on_comment,
+    on_edit_description: on_edit_description,
+    notify_error: notify_error,
+    remove_description_mouse: fn() {},
+    remove_comments_mouse: fn() {},
+    palette: palette,
+  }
+  controller.remove_description_mouse = description_tab.on_mouse(
+    fn(received: mut event::MouseEvent) {
+      if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
+        controller.switch_section(DESCRIPTION_SECTION)
+        received.stop_propagation()
+      }
+    },
+  )
+  controller.remove_comments_mouse = comments_tab.on_mouse(fn(received: mut event::MouseEvent) {
+    if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
+      controller.switch_section(COMMENTS_SECTION)
+      received.stop_propagation()
+    }
+  })
+  controller.refresh_tabs()
+  controller
+}
+
+impl IssueDetailController {
+  private fn mut refresh_tabs() {
+    self.description_tab.set_text_style(
+      text::style(
+        foreground: match self.active_section == DESCRIPTION_SECTION {
+          true => self.palette.accent,
+          false => self.palette.foreground,
+        },
+        bold: self.active_section == DESCRIPTION_SECTION,
+        dim: not self.active_section == DESCRIPTION_SECTION,
+      ),
+    )
+    self.comments_tab.set_text_style(
+      text::style(
+        foreground: match self.active_section == COMMENTS_SECTION {
+          true => self.palette.accent,
+          false => self.palette.foreground,
+        },
+        bold: self.active_section == COMMENTS_SECTION,
+        dim: not self.active_section == COMMENTS_SECTION,
+      ),
+    )
+  }
+
+  private fn mut show_issue(issue: issues::Issue) {
+    self.identifier_text.set_content(issue.identifier)
+    self.title_text.set_content(issue.title)
+    self.metadata_first.set_content(
+      metadata_line("State", issue.state_name, "Priority", priority(issue), self.palette),
+    )
+    self.metadata_second.set_content(
+      metadata_line("Assignee", issue.assignee_name, "Cycle", issue.cycle_label, self.palette),
+    )
+    self.metadata_third.set_content(
+      metadata_line("Project", issue.project_name, "Team", issue.team_name, self.palette),
+    )
+    self.description.set_source(issue.description.or(""))
+    self.status.set_style(status_style(style::Display::none))
+    self.content.set_style(root_child_style(style::Display::flex))
+  }
+
+  private fn mut show_issue_error(message: Str) {
+    self.status.set_content("Couldn't load {self.identifier}: {message}")
+    self.status.set_text_style(text::style(foreground: self.palette.danger, bold: true))
+    self.status.set_style(status_style(style::Display::flex))
+    self.content.set_style(root_child_style(style::Display::none))
+  }
+
+  private fn mut create_comment(comment: issues::Comment) CommentRecord {
+    let root = box::new(self.context, styles: comment_style(comment, false, false, self.palette))
+    root.set_focusable(true)
+    let header = text::new(
+      self.context,
+      content: "{comment.author}  {timestamp::friendly(comment.created_at)}",
+      selectable: true,
+      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+      text_style: text::style(bold: true),
+    )
+    let body = markdown_controller::new(self.context, self.palette, comment.body, self.on_open_url)
+    root.add(header)
+    root.add(body.root)
+    let id = comment.id
+    let remove_mouse = root.on_mouse(fn(received: mut event::MouseEvent) {
+      if received.event_type == event::MouseEventType::move {
+        self.set_hovered_comment(id)
+      } else if received.event_type == event::MouseEventType::out {
+        self.clear_hovered_comment(id)
+      } else if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
+        self.select_comment(id)
+        received.stop_propagation()
+      }
+    })
+    CommentRecord{
+      id: id,
+      root: root,
+      header: header,
+      body: body,
+      remove_mouse: remove_mouse,
+    }
+  }
+
+  private fn mut reconcile_comments() {
+    self.hovered_comment_id = ""
+    let previous = self.comment_records
+    for record in previous {
+      let _ = self.comments_root.remove(record.root)
+    }
+    let next = mut List::new<CommentRecord>()
+    for comment in self.comments {
+      mut found: CommentRecord? = Maybe::new()
+      for record in previous {
+        if record.id == comment.id {
+          found = Maybe::new(record)
+        }
+      }
+      let record = match found {
+        value => value,
+        _ => self.create_comment(comment),
+      }
+      record.root.set_style(comment_style(comment, false, false, self.palette))
+      record.header.set_content("{comment.author}  {timestamp::friendly(comment.created_at)}")
+      record.body.set_source(comment.body)
+      self.comments_root.add(record.root)
+      next.push(record)
+    }
+    for old in previous {
+      mut retained = false
+      for record in next {
+        if record.id == old.id {
+          retained = true
+        }
+      }
+      if not retained {
+        old.remove_mouse()
+        old.body.dispose()
+        old.root.destroy(recursive: true)
+      }
+    }
+    self.comment_records = next.@
+    self.refresh_comment_selection()
+  }
+
+  private fn mut set_hovered_comment(id: Str) {
+    if not self.hovered_comment_id == id {
+      self.hovered_comment_id = id
+      self.refresh_comment_selection()
+    }
+  }
+
+  private fn mut clear_hovered_comment(id: Str) {
+    if self.hovered_comment_id == id {
+      self.hovered_comment_id = ""
+      self.refresh_comment_selection()
+    }
+  }
+
+  private fn mut refresh_comment_selection() {
+    for record, index in self.comment_records {
+      match self.comments.at(index) {
+        comment => {
+          let active = index == self.comment_cursor
+          let hovered = (not active) and record.id == self.hovered_comment_id
+          let foreground = match {
+            active => self.palette.item_active_foreground,
+            hovered => self.palette.item_hover_foreground,
+            _ => self.palette.foreground,
+          }
+          record.root.set_style(comment_style(comment, active, hovered, self.palette))
+          record.header.set_text_style(
+            text::style(foreground: foreground, bold: active, dim: not active and not hovered),
+          )
+          record.body.set_interaction(active, hovered)
+        },
+        _ => (),
+      }
+    }
+  }
+
+  private fn selected_comment_id() Str {
+    match self.comments.at(self.comment_cursor) {
+      comment => comment.id,
+      _ => "",
+    }
+  }
+
+  private fn mut replace_comments(comments: [issues::Comment]) {
+    let selected_id = self.selected_comment_id()
+    let requested_id = self.pending_comment_id
+    self.comments = comments
+    self.comment_cursor = 0
+    mut found_requested = false
+    if not requested_id.is_empty() {
+      for comment, index in self.comments {
+        if comment.id == requested_id {
+          self.comment_cursor = index
+          found_requested = true
+        }
+      }
+    }
+    if not found_requested and not selected_id.is_empty() {
+      for comment, index in self.comments {
+        if comment.id == selected_id {
+          self.comment_cursor = index
+        }
+      }
+    }
+    self.show_comments()
+    if (not found_requested) and not requested_id.is_empty() {
+      // Preserve ID-based selection for a later eventually-consistent refresh,
+      // but do not let that later refresh steal focus from a newer modal.
+      self.focus_pending_comment = false
+    }
+    if found_requested {
+      self.pending_comment_id = ""
+      let should_focus = self.focus_pending_comment
+      self.focus_pending_comment = false
+      if should_focus {
+        match self.comment_records.at(self.comment_cursor) {
+          record => {
+            let _ = record.root.focus()
+            let _ = self.body_scroll.scroll_child_into_view(record.root)
+          },
+          _ => (),
+        }
+      }
+    }
+  }
+
+  private fn mut show_comments() {
+    self.comments_tab.set_content("Comments ({self.comments.size()})")
+    self.comments_status.set_text_style(text::style(dim: true))
+    self.comments_status.set_content(
+      match self.comments.size() {
+        0 => "No comments",
+        _ => "",
+      },
+    )
+    self.comments_status.set_style(
+      status_style(
+        match self.comments.size() {
+          0 => style::Display::flex,
+          _ => style::Display::none,
+        },
+      ),
+    )
+    if self.comment_cursor >= self.comments.size() {
+      self.comment_cursor = match self.comments.size() {
+        0 => 0,
+        _ => self.comments.size() - 1,
+      }
+    }
+    self.reconcile_comments()
+  }
+
+  private fn mut show_comments_error(message: Str) {
+    self.comments_status.set_content("Couldn't load comments: {message}")
+    self.comments_status.set_text_style(text::style(foreground: self.palette.danger, bold: true))
+    self.comments_status.set_style(status_style(style::Display::flex))
+  }
+
+  fn mut switch_section(section: Int) {
+    if not self.scope.disposed and section != self.active_section {
+      self.active_section = section
+      let _ = self.body_scroll.remove(self.description.root)
+      let _ = self.body_scroll.remove(self.comments_root)
+      match section {
+        1 => self.body_scroll.add(self.comments_root),
+        _ => self.body_scroll.add(self.description.root),
+      }
+      let _ = self.body_scroll.scroll_to(0)
+      self.refresh_tabs()
+    }
+  }
+
+  fn mut select_comment(id: Str) {
+    for comment, index in self.comments {
+      if comment.id == id {
+        self.comment_cursor = index
+      }
+    }
+    self.refresh_comment_selection()
+    match self.comment_records.at(self.comment_cursor) {
+      record => {
+        let _ = self.body_scroll.scroll_child_into_view(record.root)
+      },
+      _ => (),
+    }
+  }
+
+  private fn mut move_comment(delta: Int) {
+    if self.comments.size() > 0 {
+      self.hovered_comment_id = ""
+      mut next = self.comment_cursor + delta
+      if next < 0 {
+        next = 0
+      }
+      if next >= self.comments.size() {
+        next = self.comments.size() - 1
+      }
+      self.comment_cursor = next
+      self.refresh_comment_selection()
+      match self.comment_records.at(next) {
+        record => {
+          let _ = self.body_scroll.scroll_child_into_view(record.root)
+        },
+        _ => (),
+      }
+    }
+  }
+
+  private fn mut refresh_issue(silent: Bool) {
+    self.issue_generation =+ 1
+    let generation = self.issue_generation
+    if not silent and self.issue.is_none() {
+      self.status.set_content("Loading {self.identifier}…")
+      self.status.set_text_style(text::style(dim: true))
+    }
+    self.service.load_issue(
+      self.scope.stop.receiver(),
+      self.identifier,
+      fn(result: issues::Issue!Str) {
+        if (not self.scope.disposed) and generation == self.issue_generation {
+          match result {
+            ok(issue) => {
+              self.issue = Maybe::new(issue)
+              self.show_issue(issue)
+            },
+            err(message) => {
+              match self.issue {
+                existing => self.notify_error("Issue refresh", message),
+                _ => self.show_issue_error(message),
+              }
+            },
+          }
+        }
+      },
+    )
+  }
+
+  private fn mut refresh_comments(silent: Bool) {
+    self.comments_generation =+ 1
+    let generation = self.comments_generation
+    if not silent and self.comments.size() == 0 {
+      self.comments_status.set_content("Loading comments…")
+      self.comments_status.set_text_style(text::style(dim: true))
+      self.comments_status.set_style(status_style(style::Display::flex))
+    }
+    self.service.load_comments(
+      self.scope.stop.receiver(),
+      self.identifier,
+      fn(result: [issues::Comment]!Str) {
+        if (not self.scope.disposed) and generation == self.comments_generation {
+          match result {
+            ok(comments) => self.replace_comments(comments),
+            err(message) => {
+              self.pending_comment_id = ""
+              self.focus_pending_comment = false
+              if self.comments.size() == 0 {
+                self.show_comments_error(message)
+              } else {
+                self.notify_error("Comments refresh", message)
+              }
+            },
+          }
+        }
+      },
+    )
+  }
+
+  fn mut refresh(silent: Bool) {
+    if not self.scope.disposed {
+      self.refresh_issue(silent)
+      self.refresh_comments(silent)
+    }
+  }
+
+  private fn mut schedule_refresh() {
+    self.cancel_refresh()
+    self.cancel_refresh = self.schedule(5 * 60 * 1000, fn() {
+      if not self.scope.disposed {
+        self.refresh(true)
+        self.schedule_refresh()
+      }
+    })
+  }
+
+  fn mut start() {
+    if (not self.scope.disposed) and self.issue_generation == 0 {
+      self.refresh(false)
+      self.schedule_refresh()
+    }
+  }
+
+  private fn mut open_browser() {
+    match self.issue {
+      loaded => {
+        if not loaded.url.is_empty() {
+          self.on_open_url(loaded.url)
+        }
+      },
+      _ => (),
+    }
+  }
+
+  private fn mut pick(field: issue_field_picker_controller::Field) {
+    match self.issue {
+      loaded => self.on_pick_field(field, loaded),
+      _ => (),
+    }
+  }
+
+  private fn mut compose_comment() {
+    match self.issue {
+      loaded => {
+        self.switch_section(COMMENTS_SECTION)
+        self.on_comment(loaded, "", "")
+      },
+      _ => (),
+    }
+  }
+
+  private fn mut reply_to_selected() {
+    if self.active_section == COMMENTS_SECTION {
+      match self.issue {
+        loaded => {
+          match self.comments.at(self.comment_cursor) {
+            target => {
+              let parent_id = match target.parent_id.is_empty() {
+                true => target.id,
+                false => target.parent_id,
+              }
+              self.on_comment(loaded, parent_id, target.author)
+            },
+            _ => (),
+          }
+        },
+        _ => (),
+      }
+    }
+  }
+
+  private fn mut edit_description() {
+    match self.issue {
+      loaded => {
+        self.switch_section(DESCRIPTION_SECTION)
+        self.on_edit_description(loaded)
+      },
+      _ => (),
+    }
+  }
+
+  fn mut comments_changed(comment_id: Str, should_focus: Bool) {
+    if not self.scope.disposed {
+      self.pending_comment_id = comment_id
+      self.focus_pending_comment = should_focus and not comment_id.is_empty()
+      self.switch_section(COMMENTS_SECTION)
+      self.refresh_comments(false)
+    }
+  }
+
+  fn mut description_changed(description: Str) {
+    if not self.scope.disposed {
+      self.issue_generation =+ 1
+      match self.issue {
+        loaded => {
+          let updated = mut loaded
+          updated.description = Maybe::new(description)
+          self.issue = Maybe::new(updated.@)
+          self.show_issue(updated.@)
+        },
+        _ => (),
+      }
+      self.refresh_issue(true)
+    }
+  }
+
+  fn mut focus() {
+    let _ = self.body_scroll.focus()
+  }
+
+  fn mut handle_key(received: mut event::KeyEvent) Bool {
+    if self.scope.disposed or received.event_type == event::KeyEventType::release {
+      false
+    } else {
+      mut handled = true
+      match {
+        received.matches("d") => self.switch_section(DESCRIPTION_SECTION),
+        received.matches("c") => self.switch_section(COMMENTS_SECTION),
+        received.matches("j") and self.active_section == COMMENTS_SECTION => self.move_comment(1),
+        received.matches("k") and self.active_section == COMMENTS_SECTION => self.move_comment(-1),
+        received.matches("j") or received.matches("down") => {
+          let _ = self.body_scroll.scroll_by(1)
+        },
+        received.matches("k") or received.matches("up") => {
+          let _ = self.body_scroll.scroll_by(-1)
+        },
+        received.matches("n") => self.compose_comment(),
+        received.matches("r") => self.reply_to_selected(),
+        received.matches("e") => self.edit_description(),
+        received.matches("o") => self.open_browser(),
+        received.matches("s") => self.pick(issue_field_picker_controller::Field::state),
+        received.matches("y") => self.pick(issue_field_picker_controller::Field::cycle),
+        received.matches("p") => self.pick(issue_field_picker_controller::Field::priority),
+        received.matches("a") => self.pick(issue_field_picker_controller::Field::assignee),
+        received.matches("p", shift: true) => self.pick(issue_field_picker_controller::Field::project),
+        _ => { handled = false },
+      }
+      handled
+    }
+  }
+
+  fn mut screen(dispose_extra: fn()) shell_controller::Screen {
+    shell_controller::Screen{
+      root: self.root,
+      focus: fn() {
+        self.focus()
+      },
+      handle_key: fn(received: mut event::KeyEvent) Bool {
+        self.handle_key(received)
+      },
+      dispose: fn() {
+        dispose_extra()
+        self.dispose()
+      },
+    }
+  }
+
+  fn mut dispose() {
+    if not self.scope.disposed {
+      self.cancel_refresh()
+      self.scope.dispose()
+      self.remove_description_mouse()
+      self.remove_comments_mouse()
+      self.description.dispose()
+      for record in self.comment_records {
+        record.remove_mouse()
+        record.body.dispose()
+      }
+      self.comment_records = []
+    }
+  }
+}

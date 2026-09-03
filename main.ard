@@ -1,219 +1,426 @@
-use ard/async
-
-use go:go.rockorager.dev/vaxis/ui
-use go:time
+use cooper/app
+use cooper/box
+use cooper/event
+use cooper/runtime
+use cooper/style
+use cooper/text
 use tinear/config
-use go:tinear/ffi
-use tinear/tui/logged_in_screen
-use tinear/tui/modal
-use tinear/tui/toast
-use tinear/tui/welcome_screen
+use tinear/models/cache
+use tinear/models/documents
+use tinear/models/issues
+use tinear/models/shell as shell_model
+use tinear/models/tabs
+use tinear/platform/url
+use tinear/services/auth
+use tinear/services/board_service
+use tinear/services/cache_writer
+use tinear/services/document_detail_service
+use tinear/services/inbox_service
+use tinear/services/issue_creation_service
+use tinear/services/issue_detail_service
+use tinear/services/issue_edit_service
+use tinear/services/issue_fields_service
+use tinear/services/search_service
+use tinear/tui/application_shell
+use tinear/tui/board_controller
+use tinear/tui/document_detail_controller
+use tinear/tui/inbox_controller
+use tinear/tui/issue_creation_controller
+use tinear/tui/issue_detail_controller
+use tinear/tui/issue_editor_controller
+use tinear/tui/issue_field_picker_controller
+use tinear/tui/scheduler
+use tinear/tui/search_controller
+use tinear/tui/shell_controller
+use tinear/tui/theme
+use tinear/tui/toast_host
+use tinear/tui/welcome_controller
 
-let DEFAULT_TOAST_TTL_MS: Int = 5000
-
-struct AppState {
-  api_key: Str,
-  toasts: [toast::Toast],
-  next_toast_id: Int,
-  // Currently-presented modal, if any. Setting to some / none drives
-  // the overlay slot in the app root.
-  current_modal: modal::ModalDef?,
+private struct ActiveRoute {
+  handle: fn(mut event::KeyEvent) Bool,
 }
 
-impl AppState {
-  fn has_auth() Bool {
-    not self.api_key.is_empty()
-  }
+private struct ShellActions {
+  open_issue: fn(Str),
+  open_doc: fn(tabs::TabRef),
+  open_picker: fn(issue_field_picker_controller::Field, issues::Issue),
+  retitle_doc: fn(tabs::TabRef, Str),
+  focus_shell: fn(),
 }
 
-fn set_api_key(c: mut ffi::StateCtx, api_key: Str) {
-  ffi::Update<AppState>(c, fn(state) {
-    state.api_key = api_key
-  })
+private struct DetailActions {
+  open_picker: fn(issue_field_picker_controller::Field, issues::Issue),
+  open_comment: fn(issues::Issue, Str, Str),
+  edit_description: fn(issues::Issue),
 }
 
-// Append a new toast and schedule its removal once the TTL elapses.
-// Safe to call from event handlers and from background fibers
-// (ffi::Dispatch lands the state mutation on the UI thread).
-fn dispatch_toast(
-  ctx: mut ffi::StateCtx,
-  title: Str,
-  description: Str,
-  variant: toast::ToastVariant,
-  ttl_ms: Int,
-) {
-  ffi::Dispatch(ctx, fn() {
-    let toast_id = ffi::StateValue<AppState>(ctx).next_toast_id + 1
-    ffi::Update<AppState>(ctx, fn(state) {
-      state.next_toast_id = toast_id
-      let next_toasts: mut [toast::Toast] = mut []
-      for t in state.toasts {
-        next_toasts.push(t)
-      }
-      next_toasts.push(
-        toast::Toast{
-          id: toast_id,
-          title: title,
-          description: description,
-          variant: variant,
-          ttl_ms: ttl_ms,
-        },
-      )
-      state.toasts = next_toasts.@
-    })
-    async::start(fn() {
-      time::Sleep(time::Duration::from(ttl_ms) * time::Millisecond)
-      ffi::Dispatch(ctx, fn() {
-        ffi::Update<AppState>(ctx, fn(s: mut AppState) {
-          let remaining: mut [toast::Toast] = mut []
-          for t in s.toasts {
-            if not t.id == toast_id {
-              remaining.push(t)
-            }
-          }
-          s.toasts = remaining.@
-        })
-      })
-    })
-  })
-}
-
-// Modal lifecycle helpers. close_modal clears the slot; show_modal
-// installs a builder. Both are runtime-safe (ffi::Dispatch lands the
-// state mutation on the UI thread) so callers can invoke them from
-// event handlers or background fibers.
-fn close_modal(c: mut ffi::StateCtx) {
-  ffi::Dispatch(c, fn() {
-    ffi::Update<AppState>(c, fn(s: mut AppState) {
-      s.current_modal = Maybe::new()
-    })
-  })
-}
-
-fn show_modal(c: mut ffi::StateCtx, builder: fn(ui::Theme, fn()) ui::Widget) {
-  ffi::Dispatch(c, fn() {
-    ffi::Update<AppState>(c, fn(s: mut AppState) {
-      s.current_modal = Maybe::new(modal::ModalDef{build: builder})
-    })
-  })
-}
-
-fn body(c: mut ffi::StateCtx, ctx: ui::BuildContext) ui::Widget {
-  let theme = ui::MustDepend<ui::Theme>(ctx)
-  let model = ffi::StateValue<AppState>(c)
-  let notify = fn(title: Str, description: Str, variant: toast::ToastVariant) {
-    dispatch_toast(c, title, description, variant, DEFAULT_TOAST_TTL_MS)
-  }
-  let content = match model.has_auth() {
-    true => {
-      ui::Padding(
-        ui::Symmetric(1, 0),
-        logged_in_screen::new(
-          model.api_key,
-          notify,
-          fn(builder: fn(ui::Theme, fn()) ui::Widget) {
-            show_modal(c, builder)
-          },
-          fn() {
-            close_modal(c)
-          },
-          model.current_modal.is_some(),
-        ),
-      )
-    },
-    false => {
-      ui::Center(
-        ui::Padding(
-          ui::Symmetric(1, 0),
-          welcome_screen::new(fn(api_key: Str) {
-            set_api_key(c, api_key)
-          }),
-        ),
-      )
-    },
-  }
-  // Toast overlay rides above the screen content, anchored
-  // bottom-right with 1 col of padding from the right edge and 2 rows
-  // from the bottom (above the hint bar). Modal: false so it doesn't
-  // trap focus.
-  //
-  // The widget type at this slot must be STABLE across rebuilds: if it
-  // flipped between `content` and `Overlay{...}` when toasts.size()
-  // crosses 0, the framework would treat it as a different widget type
-  // and unmount the entire subtree underneath — including the shell
-  // and inbox view, forcing refetches on every toast appear/disappear.
-  // Always use Overlay; pass an empty entries list when there's
-  // nothing to layer.
-  let entries: mut [ui::OverlayEntry] = mut []
-  if model.toasts.size() > 0 {
-    entries.push(
-      ui::OverlayEntry{
-        Child: ui::Padding(ui::Insets{Right: 1, Bottom: 2}, toast::render_stack(theme, model.toasts)),
-        Modal: false,
-        Alignment: ui::BottomRight,
-      },
-    )
-  }
-  // Modal entry. Modal: true inserts a barrier behind the entry so the
-  // body view stops responding to keys and clicks while the modal is
-  // presented. The modal's own FocusScope (inside show_modal) handles
-  // the focus trap.
-  match model.current_modal {
-    def => {
-      entries.push(
-        ui::OverlayEntry{Child: ui::Center(
-          def.build(theme, fn() {
-            close_modal(c)
-          }),
-        ), Modal: true},
-      )
-    },
-    _ => (),
-  }
-  let layered = ui::Overlay{Child: content, Entries: entries.@}
-  ui::DecoratedBox(
-    ui::Decoration{Style: ui::Style{Foreground: theme.Foreground, Background: theme.Background}},
-    layered,
+private fn placeholder_screen(ctx: mut runtime::Runtime, title: Str, message: Str) shell_controller::Screen {
+  let root = box::new(
+    ctx,
+    styles: style::new(
+      width: style::percent(100.0),
+      height: style::percent(100.0),
+      padding: style::edges(style::cells(1)),
+      flex_direction: style::FlexDirection::column,
+      gap: style::cells(1),
+    ),
   )
+  root.set_focusable(true)
+  root.add(text::new(ctx, content: title, text_style: text::style(bold: true)))
+  root.add(text::new(ctx, content: message, text_style: text::style(dim: true)))
+  shell_controller::Screen{
+    root: root,
+    focus: fn() {
+      let _ = root.focus()
+    },
+    handle_key: fn(received: mut event::KeyEvent) Bool {
+      false
+    },
+    dispose: fn() {},
+  }
 }
 
-fn root() ui::Widget {
-  ui::Actions{
-    // Quit on Ctrl+C (delivered as a key in raw mode, not SIGINT).
-    // Cmd+C (reported as Super+c where the terminal forwards it) copies
-    // the active selection: the binding invokes vaxis's
-    // copy-selection intent, which bubbles up from the focused element
-    // to whichever SelectionArea wraps it (the detail panes). With no
-    // selection on the focus path it's a harmless no-op.
-    Bindings: [
-      "tinear.quit": fn(ev: ui::EventContext, intent: ui::Intent) ui::EventResult {
-        ev.Quit()
-        ui::EventHandled
-      },
-    ],
-    Child: ui::Shortcuts{
-      Bindings: ["Ctrl+c": ffi::Intent("tinear.quit"), "Super+c": ffi::Intent("vaxis.text.copy-selection")],
-      Child: ffi::Stateful{
-        Init: fn() Any {
-          let api_key: Str = match config::load() {
-            ok(cfg) => cfg.api_key,
-            err(_) => "",
-          }
-          AppState{
-            api_key: api_key,
-            toasts: [],
-            next_toast_id: 0,
-            current_modal: Maybe::new(),
-          }
+private fn document_detail_screen(
+  ctx: mut runtime::Runtime,
+  palette: theme::Theme,
+  api_key: Str,
+  reference: tabs::TabRef,
+  application_shell: mut application_shell::ApplicationShell,
+  on_title: fn(Str),
+) shell_controller::Screen {
+  let detail = document_detail_controller::new(
+    ctx,
+    palette,
+    reference.id,
+    reference.title,
+    document_detail_service::live(ctx, api_key),
+    scheduler::for_context(ctx),
+    on_title,
+    fn(target: Str) {
+      match url::open(ctx, target) {
+        ok(_) => (),
+        err(error) => {
+          let _ = application_shell.toasts.show(
+            "Couldn't open URL",
+            error.error(),
+            toast_host::Variant::error,
+            4000,
+          )
         },
-        Build: body,
-      },
+      }
     },
+    fn(title: Str, message: Str) {
+      let _ = application_shell.toasts.show(title, message, toast_host::Variant::error, 4000)
+    },
+  )
+  detail.start()
+  detail.screen()
+}
+
+private fn issue_detail_screen(
+  ctx: mut runtime::Runtime,
+  palette: theme::Theme,
+  api_key: Str,
+  identifier: Str,
+  application_shell: mut application_shell::ApplicationShell,
+) shell_controller::Screen {
+  let actions = mut DetailActions{
+    open_picker: fn(field: issue_field_picker_controller::Field, issue: issues::Issue) {},
+    open_comment: fn(issue: issues::Issue, parent_id: Str, author: Str) {},
+    edit_description: fn(issue: issues::Issue) {},
   }
+  let detail = issue_detail_controller::new(
+    ctx,
+    palette,
+    identifier,
+    issue_detail_service::live(ctx, api_key),
+    scheduler::for_context(ctx),
+    fn(target: Str) {
+      match url::open(ctx, target) {
+        ok(_) => (),
+        err(error) => {
+          let _ = application_shell.toasts.show(
+            "Couldn't open URL",
+            error.error(),
+            toast_host::Variant::error,
+            4000,
+          )
+        },
+      }
+    },
+    fn(field: issue_field_picker_controller::Field, issue: issues::Issue) {
+      actions.open_picker(field, issue)
+    },
+    fn(issue: issues::Issue, parent_id: Str, author: Str) {
+      actions.open_comment(issue, parent_id, author)
+    },
+    fn(issue: issues::Issue) {
+      actions.edit_description(issue)
+    },
+    fn(title: Str, message: Str) {
+      let _ = application_shell.toasts.show(title, message, toast_host::Variant::error, 4000)
+    },
+  )
+  let field_pickers = issue_field_picker_controller::new(
+    ctx,
+    application_shell.modal,
+    palette,
+    issue_fields_service::live(ctx, api_key),
+    fn() {
+      detail.focus()
+    },
+    fn() {
+      detail.refresh(true)
+    },
+    fn(title: Str, message: Str) {
+      let _ = application_shell.toasts.show(title, message, toast_host::Variant::error, 4000)
+    },
+  )
+  let editor = issue_editor_controller::new(
+    ctx,
+    application_shell.modal,
+    palette,
+    issue_edit_service::live(ctx, api_key),
+    fn() {
+      detail.focus()
+    },
+    fn(comment_id: Str, should_focus: Bool) {
+      detail.comments_changed(comment_id, should_focus)
+    },
+    fn(description: Str) {
+      detail.description_changed(description)
+    },
+    fn(title: Str, message: Str) {
+      let _ = application_shell.toasts.show(title, message, toast_host::Variant::error, 4000)
+    },
+  )
+  actions.open_picker = fn(field: issue_field_picker_controller::Field, issue: issues::Issue) {
+    field_pickers.open(field, issue)
+  }
+  actions.open_comment = fn(issue: issues::Issue, parent_id: Str, author: Str) {
+    editor.open_comment(issue, parent_id, author)
+  }
+  actions.edit_description = fn(issue: issues::Issue) {
+    editor.open_description(issue)
+  }
+  detail.start()
+  detail.screen(fn() {
+    editor.dispose()
+    field_pickers.dispose()
+  })
+}
+
+private fn show_logged_in(
+  ctx: mut runtime::Runtime,
+  palette: theme::Theme,
+  api_key: Str,
+  application_shell: mut application_shell::ApplicationShell,
+  active_route: mut ActiveRoute,
+) {
+  let writer = cache_writer::live(ctx)
+  let model = shell_model::restore(cache::load_logged_in())
+  let actions = mut ShellActions{
+    open_issue: fn(identifier: Str) {},
+    open_doc: fn(reference: tabs::TabRef) {},
+    open_picker: fn(field: issue_field_picker_controller::Field, issue: issues::Issue) {},
+    retitle_doc: fn(reference: tabs::TabRef, title: Str) {},
+    focus_shell: fn() {},
+  }
+  let inbox = inbox_controller::new(
+    ctx,
+    palette,
+    inbox_service::live(ctx, api_key),
+    scheduler::for_context(ctx),
+    fn(identifier: Str) {
+      actions.open_issue(identifier)
+    },
+    fn(target: Str) {
+      match url::open(ctx, target) {
+        ok(_) => (),
+        err(error) => {
+          let _ = application_shell.toasts.show(
+            "Couldn't open URL",
+            error.error(),
+            toast_host::Variant::error,
+            4000,
+          )
+        },
+      }
+    },
+    fn(title: Str, message: Str) {
+      let _ = application_shell.toasts.show(title, message, toast_host::Variant::error, 4000)
+    },
+  )
+  let board = board_controller::new(
+    ctx,
+    palette,
+    board_service::live(ctx, api_key),
+    scheduler::for_context(ctx),
+    fn(identifier: Str) {
+      actions.open_issue(identifier)
+    },
+    fn(field: issue_field_picker_controller::Field, issue: issues::Issue) {
+      actions.open_picker(field, issue)
+    },
+    fn(title: Str, message: Str) {
+      let _ = application_shell.toasts.show(title, message, toast_host::Variant::error, 4000)
+    },
+  )
+  let field_pickers = issue_field_picker_controller::new(
+    ctx,
+    application_shell.modal,
+    palette,
+    issue_fields_service::live(ctx, api_key),
+    fn() {
+      board.focus()
+    },
+    fn() {
+      board.refresh(true)
+    },
+    fn(title: Str, message: Str) {
+      let _ = application_shell.toasts.show(title, message, toast_host::Variant::error, 4000)
+    },
+  )
+  actions.open_picker = fn(field: issue_field_picker_controller::Field, issue: issues::Issue) {
+    field_pickers.open(field, issue)
+  }
+  let creation = issue_creation_controller::new(
+    ctx,
+    application_shell.modal,
+    palette,
+    issue_creation_service::live(ctx, api_key),
+    fn() {
+      actions.focus_shell()
+    },
+    fn(title: Str, message: Str, success: Bool) {
+      let variant = match success {
+        true => toast_host::Variant::success,
+        false => toast_host::Variant::error,
+      }
+      let _ = application_shell.toasts.show(title, message, variant, 4000)
+    },
+    fn(identifier: Str) {
+      actions.open_issue(identifier)
+    },
+  )
+  let search = search_controller::new(
+    application_shell.modal,
+    palette,
+    search_service::live(ctx, api_key),
+    scheduler::for_context(ctx),
+    fn() {
+      actions.focus_shell()
+    },
+    fn(issue: issues::Issue) {
+      actions.open_issue(issue.identifier)
+    },
+    fn(document: documents::DocMeta) {
+      actions.open_doc(tabs::doc_tab(document.slug_id, document.title))
+    },
+  )
+  let controller = shell_controller::new(
+    ctx,
+    palette,
+    model,
+    inbox.screen(),
+    board.screen(),
+    fn(reference: tabs::TabRef) shell_controller::Screen {
+      match reference.kind {
+        tabs::Kind::issue => issue_detail_screen(ctx, palette, api_key, reference.id, application_shell),
+        tabs::Kind::doc => {
+          document_detail_screen(
+            ctx,
+            palette,
+            api_key,
+            reference,
+            application_shell,
+            fn(title: Str) {
+              actions.retitle_doc(reference, title)
+            },
+          )
+        },
+      }
+    },
+    fn(snapshot: cache::LoggedInCache) {
+      writer.persist(snapshot)
+    },
+    fn() {
+      creation.dispose()
+      search.dispose()
+      field_pickers.dispose()
+      writer.dispose()
+    },
+    fn() {
+      search.open(ctx)
+    },
+    fn() {
+      creation.open()
+    },
+  )
+  application_shell.set_screen(controller.root, fn() {
+    controller.dispose()
+  })
+  actions.open_issue = fn(identifier: Str) {
+    controller.open(tabs::issue_tab(identifier))
+  }
+  actions.open_doc = fn(reference: tabs::TabRef) {
+    controller.open(reference)
+  }
+  actions.focus_shell = fn() {
+    controller.focus_active()
+  }
+  actions.retitle_doc = fn(reference: tabs::TabRef, title: Str) {
+    controller.retitle(reference, title)
+  }
+  active_route.handle = fn(received: mut event::KeyEvent) Bool {
+    controller.handle_key(received)
+  }
+  inbox.start()
+  board.start()
+  controller.focus_active()
 }
 
 fn main() {
-  // No explicit theme: vaxis derives one from the terminal's own
-  // colors (OSC 10/11 foreground and background, OSC 4 palette).
-  ui::Run(root()).expect("Failed to start UI")
+  let application = app::new(exit_on_ctrl_c: false).expect("create tinear")
+  defer application.destroy()
+  let ctx = application.context
+  let palette = theme::new()
+  let application_shell = application_shell::new(ctx, palette, scheduler::for_context(ctx))
+  let active_route = mut ActiveRoute{handle: fn(received: mut event::KeyEvent) Bool {
+    false
+  }}
+  application.root.add(application_shell.root)
+
+  let configured = match config::load() {
+    ok(value) => value,
+    err(_) => config::Config{api_key: ""},
+  }
+  match configured.has_auth() {
+    true => show_logged_in(ctx, palette, configured.api_key, application_shell, active_route),
+    false => {
+      let welcome = welcome_controller::new(ctx, palette, auth::live(ctx), fn(api_key: Str) {
+        show_logged_in(ctx, palette, api_key, application_shell, active_route)
+      })
+      application_shell.set_screen(welcome.root, fn() {
+        welcome.dispose()
+      })
+      let _ = welcome.focus()
+    },
+  }
+
+  let _ = application.on_key(fn(received: mut event::KeyEvent) {
+    if received.event_type != event::KeyEventType::release and received.matches("c", ctrl: true) {
+      application_shell.dispose()
+      application.destroy()
+      received.prevent_default()
+      received.stop_propagation()
+    } else {
+      let handled = application_shell.handle_key(received, application.selection())
+      if (not handled) and not application_shell.modal.is_open() {
+        let _ = active_route.handle(received)
+      }
+    }
+  })
+
+  application.run().expect("run tinear")
 }

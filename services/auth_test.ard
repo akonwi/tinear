@@ -1,0 +1,122 @@
+use ard/testing
+
+use cooper/testing as cooper_testing
+use decode
+use go:time
+use tinear/services/auth
+
+private struct SavedState {
+  api_key: Str,
+}
+
+private struct CompletionState {
+  done: Bool,
+  success: Bool,
+}
+
+private fn flush_until(application: cooper_testing::TestApp, completion: mut CompletionState) Bool {
+  mut attempts = 0
+  while attempts < 100 and not completion.done {
+    let _ = application.flush()
+    time::Sleep(time::Millisecond)
+    attempts =+ 1
+  }
+  completion.done and completion.success
+}
+
+test fn auth_requires_a_non_null_viewer_id() Void!Str {
+  let valid = try decode::from_json("{{\"viewer\":{{\"id\":\"user-1\"}}}}")
+  try auth::validate_viewer(valid)
+  let missing = try decode::from_json("{{\"viewer\":null}}")
+  try testing::assert(auth::validate_viewer(missing).is_err(), "null viewer should fail validation")
+  let empty = try decode::from_json("{{\"viewer\":{{\"id\":\"\"}}}}")
+  testing::assert(auth::validate_viewer(empty).is_err(), "empty viewer id should fail validation")
+}
+
+test fn auth_validation_maps_raw_failures_to_user_facing_messages() Void!Str {
+  let unauthorized: Any!Str = Result::err("HTTP 401: raw response")
+  match auth::validate_result(unauthorized) {
+    ok(_) => try testing::assert(false, "401 should fail"),
+    err(message) => try testing::assert(message == "Invalid key", "401 should become Invalid key"),
+  }
+
+  let unavailable: Any!Str = Result::err("dial tcp: connection refused")
+  match auth::validate_result(unavailable) {
+    ok(_) => try testing::assert(false, "network failure should fail"),
+    err(message) => {
+      try testing::assert(message == "Invalid key", "raw validation details should not be exposed")
+    },
+  }
+
+  let null_viewer = try decode::from_json("{{\"viewer\":null}}")
+  let malformed: Any!Str = Result::ok(null_viewer)
+  match auth::validate_result(malformed) {
+    ok(_) => testing::assert(false, "null viewer should fail"),
+    err(message) => {
+      testing::assert(message == "Invalid key", "invalid viewer should become Invalid key")
+    },
+  }
+}
+
+test fn auth_service_dispatches_validation_and_persistence_result() Void!Str {
+  let application = cooper_testing::new(20, 5)
+  defer application.destroy()
+  let saved = mut SavedState{api_key: ""}
+  let completion = mut CompletionState{done: false, success: false}
+  let authenticate = auth::with_services(
+    application.context,
+    fn(api_key: Str) Void!Str {
+      Result::ok(())
+    },
+    fn(api_key: Str) Str!Str {
+      saved.api_key = api_key
+      Result::ok("config.json")
+    },
+  )
+  let view_stop = Chan::new<Bool>()
+  authenticate("lin_api_test", view_stop.receiver(), fn(result: Void!Str) {
+    completion.done = true
+    completion.success = result.is_ok()
+  })
+  try testing::assert(
+    flush_until(application, completion),
+    "successful authentication should complete on the UI thread",
+  )
+  testing::assert(saved.api_key == "lin_api_test", "validated key should be persisted")
+}
+
+test fn auth_service_cancellation_prevents_persistence_and_completion() Void!Str {
+  let application = cooper_testing::new(20, 5)
+  defer application.destroy()
+  let validation_started = Chan::new<Bool>()
+  let release_validation = Chan::new<Bool>()
+  let saved = Chan::new<Bool>()
+  let completion = mut CompletionState{done: false, success: false}
+  let authenticate = auth::with_services(
+    application.context,
+    fn(api_key: Str) Void!Str {
+      validation_started.send(true)
+      let _ = release_validation.receiver().recv()
+      Result::ok(())
+    },
+    fn(api_key: Str) Str!Str {
+      saved.send(true)
+      Result::ok("config.json")
+    },
+  )
+  let view_stop = Chan::new<Bool>()
+  authenticate("lin_api_test", view_stop.receiver(), fn(result: Void!Str) {
+    completion.done = true
+  })
+  let _ = validation_started.receiver().recv()
+  view_stop.close()
+  release_validation.send(true)
+  time::Sleep(10 * time::Millisecond)
+  let _ = application.flush()
+  let persisted = select {
+    saved.receiver().recv() => true,
+    _ => false,
+  }
+  try testing::assert(not persisted, "canceled authentication should not persist the key")
+  testing::assert(not completion.done, "canceled authentication should not invoke completion")
+}

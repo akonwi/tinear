@@ -1,0 +1,445 @@
+use ard/testing as assertions
+
+use cooper/event
+use cooper/testing
+use tinear/models/issues
+use tinear/services/issue_detail_service
+use tinear/tui/issue_detail_controller
+use tinear/tui/issue_field_picker_controller
+use tinear/tui/theme
+
+struct FakeState {
+  issue_loads: [fn(issues::Issue!Str)],
+  comment_loads: [fn([issues::Comment]!Str)],
+}
+
+struct Scheduled {
+  actions: [fn()],
+  cancellations: Int,
+}
+
+struct Actions {
+  opened_url: Str,
+  picked: [Str],
+  comments: [Str],
+  edits: Int,
+  errors: Int,
+}
+
+private fn fake_service(state: mut FakeState) issue_detail_service::Service {
+  issue_detail_service::Service{
+    load_issue: fn(cancellation: Receiver<Bool>, identifier: Str, completion: fn(issues::Issue!Str)) {
+      state.issue_loads.push(completion)
+    },
+    load_comments: fn(cancellation: Receiver<Bool>, identifier: Str, completion: fn([issues::Comment]!Str)) {
+      state.comment_loads.push(completion)
+    },
+  }
+}
+
+private fn fake_schedule(state: mut Scheduled) fn(Int, fn()) fn() {
+  fn(milliseconds: Int, action: fn()) fn() {
+    state.actions.push(action)
+    fn() {
+      state.cancellations =+ 1
+    }
+  }
+}
+
+private fn issue(title: Str, description: Str) issues::Issue {
+  issues::Issue{
+    id: "issue-1",
+    identifier: "AKO-1",
+    title: title,
+    description: Maybe::new(description),
+    priority: 2,
+    state_id: "started",
+    state_name: "In Progress",
+    state_type: "started",
+    state_position: 1.0,
+    team_id: "team-1",
+    team_name: "Core",
+    team_key: "AKO",
+    project_id: "project-1",
+    project_name: "Tinear",
+    assignee_id: "user-1",
+    assignee_name: "Alex",
+    cycle_id: "cycle-1",
+    cycle_label: "Cycle 1",
+    url: "https://linear.app/AKO-1",
+  }
+}
+
+private fn comment(id: Str, author: Str, body: Str, depth: Int) issues::Comment {
+  issues::Comment{
+    id: id,
+    author: author,
+    created_at: "2026-01-01T12:00:00Z",
+    body: body,
+    parent_id: match depth > 0 {
+      true => "c1",
+      false => "",
+    },
+    depth: depth,
+  }
+}
+
+private fn key(name: Str, shift: Bool?) mut event::KeyEvent {
+  event::key(
+    name,
+    "",
+    event::KeyEventType::press,
+    event::Modifiers{
+      shift: shift.or(false),
+      ctrl: false,
+      alt: false,
+      super: false,
+    },
+  )
+}
+
+private fn make_controller(
+  application: testing::TestApp,
+  fake: mut FakeState,
+  scheduled: mut Scheduled,
+  actions: mut Actions,
+) mut issue_detail_controller::IssueDetailController {
+  issue_detail_controller::new(
+    application.context,
+    theme::new(),
+    "AKO-1",
+    fake_service(fake),
+    fake_schedule(scheduled),
+    fn(url: Str) {
+      actions.opened_url = url
+    },
+    fn(field: issue_field_picker_controller::Field, selected: issues::Issue) {
+      let name = match field {
+        issue_field_picker_controller::Field::state => "state",
+        issue_field_picker_controller::Field::cycle => "cycle",
+        issue_field_picker_controller::Field::priority => "priority",
+        issue_field_picker_controller::Field::assignee => "assignee",
+        issue_field_picker_controller::Field::project => "project",
+      }
+      actions.picked.push("{name}:{selected.id}")
+    },
+    fn(selected: issues::Issue, parent_id: Str, author: Str) {
+      actions.comments.push("{selected.id}:{parent_id}:{author}")
+    },
+    fn(selected: issues::Issue) {
+      actions.edits =+ 1
+    },
+    fn(title: Str, message: Str) {
+      actions.errors =+ 1
+    },
+  )
+}
+
+test fn issue_detail_loads_issue_and_comments_independently_and_routes_commands() Void!Str {
+  let application = testing::new(90, 28)
+  defer application.destroy()
+  let fake = mut FakeState{issue_loads: [], comment_loads: []}
+  let scheduled = mut Scheduled{actions: [], cancellations: 0}
+  let actions = mut Actions{
+    opened_url: "",
+    picked: [],
+    comments: [],
+    edits: 0,
+    errors: 0,
+  }
+  let controller = make_controller(application, fake, scheduled, actions)
+  application.root.add(controller.root)
+  controller.start()
+  try assertions::assert(fake.issue_loads.size() == 1, "issue should load once")
+  try assertions::assert(fake.comment_loads.size() == 1, "comments should load independently")
+
+  (fake.comment_loads.at(0).expect("comments"))(
+    Result::ok([comment("c1", "Alex", "First **comment**", 0), comment("c2", "Blair", "Reply", 1)]),
+  )
+  try assertions::assert(controller.comments.size() == 2, "comments may finish before issue")
+  (fake.issue_loads.at(0).expect("issue"))(
+    Result::ok(issue("Retained detail", "# Description\n\nBody with **markdown**")),
+  )
+  application.render()
+  try testing::assert_contains(application.frame().text(), "AKO-1")
+  try testing::assert_contains(application.frame().text(), "Retained detail")
+  try testing::assert_contains(application.frame().text(), "Tinear")
+  try testing::assert_contains(application.frame().text(), "Core")
+  try testing::assert_contains(application.frame().text(), "Description")
+  try testing::assert_contains(application.frame().text(), "Body with markdown")
+  for size in [[60, 20], [100, 30], [160, 40]] {
+    application.resize(size.at(0).expect("width"), size.at(1).expect("height"))
+    try assertions::assert(controller.issue.is_some(), "resize should preserve loaded issue")
+    try testing::assert_contains(application.frame().text(), "Body with markdown")
+  }
+
+  try assertions::assert(controller.handle_key(key("c")), "c should switch to comments")
+  application.render()
+  try testing::assert_contains(application.frame().text(), "First comment")
+  try testing::assert_contains(application.frame().text(), "Jan")
+  try assertions::assert(
+    not application.frame().text().contains("T12:00:00Z"),
+    "comment timestamps should not expose raw RFC3339 syntax",
+  )
+  let focused_comment = controller.comment_records.at(0).expect("focused comment")
+  try assertions::assert(
+    focused_comment.root.style().background.expect("active background").index.expect("palette") == Uint8::from(4),
+    "focused comment should use the same accent background as a focused issue card",
+  )
+  try assertions::assert(
+    focused_comment.header.text_style().foreground.expect("active foreground").index.expect("palette") == Uint8::from(15) and focused_comment.header.text_style().bold and focused_comment.body.active,
+    "focused comment content should use bright active text",
+  )
+  try assertions::assert(controller.handle_key(key("j")), "j should move comment cursor")
+  try assertions::assert(controller.comment_cursor == 1, "comment cursor should move")
+  try assertions::assert(
+    controller.comment_records.at(
+      1,
+    ).expect(
+      "next focused comment",
+    ).root.style().background.expect("active background").index.expect("palette") == Uint8::from(4),
+    "comment navigation should move the active surface",
+  )
+  try assertions::assert(controller.handle_key(key("o")), "o should open issue URL")
+  try assertions::assert(actions.opened_url == "https://linear.app/AKO-1", "loaded issue URL should open")
+  let _ = controller.handle_key(key("p"))
+  let _ = controller.handle_key(key("p", shift: true))
+  try assertions::assert(
+    actions.picked.at(0).expect("priority") == "priority:issue-1",
+    "p should open priority picker",
+  )
+  try assertions::assert(
+    actions.picked.at(1).expect("project") == "project:issue-1",
+    "P should open project picker",
+  )
+  let _ = controller.handle_key(key("n"))
+  let _ = controller.handle_key(key("r"))
+  let _ = controller.handle_key(key("e"))
+  try assertions::assert(
+    actions.comments.at(0).expect("new comment") == "issue-1::",
+    "n should compose a top-level comment",
+  )
+  try assertions::assert(
+    actions.comments.at(1).expect("reply") == "issue-1:c1:Blair",
+    "replying to a reply should target the thread root",
+  )
+  try assertions::assert(actions.edits == 1, "e should open description editing")
+
+  controller.comments_changed("c2", true)
+  (fake.comment_loads.at(1).expect("refreshed comments"))(
+    Result::ok(
+      [
+        comment("new", "New", "Inserted", 0),
+        comment("c1", "Alex", "First **comment**", 0),
+        comment("c2", "Blair", "Reply", 1),
+      ],
+    ),
+  )
+  try assertions::assert(
+    controller.comments.at(controller.comment_cursor).expect("created comment").id == "c2",
+    "post refresh should select the created comment by ID",
+  )
+  assertions::assert(
+    controller.comment_records.at(
+      controller.comment_cursor,
+    ).expect("revealed comment").root.is_focused(),
+    "post refresh should focus and reveal the created comment",
+  )
+}
+
+test fn issue_detail_independent_errors_retry_to_issue_and_empty_comments() Void!Str {
+  let application = testing::new(80, 24)
+  defer application.destroy()
+  let fake = mut FakeState{issue_loads: [], comment_loads: []}
+  let scheduled = mut Scheduled{actions: [], cancellations: 0}
+  let actions = mut Actions{
+    opened_url: "",
+    picked: [],
+    comments: [],
+    edits: 0,
+    errors: 0,
+  }
+  let controller = make_controller(application, fake, scheduled, actions)
+  application.root.add(controller.root)
+  controller.start()
+  (fake.issue_loads.at(0).expect("issue load"))(Result::err("forbidden"))
+  (fake.comment_loads.at(0).expect("comments load"))(Result::err("offline"))
+  try assertions::assert(
+    controller.status.content().contains("forbidden"),
+    "issue errors should render independently",
+  )
+  try assertions::assert(
+    controller.comments_status.content().contains("offline"),
+    "comment errors should render independently",
+  )
+
+  controller.refresh(false)
+  (fake.issue_loads.at(1).expect("issue retry"))(Result::ok(issue("Recovered", "Body")))
+  (fake.comment_loads.at(1).expect("comments retry"))(Result::ok([]))
+  try assertions::assert(
+    controller.title_text.content() == "Recovered",
+    "issue retry should recover content",
+  )
+  assertions::assert(
+    controller.comments_status.content() == "No comments",
+    "empty comments retry should render empty state",
+  )
+}
+
+test fn issue_detail_rejects_stale_issue_and_comment_results() Void!Str {
+  let application = testing::new(70, 20)
+  defer application.destroy()
+  let fake = mut FakeState{issue_loads: [], comment_loads: []}
+  let scheduled = mut Scheduled{actions: [], cancellations: 0}
+  let actions = mut Actions{
+    opened_url: "",
+    picked: [],
+    comments: [],
+    edits: 0,
+    errors: 0,
+  }
+  let controller = make_controller(application, fake, scheduled, actions)
+  application.root.add(controller.root)
+  controller.start()
+  controller.refresh(true)
+  (fake.issue_loads.at(0).expect("stale issue"))(Result::ok(issue("Stale", "old")))
+  (fake.comment_loads.at(0).expect("stale comments"))(
+    Result::ok([comment("old", "Old", "stale", 0)]),
+  )
+  try assertions::assert(controller.issue.is_none(), "older issue generation should be ignored")
+  try assertions::assert(controller.comments.size() == 0, "older comments generation should be ignored")
+
+  (fake.issue_loads.at(1).expect("current issue"))(Result::ok(issue("Current", "new")))
+  (fake.comment_loads.at(1).expect("current comments"))(
+    Result::ok([comment("new", "New", "current", 0)]),
+  )
+  try assertions::assert(
+    controller.issue.expect("loaded").title == "Current",
+    "current issue should apply",
+  )
+  assertions::assert(
+    controller.comments.at(0).expect("comment").id == "new",
+    "current comments should apply",
+  )
+}
+
+test fn created_comment_selection_survives_eventually_consistent_refresh() Void!Str {
+  let application = testing::new(70, 20)
+  defer application.destroy()
+  let fake = mut FakeState{issue_loads: [], comment_loads: []}
+  let scheduled = mut Scheduled{actions: [], cancellations: 0}
+  let actions = mut Actions{
+    opened_url: "",
+    picked: [],
+    comments: [],
+    edits: 0,
+    errors: 0,
+  }
+  let controller = make_controller(application, fake, scheduled, actions)
+  application.root.add(controller.root)
+  controller.start()
+  (fake.issue_loads.at(0).expect("issue"))(Result::ok(issue("Current", "Body")))
+  (fake.comment_loads.at(0).expect("comments"))(
+    Result::ok([comment("c1", "Alex", "First", 0), comment("c2", "Blair", "Second", 0)]),
+  )
+  controller.switch_section(1)
+  controller.select_comment("c2")
+  controller.comments_changed("future", true)
+  (fake.comment_loads.at(1).expect("eventually consistent refresh"))(
+    Result::ok([comment("c1", "Alex", "First", 0), comment("c2", "Blair", "Second", 0)]),
+  )
+  try assertions::assert(
+    controller.pending_comment_id == "future",
+    "missing created ID should remain pending",
+  )
+  try assertions::assert(
+    controller.comments.at(controller.comment_cursor).expect("preserved cursor").id == "c2",
+    "missing created ID should preserve the existing selection",
+  )
+
+  controller.refresh(true)
+  (fake.comment_loads.at(2).expect("later refresh"))(
+    Result::ok(
+      [
+        comment("c1", "Alex", "First", 0),
+        comment("future", "Me", "Created", 0),
+        comment("c2", "Blair", "Second", 0),
+      ],
+    ),
+  )
+  try assertions::assert(
+    controller.pending_comment_id.is_empty(),
+    "matching created ID should be consumed",
+  )
+  try assertions::assert(
+    controller.comments.at(controller.comment_cursor).expect("created comment").id == "future",
+    "later refresh should select the created comment",
+  )
+  assertions::assert(
+    not controller.comment_records.at(controller.comment_cursor).expect("created record").root.is_focused(),
+    "deferred created-comment selection should not steal focus from later UI",
+  )
+}
+
+test fn saved_description_invalidates_older_refresh_snapshot() Void!Str {
+  let application = testing::new(70, 20)
+  defer application.destroy()
+  let fake = mut FakeState{issue_loads: [], comment_loads: []}
+  let scheduled = mut Scheduled{actions: [], cancellations: 0}
+  let actions = mut Actions{
+    opened_url: "",
+    picked: [],
+    comments: [],
+    edits: 0,
+    errors: 0,
+  }
+  let controller = make_controller(application, fake, scheduled, actions)
+  application.root.add(controller.root)
+  controller.start()
+  (fake.issue_loads.at(0).expect("initial issue"))(Result::ok(issue("Current", "Original")))
+  controller.refresh(true)
+  controller.description_changed("Saved locally")
+  try assertions::assert(
+    controller.issue.expect("local issue").description.or("") == "Saved locally",
+    "successful save should update retained description immediately",
+  )
+  (fake.issue_loads.at(1).expect("older refresh"))(
+    Result::ok(issue("Current", "Old server snapshot")),
+  )
+  try assertions::assert(
+    controller.issue.expect("preserved issue").description.or("") == "Saved locally",
+    "pre-save refresh must not restore the old description",
+  )
+  (fake.issue_loads.at(2).expect("post-save refresh"))(
+    Result::ok(issue("Current", "Saved locally")),
+  )
+  assertions::assert(
+    controller.issue.expect("reconciled issue").description.or("") == "Saved locally",
+    "post-save refresh should reconcile server state",
+  )
+}
+
+test fn issue_detail_disposal_cancels_periodic_refresh_and_late_results() Void!Str {
+  let application = testing::new(60, 18)
+  defer application.destroy()
+  let fake = mut FakeState{issue_loads: [], comment_loads: []}
+  let scheduled = mut Scheduled{actions: [], cancellations: 0}
+  let actions = mut Actions{
+    opened_url: "",
+    picked: [],
+    comments: [],
+    edits: 0,
+    errors: 0,
+  }
+  let controller = make_controller(application, fake, scheduled, actions)
+  application.root.add(controller.root)
+  controller.start()
+  controller.dispose()
+  (fake.issue_loads.at(0).expect("late issue"))(Result::ok(issue("Late", "late")))
+  (fake.comment_loads.at(0).expect("late comments"))(
+    Result::ok([comment("late", "Late", "late", 0)]),
+  )
+  try assertions::assert(controller.issue.is_none(), "disposed detail should ignore late issue")
+  try assertions::assert(controller.comments.size() == 0, "disposed detail should ignore late comments")
+  assertions::assert(scheduled.cancellations == 1, "dispose should stop periodic refresh")
+}

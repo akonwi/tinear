@@ -1,0 +1,355 @@
+use cooper/box
+use cooper/event
+use cooper/runtime
+use cooper/style
+use cooper/text
+use cooper/text_area
+use tinear/models/issues
+use tinear/services/issue_edit_service
+use tinear/tui/lifecycle
+use tinear/tui/modal_host
+use tinear/tui/theme as tinear_theme
+
+private struct EditorSession {
+  root: mut box::Box,
+  area: mut text_area::TextArea,
+  status: mut text::Text,
+  ticket: modal_host::Ticket?,
+  remove_key: fn(),
+  remove_paste: fn(),
+  submit_guard: Chan<Bool>,
+  disposed: Bool,
+}
+
+impl EditorSession {
+  fn mut dispose() {
+    if not self.disposed {
+      self.disposed = true
+      self.remove_key()
+      self.remove_paste()
+      self.remove_key = fn() {}
+      self.remove_paste = fn() {}
+    }
+  }
+}
+
+private fn begin_submission(guard: Chan<Bool>) Bool {
+  select {
+    guard.sender().send(true) => true,
+    _ => false,
+  }
+}
+
+private fn begin_editor_submission(session_guard: Chan<Bool>, operation_guard: Chan<Bool>) Bool {
+  if not begin_submission(session_guard) {
+    false
+  } else if begin_submission(operation_guard) {
+    true
+  } else {
+    clear_submission(session_guard)
+    false
+  }
+}
+
+private fn clear_submission(guard: Chan<Bool>) {
+  select {
+    guard.receiver().recv() => (),
+    _ => (),
+  }
+}
+
+private fn submission_active(guard: Chan<Bool>) Bool {
+  mut active = false
+  select {
+    guard.receiver().recv() => {
+      active = true
+      guard.sender().send(true)
+    },
+    _ => (),
+  }
+  active
+}
+
+struct Controller {
+  context: mut runtime::Runtime,
+  modal: mut modal_host::ModalHost,
+  palette: tinear_theme::Theme,
+  service: issue_edit_service::Service,
+  scope: mut lifecycle::Scope,
+  current_ticket: modal_host::Ticket?,
+  operation_guard: Chan<Bool>,
+  restore_focus: fn(),
+  on_comments_changed: fn(Str, Bool),
+  on_description_changed: fn(Str),
+  notify_error: fn(Str, Str),
+}
+
+fn new(
+  ctx: mut runtime::Runtime,
+  modal: mut modal_host::ModalHost,
+  palette: tinear_theme::Theme,
+  service: issue_edit_service::Service,
+  restore_focus: fn(),
+  on_comments_changed: fn(Str, Bool),
+  on_description_changed: fn(Str),
+  notify_error: fn(Str, Str),
+) mut Controller {
+  (mut Controller{
+    context: ctx,
+    modal: modal,
+    palette: palette,
+    service: service,
+    scope: lifecycle::new(),
+    current_ticket: Maybe::new<modal_host::Ticket>(),
+    operation_guard: Chan::new<Bool>(1),
+    restore_focus: restore_focus,
+    on_comments_changed: on_comments_changed,
+    on_description_changed: on_description_changed,
+    notify_error: notify_error,
+  })
+}
+
+impl Controller {
+  private fn mut editor(value: Str, placeholder: Str) mut EditorSession {
+    let root = box::new(
+      self.context,
+      styles: style::new(
+        width: style::percent(100.0),
+        height: style::cells(14),
+        flex_direction: style::FlexDirection::column,
+        gap: style::cells(1),
+      ),
+    )
+    let area = text_area::new(
+      self.context,
+      value: value,
+      placeholder: placeholder,
+      wrap: text::TextWrap::word,
+      styles: style::new(width: style::percent(100.0), height: style::cells(11), flex_shrink: 0.0),
+    )
+    let status = text::new(
+      self.context,
+      content: "",
+      selectable: false,
+      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+      text_style: text::style(dim: true),
+    )
+    root.add(area)
+    root.add(status)
+    (mut EditorSession{
+      root: root,
+      area: area,
+      status: status,
+      ticket: Maybe::new<modal_host::Ticket>(),
+      remove_key: fn() {},
+      remove_paste: fn() {},
+      submit_guard: Chan::new<Bool>(1),
+      disposed: false,
+    })
+  }
+
+  private fn mut finish_comment(session: mut EditorSession, result: Str!Str) {
+    clear_submission(session.submit_guard)
+    clear_submission(self.operation_guard)
+    if not self.scope.disposed {
+      match result {
+        ok(comment_id) => {
+          mut should_focus = false
+          match session.ticket {
+            ticket => {
+              should_focus = self.modal.is_current(ticket)
+              let _ = self.modal.close_if_current(ticket)
+            },
+            _ => (),
+          }
+          self.on_comments_changed(comment_id, should_focus)
+        },
+        err(message) => {
+          match session.ticket {
+            ticket => {
+              if self.modal.is_current(ticket) and not session.disposed {
+                session.status.set_content("⚠ {message}")
+                session.status.set_text_style(
+                  text::style(foreground: self.palette.danger, bold: true),
+                )
+              } else {
+                self.notify_error("Post comment", message)
+              }
+            },
+            _ => self.notify_error("Post comment", message),
+          }
+        },
+      }
+    }
+  }
+
+  private fn mut submit_comment(session: mut EditorSession, issue: issues::Issue, parent_id: Str) {
+    if not session.disposed {
+      let body = session.area.value().trim()
+      if body.is_empty() {
+        session.status.set_content("Comment cannot be empty")
+        session.status.set_text_style(text::style(foreground: self.palette.danger, bold: true))
+      } else if begin_editor_submission(session.submit_guard, self.operation_guard) {
+        session.status.set_content("Posting…")
+        session.status.set_text_style(text::style(dim: true))
+        self.service.create_comment(
+          self.scope.stop.receiver(),
+          issue.id,
+          body,
+          parent_id,
+          fn(result: Str!Str) {
+            self.finish_comment(session, result)
+          },
+        )
+      }
+    }
+  }
+
+  fn mut open_comment(issue: issues::Issue, parent_id: Str, reply_author: Str) {
+    if (not self.scope.disposed) and not submission_active(self.operation_guard) {
+      let session = self.editor("", "Write a comment…")
+      session.remove_key = session.area.on_key(fn(received: mut event::KeyEvent) {
+        if received.event_type != event::KeyEventType::release {
+          if submission_active(session.submit_guard) {
+            received.prevent_default()
+            received.stop_propagation()
+          } else if received.matches("return", ctrl: true) or received.matches("m", ctrl: true) or received.matches("j", ctrl: true) {
+            self.submit_comment(session, issue, parent_id)
+            received.prevent_default()
+            received.stop_propagation()
+          }
+        }
+      })
+      session.remove_paste = session.area.on_paste(fn(received: mut event::PasteEvent) {
+        if submission_active(session.submit_guard) {
+          received.prevent_default()
+          received.stop_propagation()
+        }
+      })
+      let title = match parent_id.is_empty() {
+        true => "Comment on {issue.identifier}",
+        false => "Reply to {reply_author} — {issue.identifier}",
+      }
+      let ticket = self.modal.present(
+        title,
+        session.root,
+        "Ctrl+Enter post   Esc cancel",
+        fn() {
+          session.dispose()
+        },
+        fn() {
+          let _ = session.area.focus()
+        },
+        self.restore_focus,
+        fn() Bool {
+          not submission_active(session.submit_guard)
+        },
+      )
+      session.ticket = Maybe::new(ticket)
+      self.current_ticket = Maybe::new(ticket)
+    }
+  }
+
+  private fn mut finish_description(session: mut EditorSession, description: Str, result: Void!Str) {
+    clear_submission(session.submit_guard)
+    clear_submission(self.operation_guard)
+    if not self.scope.disposed {
+      match result {
+        ok(_) => {
+          match session.ticket {
+            ticket => {
+              let _ = self.modal.close_if_current(ticket)
+            },
+            _ => (),
+          }
+          self.on_description_changed(description)
+        },
+        err(message) => {
+          match session.ticket {
+            ticket => {
+              if self.modal.is_current(ticket) and not session.disposed {
+                session.status.set_content("⚠ {message}")
+                session.status.set_text_style(
+                  text::style(foreground: self.palette.danger, bold: true),
+                )
+              } else {
+                self.notify_error("Save description", message)
+              }
+            },
+            _ => self.notify_error("Save description", message),
+          }
+        },
+      }
+    }
+  }
+
+  private fn mut submit_description(session: mut EditorSession, issue: issues::Issue) {
+    if not session.disposed and begin_editor_submission(session.submit_guard, self.operation_guard) {
+      let description = session.area.value()
+      session.status.set_content("Saving…")
+      session.status.set_text_style(text::style(dim: true))
+      self.service.update_description(
+        self.scope.stop.receiver(),
+        issue.id,
+        description,
+        fn(result: Void!Str) {
+          self.finish_description(session, description, result)
+        },
+      )
+    }
+  }
+
+  fn mut open_description(issue: issues::Issue) {
+    if (not self.scope.disposed) and not submission_active(self.operation_guard) {
+      let session = self.editor(issue.description.or(""), "Describe the issue… (markdown)")
+      session.remove_key = session.area.on_key(fn(received: mut event::KeyEvent) {
+        if received.event_type != event::KeyEventType::release {
+          if submission_active(session.submit_guard) {
+            received.prevent_default()
+            received.stop_propagation()
+          } else if received.matches("return", ctrl: true) or received.matches("m", ctrl: true) or received.matches("j", ctrl: true) {
+            self.submit_description(session, issue)
+            received.prevent_default()
+            received.stop_propagation()
+          }
+        }
+      })
+      session.remove_paste = session.area.on_paste(fn(received: mut event::PasteEvent) {
+        if submission_active(session.submit_guard) {
+          received.prevent_default()
+          received.stop_propagation()
+        }
+      })
+      let ticket = self.modal.present(
+        "Edit description — {issue.identifier}",
+        session.root,
+        "Ctrl+Enter save   Esc cancel",
+        fn() {
+          session.dispose()
+        },
+        fn() {
+          let _ = session.area.focus()
+        },
+        self.restore_focus,
+        fn() Bool {
+          not submission_active(session.submit_guard)
+        },
+      )
+      session.ticket = Maybe::new(ticket)
+      self.current_ticket = Maybe::new(ticket)
+    }
+  }
+
+  fn mut dispose() {
+    if not self.scope.disposed {
+      self.scope.dispose()
+      match self.current_ticket {
+        ticket => {
+          let _ = self.modal.close_if_current(ticket)
+        },
+        _ => (),
+      }
+      self.current_ticket = Maybe::new<modal_host::Ticket>()
+    }
+  }
+}

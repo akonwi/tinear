@@ -1,0 +1,57 @@
+use ard/async
+
+use cooper/runtime
+use tinear/models/issues
+
+type LoadTeams = fn(Receiver<Bool>, fn([issues::Team]!Str))
+type CreateIssue = fn(Receiver<Bool>, Str, Str, Str, fn(Str!Str))
+
+struct Service {
+  load_teams: LoadTeams,
+  create_issue: CreateIssue,
+}
+
+private fn cancelled(app: Receiver<Void>, view: Receiver<Bool>) Bool {
+  select {
+    app.recv() => true,
+    view.recv() => true,
+    _ => false,
+  }
+}
+
+fn live(ctx: mut runtime::Runtime, api_key: Str) Service {
+  let app_cancellation = ctx.cancellation
+  let dispatch = ctx.dispatch
+  Service{
+    load_teams: fn(view_cancellation: Receiver<Bool>, completion: fn([issues::Team]!Str)) {
+      async::start(fn() {
+        if not cancelled(app_cancellation, view_cancellation) {
+          let result = issues::fetch_teams(api_key)
+          if not cancelled(app_cancellation, view_cancellation) {
+            let _ = dispatch(fn() {
+              completion(result)
+            })
+          }
+        }
+      })
+    },
+    create_issue: fn(
+      view_cancellation: Receiver<Bool>,
+      team_id: Str,
+      title: Str,
+      description: Str,
+      completion: fn(Str!Str),
+    ) {
+      async::start(fn() {
+        if not cancelled(app_cancellation, view_cancellation) {
+          let result = issues::create_issue(api_key, team_id, title, description)
+          if not cancelled(app_cancellation, view_cancellation) {
+            let _ = dispatch(fn() {
+              completion(result)
+            })
+          }
+        }
+      })
+    },
+  }
+}

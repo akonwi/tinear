@@ -1,5 +1,12 @@
 # Issue Search UX Proposal
 
+> **Status: implemented and superseded as an implementation plan.** The active
+> Cooper controller searches both issues and documents, preserves partial
+> results when one source fails, and opens typed dynamic tabs. Widget/state
+> sketches below describe the original vaxis/ui proposal and are retained only
+> as design history; see [features.md](features.md#8-search-overlay) for current
+> behavior.
+
 ## Goal
 
 Add a global issue search flow opened with `?`. Search should let users find

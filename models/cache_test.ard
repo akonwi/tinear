@@ -16,7 +16,7 @@ test fn test_cache_decode_ignores_unknown_version() Void!Str {
     cache::DataCache{version: 999, logged_in: cache::empty_logged_in()},
   ).expect("encode cache")
   let content = Str::from(encoded)
-  
+
   match cache::decode(content) {
     _cache => testing::assert(false, "unknown cache version should be ignored"),
     _ => testing::assert(true, "unknown version ignored"),
@@ -29,9 +29,9 @@ test fn test_cache_round_trips_logged_in_state() Void!Str {
     tabs::doc_tab("e234753fe971", "Video Call — Database Schema"),
   ]
   let original = cache::DataCache{version: cache::version(), logged_in: cache::LoggedInCache{tab_index: 2, tabs: tab_refs}}
-  
+
   let content = try cache::encode(original)
-  
+
   match cache::decode(content) {
     restored => {
       try testing::assert(restored.logged_in.tab_index == 2, "active tab index should round trip")

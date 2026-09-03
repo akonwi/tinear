@@ -1,0 +1,248 @@
+use ard/testing as assertions
+
+use cooper/event
+use cooper/testing
+use tinear/models/issues
+use tinear/services/issue_creation_service
+use tinear/tui/issue_creation_controller
+use tinear/tui/modal_host
+use tinear/tui/theme
+
+struct CreateRequest {
+  team_id: Str,
+  title: Str,
+  description: Str,
+  completion: fn(Str!Str),
+}
+
+struct FakeState {
+  team_loads: [fn([issues::Team]!Str)],
+  creates: [CreateRequest],
+}
+
+struct Outcome {
+  errors: [Str],
+  successes: [Str],
+  created: [Str],
+}
+
+private fn service(state: mut FakeState) issue_creation_service::Service {
+  issue_creation_service::Service{
+    load_teams: fn(cancellation: Receiver<Bool>, completion: fn([issues::Team]!Str)) {
+      state.team_loads.push(completion)
+    },
+    create_issue: fn(
+      cancellation: Receiver<Bool>,
+      team_id: Str,
+      title: Str,
+      description: Str,
+      completion: fn(Str!Str),
+    ) {
+      state.creates.push(
+        CreateRequest{
+          team_id: team_id,
+          title: title,
+          description: description,
+          completion: completion,
+        },
+      )
+    },
+  }
+}
+
+private fn team(id: Str, name: Str) issues::Team {
+  issues::Team{
+    id: id,
+    name: name,
+    key: name,
+  }
+}
+
+private fn controller(
+  application: testing::TestApp,
+  modal: mut modal_host::ModalHost,
+  state: mut FakeState,
+  outcome: mut Outcome,
+) mut issue_creation_controller::Controller {
+  issue_creation_controller::new(
+    application.context,
+    modal,
+    theme::new(),
+    service(state),
+    fn() {},
+    fn(title: Str, message: Str, success: Bool) {
+      match success {
+        true => outcome.successes.push(message),
+        false => outcome.errors.push(message),
+      }
+    },
+    fn(identifier: Str) {
+      outcome.created.push(identifier)
+    },
+  )
+}
+
+private fn key(name: Str, ctrl: Bool?) mut event::KeyEvent {
+  event::key(
+    name,
+    "",
+    event::KeyEventType::press,
+    event::Modifiers{
+      shift: false,
+      ctrl: ctrl.or(false),
+      alt: false,
+      super: false,
+    },
+  )
+}
+
+test fn creation_with_one_team_validates_retries_and_opens_issue() Void!Str {
+  let application = testing::new(90, 30)
+  defer application.destroy()
+  let modal = modal_host::new(application.context, theme::new())
+  application.root.add(modal.root)
+  let state = mut FakeState{team_loads: [], creates: []}
+  let outcome = mut Outcome{
+    errors: [],
+    successes: [],
+    created: [],
+  }
+  let creation = controller(application, modal, state, outcome)
+  creation.open()
+  try assertions::assert(state.team_loads.size() == 1, "opening should load teams")
+  (state.team_loads.at(0).expect("team load"))(Result::ok([team("team-1", "Core")]))
+  application.render()
+  for size in [[60, 20], [100, 30], [160, 40]] {
+    application.resize(size.at(0).expect("width"), size.at(1).expect("height"))
+    try assertions::assert(modal.is_open(), "creation form should survive resize")
+    try assertions::assert(state.creates.size() == 0, "resize should not submit the form")
+  }
+
+  application.key(key("return", ctrl: true))
+  try assertions::assert(state.creates.size() == 0, "empty title should not submit")
+  try assertions::assert(
+    application.frame().text().contains("Title is required"),
+    "validation error should render",
+  )
+  application.paste(event::paste("  New issue  "))
+  application.key(key("tab"))
+  application.paste(event::paste("Description body"))
+  application.key(key("return", ctrl: true))
+  application.key(key("return", ctrl: true))
+  try assertions::assert(state.creates.size() == 1, "duplicate submission chords should be ignored")
+  let request = state.creates.at(0).expect("create request")
+  try assertions::assert(request.team_id == "team-1", "single team should be selected automatically")
+  try assertions::assert(request.title == "New issue", "title should be trimmed; got {request.title}")
+  try assertions::assert(request.description == "Description body", "description should be submitted")
+  try assertions::assert(not modal.dismiss(), "in-flight creation should guard dismissal")
+  request.completion(Result::err("permission denied"))
+  application.render()
+  try assertions::assert(
+    application.frame().text().contains("permission denied"),
+    "submission error should render",
+  )
+  application.key(key("return", ctrl: true))
+  try assertions::assert(state.creates.size() == 2, "failed submission should allow retry")
+  state.creates.at(1).expect("retry").completion(Result::ok("AKO-42"))
+  try assertions::assert(not modal.is_open(), "successful creation should close modal")
+  try assertions::assert(
+    outcome.successes.at(0).expect("success toast") == "AKO-42",
+    "success should notify",
+  )
+  assertions::assert(
+    outcome.created.at(0).expect("opened issue") == "AKO-42",
+    "created issue should open",
+  )
+}
+
+test fn creation_handles_zero_and_many_team_flows() Void!Str {
+  let application = testing::new(80, 26)
+  defer application.destroy()
+  let modal = modal_host::new(application.context, theme::new())
+  application.root.add(modal.root)
+  let state = mut FakeState{team_loads: [], creates: []}
+  let outcome = mut Outcome{
+    errors: [],
+    successes: [],
+    created: [],
+  }
+  let creation = controller(application, modal, state, outcome)
+
+  creation.open()
+  (state.team_loads.at(0).expect("empty team load"))(Result::ok([]))
+  try assertions::assert(not modal.is_open(), "zero teams should close flow")
+  try assertions::assert(
+    outcome.errors.at(0).expect("zero-team error") == "No teams found in this workspace",
+    "zero teams should report a useful error",
+  )
+
+  creation.open()
+  (state.team_loads.at(1).expect("many teams"))(
+    Result::ok([team("team-1", "Core"), team("team-2", "Mobile")]),
+  )
+  application.render()
+  try assertions::assert(application.frame().text().contains("choose team"), "team picker should render")
+  application.key(key("down"))
+  application.key(key("return"))
+  application.paste(event::paste("Mobile issue"))
+  application.key(key("return", ctrl: true))
+  try assertions::assert(
+    state.creates.at(0).expect("many-team create").team_id == "team-2",
+    "picker should choose team",
+  )
+  state.creates.at(0).expect("many-team success").completion(Result::ok("MOBILE-1"))
+  assertions::assert(
+    outcome.created.at(0).expect("created") == "MOBILE-1",
+    "many-team flow should open issue",
+  )
+}
+
+test fn creation_team_load_error_closes_and_reports() Void!Str {
+  let application = testing::new(70, 22)
+  defer application.destroy()
+  let modal = modal_host::new(application.context, theme::new())
+  application.root.add(modal.root)
+  let state = mut FakeState{team_loads: [], creates: []}
+  let outcome = mut Outcome{
+    errors: [],
+    successes: [],
+    created: [],
+  }
+  let creation = controller(application, modal, state, outcome)
+  creation.open()
+  try assertions::assert(modal.is_open(), "loading teams should own the modal")
+  (state.team_loads.at(0).expect("team load"))(Result::err("workspace unavailable"))
+  try assertions::assert(not modal.is_open(), "team load failure should close creation")
+  assertions::assert(
+    outcome.errors.at(0).expect("load error") == "workspace unavailable",
+    "team load failure should report its error",
+  )
+}
+
+test fn creation_disposal_suppresses_late_team_and_create_completions() Void!Str {
+  let application = testing::new(70, 22)
+  defer application.destroy()
+  let modal = modal_host::new(application.context, theme::new())
+  application.root.add(modal.root)
+  let state = mut FakeState{team_loads: [], creates: []}
+  let outcome = mut Outcome{
+    errors: [],
+    successes: [],
+    created: [],
+  }
+  let creation = controller(application, modal, state, outcome)
+  creation.open()
+  creation.dispose()
+  (state.team_loads.at(0).expect("late teams"))(Result::err("late"))
+  try assertions::assert(outcome.errors.size() == 0, "disposed team load should be ignored")
+
+  let second_state = mut FakeState{team_loads: [], creates: []}
+  let second = controller(application, modal, second_state, outcome)
+  second.open()
+  (second_state.team_loads.at(0).expect("team"))(Result::ok([team("team-1", "Core")]))
+  application.paste(event::paste("Late issue"))
+  application.key(key("return", ctrl: true))
+  second.dispose()
+  second_state.creates.at(0).expect("late create").completion(Result::ok("AKO-99"))
+  assertions::assert(outcome.created.size() == 0, "disposed create should not open issue")
+}

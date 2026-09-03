@@ -152,13 +152,15 @@ fn load() DataCache? {
 
 fn save(cache: DataCache) Void!Str {
   let dir = try config::get_config_dir()
-  // 0o755: rwxr-xr-x. MkdirAll is a no-op when the directory exists.
-  try os::MkdirAll(dir, 493).map_err(error_message)
+  try os::MkdirAll(dir, 448).map_err(error_message)
+  try os::Chmod(dir, 448).map_err(error_message)
   let content = try encode(cache)
   let path = try data_path()
+  let temp_path = "{path}.tmp"
   mut bytes = content.bytes()
-  // 0o644: rw-r--r--
-  try os::WriteFile(path, mut bytes, 420).map_err(error_message)
+  try os::WriteFile(temp_path, mut bytes, 384).map_err(error_message)
+  try os::Rename(temp_path, path).map_err(error_message)
+  try os::Chmod(path, 384).map_err(error_message)
   Result::ok(())
 }
 

@@ -1,0 +1,329 @@
+use cooper/box
+use cooper/event
+use cooper/runtime
+use cooper/scroll_box
+use cooper/style
+use cooper/text
+use go:strings
+use tinear/models/documents
+use tinear/services/document_detail_service
+use tinear/tui/lifecycle
+use tinear/tui/markdown_controller
+use tinear/tui/scheduler
+use tinear/tui/shell_controller
+use tinear/tui/theme as tinear_theme
+use tinear/tui/timestamp
+
+struct DocumentDetailController {
+  root: mut box::Box,
+  context: mut runtime::Runtime,
+  slug_id: Str,
+  cached_title: Str,
+  status: mut text::Text,
+  content: mut box::Box,
+  title_text: mut text::Text,
+  metadata_first: mut text::Text,
+  metadata_second: mut text::Text,
+  body_scroll: mut scroll_box::ScrollBox,
+  markdown: mut markdown_controller::MarkdownController,
+  document: documents::Doc?,
+  generation: Int,
+  scope: mut lifecycle::Scope,
+  service: document_detail_service::Service,
+  schedule: scheduler::Schedule,
+  cancel_refresh: fn(),
+  on_title: fn(Str),
+  on_open_url: fn(Str),
+  notify_error: fn(Str, Str),
+  palette: tinear_theme::Theme,
+}
+
+private fn root_child_style(display: style::Display) style::Style {
+  style::new(
+    display: display,
+    width: style::percent(100.0),
+    height: style::cells(1),
+    flex_grow: 1.0,
+    overflow: style::Overflow::hidden,
+  )
+}
+
+private fn status_style(display: style::Display) style::Style {
+  style::new(
+    display: display,
+    width: style::percent(100.0),
+    height: style::cells(1),
+    flex_grow: 1.0,
+    justify_content: style::Justify::center,
+    align_items: style::Align::center,
+  )
+}
+
+private fn metadata_line(
+  first_label: Str,
+  first_value: Str,
+  second_label: Str,
+  second_value: Str,
+  palette: tinear_theme::Theme,
+) text::StyledText {
+  text::styled_text(
+    [
+      text::span(first_label, style: text::span_style(dim: true)),
+      text::span("  {first_value}", style: text::span_style(foreground: palette.foreground)),
+      text::span("     {second_label}", style: text::span_style(dim: true)),
+      text::span("  {second_value}", style: text::span_style(foreground: palette.foreground)),
+    ],
+  )
+}
+
+fn new(
+  ctx: mut runtime::Runtime,
+  palette: tinear_theme::Theme,
+  slug_id: Str,
+  cached_title: Str,
+  service: document_detail_service::Service,
+  schedule: scheduler::Schedule,
+  on_title: fn(Str),
+  on_open_url: fn(Str),
+  notify_error: fn(Str, Str),
+) mut DocumentDetailController {
+  let root = box::new(
+    ctx,
+    styles: style::new(
+      width: style::percent(100.0),
+      height: style::percent(100.0),
+      overflow: style::Overflow::hidden,
+      padding: style::Edges{
+        top: style::cells(0),
+        right: style::cells(1),
+        bottom: style::cells(0),
+        left: style::cells(1),
+      },
+    ),
+  )
+  let loading_title = match cached_title.is_empty() {
+    true => "document",
+    false => cached_title,
+  }
+  let status = text::new(
+    ctx,
+    content: "Loading {loading_title}…",
+    selectable: false,
+    styles: status_style(style::Display::flex),
+    text_style: text::style(dim: true),
+  )
+  let content = box::new(ctx, styles: root_child_style(style::Display::none))
+  let title_text = text::new(
+    ctx,
+    content: cached_title,
+    selectable: true,
+    wrap: text::TextWrap::word,
+    overflow: text::TextOverflow::ellipsis,
+    styles: style::new(width: style::percent(100.0), max_height: style::cells(2), flex_shrink: 0.0),
+    text_style: text::style(bold: true),
+  )
+  let metadata_first = text::new(
+    ctx,
+    content: "",
+    selectable: true,
+    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+  )
+  let metadata_second = text::new(
+    ctx,
+    content: "",
+    selectable: true,
+    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+  )
+  let rule = text::new(
+    ctx,
+    content: strings::Repeat("─", 512),
+    selectable: false,
+    wrap: text::TextWrap::none,
+    overflow: text::TextOverflow::clip,
+    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+    text_style: text::style(foreground: palette.border, dim: true),
+  )
+  let body_scroll = scroll_box::new(
+    ctx,
+    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_grow: 1.0),
+  )
+  let markdown = markdown_controller::new(
+    ctx,
+    palette,
+    "",
+    on_open_url,
+    empty_label: "Empty document",
+  )
+  body_scroll.add(markdown.root)
+  content.add(title_text)
+  content.add(metadata_first)
+  content.add(metadata_second)
+  content.add(rule)
+  content.add(body_scroll)
+  root.add(status)
+  root.add(content)
+
+  let controller = mut DocumentDetailController{
+    root: root,
+    context: ctx,
+    slug_id: slug_id,
+    cached_title: cached_title,
+    status: status,
+    content: content,
+    title_text: title_text,
+    metadata_first: metadata_first,
+    metadata_second: metadata_second,
+    body_scroll: body_scroll,
+    markdown: markdown,
+    document: Maybe::new<documents::Doc>(),
+    generation: 0,
+    scope: lifecycle::new(),
+    service: service,
+    schedule: schedule,
+    cancel_refresh: fn() {},
+    on_title: on_title,
+    on_open_url: on_open_url,
+    notify_error: notify_error,
+    palette: palette,
+  }
+  controller
+}
+
+impl DocumentDetailController {
+  private fn mut show_document(document: documents::Doc) {
+    self.document = Maybe::new(document)
+    self.title_text.set_content(document.meta.title)
+    self.metadata_first.set_content(
+      metadata_line(
+        "Project",
+        document.meta.container,
+        "Creator",
+        document.meta.creator,
+        self.palette,
+      ),
+    )
+    self.metadata_second.set_content(
+      metadata_line("Updated", timestamp::friendly(document.meta.updated_at), "", "", self.palette),
+    )
+    self.markdown.set_source(document.content.or(""))
+    self.status.set_style(status_style(style::Display::none))
+    self.content.set_style(root_child_style(style::Display::flex))
+    if document.meta.title != self.cached_title {
+      self.cached_title = document.meta.title
+      self.on_title(document.meta.title)
+    }
+  }
+
+  private fn mut show_initial_error(message: Str) {
+    let title = match self.cached_title.is_empty() {
+      true => "document",
+      false => self.cached_title,
+    }
+    self.status.set_content("Couldn't load {title}: {message}")
+    self.status.set_text_style(text::style(foreground: self.palette.danger, bold: true))
+    self.status.set_style(status_style(style::Display::flex))
+    self.content.set_style(root_child_style(style::Display::none))
+  }
+
+  fn mut refresh(silent: Bool) {
+    if not self.scope.disposed {
+      let generation = self.scope.begin_request()
+      self.generation = generation
+      if not silent and self.document.is_none() {
+        self.status.set_content("Loading {self.cached_title}…")
+        self.status.set_text_style(text::style(dim: true))
+      }
+      self.service.load(self.scope.stop.receiver(), self.slug_id, fn(result: documents::Doc!Str) {
+        if self.scope.is_current(generation) {
+          match result {
+            ok(document) => self.show_document(document),
+            err(message) => {
+              if self.document.is_none() {
+                self.show_initial_error(message)
+              } else {
+                self.notify_error("Refresh document", message)
+              }
+            },
+          }
+        }
+      })
+    }
+  }
+
+  private fn mut schedule_refresh() {
+    self.cancel_refresh()
+    self.cancel_refresh = self.schedule(5 * 60 * 1000, fn() {
+      if not self.scope.disposed {
+        self.refresh(true)
+        self.schedule_refresh()
+      }
+    })
+  }
+
+  fn mut start() {
+    if (not self.scope.disposed) and self.generation == 0 {
+      self.refresh(false)
+      self.schedule_refresh()
+    }
+  }
+
+  private fn mut open_browser() {
+    match self.document {
+      loaded => {
+        if not loaded.meta.url.is_empty() {
+          self.on_open_url(loaded.meta.url)
+        }
+      },
+      _ => (),
+    }
+  }
+
+  fn mut focus() {
+    let _ = self.body_scroll.focus()
+  }
+
+  fn mut handle_key(received: mut event::KeyEvent) Bool {
+    if self.scope.disposed or received.event_type == event::KeyEventType::release {
+      false
+    } else {
+      match {
+        received.matches("j") or received.matches("down") => {
+          let _ = self.body_scroll.scroll_by(1)
+          true
+        },
+        received.matches("k") or received.matches("up") => {
+          let _ = self.body_scroll.scroll_by(-1)
+          true
+        },
+        received.matches("o") => {
+          self.open_browser()
+          true
+        },
+        _ => false,
+      }
+    }
+  }
+
+  fn mut screen() shell_controller::Screen {
+    shell_controller::Screen{
+      root: self.root,
+      focus: fn() {
+        self.focus()
+      },
+      handle_key: fn(received: mut event::KeyEvent) Bool {
+        self.handle_key(received)
+      },
+      dispose: fn() {
+        self.dispose()
+      },
+    }
+  }
+
+  fn mut dispose() {
+    if not self.scope.disposed {
+      self.cancel_refresh()
+      self.scope.dispose()
+      self.markdown.dispose()
+    }
+  }
+}

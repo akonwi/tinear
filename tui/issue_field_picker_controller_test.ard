@@ -1,0 +1,502 @@
+use ard/testing as assertions
+
+use cooper/box
+use cooper/event
+use cooper/testing
+use tinear/models/issues
+use tinear/services/issue_fields_service
+use tinear/tui/issue_field_picker_controller
+use tinear/tui/modal_host
+use tinear/tui/theme
+
+struct StringMutation {
+  issue_id: Str,
+  value: Str,
+  completion: fn(Void!Str),
+}
+
+struct PriorityMutation {
+  issue_id: Str,
+  value: Int,
+  completion: fn(Void!Str),
+}
+
+struct FakeState {
+  state_loads: [fn([issues::WorkflowState]!Str)],
+  state_cancellations: [Receiver<Bool>],
+  cycle_loads: [fn(issues::TeamCyclesResult!Str)],
+  member_loads: [fn([issues::Member]!Str)],
+  project_loads: [fn([issues::Project]!Str)],
+  state_updates: [StringMutation],
+  cycle_updates: [StringMutation],
+  priority_updates: [PriorityMutation],
+  assignee_updates: [StringMutation],
+  project_updates: [StringMutation],
+}
+
+struct Outcome {
+  changed: Int,
+  errors: Int,
+  error_title: Str,
+}
+
+private fn fake_state() mut FakeState {
+  (mut FakeState{
+    state_loads: [],
+    state_cancellations: [],
+    cycle_loads: [],
+    member_loads: [],
+    project_loads: [],
+    state_updates: [],
+    cycle_updates: [],
+    priority_updates: [],
+    assignee_updates: [],
+    project_updates: [],
+  })
+}
+
+private fn fake_service(state: mut FakeState) issue_fields_service::Service {
+  issue_fields_service::Service{
+    load_states: fn(cancellation: Receiver<Bool>, team_id: Str, completion: fn([issues::WorkflowState]!Str)) {
+      state.state_loads.push(completion)
+      state.state_cancellations.push(cancellation)
+    },
+    load_cycles: fn(cancellation: Receiver<Bool>, team_id: Str, completion: fn(issues::TeamCyclesResult!Str)) {
+      state.cycle_loads.push(completion)
+    },
+    load_members: fn(cancellation: Receiver<Bool>, team_id: Str, completion: fn([issues::Member]!Str)) {
+      state.member_loads.push(completion)
+    },
+    load_projects: fn(cancellation: Receiver<Bool>, team_id: Str, completion: fn([issues::Project]!Str)) {
+      state.project_loads.push(completion)
+    },
+    update_state: fn(cancellation: Receiver<Bool>, issue_id: Str, value: Str, completion: fn(Void!Str)) {
+      state.state_updates.push(
+        StringMutation{
+          issue_id: issue_id,
+          value: value,
+          completion: completion,
+        },
+      )
+    },
+    update_cycle: fn(cancellation: Receiver<Bool>, issue_id: Str, value: Str, completion: fn(Void!Str)) {
+      state.cycle_updates.push(
+        StringMutation{
+          issue_id: issue_id,
+          value: value,
+          completion: completion,
+        },
+      )
+    },
+    update_priority: fn(cancellation: Receiver<Bool>, issue_id: Str, value: Int, completion: fn(Void!Str)) {
+      state.priority_updates.push(
+        PriorityMutation{
+          issue_id: issue_id,
+          value: value,
+          completion: completion,
+        },
+      )
+    },
+    update_assignee: fn(cancellation: Receiver<Bool>, issue_id: Str, value: Str, completion: fn(Void!Str)) {
+      state.assignee_updates.push(
+        StringMutation{
+          issue_id: issue_id,
+          value: value,
+          completion: completion,
+        },
+      )
+    },
+    update_project: fn(cancellation: Receiver<Bool>, issue_id: Str, value: Str, completion: fn(Void!Str)) {
+      state.project_updates.push(
+        StringMutation{
+          issue_id: issue_id,
+          value: value,
+          completion: completion,
+        },
+      )
+    },
+  }
+}
+
+private fn issue() issues::Issue {
+  issues::Issue{
+    id: "issue-1",
+    identifier: "AKO-1",
+    title: "Picker behavior",
+    description: Maybe::new<Str>(),
+    priority: 2,
+    state_id: "started",
+    state_name: "In Progress",
+    state_type: "started",
+    state_position: 1.0,
+    team_id: "team-1",
+    team_name: "Core",
+    team_key: "AKO",
+    project_id: "project-1",
+    project_name: "Tinear",
+    assignee_id: "user-1",
+    assignee_name: "Alex",
+    cycle_id: "cycle-2",
+    cycle_label: "Cycle 2",
+    url: "https://linear.app/AKO-1",
+  }
+}
+
+private fn key(name: Str) mut event::KeyEvent {
+  event::key(
+    name,
+    "",
+    event::KeyEventType::press,
+    event::Modifiers{
+      shift: false,
+      ctrl: false,
+      alt: false,
+      super: false,
+    },
+  )
+}
+
+private fn controller(
+  application: testing::TestApp,
+  modal: mut modal_host::ModalHost,
+  state: mut FakeState,
+  outcome: mut Outcome,
+) mut issue_field_picker_controller::Controller {
+  issue_field_picker_controller::new(
+    application.context,
+    modal,
+    theme::new(),
+    fake_service(state),
+    fn() {},
+    fn() {
+      outcome.changed =+ 1
+    },
+    fn(title: Str, message: Str) {
+      outcome.errors =+ 1
+      outcome.error_title = title
+    },
+  )
+}
+
+test fn field_picker_sorts_states_and_filters_cycles() Void!Str {
+  let sorted = issue_field_picker_controller::sort_states(
+    [
+      issues::WorkflowState{
+        id: "done",
+        raw_name: "Done",
+        name: "Done",
+        state_type: "completed",
+        position: 1.0,
+      },
+      issues::WorkflowState{
+        id: "doing",
+        raw_name: "Doing",
+        name: "Doing",
+        state_type: "started",
+        position: 2.0,
+      },
+      issues::WorkflowState{
+        id: "todo",
+        raw_name: "Todo",
+        name: "Todo",
+        state_type: "unstarted",
+        position: 3.0,
+      },
+      issues::WorkflowState{
+        id: "started",
+        raw_name: "Started",
+        name: "Started",
+        state_type: "started",
+        position: 1.0,
+      },
+    ],
+  )
+  try assertions::assert(sorted.at(0).expect("todo").id == "todo", "state type rank should sort first")
+  try assertions::assert(
+    sorted.at(1).expect("started").id == "started",
+    "position should sort within type",
+  )
+  try assertions::assert(sorted.at(3).expect("done").id == "done", "completed should sort last")
+
+  let cycles = issue_field_picker_controller::cycles_for_issue(
+    issues::TeamCyclesResult{
+      active_cycle_number: Maybe::new(2),
+      cycles: [
+        issues::Cycle{
+          id: "c1",
+          number: 1,
+          name: "",
+          starts_at: "",
+        },
+        issues::Cycle{
+          id: "c5",
+          number: 5,
+          name: "",
+          starts_at: "",
+        },
+        issues::Cycle{
+          id: "c4",
+          number: 4,
+          name: "",
+          starts_at: "",
+        },
+        issues::Cycle{
+          id: "c3",
+          number: 3,
+          name: "",
+          starts_at: "",
+        },
+      ],
+    },
+    "c4",
+  )
+  try assertions::assert(cycles.size() == 3, "cycles should include past, next, and current outlier")
+  try assertions::assert(
+    cycles.at(0).expect("current outlier").id == "c4",
+    "cycles should sort newest first",
+  )
+  assertions::assert(
+    cycles.at(2).expect("oldest").id == "c1",
+    "oldest included cycle should be last",
+  )
+}
+
+test fn state_picker_ignores_dismissed_load_and_reports_mutation_failure() Void!Str {
+  let application = testing::new(80, 24)
+  defer application.destroy()
+  let modal = modal_host::new(application.context, theme::new())
+  application.root.add(modal.root)
+  let state = fake_state()
+  let outcome = mut Outcome{
+    changed: 0,
+    errors: 0,
+    error_title: "",
+  }
+  let picker = controller(application, modal, state, outcome)
+
+  picker.open(issue_field_picker_controller::Field::state, issue())
+  try assertions::assert(state.state_loads.size() == 1, "state picker should load team states")
+  try assertions::assert(modal.dismiss(), "loading picker should be dismissible")
+  let load_cancelled = select {
+    state.state_cancellations.at(0).expect("cancellation").recv() => true,
+    _ => false,
+  }
+  try assertions::assert(load_cancelled, "dismissing load should cancel its request")
+  (state.state_loads.at(0).expect("dismissed load"))(
+    Result::ok(
+      [
+        issues::WorkflowState{
+          id: "started",
+          raw_name: "In Progress",
+          name: "In Progress",
+          state_type: "started",
+          position: 1.0,
+        },
+      ],
+    ),
+  )
+  try assertions::assert(not modal.is_open(), "dismissed load must not reopen modal")
+
+  picker.open(issue_field_picker_controller::Field::state, issue())
+  (state.state_loads.at(1).expect("current load"))(
+    Result::ok(
+      [
+        issues::WorkflowState{
+          id: "backlog",
+          raw_name: "Backlog",
+          name: "Backlog",
+          state_type: "backlog",
+          position: 1.0,
+        },
+        issues::WorkflowState{
+          id: "started",
+          raw_name: "In Progress",
+          name: "In Progress",
+          state_type: "started",
+          position: 1.0,
+        },
+      ],
+    ),
+  )
+  application.render()
+  for size in [[60, 20], [100, 30], [160, 40]] {
+    application.resize(size.at(0).expect("width"), size.at(1).expect("height"))
+    try assertions::assert(modal.is_open(), "field picker should survive resize")
+    try testing::assert_contains(application.frame().text(), "Backlog")
+  }
+  application.key(key("up"))
+  application.key(key("return"))
+  try assertions::assert(state.state_updates.size() == 1, "selection should start state mutation")
+  try assertions::assert(
+    state.state_updates.at(0).expect("mutation").value == "backlog",
+    "selected state id should be sent",
+  )
+  try assertions::assert(not modal.dismiss(), "in-flight mutation should not be dismissible")
+  (state.state_updates.at(0).expect("mutation").completion)(Result::err("denied"))
+  try assertions::assert(not modal.is_open(), "failed mutation should close progress modal")
+  try assertions::assert(outcome.changed == 0, "failed mutation should not refresh")
+  try assertions::assert(outcome.errors == 1, "failed mutation should notify")
+  assertions::assert(outcome.error_title == "Update state", "error should identify mutation")
+}
+
+test fn field_picker_load_failure_closes_and_reports() Void!Str {
+  let application = testing::new(80, 24)
+  defer application.destroy()
+  let modal = modal_host::new(application.context, theme::new())
+  application.root.add(modal.root)
+  let state = fake_state()
+  let outcome = mut Outcome{
+    changed: 0,
+    errors: 0,
+    error_title: "",
+  }
+  let picker = controller(application, modal, state, outcome)
+  picker.open(issue_field_picker_controller::Field::state, issue())
+  (state.state_loads.at(0).expect("state load"))(Result::err("forbidden"))
+  try assertions::assert(not modal.is_open(), "picker load failure should close loading modal")
+  try assertions::assert(outcome.errors == 1, "picker load failure should notify")
+  assertions::assert(outcome.error_title == "State picker", "load error should identify the picker")
+}
+
+test fn priority_cycle_assignee_and_project_pickers_apply_and_refresh() Void!Str {
+  let application = testing::new(80, 24)
+  defer application.destroy()
+  let modal = modal_host::new(application.context, theme::new())
+  application.root.add(modal.root)
+  let state = fake_state()
+  let outcome = mut Outcome{
+    changed: 0,
+    errors: 0,
+    error_title: "",
+  }
+  let picker = controller(application, modal, state, outcome)
+  let selected = issue()
+
+  picker.open(issue_field_picker_controller::Field::priority, selected)
+  application.render()
+  application.key(key("down"))
+  application.key(key("return"))
+  try assertions::assert(
+    state.priority_updates.at(0).expect("priority").value == 3,
+    "priority value should map from option",
+  )
+  let replacement = box::new(application.context)
+  let replacement_ticket = modal.present(
+    "Other modal",
+    replacement,
+    "",
+    fn() {},
+    fn() {},
+    fn() {},
+    fn() Bool {
+      true
+    },
+  )
+  (state.priority_updates.at(0).expect("priority").completion)(Result::ok(()))
+  try assertions::assert(
+    outcome.changed == 1,
+    "successful mutation should refresh after modal replacement",
+  )
+  try assertions::assert(
+    modal.is_current(replacement_ticket),
+    "mutation should not close a replacement modal",
+  )
+  let _ = modal.close()
+
+  picker.open(issue_field_picker_controller::Field::cycle, selected)
+  (state.cycle_loads.at(0).expect("cycles"))(
+    Result::ok(
+      issues::TeamCyclesResult{
+        active_cycle_number: Maybe::new(2),
+        cycles: [
+          issues::Cycle{
+            id: "cycle-1",
+            number: 1,
+            name: "",
+            starts_at: "2025-01-01",
+          },
+          issues::Cycle{
+            id: "cycle-2",
+            number: 2,
+            name: "",
+            starts_at: "2025-01-15",
+          },
+          issues::Cycle{
+            id: "cycle-3",
+            number: 3,
+            name: "Next",
+            starts_at: "2025-02-01",
+          },
+        ],
+      },
+    ),
+  )
+  application.render()
+  application.key(key("up"))
+  application.key(key("up"))
+  application.key(key("return"))
+  try assertions::assert(
+    state.cycle_updates.at(0).expect("cycle").value == "",
+    "no-cycle option should clear cycle",
+  )
+  (state.cycle_updates.at(0).expect("cycle").completion)(Result::ok(()))
+
+  picker.open(issue_field_picker_controller::Field::assignee, selected)
+  (state.member_loads.at(0).expect("members"))(
+    Result::ok(
+      [issues::Member{id: "user-1", name: "Alex"}, issues::Member{id: "user-2", name: "Blair"}],
+    ),
+  )
+  application.render()
+  application.key(key("down"))
+  application.key(key("return"))
+  try assertions::assert(
+    state.assignee_updates.at(0).expect("assignee").value == "user-2",
+    "member id should update",
+  )
+  (state.assignee_updates.at(0).expect("assignee").completion)(Result::ok(()))
+
+  picker.open(issue_field_picker_controller::Field::project, selected)
+  (state.project_loads.at(0).expect("projects"))(
+    Result::ok(
+      [
+        issues::Project{id: "project-1", name: "Tinear"},
+        issues::Project{id: "project-2", name: "Cooper"},
+      ],
+    ),
+  )
+  application.render()
+  application.key(key("down"))
+  application.key(key("return"))
+  try assertions::assert(
+    state.project_updates.at(0).expect("project").value == "project-2",
+    "project id should update",
+  )
+  (state.project_updates.at(0).expect("project").completion)(Result::ok(()))
+
+  try assertions::assert(outcome.changed == 4, "each successful mutation should request board refresh")
+  try assertions::assert(outcome.errors == 0, "successful mutations should not notify errors")
+  assertions::assert(not modal.is_open(), "successful mutation should close progress modal")
+}
+
+test fn field_picker_disposal_closes_owned_modal_and_ignores_late_load() Void!Str {
+  let application = testing::new(60, 20)
+  defer application.destroy()
+  let modal = modal_host::new(application.context, theme::new())
+  application.root.add(modal.root)
+  let state = fake_state()
+  let outcome = mut Outcome{
+    changed: 0,
+    errors: 0,
+    error_title: "",
+  }
+  let picker = controller(application, modal, state, outcome)
+  picker.open(issue_field_picker_controller::Field::project, issue())
+  picker.dispose()
+  try assertions::assert(not modal.is_open(), "dispose should close picker-owned modal")
+  (state.project_loads.at(0).expect("late load"))(
+    Result::ok([issues::Project{id: "late", name: "Late"}]),
+  )
+  try assertions::assert(not modal.is_open(), "late load should stay suppressed")
+  assertions::assert(outcome.errors == 0, "late completion should not notify")
+}

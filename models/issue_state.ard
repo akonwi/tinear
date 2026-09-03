@@ -1,0 +1,73 @@
+// Shared Linear issue and workflow model helpers. This module has no UI dependency.
+
+// Workflow rank for a Linear state type. Lower is earlier in the flow. Used to
+// sort columns/states across teams so cross-team merged states land in a
+// predictable order.
+fn state_type_rank(state_type: Str) Int {
+  match state_type {
+    "triage" => 0,
+    "backlog" => 1,
+    "unstarted" => 2,
+    "started" => 3,
+    "completed" => 4,
+    _ => 5,
+  }
+}
+
+// State names to exclude from the board view. These are typically dead-end
+// states whose issues shouldn't clutter the active workflow.
+fn is_hidden_state(name: Str) Bool {
+  name == "Duplicate"
+}
+
+// Linear priority code (1=Urgent..4=Low, 0/None=no priority) to label.
+fn priority_label(p: Int?) Str {
+  match p {
+    n => {
+      match n {
+        1 => "Urgent",
+        2 => "High",
+        3 => "Medium",
+        4 => "Low",
+        _ => "—",
+      }
+    },
+    _ => "—",
+  }
+}
+
+// Single-character priority glyph for compact card rendering. Returns a space
+// when priority is None or 0 so all glyphs occupy the same visual column.
+fn priority_glyph(p: Int?) Str {
+  match p {
+    n => {
+      match n {
+        1 => "!",
+        2 => "↑",
+        3 => "~",
+        4 => "↓",
+        _ => " ",
+      }
+    },
+    _ => " ",
+  }
+}
+
+// A raw board column from the Linear API, before models/issues.ard decodes each
+// issue into the typed Issue model used by retained controllers.
+struct BoardColumn {
+  name: Str,
+  state_type: Str,
+  position: Float64,
+  issues: [Any],
+}
+
+// Result of fetching a team's cycles. `active_cycle_number` is the number of
+// the team's currently active cycle, used to filter the list of cycles to a
+// useful slice (past + active + next) instead of every future cycle the team has
+// scheduled. This is the raw API shape used before models/issues.ard decodes
+// cycles into typed model data.
+struct TeamCyclesResult {
+  active_cycle_number: Int?,
+  cycles: [Any],
+}

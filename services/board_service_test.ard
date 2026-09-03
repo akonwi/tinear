@@ -1,0 +1,80 @@
+use ard/testing
+
+use tinear/models/issues
+use tinear/services/board_service
+
+private fn target(raw_name: Str, name: Str, state_type: Str) board_service::StateTarget {
+  board_service::StateTarget{
+    raw_name: raw_name,
+    name: name,
+    state_type: state_type,
+    position: 1.0,
+  }
+}
+
+private fn state(id: Str, raw_name: Str, name: Str, state_type: Str) issues::WorkflowState {
+  issues::WorkflowState{
+    id: id,
+    raw_name: raw_name,
+    name: name,
+    state_type: state_type,
+    position: 1.0,
+  }
+}
+
+test fn board_move_resolves_exact_then_unique_normalized_team_state() Void!Str {
+  let exact = try board_service::resolve_target_state(
+    target("In Progress", "In Progress", "started"),
+    [
+      state("wrong-name", "Done", "Done", "completed"),
+      state("exact", "In Progress", "In Progress", "started"),
+    ],
+  )
+  try testing::assert(exact.id == "exact", "raw name and type should resolve the target state")
+  let cross_team = try board_service::resolve_target_state(
+    target("Review", "Review", "started"),
+    [state("team-b-review", "Review", "Review", "unstarted")],
+  )
+  try testing::assert(
+    cross_team.id == "team-b-review",
+    "a unique raw name should resolve independently of another team's column type",
+  )
+
+  let normalized = try board_service::resolve_target_state(
+    target("â€” Done", "- Done", "completed"),
+    [state("normalized", "— Done", "- Done", "completed")],
+  )
+  testing::assert(
+    normalized.id == "normalized",
+    "a unique normalized label should be a safe fallback",
+  )
+}
+
+test fn board_move_rejects_missing_ambiguous_and_type_only_states() Void!Str {
+  let missing = board_service::resolve_target_state(
+    target("Review", "Review", "started"),
+    [state("doing", "Doing", "Doing", "started")],
+  )
+  try testing::assert(missing.is_err(), "matching only the workflow type must not select a state")
+
+  let duplicate_raw = board_service::resolve_target_state(
+    target("Review", "Review", "started"),
+    [
+      state("review-a", "Review", "Review", "started"),
+      state("review-b", "Review", "Review", "unstarted"),
+    ],
+  )
+  try testing::assert(
+    duplicate_raw.is_err(),
+    "duplicate raw names must not depend on column type ordering",
+  )
+
+  let ambiguous = board_service::resolve_target_state(
+    target("different raw label", "- Done", "completed"),
+    [
+      state("done-a", "— Done", "- Done", "completed"),
+      state("done-b", "â€” Done", "- Done", "completed"),
+    ],
+  )
+  testing::assert(ambiguous.is_err(), "multiple normalized matches must be rejected")
+}

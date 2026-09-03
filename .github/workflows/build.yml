@@ -1,0 +1,71 @@
+name: Native build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  ARD_VERSION: v0.40.0
+  CGO_ENABLED: "1"
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux/amd64
+            runner: ubuntu-24.04
+          - target: linux/arm64
+            runner: ubuntu-24.04-arm
+          - target: darwin/amd64
+            runner: macos-15-intel
+          - target: darwin/arm64
+            runner: macos-15
+
+    steps:
+      - name: Check out Tinear
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version: "1.27"
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Verify native target
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(go env GOOS)/$(go env GOARCH)" = "${{ matrix.target }}"
+          test "$(go env CGO_ENABLED)" = "1"
+
+      - name: Install Ard
+        shell: bash
+        run: |
+          scripts/install-ard.sh "$ARD_VERSION" "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Build native Tinear
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod download
+          ard deps fetch
+          go build ./...
+          ard build main.ard --out "$RUNNER_TEMP/tinear"
+          file "$RUNNER_TEMP/tinear"

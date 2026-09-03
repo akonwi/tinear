@@ -1,0 +1,23 @@
+use ard/testing
+
+use tinear/platform/url
+
+test fn url_launcher_accepts_only_web_targets() Void!Str {
+  try testing::assert(url::is_supported("https://linear.app/issue/AKO-1"), "https should be supported")
+  try testing::assert(url::is_supported("http://localhost:3000"), "http should be supported")
+  try testing::assert(
+    not url::is_supported("-malicious-option"),
+    "option-shaped target should be rejected",
+  )
+  testing::assert(not url::is_supported("file:///tmp/secret"), "non-web scheme should be rejected")
+}
+
+test fn url_launcher_rejects_unsupported_target_before_fallback() Void!Str {
+  mut fallbacks = 0
+  let result = url::open_with_fallback("javascript:alert(1)", fn(target: Str) Void!Error {
+    fallbacks =+ 1
+    Result::ok(())
+  })
+  try testing::assert(result.is_err(), "unsupported scheme should fail")
+  testing::assert(fallbacks == 0, "unsupported target should not reach platform fallback")
+}
