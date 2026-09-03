@@ -1,10 +1,5 @@
-use cooper/box
-use cooper/event
-use cooper/input
-use cooper/runtime
-use cooper/scroll_box
-use cooper/style
-use cooper/text
+use cooper
+use cooper/ui
 use tinear/models/documents
 use tinear/models/issues
 use tinear/services/search_service
@@ -14,17 +9,17 @@ use tinear/tui/scheduler
 use tinear/tui/theme as tinear_theme
 
 struct SearchRow {
-  root: mut box::Box,
+  root: mut ui::Box,
   remove_mouse: fn(),
 }
 
 private struct SearchSession {
-  root: mut box::Box,
-  context: mut runtime::Runtime,
-  query: mut input::Input,
-  results: mut scroll_box::ScrollBox,
-  status: mut text::Text,
-  warning: mut text::Text,
+  root: mut ui::Box,
+  context: mut cooper::Runtime,
+  query: mut ui::Input,
+  results: mut ui::ScrollBox,
+  status: mut ui::Text,
+  warning: mut ui::Text,
   rows: [SearchRow],
   hits: [search_service::Hit],
   cursor: Int,
@@ -41,32 +36,32 @@ private struct SearchSession {
   palette: tinear_theme::Theme,
 }
 
-private fn status_style(display: style::Display) style::Style {
-  style::new(
+private fn status_style(display: ui::Display) ui::Style {
+  ui::style(
     display: display,
-    width: style::percent(100.0),
-    height: style::cells(1),
+    width: ui::percent(100.0),
+    height: ui::cells(1),
     flex_shrink: 0.0,
   )
 }
 
-private fn row_style(active: Bool, hovered: Bool, palette: tinear_theme::Theme) style::Style {
-  style::new(
-    width: style::percent(100.0),
-    height: style::cells(1),
+private fn row_style(active: Bool, hovered: Bool, palette: tinear_theme::Theme) ui::Style {
+  ui::style(
+    width: ui::percent(100.0),
+    height: ui::cells(1),
     flex_shrink: 0.0,
-    flex_direction: style::FlexDirection::row,
-    overflow: style::Overflow::hidden,
+    flex_direction: ui::FlexDirection::row,
+    overflow: ui::Overflow::hidden,
     background: match {
       active => palette.item_active_background,
       hovered => palette.item_hover_background,
       _ => palette.background,
     },
-    padding: style::Edges{
-      top: style::cells(0),
-      right: style::cells(1),
-      bottom: style::cells(0),
-      left: style::cells(1),
+    padding: ui::Edges{
+      top: ui::cells(0),
+      right: ui::cells(1),
+      bottom: ui::cells(0),
+      left: ui::cells(1),
     },
   )
 }
@@ -93,51 +88,51 @@ private fn hit_right(hit: search_service::Hit) Str {
 }
 
 private fn new_session(
-  ctx: mut runtime::Runtime,
+  ctx: mut cooper::Runtime,
   palette: tinear_theme::Theme,
   service: search_service::Service,
   schedule: scheduler::Schedule,
 ) mut SearchSession {
-  let root = box::new(
+  let root = ui::box(
     ctx,
-    styles: style::new(
-      width: style::percent(100.0),
-      height: style::cells(12),
-      flex_direction: style::FlexDirection::column,
-      overflow: style::Overflow::hidden,
+    styles: ui::style(
+      width: ui::percent(100.0),
+      height: ui::cells(12),
+      flex_direction: ui::FlexDirection::column,
+      overflow: ui::Overflow::hidden,
     ),
   )
-  let query = input::new(
+  let query = ui::input(
     ctx,
     placeholder: "Search issues and docs…",
-    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+    styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
   )
-  let rule = text::new(
+  let rule = ui::text(
     ctx,
     content: "────────────────────────────────────────────────────────────────────────",
     selectable: false,
-    wrap: text::TextWrap::none,
-    overflow: text::TextOverflow::clip,
-    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
-    text_style: text::style(dim: true),
+    wrap: ui::TextWrap::none,
+    overflow: ui::TextOverflow::clip,
+    styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
+    text_style: ui::text_style(dim: true),
   )
-  let results = scroll_box::new(
+  let results = ui::scroll_box(
     ctx,
-    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_grow: 1.0),
+    styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_grow: 1.0),
   )
-  let status = text::new(
+  let status = ui::text(
     ctx,
     content: "Type to search issues and docs",
     selectable: false,
-    styles: status_style(style::Display::flex),
-    text_style: text::style(dim: true),
+    styles: status_style(ui::Display::flex),
+    text_style: ui::text_style(dim: true),
   )
-  let warning = text::new(
+  let warning = ui::text(
     ctx,
     content: "",
     selectable: false,
-    styles: status_style(style::Display::none),
-    text_style: text::style(dim: true),
+    styles: status_style(ui::Display::none),
+    text_style: ui::text_style(dim: true),
   )
   results.add(status)
   root.add(query)
@@ -173,8 +168,8 @@ private fn new_session(
     }),
   )
   session.listeners.push(
-    query.on_key(fn(received: mut event::KeyEvent) {
-      if received.event_type != event::KeyEventType::release {
+    query.on_key(fn(received: mut cooper::KeyEvent) {
+      if received.event_type != cooper::KeyEventType::release {
         mut handled = true
         match {
           received.matches("down") => session.move_cursor(1),
@@ -197,11 +192,11 @@ impl SearchSession {
     self.status.set_content(message)
     self.status.set_text_style(
       match danger {
-        true => text::style(foreground: self.palette.danger, bold: true),
-        false => text::style(dim: true),
+        true => ui::text_style(foreground: self.palette.danger, bold: true),
+        false => ui::text_style(dim: true),
       },
     )
-    self.status.set_style(status_style(style::Display::flex))
+    self.status.set_style(status_style(ui::Display::flex))
   }
 
   private fn mut clear_rows() {
@@ -234,47 +229,47 @@ impl SearchSession {
   }
 
   private fn mut create_row(hit: search_service::Hit, index: Int) SearchRow {
-    let root = box::new(self.context, styles: row_style(index == self.cursor, false, self.palette))
-    let left = text::new(
+    let root = ui::box(self.context, styles: row_style(index == self.cursor, false, self.palette))
+    let left = ui::text(
       self.context,
       content: hit_left(hit),
       selectable: false,
-      wrap: text::TextWrap::none,
-      overflow: text::TextOverflow::ellipsis,
-      styles: style::new(width: style::cells(11), height: style::cells(1), flex_shrink: 0.0),
+      wrap: ui::TextWrap::none,
+      overflow: ui::TextOverflow::ellipsis,
+      styles: ui::style(width: ui::cells(11), height: ui::cells(1), flex_shrink: 0.0),
       text_style: match hit {
-        Issue(_) => text::style(bold: true),
-        DocMeta(_) => text::style(dim: true, bold: true),
+        Issue(_) => ui::text_style(bold: true),
+        DocMeta(_) => ui::text_style(dim: true, bold: true),
       },
     )
-    let title = text::new(
+    let title = ui::text(
       self.context,
       content: hit_title(hit),
       selectable: false,
-      wrap: text::TextWrap::none,
-      overflow: text::TextOverflow::ellipsis,
-      styles: style::new(width: style::cells(1), height: style::cells(1), flex_grow: 1.0),
+      wrap: ui::TextWrap::none,
+      overflow: ui::TextOverflow::ellipsis,
+      styles: ui::style(width: ui::cells(1), height: ui::cells(1), flex_grow: 1.0),
     )
-    let right = text::new(
+    let right = ui::text(
       self.context,
       content: hit_right(hit),
       selectable: false,
-      wrap: text::TextWrap::none,
-      overflow: text::TextOverflow::ellipsis,
-      styles: style::new(width: style::cells(15), height: style::cells(1), flex_shrink: 0.0),
-      text_style: text::style(dim: true),
+      wrap: ui::TextWrap::none,
+      overflow: ui::TextOverflow::ellipsis,
+      styles: ui::style(width: ui::cells(15), height: ui::cells(1), flex_shrink: 0.0),
+      text_style: ui::text_style(dim: true),
     )
     root.add(left)
     root.add(title)
     root.add(right)
-    let remove_mouse = root.on_mouse(fn(received: mut event::MouseEvent) {
-      if received.event_type == event::MouseEventType::move {
+    let remove_mouse = root.on_mouse(fn(received: mut cooper::MouseEvent) {
+      if received.event_type == cooper::MouseEventType::move {
         self.hovered = index
         self.refresh_row_styles()
-      } else if received.event_type == event::MouseEventType::out and self.hovered == index {
+      } else if received.event_type == cooper::MouseEventType::out and self.hovered == index {
         self.hovered = -1
         self.refresh_row_styles()
-      } else if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
+      } else if received.event_type == cooper::MouseEventType::down and received.button == cooper::MouseButton::left {
         self.select(index)
         self.activate()
         received.stop_propagation()
@@ -295,15 +290,15 @@ impl SearchSession {
     self.warning.set_style(
       status_style(
         match outcome.warning.is_empty() {
-          true => style::Display::none,
-          false => style::Display::flex,
+          true => ui::Display::none,
+          false => ui::Display::flex,
         },
       ),
     )
     if self.hits.size() == 0 {
       self.show_status("No results found", false)
     } else {
-      self.status.set_style(status_style(style::Display::none))
+      self.status.set_style(status_style(ui::Display::none))
       let rows = mut List::new<SearchRow>()
       for hit, index in self.hits {
         let row = self.create_row(hit, index)
@@ -328,7 +323,7 @@ impl SearchSession {
       self.clear_rows()
       let _ = self.results.scroll_to(0)
       self.warning.set_content("")
-      self.warning.set_style(status_style(style::Display::none))
+      self.warning.set_style(status_style(ui::Display::none))
       if query.is_empty() {
         self.show_status("Type to search issues and docs", false)
       } else {
@@ -439,7 +434,7 @@ impl Controller {
     }
   }
 
-  fn mut open(context: mut runtime::Runtime) {
+  fn mut open(context: mut cooper::Runtime) {
     if not self.disposed {
       let session = new_session(context, self.palette, self.service, self.schedule)
       session.on_open = fn(hit: search_service::Hit) {

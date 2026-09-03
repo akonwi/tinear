@@ -1,9 +1,5 @@
-use cooper/box
-use cooper/event
-use cooper/runtime
-use cooper/style
-use cooper/text
-use cooper/text_area
+use cooper
+use cooper/ui
 use tinear/models/issues
 use tinear/services/issue_edit_service
 use tinear/tui/lifecycle
@@ -11,9 +7,9 @@ use tinear/tui/modal_host
 use tinear/tui/theme as tinear_theme
 
 private struct EditorSession {
-  root: mut box::Box,
-  area: mut text_area::TextArea,
-  status: mut text::Text,
+  root: mut ui::Box,
+  area: mut ui::TextArea,
+  status: mut ui::Text,
   ticket: modal_host::Ticket?,
   remove_key: fn(),
   remove_paste: fn(),
@@ -71,7 +67,7 @@ private fn submission_active(guard: Chan<Bool>) Bool {
 }
 
 struct Controller {
-  context: mut runtime::Runtime,
+  context: mut cooper::Runtime,
   modal: mut modal_host::ModalHost,
   palette: tinear_theme::Theme,
   service: issue_edit_service::Service,
@@ -85,7 +81,7 @@ struct Controller {
 }
 
 fn new(
-  ctx: mut runtime::Runtime,
+  ctx: mut cooper::Runtime,
   modal: mut modal_host::ModalHost,
   palette: tinear_theme::Theme,
   service: issue_edit_service::Service,
@@ -111,28 +107,28 @@ fn new(
 
 impl Controller {
   private fn mut editor(value: Str, placeholder: Str) mut EditorSession {
-    let root = box::new(
+    let root = ui::box(
       self.context,
-      styles: style::new(
-        width: style::percent(100.0),
-        height: style::cells(14),
-        flex_direction: style::FlexDirection::column,
-        gap: style::cells(1),
+      styles: ui::style(
+        width: ui::percent(100.0),
+        height: ui::cells(14),
+        flex_direction: ui::FlexDirection::column,
+        gap: ui::cells(1),
       ),
     )
-    let area = text_area::new(
+    let area = ui::text_area(
       self.context,
       value: value,
       placeholder: placeholder,
-      wrap: text::TextWrap::word,
-      styles: style::new(width: style::percent(100.0), height: style::cells(11), flex_shrink: 0.0),
+      wrap: ui::TextWrap::word,
+      styles: ui::style(width: ui::percent(100.0), height: ui::cells(11), flex_shrink: 0.0),
     )
-    let status = text::new(
+    let status = ui::text(
       self.context,
       content: "",
       selectable: false,
-      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
-      text_style: text::style(dim: true),
+      styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
+      text_style: ui::text_style(dim: true),
     )
     root.add(area)
     root.add(status)
@@ -170,7 +166,7 @@ impl Controller {
               if self.modal.is_current(ticket) and not session.disposed {
                 session.status.set_content("⚠ {message}")
                 session.status.set_text_style(
-                  text::style(foreground: self.palette.danger, bold: true),
+                  ui::text_style(foreground: self.palette.danger, bold: true),
                 )
               } else {
                 self.notify_error("Post comment", message)
@@ -188,10 +184,10 @@ impl Controller {
       let body = session.area.value().trim()
       if body.is_empty() {
         session.status.set_content("Comment cannot be empty")
-        session.status.set_text_style(text::style(foreground: self.palette.danger, bold: true))
+        session.status.set_text_style(ui::text_style(foreground: self.palette.danger, bold: true))
       } else if begin_editor_submission(session.submit_guard, self.operation_guard) {
         session.status.set_content("Posting…")
-        session.status.set_text_style(text::style(dim: true))
+        session.status.set_text_style(ui::text_style(dim: true))
         self.service.create_comment(
           self.scope.stop.receiver(),
           issue.id,
@@ -208,8 +204,8 @@ impl Controller {
   fn mut open_comment(issue: issues::Issue, parent_id: Str, reply_author: Str) {
     if (not self.scope.disposed) and not submission_active(self.operation_guard) {
       let session = self.editor("", "Write a comment…")
-      session.remove_key = session.area.on_key(fn(received: mut event::KeyEvent) {
-        if received.event_type != event::KeyEventType::release {
+      session.remove_key = session.area.on_key(fn(received: mut cooper::KeyEvent) {
+        if received.event_type != cooper::KeyEventType::release {
           if submission_active(session.submit_guard) {
             received.prevent_default()
             received.stop_propagation()
@@ -220,7 +216,7 @@ impl Controller {
           }
         }
       })
-      session.remove_paste = session.area.on_paste(fn(received: mut event::PasteEvent) {
+      session.remove_paste = session.area.on_paste(fn(received: mut cooper::PasteEvent) {
         if submission_active(session.submit_guard) {
           received.prevent_default()
           received.stop_propagation()
@@ -270,7 +266,7 @@ impl Controller {
               if self.modal.is_current(ticket) and not session.disposed {
                 session.status.set_content("⚠ {message}")
                 session.status.set_text_style(
-                  text::style(foreground: self.palette.danger, bold: true),
+                  ui::text_style(foreground: self.palette.danger, bold: true),
                 )
               } else {
                 self.notify_error("Save description", message)
@@ -287,7 +283,7 @@ impl Controller {
     if not session.disposed and begin_editor_submission(session.submit_guard, self.operation_guard) {
       let description = session.area.value()
       session.status.set_content("Saving…")
-      session.status.set_text_style(text::style(dim: true))
+      session.status.set_text_style(ui::text_style(dim: true))
       self.service.update_description(
         self.scope.stop.receiver(),
         issue.id,
@@ -302,8 +298,8 @@ impl Controller {
   fn mut open_description(issue: issues::Issue) {
     if (not self.scope.disposed) and not submission_active(self.operation_guard) {
       let session = self.editor(issue.description.or(""), "Describe the issue… (markdown)")
-      session.remove_key = session.area.on_key(fn(received: mut event::KeyEvent) {
-        if received.event_type != event::KeyEventType::release {
+      session.remove_key = session.area.on_key(fn(received: mut cooper::KeyEvent) {
+        if received.event_type != cooper::KeyEventType::release {
           if submission_active(session.submit_guard) {
             received.prevent_default()
             received.stop_propagation()
@@ -314,7 +310,7 @@ impl Controller {
           }
         }
       })
-      session.remove_paste = session.area.on_paste(fn(received: mut event::PasteEvent) {
+      session.remove_paste = session.area.on_paste(fn(received: mut cooper::PasteEvent) {
         if submission_active(session.submit_guard) {
           received.prevent_default()
           received.stop_propagation()

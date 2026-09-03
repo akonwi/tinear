@@ -1,8 +1,9 @@
 use ard/testing as assertions
 
-use cooper/box
+use cooper
 use cooper/event
 use cooper/testing
+use cooper/ui
 use tinear/models/issues
 use tinear/services/issue_fields_service
 use tinear/tui/issue_field_picker_controller
@@ -143,12 +144,12 @@ private fn issue() issues::Issue {
   }
 }
 
-private fn key(name: Str) mut event::KeyEvent {
+private fn key(name: Str) mut cooper::KeyEvent {
   event::key(
     name,
     "",
-    event::KeyEventType::press,
-    event::Modifiers{
+    cooper::KeyEventType::press,
+    cooper::Modifiers{
       shift: false,
       ctrl: false,
       alt: false,
@@ -385,7 +386,7 @@ test fn priority_cycle_assignee_and_project_pickers_apply_and_refresh() Void!Str
     state.priority_updates.at(0).expect("priority").value == 3,
     "priority value should map from option",
   )
-  let replacement = box::new(application.context)
+  let replacement = ui::box(application.context)
   let replacement_ticket = modal.present(
     "Other modal",
     replacement,

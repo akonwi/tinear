@@ -1,8 +1,6 @@
+use cooper
 use cooper/animation
-use cooper/box
-use cooper/runtime
-use cooper/style
-use cooper/text
+use cooper/ui
 use tinear/tui/scheduler
 use tinear/tui/theme as tinear_theme
 
@@ -14,44 +12,44 @@ enum Variant {
 
 struct Entry {
   id: Int,
-  root: mut box::Box,
+  root: mut ui::Box,
   timeline: mut animation::Timeline,
   cancel_expiry: fn(),
 }
 
 struct ToastHost {
-  root: mut box::Box,
+  root: mut ui::Box,
   entries: [Entry],
   next_id: Int,
   disposed: Bool,
-  hidden_style: style::Style,
-  visible_style: style::Style,
+  hidden_style: ui::Style,
+  visible_style: ui::Style,
   palette: tinear_theme::Theme,
   schedule: scheduler::Schedule,
-  context: mut runtime::Runtime,
+  context: mut cooper::Runtime,
 }
 
-private fn root_style(display: style::Display) style::Style {
-  style::new(
+private fn root_style(display: ui::Display) ui::Style {
+  ui::style(
     display: display,
-    position: style::Position::absolute,
-    right: style::cells(1),
-    bottom: style::cells(2),
-    width: style::cells(52),
-    max_height: style::percent(80.0),
-    flex_direction: style::FlexDirection::column,
-    align_items: style::Align::end,
-    justify_content: style::Justify::end,
-    gap: style::cells(1),
-    overflow: style::Overflow::hidden,
+    position: ui::Position::absolute,
+    right: ui::cells(1),
+    bottom: ui::cells(2),
+    width: ui::cells(52),
+    max_height: ui::percent(80.0),
+    flex_direction: ui::FlexDirection::column,
+    align_items: ui::Align::end,
+    justify_content: ui::Justify::end,
+    gap: ui::cells(1),
+    overflow: ui::Overflow::hidden,
     z_index: 900,
   )
 }
 
-fn new(ctx: mut runtime::Runtime, palette: tinear_theme::Theme, schedule: scheduler::Schedule) mut ToastHost {
-  let hidden_style = root_style(style::Display::none)
-  let visible_style = root_style(style::Display::flex)
-  let root = box::new(ctx, styles: hidden_style)
+fn new(ctx: mut cooper::Runtime, palette: tinear_theme::Theme, schedule: scheduler::Schedule) mut ToastHost {
+  let hidden_style = root_style(ui::Display::none)
+  let visible_style = root_style(ui::Display::flex)
+  let root = ui::box(ctx, styles: hidden_style)
   (mut ToastHost{
     root: root,
     entries: [],
@@ -65,7 +63,7 @@ fn new(ctx: mut runtime::Runtime, palette: tinear_theme::Theme, schedule: schedu
   })
 }
 
-private fn toast_width(ctx: mut runtime::Runtime, title: Str, description: Str) Int {
+private fn toast_width(ctx: mut cooper::Runtime, title: Str, description: Str) Int {
   mut content_width = ctx.measure_text(title)
   if not description.is_empty() {
     let description_width = ctx.measure_text(description)
@@ -143,73 +141,73 @@ impl ToastHost {
       true => 1,
       false => 2,
     }
-    let toast = box::new(
+    let toast = ui::box(
       self.context,
-      styles: style::new(
+      styles: ui::style(
         background: self.palette.background,
-        border: style::Border::rounded,
+        border: ui::Border::rounded,
         border_color: marker_color,
-        position: style::Position::relative,
-        left: style::cells(target_width),
-        width: style::cells(target_width),
-        height: style::cells(content_height + 2),
-        flex_direction: style::FlexDirection::row,
-        align_items: style::Align::start,
+        position: ui::Position::relative,
+        left: ui::cells(target_width),
+        width: ui::cells(target_width),
+        height: ui::cells(content_height + 2),
+        flex_direction: ui::FlexDirection::row,
+        align_items: ui::Align::start,
         flex_shrink: 0.0,
-        padding: style::Edges{
-          top: style::cells(0),
-          right: style::cells(1),
-          bottom: style::cells(0),
-          left: style::cells(1),
+        padding: ui::Edges{
+          top: ui::cells(0),
+          right: ui::cells(1),
+          bottom: ui::cells(0),
+          left: ui::cells(1),
         },
-        overflow: style::Overflow::hidden,
+        overflow: ui::Overflow::hidden,
       ),
     )
     toast.add(
-      text::new(
+      ui::text(
         self.context,
         content: marker,
         selectable: false,
-        styles: style::new(width: style::cells(2), height: style::cells(1), flex_shrink: 0.0),
-        text_style: text::style(foreground: marker_color, bold: true),
+        styles: ui::style(width: ui::cells(2), height: ui::cells(1), flex_shrink: 0.0),
+        text_style: ui::text_style(foreground: marker_color, bold: true),
       ),
     )
-    let content = box::new(
+    let content = ui::box(
       self.context,
-      styles: style::new(
-        width: style::fit_content(),
-        max_width: style::cells(46),
-        height: style::cells(content_height),
-        flex_direction: style::FlexDirection::column,
+      styles: ui::style(
+        width: ui::fit_content(),
+        max_width: ui::cells(46),
+        height: ui::cells(content_height),
+        flex_direction: ui::FlexDirection::column,
       ),
     )
     content.add(
-      text::new(
+      ui::text(
         self.context,
         content: title,
-        wrap: text::TextWrap::none,
-        overflow: text::TextOverflow::ellipsis,
-        styles: style::new(
-          width: style::fit_content(),
-          max_width: style::cells(46),
-          height: style::cells(1),
+        wrap: ui::TextWrap::none,
+        overflow: ui::TextOverflow::ellipsis,
+        styles: ui::style(
+          width: ui::fit_content(),
+          max_width: ui::cells(46),
+          height: ui::cells(1),
         ),
-        text_style: text::style(bold: true),
+        text_style: ui::text_style(bold: true),
       ),
     )
     if not detail.is_empty() {
       content.add(
-        text::new(
+        ui::text(
           self.context,
           content: detail,
-          wrap: text::TextWrap::none,
-          overflow: text::TextOverflow::ellipsis,
-          styles: style::new(
-            width: style::fit_content(),
-            max_width: style::cells(46),
-            height: style::cells(1),
+          wrap: ui::TextWrap::none,
+          overflow: ui::TextOverflow::ellipsis,
+          styles: ui::style(
+            width: ui::fit_content(),
+            max_width: ui::cells(46),
+            height: ui::cells(1),
           ),
-          text_style: text::style(dim: true),
+          text_style: ui::text_style(dim: true),
         ),
       )
     }
@@ -220,7 +218,7 @@ impl ToastHost {
       timeline.duration(),
       fn(frame: animation::Frame) {
         let applied = mut toast.style()
-        applied.left = style::cells(animation::lerp_int(target_width, 0, frame.progress))
+        applied.left = ui::cells(animation::lerp_int(target_width, 0, frame.progress))
         toast.set_style(applied.@)
       },
       ease: animation::out_quad,

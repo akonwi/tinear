@@ -1,8 +1,9 @@
 use ard/testing as assertions
 
+use cooper
 use cooper/event
-use cooper/style
 use cooper/testing
+use cooper/ui
 use tinear/models/issues
 use tinear/services/board_service
 use tinear/tui/board_controller
@@ -101,8 +102,8 @@ private fn ignore_picker(field: issue_field_picker_controller::Field, selected: 
 
 private fn ignore_moved(moved: issues::Issue) {}
 
-private fn modifiers() event::Modifiers {
-  event::Modifiers{
+private fn modifiers() cooper::Modifiers {
+  cooper::Modifiers{
     shift: false,
     ctrl: false,
     alt: false,
@@ -110,8 +111,8 @@ private fn modifiers() event::Modifiers {
   }
 }
 
-private fn shift_modifiers() event::Modifiers {
-  event::Modifiers{
+private fn shift_modifiers() cooper::Modifiers {
+  cooper::Modifiers{
     shift: true,
     ctrl: false,
     alt: false,
@@ -119,12 +120,12 @@ private fn shift_modifiers() event::Modifiers {
   }
 }
 
-private fn shifted_key(name: Str) mut event::KeyEvent {
+private fn shifted_key(name: Str) mut cooper::KeyEvent {
   event::key(
     name,
     "",
-    event::KeyEventType::press,
-    event::Modifiers{
+    cooper::KeyEventType::press,
+    cooper::Modifiers{
       shift: true,
       ctrl: false,
       alt: false,
@@ -133,12 +134,12 @@ private fn shifted_key(name: Str) mut event::KeyEvent {
   )
 }
 
-private fn key(name: Str) mut event::KeyEvent {
+private fn key(name: Str) mut cooper::KeyEvent {
   event::key(
     name,
     "",
-    event::KeyEventType::press,
-    event::Modifiers{
+    cooper::KeyEventType::press,
+    cooper::Modifiers{
       shift: false,
       ctrl: false,
       alt: false,
@@ -283,8 +284,8 @@ test fn board_drag_moves_issue_optimistically_and_confirms_team_state() Void!Str
   )
   application.mouse(
     event::mouse(
-      event::MouseEventType::drag,
-      event::MouseButton::left,
+      cooper::MouseEventType::drag,
+      cooper::MouseButton::left,
       source.x + 12,
       source.y + 1,
       modifiers(),
@@ -294,8 +295,8 @@ test fn board_drag_moves_issue_optimistically_and_confirms_team_state() Void!Str
   let intermediate_x = controller.drag_ghost.layout().screen.x
   application.mouse(
     event::mouse(
-      event::MouseEventType::drag,
-      event::MouseButton::left,
+      cooper::MouseEventType::drag,
+      cooper::MouseButton::left,
       target.x - 1,
       target.y,
       modifiers(),
@@ -311,7 +312,7 @@ test fn board_drag_moves_issue_optimistically_and_confirms_team_state() Void!Str
     "drop target should use a visible heavy rule",
   )
   try assertions::assert(
-    controller.drag_layer.style().display == style::Display::flex,
+    controller.drag_layer.style().display == ui::Display::flex,
     "drag should show the floating card layer",
   )
   try assertions::assert(
@@ -336,14 +337,14 @@ test fn board_drag_moves_issue_optimistically_and_confirms_team_state() Void!Str
   )
   try assertions::assert(controller.dragging_issue_id == "i1", "load completion should preserve drag ownership")
   try assertions::assert(
-    controller.drag_layer.style().display == style::Display::flex,
+    controller.drag_layer.style().display == ui::Display::flex,
     "a load completing during drag should preserve the floating card",
   )
   try assertions::assert(controller.columns.size() == 2, "a load completing during drag should preserve board data")
   application.mouse_up(target.x - 1, target.y)
 
   try assertions::assert(
-    controller.drag_layer.style().display == style::Display::none,
+    controller.drag_layer.style().display == ui::Display::none,
     "drop should remove the floating card layer",
   )
   try assertions::assert(fake.moves.size() == 1, "drop should start one state mutation")
@@ -515,7 +516,7 @@ test fn board_drag_threshold_same_column_and_interrupted_drops_are_safe() Void!S
   application.drag(card.x + 1, card.y + 1, card.x + 2, card.y + 1)
   try assertions::assert(opened.count == 1, "one-cell pointer jitter should remain an ordinary click")
   try assertions::assert(
-    controller.drag_layer.style().display == style::Display::none,
+    controller.drag_layer.style().display == ui::Display::none,
     "one-cell pointer jitter should not lift the card",
   )
   application.drag(card.x + 1, card.y + 1, card.x + 4, card.y + 1)
@@ -531,8 +532,8 @@ test fn board_drag_threshold_same_column_and_interrupted_drops_are_safe() Void!S
   application.mouse_down(card.x + 1, card.y + 1)
   application.mouse(
     event::mouse(
-      event::MouseEventType::drag,
-      event::MouseButton::left,
+      cooper::MouseEventType::drag,
+      cooper::MouseButton::left,
       card.x + 8,
       card.y + 1,
       modifiers(),
@@ -542,7 +543,7 @@ test fn board_drag_threshold_same_column_and_interrupted_drops_are_safe() Void!S
   try assertions::assert(fake.loads.size() == 1, "gated refresh command should not replace the gesture")
   try assertions::assert(controller.handle_key(key("escape")), "Escape should cancel an active drag")
   try assertions::assert(
-    controller.drag_layer.style().display == style::Display::none,
+    controller.drag_layer.style().display == ui::Display::none,
     "Escape should remove the floating card",
   )
   application.mouse_up(card.x + 8, card.y + 1)
@@ -551,41 +552,41 @@ test fn board_drag_threshold_same_column_and_interrupted_drops_are_safe() Void!S
   application.mouse_down(card.x + 1, card.y + 1)
   application.mouse(
     event::mouse(
-      event::MouseEventType::drag,
-      event::MouseButton::left,
+      cooper::MouseEventType::drag,
+      cooper::MouseButton::left,
       card.x + 8,
       card.y + 1,
       modifiers(),
     ),
   )
   try assertions::assert(
-    controller.drag_layer.style().display == style::Display::flex,
+    controller.drag_layer.style().display == ui::Display::flex,
     "active drag should show the floating layer",
   )
   try assertions::assert(controller.outer_scroll.is_focused(), "drag should keep the board scroll focused")
   controller.outer_scroll.blur()
   application.render()
   try assertions::assert(
-    controller.drag_layer.style().display == style::Display::none,
+    controller.drag_layer.style().display == ui::Display::none,
     "losing board focus should clear an interrupted drag layer",
   )
   application.mouse_up(card.x + 8, card.y + 1)
   try assertions::assert(fake.moves.size() == 0, "release after deactivation should not mutate")
 
-  application.set_terminal_focus(event::TerminalFocus::gained)
+  application.set_terminal_focus(cooper::TerminalFocus::gained)
   application.mouse_down(card.x + 1, card.y + 1)
   application.mouse(
     event::mouse(
-      event::MouseEventType::drag,
-      event::MouseButton::left,
+      cooper::MouseEventType::drag,
+      cooper::MouseButton::left,
       card.x + 8,
       card.y + 1,
       modifiers(),
     ),
   )
-  application.set_terminal_focus(event::TerminalFocus::lost)
+  application.set_terminal_focus(cooper::TerminalFocus::lost)
   try assertions::assert(
-    controller.drag_layer.style().display == style::Display::none,
+    controller.drag_layer.style().display == ui::Display::none,
     "terminal focus loss should clear a drag released outside the app",
   )
   application.mouse_up(card.x + 8, card.y + 1)
@@ -668,7 +669,7 @@ test fn board_drag_layer_forwards_horizontal_wheel_to_reach_offscreen_column() V
   ).expect("source").cards.at(0).expect("card").surface.layout().screen
   application.mouse_down(source.x + 1, source.y + 1)
   application.mouse(
-    event::mouse(event::MouseEventType::drag, event::MouseButton::left, 55, 2, modifiers()),
+    event::mouse(cooper::MouseEventType::drag, cooper::MouseButton::left, 55, 2, modifiers()),
   )
   application.render()
   try assertions::assert(
@@ -682,8 +683,8 @@ test fn board_drag_layer_forwards_horizontal_wheel_to_reach_offscreen_column() V
   for index in 0..9 {
     application.mouse(
       event::mouse(
-        event::MouseEventType::scroll,
-        event::MouseButton::none,
+        cooper::MouseEventType::scroll,
+        cooper::MouseButton::none,
         55,
         2,
         shift_modifiers(),
@@ -698,7 +699,7 @@ test fn board_drag_layer_forwards_horizontal_wheel_to_reach_offscreen_column() V
     "drag layer should forward shifted wheel scrolling",
   )
   application.mouse(
-    event::mouse(event::MouseEventType::drag, event::MouseButton::left, 55, 2, modifiers()),
+    event::mouse(cooper::MouseEventType::drag, cooper::MouseButton::left, 55, 2, modifiers()),
   )
   application.mouse_up(55, 2)
   try assertions::assert(fake.moves.size() == 1, "newly revealed column should accept the drop")
@@ -942,12 +943,12 @@ test fn board_failed_manual_refresh_restores_existing_columns() Void!Str {
   )
   controller.refresh(false)
   try assertions::assert(
-    controller.outer_scroll.style().display == style::Display::none,
+    controller.outer_scroll.style().display == ui::Display::none,
     "loading state should hide board",
   )
   (fake.loads.at(1).expect("refresh"))(Result::err("network unavailable"))
   try assertions::assert(
-    controller.outer_scroll.style().display == style::Display::flex,
+    controller.outer_scroll.style().display == ui::Display::flex,
     "failed refresh should restore board",
   )
   try assertions::assert(errors.count == 1, "failed refresh should notify")

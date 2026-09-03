@@ -1,8 +1,5 @@
-use cooper/box
-use cooper/event
-use cooper/runtime
-use cooper/style
-use cooper/text
+use cooper
+use cooper/ui
 use tinear/tui/theme as tinear_theme
 
 struct Ticket {
@@ -10,65 +7,65 @@ struct Ticket {
 }
 
 struct ModalHost {
-  root: mut box::Box,
-  frame: mut box::Box,
-  title_text: mut text::Text,
-  body_slot: mut box::Box,
-  footer_text: mut text::Text,
-  current_root: (mut box::Box)?,
+  root: mut ui::Box,
+  frame: mut ui::Box,
+  title_text: mut ui::Text,
+  body_slot: mut ui::Box,
+  footer_text: mut ui::Text,
+  current_root: (mut ui::Box)?,
   current_dispose: fn()?,
   current_restore_focus: fn()?,
   current_can_dismiss: (fn() Bool)?,
   generation: Int,
   presented: Bool,
-  hidden_style: style::Style,
-  visible_style: style::Style,
+  hidden_style: ui::Style,
+  visible_style: ui::Style,
 }
 
-private fn root_style(display: style::Display) style::Style {
-  style::new(
+private fn root_style(display: ui::Display) ui::Style {
+  ui::style(
     display: display,
-    position: style::Position::absolute,
-    left: style::cells(0),
-    top: style::cells(0),
-    width: style::percent(100.0),
-    height: style::percent(100.0),
-    align_items: style::Align::center,
-    justify_content: style::Justify::center,
+    position: ui::Position::absolute,
+    left: ui::cells(0),
+    top: ui::cells(0),
+    width: ui::percent(100.0),
+    height: ui::percent(100.0),
+    align_items: ui::Align::center,
+    justify_content: ui::Justify::center,
     z_index: 1000,
   )
 }
 
-fn new(ctx: mut runtime::Runtime, palette: tinear_theme::Theme) mut ModalHost {
-  let hidden_style = root_style(style::Display::none)
-  let visible_style = root_style(style::Display::flex)
-  let root = box::new(ctx, styles: hidden_style)
-  let frame = box::new(
+fn new(ctx: mut cooper::Runtime, palette: tinear_theme::Theme) mut ModalHost {
+  let hidden_style = root_style(ui::Display::none)
+  let visible_style = root_style(ui::Display::flex)
+  let root = ui::box(ctx, styles: hidden_style)
+  let frame = ui::box(
     ctx,
-    styles: style::new(
-      width: style::percent(70.0),
-      max_width: style::cells(72),
-      max_height: style::percent(80.0),
+    styles: ui::style(
+      width: ui::percent(70.0),
+      max_width: ui::cells(72),
+      max_height: ui::percent(80.0),
       background: palette.background,
-      border: style::Border::rounded,
+      border: ui::Border::rounded,
       border_color: palette.accent,
-      flex_direction: style::FlexDirection::column,
-      padding: style::Edges{
-        top: style::cells(0),
-        right: style::cells(1),
-        bottom: style::cells(0),
-        left: style::cells(1),
+      flex_direction: ui::FlexDirection::column,
+      padding: ui::Edges{
+        top: ui::cells(0),
+        right: ui::cells(1),
+        bottom: ui::cells(0),
+        left: ui::cells(1),
       },
-      gap: style::cells(1),
+      gap: ui::cells(1),
     ),
   )
   frame.set_focusable(true)
-  let title_text = text::new(ctx, content: "", text_style: text::style(bold: true))
-  let body_slot = box::new(
+  let title_text = ui::text(ctx, content: "", text_style: ui::text_style(bold: true))
+  let body_slot = ui::box(
     ctx,
-    styles: style::new(width: style::percent(100.0), flex_direction: style::FlexDirection::column),
+    styles: ui::style(width: ui::percent(100.0), flex_direction: ui::FlexDirection::column),
   )
-  let footer_text = text::new(ctx, content: "", text_style: text::style(dim: true))
+  let footer_text = ui::text(ctx, content: "", text_style: ui::text_style(dim: true))
 
   frame.add(title_text)
   frame.add(body_slot)
@@ -77,7 +74,7 @@ fn new(ctx: mut runtime::Runtime, palette: tinear_theme::Theme) mut ModalHost {
 
   // The full-screen, high-z root wins hit testing over background controls.
   // Preserve normal autofocus for controls inside the modal.
-  let _ = root.on_mouse(fn(received: mut event::MouseEvent) {
+  let _ = root.on_mouse(fn(received: mut cooper::MouseEvent) {
     received.stop_propagation()
   })
 
@@ -87,7 +84,7 @@ fn new(ctx: mut runtime::Runtime, palette: tinear_theme::Theme) mut ModalHost {
     title_text: title_text,
     body_slot: body_slot,
     footer_text: footer_text,
-    current_root: Maybe::new<mut box::Box>(),
+    current_root: Maybe::new<mut ui::Box>(),
     current_dispose: Maybe::new<fn()>(),
     current_restore_focus: Maybe::new<fn()>(),
     current_can_dismiss: Maybe::new<fn() Bool>(),
@@ -117,7 +114,7 @@ impl ModalHost {
       let closing_generation = self.generation
 
       self.presented = false
-      self.current_root = Maybe::new<mut box::Box>()
+      self.current_root = Maybe::new<mut ui::Box>()
       self.current_dispose = Maybe::new<fn()>()
       self.current_restore_focus = Maybe::new<fn()>()
       self.current_can_dismiss = Maybe::new<fn() Bool>()
@@ -150,7 +147,7 @@ impl ModalHost {
 
   fn mut present(
     title: Str,
-    body: mut box::Box,
+    body: mut ui::Box,
     footer: Str,
     dispose: fn(),
     initial_focus: fn(),
@@ -159,7 +156,7 @@ impl ModalHost {
   ) Ticket {
     let _ = self.clear_current(false)
     self.generation =+ 1
-    self.current_root = Maybe::new<mut box::Box>(body)
+    self.current_root = Maybe::new<mut ui::Box>(body)
     self.current_dispose = Maybe::new<fn()>(dispose)
     self.current_restore_focus = Maybe::new<fn()>(restore_focus)
     self.current_can_dismiss = Maybe::new<fn() Bool>(can_dismiss)

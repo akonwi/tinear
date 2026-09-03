@@ -1,7 +1,5 @@
-use cooper/box
-use cooper/runtime
-use cooper/style
-use cooper/text
+use cooper
+use cooper/ui
 use tinear/tui/theme as tinear_theme
 
 struct Hint {
@@ -10,47 +8,47 @@ struct Hint {
 }
 
 struct HintsBar {
-  root: mut box::Box,
-  actions_text: mut text::Text,
+  root: mut ui::Box,
+  actions_text: mut ui::Text,
   palette: tinear_theme::Theme,
 }
 
-private fn actions_content(hints: [Hint], palette: tinear_theme::Theme) text::StyledText {
-  let spans = mut List::new<text::Span>()
+private fn actions_content(hints: [Hint], palette: tinear_theme::Theme) ui::StyledText {
+  let spans = mut List::new<ui::Span>()
   for hint, index in hints {
     if index > 0 {
-      spans.push(text::span("   "))
+      spans.push(ui::span("   "))
     }
     spans.push(
-      text::span(hint.key, style: text::span_style(foreground: palette.accent, bold: true)),
+      ui::span(hint.key, style: ui::span_style(foreground: palette.accent, bold: true)),
     )
     if not hint.label.is_empty() {
-      spans.push(text::span(" {hint.label}", style: text::span_style(dim: true)))
+      spans.push(ui::span(" {hint.label}", style: ui::span_style(dim: true)))
     }
   }
-  text::styled_text(spans.@)
+  ui::styled_text(spans.@)
 }
 
-fn new(ctx: mut runtime::Runtime, palette: tinear_theme::Theme, hints: [Hint]) mut HintsBar {
-  let root = box::new(
+fn new(ctx: mut cooper::Runtime, palette: tinear_theme::Theme, hints: [Hint]) mut HintsBar {
+  let root = ui::box(
     ctx,
-    styles: style::new(
-      width: style::percent(100.0),
-      height: style::cells(1),
+    styles: ui::style(
+      width: ui::percent(100.0),
+      height: ui::cells(1),
       flex_shrink: 0.0,
-      flex_direction: style::FlexDirection::row,
-      align_items: style::Align::center,
-      justify_content: style::Justify::start,
-      overflow: style::Overflow::hidden,
+      flex_direction: ui::FlexDirection::row,
+      align_items: ui::Align::center,
+      justify_content: ui::Justify::start,
+      overflow: ui::Overflow::hidden,
     ),
   )
-  let actions_text = text::new(
+  let actions_text = ui::text(
     ctx,
     content: actions_content(hints, palette),
     selectable: false,
-    wrap: text::TextWrap::none,
-    overflow: text::TextOverflow::ellipsis,
-    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 1.0),
+    wrap: ui::TextWrap::none,
+    overflow: ui::TextOverflow::ellipsis,
+    styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 1.0),
   )
   root.add(actions_text)
   (mut HintsBar{

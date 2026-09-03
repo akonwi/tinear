@@ -1,5 +1,6 @@
 use ard/testing as assertions
 
+use cooper
 use cooper/event
 use cooper/testing
 use tinear/models/inbox
@@ -94,12 +95,12 @@ private fn fake_schedule(state: mut ScheduledState) fn(Int, fn()) fn() {
   }
 }
 
-private fn key(name: Str, text: Str) mut event::KeyEvent {
+private fn key(name: Str, text: Str) mut cooper::KeyEvent {
   event::key(
     name,
     text,
-    event::KeyEventType::press,
-    event::Modifiers{
+    cooper::KeyEventType::press,
+    cooper::Modifiers{
       shift: false,
       ctrl: false,
       alt: false,

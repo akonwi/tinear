@@ -1,5 +1,6 @@
 use ard/testing as assertions
 
+use cooper
 use cooper/event
 use cooper/testing
 use tinear/models/issues
@@ -84,12 +85,12 @@ private fn comment(id: Str, author: Str, body: Str, depth: Int) issues::Comment 
   }
 }
 
-private fn key(name: Str, shift: Bool?) mut event::KeyEvent {
+private fn key(name: Str, shift: Bool?) mut cooper::KeyEvent {
   event::key(
     name,
     "",
-    event::KeyEventType::press,
-    event::Modifiers{
+    cooper::KeyEventType::press,
+    cooper::Modifiers{
       shift: shift.or(false),
       ctrl: false,
       alt: false,

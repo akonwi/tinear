@@ -1,13 +1,9 @@
 use ard/testing as assertions
 
-use cooper/box
+use cooper
 use cooper/event
-use cooper/geometry
-use cooper/runtime
-use cooper/selection
-use cooper/style
 use cooper/testing
-use cooper/text
+use cooper/ui
 use tinear/tui/application_shell
 use tinear/tui/theme
 
@@ -15,17 +11,17 @@ private fn no_schedule(delay: Int, action: fn()) fn() {
   fn() {}
 }
 
-private fn screen(ctx: mut runtime::Runtime, label: Str) mut box::Box {
-  let root = box::new(
+private fn screen(ctx: mut cooper::Runtime, label: Str) mut ui::Box {
+  let root = ui::box(
     ctx,
-    styles: style::new(width: style::percent(100.0), height: style::percent(100.0)),
+    styles: ui::style(width: ui::percent(100.0), height: ui::percent(100.0)),
   )
-  root.add(text::new(ctx, content: label))
+  root.add(ui::text(ctx, content: label))
   root
 }
 
-private fn modifiers(super_key: Bool) event::Modifiers {
-  event::Modifiers{
+private fn modifiers(super_key: Bool) cooper::Modifiers {
+  cooper::Modifiers{
     shift: false,
     ctrl: false,
     alt: false,
@@ -93,10 +89,10 @@ test fn application_shell_copies_supplied_selection() Void!Str {
   defer application.destroy()
   let shell = application_shell::new(application.context, theme::new(), no_schedule)
   application.root.add(shell.root)
-  let selected = selection::Selection{
-    anchor: geometry::Point{x: 0, y: 0},
-    focus: geometry::Point{x: 5, y: 0},
-    bounds: geometry::Rect{
+  let selected = ui::Selection{
+    anchor: ui::Point{x: 0, y: 0},
+    focus: ui::Point{x: 5, y: 0},
+    bounds: ui::Rect{
       x: 0,
       y: 0,
       width: 6,
@@ -105,7 +101,7 @@ test fn application_shell_copies_supplied_selection() Void!Str {
     selected_text: "copied",
     is_dragging: false,
   }
-  let received = event::key("c", "c", event::KeyEventType::press, modifiers(true))
+  let received = event::key("c", "c", cooper::KeyEventType::press, modifiers(true))
   try assertions::assert(shell.handle_key(received, selected), "Super+C should be handled")
   let clipboard = try application.context.clipboard.read().map_err(fn(error) {
     error.error()
@@ -130,9 +126,9 @@ test fn application_shell_consumes_rejected_modal_escape() Void!Str {
       false
     },
   )
-  let received = event::key("escape", "", event::KeyEventType::press, modifiers(false))
+  let received = event::key("escape", "", cooper::KeyEventType::press, modifiers(false))
   try assertions::assert(
-    shell.handle_key(received, Maybe::new<selection::Selection>()),
+    shell.handle_key(received, Maybe::new<ui::Selection>()),
     "modal Escape should be consumed",
   )
   assertions::assert(shell.modal.is_open(), "dismissal guard should keep modal open")
@@ -155,9 +151,9 @@ test fn application_shell_routes_escape_to_modal_first() Void!Str {
       true
     },
   )
-  let received = event::key("escape", "", event::KeyEventType::press, modifiers(false))
+  let received = event::key("escape", "", cooper::KeyEventType::press, modifiers(false))
   try assertions::assert(
-    shell.handle_key(received, Maybe::new<selection::Selection>()),
+    shell.handle_key(received, Maybe::new<ui::Selection>()),
     "modal Escape should be handled",
   )
   assertions::assert(not shell.modal.is_open(), "Escape should close the active modal")

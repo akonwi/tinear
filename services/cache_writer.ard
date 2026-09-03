@@ -1,6 +1,6 @@
 use ard/async
 
-use cooper/runtime
+use cooper
 use tinear/models/cache
 
 type Save = fn(cache::LoggedInCache) Void!Str
@@ -11,7 +11,7 @@ struct Writer {
   disposed: Bool,
 }
 
-fn new(ctx: mut runtime::Runtime, save: Save) mut Writer {
+fn new(ctx: mut cooper::Runtime, save: Save) mut Writer {
   let writer = mut Writer{
     updates: Chan::new<cache::LoggedInCache>(1),
     done: Chan::new<Bool>(1),
@@ -64,6 +64,6 @@ impl Writer {
   }
 }
 
-fn live(ctx: mut runtime::Runtime) mut Writer {
+fn live(ctx: mut cooper::Runtime) mut Writer {
   new(ctx, cache::save_logged_in)
 }

@@ -1,20 +1,16 @@
-use cooper/box
-use cooper/event
-use cooper/input
-use cooper/runtime
-use cooper/style
-use cooper/text
+use cooper
+use cooper/ui
 use tinear/services/auth
 use tinear/tui/lifecycle
 use tinear/tui/theme as tinear_theme
 
 struct WelcomeController {
-  root: mut box::Box,
-  api_key: mut input::Input,
-  login_button: mut box::Box,
-  login_label: mut text::Text,
-  status_text: mut text::Text,
-  error_text: mut text::Text,
+  root: mut ui::Box,
+  api_key: mut ui::Input,
+  login_button: mut ui::Box,
+  login_label: mut ui::Text,
+  status_text: mut ui::Text,
+  error_text: mut ui::Text,
   scope: mut lifecycle::Scope,
   authenticate: auth::Authenticate,
   on_success: fn(Str),
@@ -24,71 +20,71 @@ struct WelcomeController {
 }
 
 fn new(
-  ctx: mut runtime::Runtime,
+  ctx: mut cooper::Runtime,
   palette: tinear_theme::Theme,
   authenticate: auth::Authenticate,
   on_success: fn(Str),
 ) mut WelcomeController {
-  let root = box::new(
+  let root = ui::box(
     ctx,
-    styles: style::new(
-      width: style::percent(100.0),
-      height: style::percent(100.0),
-      align_items: style::Align::center,
-      justify_content: style::Justify::center,
+    styles: ui::style(
+      width: ui::percent(100.0),
+      height: ui::percent(100.0),
+      align_items: ui::Align::center,
+      justify_content: ui::Justify::center,
     ),
   )
-  let form = box::new(
+  let form = ui::box(
     ctx,
-    styles: style::new(
-      width: style::cells(48),
-      flex_direction: style::FlexDirection::column,
-      align_items: style::Align::center,
-      gap: style::cells(1),
+    styles: ui::style(
+      width: ui::cells(48),
+      flex_direction: ui::FlexDirection::column,
+      align_items: ui::Align::center,
+      gap: ui::cells(1),
     ),
   )
   form.add(
-    text::new(
+    ui::text(
       ctx,
       content: "▀█▀ ▀ █▀█ █▀▀ ▄▀█ █▀█\n █  █ █ █ ██▄ █▀█ █▀▄",
       selectable: false,
-      text_style: text::style(foreground: palette.accent, bold: true),
+      text_style: ui::text_style(foreground: palette.accent, bold: true),
     ),
   )
-  form.add(text::new(ctx, content: "Enter your Linear API key", selectable: false))
-  let api_key = input::new(
+  form.add(ui::text(ctx, content: "Enter your Linear API key", selectable: false))
+  let api_key = ui::input(
     ctx,
     placeholder: "lin_api_…",
     min_length: 1,
-    styles: style::new(width: style::cells(44), height: style::cells(1)),
+    styles: ui::style(width: ui::cells(44), height: ui::cells(1)),
   )
-  let login_button = box::new(
+  let login_button = ui::box(
     ctx,
-    styles: style::new(
-      border: style::Border::rounded,
+    styles: ui::style(
+      border: ui::Border::rounded,
       border_color: palette.border,
-      width: style::cells(14),
-      height: style::cells(3),
-      align_items: style::Align::center,
-      justify_content: style::Justify::center,
+      width: ui::cells(14),
+      height: ui::cells(3),
+      align_items: ui::Align::center,
+      justify_content: ui::Justify::center,
     ),
   )
   login_button.set_focusable(true)
-  let login_label = text::new(ctx, content: "Login", selectable: false)
+  let login_label = ui::text(ctx, content: "Login", selectable: false)
   login_button.add(login_label)
-  let status_text = text::new(
+  let status_text = ui::text(
     ctx,
     content: "",
     selectable: false,
-    styles: style::new(height: style::cells(1)),
-    text_style: text::style(dim: true),
+    styles: ui::style(height: ui::cells(1)),
+    text_style: ui::text_style(dim: true),
   )
-  let error_text = text::new(
+  let error_text = ui::text(
     ctx,
     content: "",
     selectable: false,
-    styles: style::new(height: style::cells(1)),
-    text_style: text::style(foreground: palette.danger, bold: true),
+    styles: ui::style(height: ui::cells(1)),
+    text_style: ui::text_style(foreground: palette.danger, bold: true),
   )
   form.add(api_key)
   form.add(login_button)
@@ -116,8 +112,8 @@ fn new(
     }),
   )
   controller.listeners.push(
-    login_button.on_key(fn(received: mut event::KeyEvent) {
-      if received.event_type != event::KeyEventType::release and (received.matches("return") or received.matches("space")) {
+    login_button.on_key(fn(received: mut cooper::KeyEvent) {
+      if received.event_type != cooper::KeyEventType::release and (received.matches("return") or received.matches("space")) {
         controller.submit()
         received.prevent_default()
         received.stop_propagation()
@@ -125,8 +121,8 @@ fn new(
     }),
   )
   controller.listeners.push(
-    login_button.on_mouse(fn(received: mut event::MouseEvent) {
-      if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
+    login_button.on_mouse(fn(received: mut cooper::MouseEvent) {
+      if received.event_type == cooper::MouseEventType::down and received.button == cooper::MouseButton::left {
         controller.submit()
         received.stop_propagation()
       }

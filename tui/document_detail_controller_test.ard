@@ -1,5 +1,6 @@
 use ard/testing as assertions
 
+use cooper
 use cooper/event
 use cooper/testing
 use tinear/models/documents
@@ -54,12 +55,12 @@ private fn document(title: Str, content: Str) documents::Doc {
   }
 }
 
-private fn key(name: Str) mut event::KeyEvent {
+private fn key(name: Str) mut cooper::KeyEvent {
   event::key(
     name,
     "",
-    event::KeyEventType::press,
-    event::Modifiers{
+    cooper::KeyEventType::press,
+    cooper::Modifiers{
       shift: false,
       ctrl: false,
       alt: false,

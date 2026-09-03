@@ -1,10 +1,5 @@
-use cooper/box
-use cooper/event
-use cooper/input
-use cooper/runtime
-use cooper/style
-use cooper/text
-use cooper/text_area
+use cooper
+use cooper/ui
 use tinear/models/issues
 use tinear/services/issue_creation_service
 use tinear/tui/lifecycle
@@ -38,15 +33,15 @@ private fn submission_active(guard: Chan<Bool>) Bool {
   active
 }
 
-private fn submit_chord(received: mut event::KeyEvent) Bool {
+private fn submit_chord(received: mut cooper::KeyEvent) Bool {
   received.matches("return", ctrl: true) or received.matches("m", ctrl: true) or received.matches("j", ctrl: true)
 }
 
 private struct CreationForm {
-  root: mut box::Box,
-  title: mut input::Input,
-  description: mut text_area::TextArea,
-  status: mut text::Text,
+  root: mut ui::Box,
+  title: mut ui::Input,
+  description: mut ui::TextArea,
+  status: mut ui::Text,
   listeners: [fn()],
   disposed: Bool,
 }
@@ -64,14 +59,14 @@ impl CreationForm {
 }
 
 private struct CreationSession {
-  root: mut box::Box,
-  context: mut runtime::Runtime,
+  root: mut ui::Box,
+  context: mut cooper::Runtime,
   modal: mut modal_host::ModalHost,
   palette: tinear_theme::Theme,
   service: issue_creation_service::Service,
   scope: mut lifecycle::Scope,
   ticket: modal_host::Ticket?,
-  stage_root: (mut box::Box)?,
+  stage_root: (mut ui::Box)?,
   stage_dispose: fn(),
   form: (mut CreationForm)?,
   selected_team: issues::Team?,
@@ -81,19 +76,19 @@ private struct CreationSession {
 }
 
 private fn new_session(
-  ctx: mut runtime::Runtime,
+  ctx: mut cooper::Runtime,
   modal: mut modal_host::ModalHost,
   palette: tinear_theme::Theme,
   service: issue_creation_service::Service,
   notify: fn(Str, Str, Bool),
   on_created: fn(Str),
 ) mut CreationSession {
-  let root = box::new(
+  let root = ui::box(
     ctx,
-    styles: style::new(
-      width: style::percent(100.0),
-      flex_direction: style::FlexDirection::column,
-      overflow: style::Overflow::hidden,
+    styles: ui::style(
+      width: ui::percent(100.0),
+      flex_direction: ui::FlexDirection::column,
+      overflow: ui::Overflow::hidden,
     ),
   )
   (mut CreationSession{
@@ -104,7 +99,7 @@ private fn new_session(
     service: service,
     scope: lifecycle::new(),
     ticket: Maybe::new<modal_host::Ticket>(),
-    stage_root: Maybe::new<mut box::Box>(),
+    stage_root: Maybe::new<mut ui::Box>(),
     stage_dispose: fn() {},
     form: Maybe::new<mut CreationForm>(),
     selected_team: Maybe::new<issues::Team>(),
@@ -115,10 +110,10 @@ private fn new_session(
 }
 
 impl CreationSession {
-  private fn mut replace_stage(next: mut box::Box, dispose: fn()) {
+  private fn mut replace_stage(next: mut ui::Box, dispose: fn()) {
     let previous = self.stage_root
     let previous_dispose = self.stage_dispose
-    self.stage_root = Maybe::new<mut box::Box>(next)
+    self.stage_root = Maybe::new<mut ui::Box>(next)
     self.stage_dispose = dispose
     match previous {
       root => {
@@ -145,21 +140,21 @@ impl CreationSession {
   }
 
   private fn mut show_loading() {
-    let loading = box::new(
+    let loading = ui::box(
       self.context,
-      styles: style::new(
-        width: style::percent(100.0),
-        height: style::cells(3),
-        align_items: style::Align::center,
-        justify_content: style::Justify::center,
+      styles: ui::style(
+        width: ui::percent(100.0),
+        height: ui::cells(3),
+        align_items: ui::Align::center,
+        justify_content: ui::Justify::center,
       ),
     )
     loading.add(
-      text::new(
+      ui::text(
         self.context,
         content: "Loading teams…",
         selectable: false,
-        text_style: text::style(dim: true),
+        text_style: ui::text_style(dim: true),
       ),
     )
     self.replace_stage(loading, fn() {})
@@ -205,14 +200,14 @@ impl CreationSession {
     form.status.set_content(message)
     form.status.set_text_style(
       match danger {
-        true => text::style(foreground: self.palette.danger, bold: true),
-        false => text::style(dim: true),
+        true => ui::text_style(foreground: self.palette.danger, bold: true),
+        false => ui::text_style(dim: true),
       },
     )
   }
 
-  private fn mut handle_form_key(form: mut CreationForm, received: mut event::KeyEvent) {
-    if received.event_type != event::KeyEventType::release {
+  private fn mut handle_form_key(form: mut CreationForm, received: mut cooper::KeyEvent) {
+    if received.event_type != cooper::KeyEventType::release {
       if submission_active(self.submit_guard) {
         received.prevent_default()
         received.stop_propagation()
@@ -224,8 +219,8 @@ impl CreationSession {
     }
   }
 
-  private fn mut handle_title_key(form: mut CreationForm, received: mut event::KeyEvent) {
-    if received.event_type != event::KeyEventType::release and (received.matches("tab") or received.matches("tab", shift: true)) and (not submission_active(self.submit_guard)) {
+  private fn mut handle_title_key(form: mut CreationForm, received: mut cooper::KeyEvent) {
+    if received.event_type != cooper::KeyEventType::release and (received.matches("tab") or received.matches("tab", shift: true)) and (not submission_active(self.submit_guard)) {
       let _ = form.description.focus()
       received.prevent_default()
       received.stop_propagation()
@@ -234,8 +229,8 @@ impl CreationSession {
     }
   }
 
-  private fn mut handle_description_key(form: mut CreationForm, received: mut event::KeyEvent) {
-    if received.event_type != event::KeyEventType::release and (received.matches("tab") or received.matches("tab", shift: true)) and (not submission_active(self.submit_guard)) {
+  private fn mut handle_description_key(form: mut CreationForm, received: mut cooper::KeyEvent) {
+    if received.event_type != cooper::KeyEventType::release and (received.matches("tab") or received.matches("tab", shift: true)) and (not submission_active(self.submit_guard)) {
       let _ = form.title.focus()
       received.prevent_default()
       received.stop_propagation()
@@ -244,7 +239,7 @@ impl CreationSession {
     }
   }
 
-  private fn mut handle_form_paste(received: mut event::PasteEvent) {
+  private fn mut handle_form_paste(received: mut cooper::PasteEvent) {
     if submission_active(self.submit_guard) {
       received.prevent_default()
       received.stop_propagation()
@@ -253,48 +248,48 @@ impl CreationSession {
 
   private fn mut show_form(team: issues::Team) {
     self.selected_team = Maybe::new(team)
-    let root = box::new(
+    let root = ui::box(
       self.context,
-      styles: style::new(
-        width: style::percent(100.0),
-        height: style::cells(12),
-        flex_direction: style::FlexDirection::column,
+      styles: ui::style(
+        width: ui::percent(100.0),
+        height: ui::cells(12),
+        flex_direction: ui::FlexDirection::column,
       ),
     )
-    let title_label = text::new(
+    let title_label = ui::text(
       self.context,
       content: "Title",
       selectable: false,
-      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
-      text_style: text::style(dim: true),
+      styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
+      text_style: ui::text_style(dim: true),
     )
-    let title = input::new(
+    let title = ui::input(
       self.context,
       placeholder: "Issue title…",
-      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+      styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
     )
-    let spacer = box::new(
+    let spacer = ui::box(
       self.context,
-      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+      styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
     )
-    let description_label = text::new(
+    let description_label = ui::text(
       self.context,
       content: "Description (optional)",
       selectable: false,
-      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
-      text_style: text::style(dim: true),
+      styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
+      text_style: ui::text_style(dim: true),
     )
-    let description = text_area::new(
+    let description = ui::text_area(
       self.context,
       placeholder: "Add details…",
-      styles: style::new(width: style::percent(100.0), height: style::cells(7), flex_shrink: 0.0),
+      styles: ui::style(width: ui::percent(100.0), height: ui::cells(7), flex_shrink: 0.0),
     )
-    let status = text::new(
+    let status = ui::text(
       self.context,
       content: "",
       selectable: false,
-      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
-      text_style: text::style(dim: true),
+      styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
+      text_style: ui::text_style(dim: true),
     )
     root.add(title_label)
     root.add(title)
@@ -318,22 +313,22 @@ impl CreationSession {
       }),
     )
     form.listeners.push(
-      title.on_key(fn(received: mut event::KeyEvent) {
+      title.on_key(fn(received: mut cooper::KeyEvent) {
         self.handle_title_key(form, received)
       }),
     )
     form.listeners.push(
-      description.on_key(fn(received: mut event::KeyEvent) {
+      description.on_key(fn(received: mut cooper::KeyEvent) {
         self.handle_description_key(form, received)
       }),
     )
     form.listeners.push(
-      title.on_paste(fn(received: mut event::PasteEvent) {
+      title.on_paste(fn(received: mut cooper::PasteEvent) {
         self.handle_form_paste(received)
       }),
     )
     form.listeners.push(
-      description.on_paste(fn(received: mut event::PasteEvent) {
+      description.on_paste(fn(received: mut cooper::PasteEvent) {
         self.handle_form_paste(received)
       }),
     )
@@ -428,7 +423,7 @@ impl CreationSession {
 }
 
 struct Controller {
-  context: mut runtime::Runtime,
+  context: mut cooper::Runtime,
   modal: mut modal_host::ModalHost,
   palette: tinear_theme::Theme,
   service: issue_creation_service::Service,
@@ -440,7 +435,7 @@ struct Controller {
 }
 
 fn new(
-  ctx: mut runtime::Runtime,
+  ctx: mut cooper::Runtime,
   modal: mut modal_host::ModalHost,
   palette: tinear_theme::Theme,
   service: issue_creation_service::Service,

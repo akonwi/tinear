@@ -1,9 +1,5 @@
-use cooper/app
-use cooper/box
-use cooper/event
-use cooper/runtime
-use cooper/style
-use cooper/text
+use cooper
+use cooper/ui
 use tinear/config
 use tinear/events
 use tinear/models/cache
@@ -38,7 +34,7 @@ use tinear/tui/toast_host
 use tinear/tui/welcome_controller
 
 private struct ActiveRoute {
-  handle: fn(mut event::KeyEvent) Bool,
+  handle: fn(mut cooper::KeyEvent) Bool,
 }
 
 private struct ShellActions {
@@ -55,26 +51,26 @@ private struct DetailActions {
   edit_description: fn(issues::Issue),
 }
 
-private fn placeholder_screen(ctx: mut runtime::Runtime, title: Str, message: Str) shell_controller::Screen {
-  let root = box::new(
+private fn placeholder_screen(ctx: mut cooper::Runtime, title: Str, message: Str) shell_controller::Screen {
+  let root = ui::box(
     ctx,
-    styles: style::new(
-      width: style::percent(100.0),
-      height: style::percent(100.0),
-      padding: style::edges(style::cells(1)),
-      flex_direction: style::FlexDirection::column,
-      gap: style::cells(1),
+    styles: ui::style(
+      width: ui::percent(100.0),
+      height: ui::percent(100.0),
+      padding: ui::edges(ui::cells(1)),
+      flex_direction: ui::FlexDirection::column,
+      gap: ui::cells(1),
     ),
   )
   root.set_focusable(true)
-  root.add(text::new(ctx, content: title, text_style: text::style(bold: true)))
-  root.add(text::new(ctx, content: message, text_style: text::style(dim: true)))
+  root.add(ui::text(ctx, content: title, text_style: ui::text_style(bold: true)))
+  root.add(ui::text(ctx, content: message, text_style: ui::text_style(dim: true)))
   shell_controller::Screen{
     root: root,
     focus: fn() {
       let _ = root.focus()
     },
-    handle_key: fn(received: mut event::KeyEvent) Bool {
+    handle_key: fn(received: mut cooper::KeyEvent) Bool {
       false
     },
     dispose: fn() {},
@@ -82,7 +78,7 @@ private fn placeholder_screen(ctx: mut runtime::Runtime, title: Str, message: St
 }
 
 private fn document_detail_screen(
-  ctx: mut runtime::Runtime,
+  ctx: mut cooper::Runtime,
   palette: theme::Theme,
   api_key: Str,
   reference: tabs::TabRef,
@@ -119,7 +115,7 @@ private fn document_detail_screen(
 }
 
 private fn issue_detail_screen(
-  ctx: mut runtime::Runtime,
+  ctx: mut cooper::Runtime,
   palette: theme::Theme,
   api_key: Str,
   identifier: Str,
@@ -225,7 +221,7 @@ private fn issue_detail_screen(
 }
 
 private fn show_logged_in(
-  ctx: mut runtime::Runtime,
+  ctx: mut cooper::Runtime,
   palette: theme::Theme,
   api_key: Str,
   application_shell: mut application_shell::ApplicationShell,
@@ -408,7 +404,7 @@ private fn show_logged_in(
   actions.retitle_doc = fn(reference: tabs::TabRef, title: Str) {
     controller.retitle(reference, title)
   }
-  active_route.handle = fn(received: mut event::KeyEvent) Bool {
+  active_route.handle = fn(received: mut cooper::KeyEvent) Bool {
     controller.handle_key(received)
   }
   inbox.start()
@@ -417,12 +413,12 @@ private fn show_logged_in(
 }
 
 fn main() {
-  let application = app::new(exit_on_ctrl_c: false).expect("create tinear")
+  let application = cooper::app(exit_on_ctrl_c: false).expect("create tinear")
   defer application.destroy()
   let ctx = application.context
   let palette = theme::new()
   let application_shell = application_shell::new(ctx, palette, scheduler::for_context(ctx))
-  let active_route = mut ActiveRoute{handle: fn(received: mut event::KeyEvent) Bool {
+  let active_route = mut ActiveRoute{handle: fn(received: mut cooper::KeyEvent) Bool {
     false
   }}
   application.root.add(application_shell.root)
@@ -444,8 +440,8 @@ fn main() {
     },
   }
 
-  let _ = application.on_key(fn(received: mut event::KeyEvent) {
-    if received.event_type != event::KeyEventType::release and received.matches("c", ctrl: true) {
+  let _ = application.on_key(fn(received: mut cooper::KeyEvent) {
+    if received.event_type != cooper::KeyEventType::release and received.matches("c", ctrl: true) {
       application_shell.dispose()
       application.destroy()
       received.prevent_default()

@@ -1,19 +1,17 @@
 # Cooper Rewrite Roadmap
 
-> Behavioral parity reference: `main` at `84ff69a`.
->
-> Cooper rewrite branch: `rewrite/cooper`.
+> Behavioral parity reference: the previous vaxis/ui implementation at `84ff69a`.
 
-The retained Cooper rewrite is complete and ready for review/release preparation.
+The retained Cooper rewrite shipped in Tinear v0.12.0 and now lives on `main`.
 Completed behavior is documented in [features.md](features.md), architecture in
 [ADR 0003](adrs/0003-adopt-cooper-retained-ui.md), and visual decisions in
 [design-language.md](design-language.md).
 
 ## Release status
 
-- Cooper is pinned to remote revision `848bac2`.
+- Cooper is pinned to remote revision `278a8fe`.
 - Native Linux/macOS amd64/arm64 CI and release workflows are restored.
-- Latest validation: `ard check main.ard`, `ard build main.ard`, 147 Ard tests,
+- Latest validation: `ard check main.ard`, `ard build main.ard`, 150 Ard tests,
   Go Markdown parser tests, and the live PTY suite pass.
 - The PTY suite covers startup, terminal/cache restoration, resize, normalized
   keys, mouse/wheel input, multiline paste, OSC 52 copy, and clean quit.

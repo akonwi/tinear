@@ -1,8 +1,9 @@
 use ard/testing as assertions
 
-use cooper/box
+use cooper
 use cooper/event
 use cooper/testing
+use cooper/ui
 use tinear/models/issues
 use tinear/services/issue_edit_service
 use tinear/tui/issue_editor_controller
@@ -83,12 +84,12 @@ private fn issue() issues::Issue {
   }
 }
 
-private fn select_all() mut event::KeyEvent {
+private fn select_all() mut cooper::KeyEvent {
   event::key(
     "a",
     "",
-    event::KeyEventType::press,
-    event::Modifiers{
+    cooper::KeyEventType::press,
+    cooper::Modifiers{
       shift: false,
       ctrl: false,
       alt: false,
@@ -97,12 +98,12 @@ private fn select_all() mut event::KeyEvent {
   )
 }
 
-private fn key(name: Str, ctrl: Bool?) mut event::KeyEvent {
+private fn key(name: Str, ctrl: Bool?) mut cooper::KeyEvent {
   event::key(
     name,
     "",
-    event::KeyEventType::press,
-    event::Modifiers{
+    cooper::KeyEventType::press,
+    cooper::Modifiers{
       shift: false,
       ctrl: ctrl.or(false),
       alt: false,
@@ -229,7 +230,7 @@ test fn description_editor_saves_draft_and_recovers_from_failure() Void!Str {
   application.paste(event::paste("Saved"))
   application.key(key("return", ctrl: true))
   let second = state.descriptions.at(1).expect("second description request")
-  let replacement = box::new(application.context)
+  let replacement = ui::box(application.context)
   let replacement_ticket = modal.present(
     "Other modal",
     replacement,
@@ -266,7 +267,7 @@ test fn replaced_comment_editor_refreshes_without_stealing_modal_focus() Void!St
   editor.open_comment(issue(), "", "")
   application.paste(event::paste("Posted elsewhere"))
   application.key(key("return", ctrl: true))
-  let replacement = box::new(application.context)
+  let replacement = ui::box(application.context)
   let replacement_ticket = modal.present(
     "Other modal",
     replacement,

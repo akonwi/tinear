@@ -1,7 +1,5 @@
-use cooper/box
-use cooper/runtime
-use cooper/style
-use cooper/text
+use cooper
+use cooper/ui
 use tinear/models/issue_state
 use tinear/models/issues
 use tinear/services/issue_fields_service
@@ -37,7 +35,7 @@ impl RequestCancellation {
 }
 
 struct Controller {
-  context: mut runtime::Runtime,
+  context: mut cooper::Runtime,
   modal: mut modal_host::ModalHost,
   palette: tinear_theme::Theme,
   service: issue_fields_service::Service,
@@ -128,7 +126,7 @@ fn cycles_for_issue(result: issues::TeamCyclesResult, current_cycle_id: Str) [is
 }
 
 fn new(
-  ctx: mut runtime::Runtime,
+  ctx: mut cooper::Runtime,
   modal: mut modal_host::ModalHost,
   palette: tinear_theme::Theme,
   service: issue_fields_service::Service,
@@ -152,24 +150,24 @@ fn new(
 
 impl Controller {
   private fn mut present_loading(title: Str, updating: Bool, dispose: fn()) modal_host::Ticket {
-    let body = box::new(
+    let body = ui::box(
       self.context,
-      styles: style::new(
-        width: style::percent(100.0),
-        height: style::cells(3),
-        align_items: style::Align::center,
-        justify_content: style::Justify::center,
+      styles: ui::style(
+        width: ui::percent(100.0),
+        height: ui::cells(3),
+        align_items: ui::Align::center,
+        justify_content: ui::Justify::center,
       ),
     )
     body.add(
-      text::new(
+      ui::text(
         self.context,
         content: match updating {
           true => "Updating…",
           false => "Loading…",
         },
         selectable: false,
-        text_style: text::style(dim: true),
+        text_style: ui::text_style(dim: true),
       ),
     )
     let ticket = self.modal.present(

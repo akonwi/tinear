@@ -1,9 +1,5 @@
-use cooper/box
-use cooper/event
-use cooper/runtime
-use cooper/scroll_box
-use cooper/style
-use cooper/text
+use cooper
+use cooper/ui
 use go:strings
 use tinear/models/documents
 use tinear/services/document_detail_service
@@ -15,16 +11,16 @@ use tinear/tui/theme as tinear_theme
 use tinear/tui/timestamp
 
 struct DocumentDetailController {
-  root: mut box::Box,
-  context: mut runtime::Runtime,
+  root: mut ui::Box,
+  context: mut cooper::Runtime,
   slug_id: Str,
   cached_title: Str,
-  status: mut text::Text,
-  content: mut box::Box,
-  title_text: mut text::Text,
-  metadata_first: mut text::Text,
-  metadata_second: mut text::Text,
-  body_scroll: mut scroll_box::ScrollBox,
+  status: mut ui::Text,
+  content: mut ui::Box,
+  title_text: mut ui::Text,
+  metadata_first: mut ui::Text,
+  metadata_second: mut ui::Text,
+  body_scroll: mut ui::ScrollBox,
   markdown: mut markdown_controller::MarkdownController,
   document: documents::Doc?,
   generation: Int,
@@ -38,24 +34,24 @@ struct DocumentDetailController {
   palette: tinear_theme::Theme,
 }
 
-private fn root_child_style(display: style::Display) style::Style {
-  style::new(
+private fn root_child_style(display: ui::Display) ui::Style {
+  ui::style(
     display: display,
-    width: style::percent(100.0),
-    height: style::cells(1),
+    width: ui::percent(100.0),
+    height: ui::cells(1),
     flex_grow: 1.0,
-    overflow: style::Overflow::hidden,
+    overflow: ui::Overflow::hidden,
   )
 }
 
-private fn status_style(display: style::Display) style::Style {
-  style::new(
+private fn status_style(display: ui::Display) ui::Style {
+  ui::style(
     display: display,
-    width: style::percent(100.0),
-    height: style::cells(1),
+    width: ui::percent(100.0),
+    height: ui::cells(1),
     flex_grow: 1.0,
-    justify_content: style::Justify::center,
-    align_items: style::Align::center,
+    justify_content: ui::Justify::center,
+    align_items: ui::Align::center,
   )
 }
 
@@ -65,19 +61,19 @@ private fn metadata_line(
   second_label: Str,
   second_value: Str,
   palette: tinear_theme::Theme,
-) text::StyledText {
-  text::styled_text(
+) ui::StyledText {
+  ui::styled_text(
     [
-      text::span(first_label, style: text::span_style(dim: true)),
-      text::span("  {first_value}", style: text::span_style(foreground: palette.foreground)),
-      text::span("     {second_label}", style: text::span_style(dim: true)),
-      text::span("  {second_value}", style: text::span_style(foreground: palette.foreground)),
+      ui::span(first_label, style: ui::span_style(dim: true)),
+      ui::span("  {first_value}", style: ui::span_style(foreground: palette.foreground)),
+      ui::span("     {second_label}", style: ui::span_style(dim: true)),
+      ui::span("  {second_value}", style: ui::span_style(foreground: palette.foreground)),
     ],
   )
 }
 
 fn new(
-  ctx: mut runtime::Runtime,
+  ctx: mut cooper::Runtime,
   palette: tinear_theme::Theme,
   slug_id: Str,
   cached_title: Str,
@@ -87,17 +83,17 @@ fn new(
   on_open_url: fn(Str),
   notify_error: fn(Str, Str),
 ) mut DocumentDetailController {
-  let root = box::new(
+  let root = ui::box(
     ctx,
-    styles: style::new(
-      width: style::percent(100.0),
-      height: style::percent(100.0),
-      overflow: style::Overflow::hidden,
-      padding: style::Edges{
-        top: style::cells(0),
-        right: style::cells(1),
-        bottom: style::cells(0),
-        left: style::cells(1),
+    styles: ui::style(
+      width: ui::percent(100.0),
+      height: ui::percent(100.0),
+      overflow: ui::Overflow::hidden,
+      padding: ui::Edges{
+        top: ui::cells(0),
+        right: ui::cells(1),
+        bottom: ui::cells(0),
+        left: ui::cells(1),
       },
     ),
   )
@@ -105,47 +101,47 @@ fn new(
     true => "document",
     false => cached_title,
   }
-  let status = text::new(
+  let status = ui::text(
     ctx,
     content: "Loading {loading_title}…",
     selectable: false,
-    styles: status_style(style::Display::flex),
-    text_style: text::style(dim: true),
+    styles: status_style(ui::Display::flex),
+    text_style: ui::text_style(dim: true),
   )
-  let content = box::new(ctx, styles: root_child_style(style::Display::none))
-  let title_text = text::new(
+  let content = ui::box(ctx, styles: root_child_style(ui::Display::none))
+  let title_text = ui::text(
     ctx,
     content: cached_title,
     selectable: true,
-    wrap: text::TextWrap::word,
-    overflow: text::TextOverflow::ellipsis,
-    styles: style::new(width: style::percent(100.0), max_height: style::cells(2), flex_shrink: 0.0),
-    text_style: text::style(bold: true),
+    wrap: ui::TextWrap::word,
+    overflow: ui::TextOverflow::ellipsis,
+    styles: ui::style(width: ui::percent(100.0), max_height: ui::cells(2), flex_shrink: 0.0),
+    text_style: ui::text_style(bold: true),
   )
-  let metadata_first = text::new(
+  let metadata_first = ui::text(
     ctx,
     content: "",
     selectable: true,
-    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+    styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
   )
-  let metadata_second = text::new(
+  let metadata_second = ui::text(
     ctx,
     content: "",
     selectable: true,
-    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+    styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
   )
-  let rule = text::new(
+  let rule = ui::text(
     ctx,
     content: strings::Repeat("─", 512),
     selectable: false,
-    wrap: text::TextWrap::none,
-    overflow: text::TextOverflow::clip,
-    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
-    text_style: text::style(foreground: palette.border, dim: true),
+    wrap: ui::TextWrap::none,
+    overflow: ui::TextOverflow::clip,
+    styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
+    text_style: ui::text_style(foreground: palette.border, dim: true),
   )
-  let body_scroll = scroll_box::new(
+  let body_scroll = ui::scroll_box(
     ctx,
-    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_grow: 1.0),
+    styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_grow: 1.0),
   )
   let markdown = markdown_controller::new(
     ctx,
@@ -206,8 +202,8 @@ impl DocumentDetailController {
       metadata_line("Updated", timestamp::friendly(document.meta.updated_at), "", "", self.palette),
     )
     self.markdown.set_source(document.content.or(""))
-    self.status.set_style(status_style(style::Display::none))
-    self.content.set_style(root_child_style(style::Display::flex))
+    self.status.set_style(status_style(ui::Display::none))
+    self.content.set_style(root_child_style(ui::Display::flex))
     if document.meta.title != self.cached_title {
       self.cached_title = document.meta.title
       self.on_title(document.meta.title)
@@ -220,9 +216,9 @@ impl DocumentDetailController {
       false => self.cached_title,
     }
     self.status.set_content("Couldn't load {title}: {message}")
-    self.status.set_text_style(text::style(foreground: self.palette.danger, bold: true))
-    self.status.set_style(status_style(style::Display::flex))
-    self.content.set_style(root_child_style(style::Display::none))
+    self.status.set_text_style(ui::text_style(foreground: self.palette.danger, bold: true))
+    self.status.set_style(status_style(ui::Display::flex))
+    self.content.set_style(root_child_style(ui::Display::none))
   }
 
   fn mut refresh(silent: Bool) {
@@ -231,7 +227,7 @@ impl DocumentDetailController {
       self.generation = generation
       if not silent and self.document.is_none() {
         self.status.set_content("Loading {self.cached_title}…")
-        self.status.set_text_style(text::style(dim: true))
+        self.status.set_text_style(ui::text_style(dim: true))
       }
       self.service.load(self.scope.stop.receiver(), self.slug_id, fn(result: documents::Doc!Str) {
         if self.scope.is_current(generation) {
@@ -282,8 +278,8 @@ impl DocumentDetailController {
     let _ = self.body_scroll.focus()
   }
 
-  fn mut handle_key(received: mut event::KeyEvent) Bool {
-    if self.scope.disposed or received.event_type == event::KeyEventType::release {
+  fn mut handle_key(received: mut cooper::KeyEvent) Bool {
+    if self.scope.disposed or received.event_type == cooper::KeyEventType::release {
       false
     } else {
       match {
@@ -310,7 +306,7 @@ impl DocumentDetailController {
       focus: fn() {
         self.focus()
       },
-      handle_key: fn(received: mut event::KeyEvent) Bool {
+      handle_key: fn(received: mut cooper::KeyEvent) Bool {
         self.handle_key(received)
       },
       dispose: fn() {

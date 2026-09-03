@@ -1,8 +1,5 @@
-use cooper/box
-use cooper/color
-use cooper/runtime
-use cooper/style
-use cooper/text
+use cooper
+use cooper/ui
 use go:strings
 use go:tinear/ffi/markdown
 use tinear/platform/url
@@ -10,18 +7,18 @@ use tinear/tui/theme as tinear_theme
 use go:unicode
 
 struct BlockRecord {
-  root: mut box::Box,
+  root: mut ui::Box,
   remove_links: [fn()],
 }
 
 private struct LinkedText {
-  control: mut text::Text,
+  control: mut ui::Text,
   remove: fn(),
 }
 
 struct MarkdownController {
-  root: mut box::Box,
-  context: mut runtime::Runtime,
+  root: mut ui::Box,
+  context: mut cooper::Runtime,
   records: [BlockRecord],
   source: Str,
   rendered: Bool,
@@ -57,7 +54,7 @@ private fn safe_link(target: Str) Bool {
   supported
 }
 
-private fn interaction_foreground(active: Bool, hovered: Bool, palette: tinear_theme::Theme) color::Color {
+private fn interaction_foreground(active: Bool, hovered: Bool, palette: tinear_theme::Theme) ui::Color {
   match {
     active => palette.item_active_foreground,
     hovered => palette.item_hover_foreground,
@@ -65,7 +62,7 @@ private fn interaction_foreground(active: Bool, hovered: Bool, palette: tinear_t
   }
 }
 
-private fn interaction_background(active: Bool, hovered: Bool, palette: tinear_theme::Theme) color::Color {
+private fn interaction_background(active: Bool, hovered: Bool, palette: tinear_theme::Theme) ui::Color {
   match {
     active => palette.item_active_background,
     hovered => palette.item_hover_background,
@@ -73,7 +70,7 @@ private fn interaction_background(active: Bool, hovered: Bool, palette: tinear_t
   }
 }
 
-private fn run_style(run: markdown::Run, palette: tinear_theme::Theme, active: Bool, hovered: Bool) text::SpanStyle {
+private fn run_style(run: markdown::Run, palette: tinear_theme::Theme, active: Bool, hovered: Bool) ui::SpanStyle {
   let linked = safe_link(run.Link)
   let foreground = match {
     active or hovered => interaction_foreground(active, hovered, palette),
@@ -81,7 +78,7 @@ private fn run_style(run: markdown::Run, palette: tinear_theme::Theme, active: B
     run.Code => palette.warning,
     _ => palette.foreground,
   }
-  text::span_style(
+  ui::span_style(
     foreground: foreground,
     background: match run.Code and not active and not hovered {
       true => Maybe::new(palette.item_hover_background),
@@ -101,14 +98,14 @@ private fn spans_for(
   force_dim: Bool?,
   active: Bool,
   hovered: Bool,
-) [text::Span] {
-  let spans = mut List::new<text::Span>()
+) [ui::Span] {
+  let spans = mut List::new<ui::Span>()
   for run in block.Runs {
     let base = run_style(run, palette, active, hovered)
     spans.push(
-      text::span(
+      ui::span(
         run.Text,
-        style: text::span_style(
+        style: ui::span_style(
           foreground: base.foreground,
           background: base.background,
           bold: base.bold.or(false) or force_bold.or(false),
@@ -130,9 +127,9 @@ private fn spans_for(
   spans.@
 }
 
-private fn block_style(spaced: Bool, background: tinear_theme::Theme?, active: Bool, hovered: Bool) style::Style {
-  style::new(
-    width: style::percent(100.0),
+private fn block_style(spaced: Bool, background: tinear_theme::Theme?, active: Bool, hovered: Bool) ui::Style {
+  ui::style(
+    width: ui::percent(100.0),
     flex_shrink: 0.0,
     background: match background {
       palette => {
@@ -145,33 +142,33 @@ private fn block_style(spaced: Bool, background: tinear_theme::Theme?, active: B
       },
       _ => Maybe::new(),
     },
-    margin: style::Edges{
-      top: style::cells(
+    margin: ui::Edges{
+      top: ui::cells(
         match spaced {
           true => 1,
           false => 0,
         },
       ),
-      right: style::cells(0),
-      bottom: style::cells(0),
-      left: style::cells(0),
+      right: ui::cells(0),
+      bottom: ui::cells(0),
+      left: ui::cells(0),
     },
   )
 }
 
 fn new(
-  ctx: mut runtime::Runtime,
+  ctx: mut cooper::Runtime,
   palette: tinear_theme::Theme,
   source: Str,
   on_open_link: fn(Str),
   empty_label: Str?,
 ) mut MarkdownController {
-  let root = box::new(
+  let root = ui::box(
     ctx,
-    styles: style::new(
-      width: style::percent(100.0),
-      flex_direction: style::FlexDirection::column,
-      align_items: style::Align::stretch,
+    styles: ui::style(
+      width: ui::percent(100.0),
+      flex_direction: ui::FlexDirection::column,
+      align_items: ui::Align::stretch,
       background: interaction_background(false, false, palette),
     ),
   )
@@ -193,17 +190,17 @@ fn new(
 }
 
 impl MarkdownController {
-  private fn mut text_control(content: text::StyledText, base_style: text::TextStyle?) LinkedText {
-    let control = text::new(
+  private fn mut text_control(content: ui::StyledText, base_style: ui::TextStyle?) LinkedText {
+    let control = ui::text(
       self.context,
       content: content,
       selectable: true,
-      wrap: text::TextWrap::word,
-      overflow: text::TextOverflow::clip,
-      styles: style::new(width: style::percent(100.0), flex_shrink: 0.0),
-      text_style: base_style.or(text::style()),
+      wrap: ui::TextWrap::word,
+      overflow: ui::TextOverflow::clip,
+      styles: ui::style(width: ui::percent(100.0), flex_shrink: 0.0),
+      text_style: base_style.or(ui::text_style()),
     )
-    let remove = control.on_link(fn(received: mut text::LinkEvent) {
+    let remove = control.on_link(fn(received: mut ui::LinkEvent) {
       received.prevent_default()
       self.on_open_link(received.url)
     })
@@ -212,7 +209,7 @@ impl MarkdownController {
 
   private fn mut build_block(block: markdown::Block, spaced: Bool) BlockRecord {
     let code = block.Kind == "code"
-    let root = box::new(
+    let root = ui::box(
       self.context,
       styles: match code {
         true => {
@@ -222,11 +219,11 @@ impl MarkdownController {
             self.active,
             self.hovered,
           )
-          configured.padding = style::Edges{
-            top: style::cells(0),
-            right: style::cells(1),
-            bottom: style::cells(0),
-            left: style::cells(1),
+          configured.padding = ui::Edges{
+            top: ui::cells(0),
+            right: ui::cells(1),
+            bottom: ui::cells(0),
+            left: ui::cells(1),
           }
           configured.@
         },
@@ -236,18 +233,18 @@ impl MarkdownController {
     let removers = mut List::new<fn()>()
     match block.Kind {
       "rule" => {
-        let rule = text::new(
+        let rule = ui::text(
           self.context,
           content: strings::Repeat("─", 512),
           selectable: false,
-          wrap: text::TextWrap::none,
-          overflow: text::TextOverflow::clip,
-          styles: style::new(
-            width: style::percent(100.0),
-            height: style::cells(1),
+          wrap: ui::TextWrap::none,
+          overflow: ui::TextOverflow::clip,
+          styles: ui::style(
+            width: ui::percent(100.0),
+            height: ui::cells(1),
             flex_shrink: 0.0,
           ),
-          text_style: text::style(
+          text_style: ui::text_style(
             foreground: match self.active or self.hovered {
               true => interaction_foreground(self.active, self.hovered, self.palette),
               false => self.palette.border,
@@ -259,15 +256,15 @@ impl MarkdownController {
       },
       "code" => {
         if not block.Lang.is_empty() {
-          let language = text::new(
+          let language = ui::text(
             self.context,
             content: match block.Lang {
               "mermaid" => "mermaid diagram (rendered in Linear)",
               _ => block.Lang,
             },
             selectable: false,
-            styles: style::new(width: style::percent(100.0), flex_shrink: 0.0),
-            text_style: text::style(
+            styles: ui::style(width: ui::percent(100.0), flex_shrink: 0.0),
+            text_style: ui::text_style(
               foreground: match self.active or self.hovered {
                 true => interaction_foreground(self.active, self.hovered, self.palette),
                 false => self.palette.item_hover_foreground,
@@ -281,14 +278,14 @@ impl MarkdownController {
           run => run.Text,
           _ => "",
         }
-        let code_text = text::new(
+        let code_text = ui::text(
           self.context,
           content: raw,
           selectable: true,
-          wrap: text::TextWrap::word,
-          overflow: text::TextOverflow::clip,
-          styles: style::new(width: style::percent(100.0), flex_shrink: 0.0),
-          text_style: text::style(
+          wrap: ui::TextWrap::word,
+          overflow: ui::TextOverflow::clip,
+          styles: ui::style(width: ui::percent(100.0), flex_shrink: 0.0),
+          text_style: ui::text_style(
             foreground: match self.active or self.hovered {
               true => interaction_foreground(self.active, self.hovered, self.palette),
               false => self.palette.item_hover_foreground,
@@ -298,13 +295,13 @@ impl MarkdownController {
         root.add(code_text)
       },
       "heading" => {
-        let heading_spans = mut List::new<text::Span>()
+        let heading_spans = mut List::new<ui::Span>()
         for run in block.Runs {
           let base = run_style(run, self.palette, self.active, self.hovered)
           heading_spans.push(
-            text::span(
+            ui::span(
               run.Text,
-              style: text::span_style(
+              style: ui::span_style(
                 foreground: match {
                   self.active or self.hovered => interaction_foreground(self.active, self.hovered, self.palette),
                   safe_link(run.Link) => self.palette.accent,
@@ -325,9 +322,9 @@ impl MarkdownController {
           )
         }
         let heading = self.text_control(
-          text::styled_text(heading_spans.@),
+          ui::styled_text(heading_spans.@),
           Maybe::new(
-            text::style(
+            ui::text_style(
               foreground: match {
                 self.active or self.hovered => interaction_foreground(self.active, self.hovered, self.palette),
                 block.Level <= 2 => self.palette.accent,
@@ -341,11 +338,11 @@ impl MarkdownController {
         removers.push(heading.remove)
       },
       "quote" => {
-        let content = mut List::new<text::Span>()
+        let content = mut List::new<ui::Span>()
         content.push(
-          text::span(
+          ui::span(
             "{indent(block.Indent - 1)}│ ",
-            style: text::span_style(
+            style: ui::span_style(
               foreground: match self.active or self.hovered {
                 true => interaction_foreground(self.active, self.hovered, self.palette),
                 false => self.palette.border,
@@ -364,22 +361,22 @@ impl MarkdownController {
           content.push(span)
         }
         let quote = self.text_control(
-          text::styled_text(content.@),
-          Maybe::new(text::style(dim: not self.active and not self.hovered)),
+          ui::styled_text(content.@),
+          Maybe::new(ui::text_style(dim: not self.active and not self.hovered)),
         )
         root.add(quote.control)
         removers.push(quote.remove)
       },
       "list_item" => {
-        let content = mut List::new<text::Span>()
+        let content = mut List::new<ui::Span>()
         let marker = match block.Marker.is_empty() {
           true => "  ",
           false => "{block.Marker} ",
         }
         content.push(
-          text::span(
+          ui::span(
             "{indent(block.Indent)}{marker}",
-            style: text::span_style(
+            style: ui::span_style(
               foreground: match self.active or self.hovered {
                 true => interaction_foreground(self.active, self.hovered, self.palette),
                 false => self.palette.foreground,
@@ -391,16 +388,16 @@ impl MarkdownController {
         for span in spans_for(block, self.palette, false, false, self.active, self.hovered) {
           content.push(span)
         }
-        let item = self.text_control(text::styled_text(content.@), Maybe::new(text::style()))
+        let item = self.text_control(ui::styled_text(content.@), Maybe::new(ui::text_style()))
         root.add(item.control)
         removers.push(item.remove)
       },
       _ => {
         let content = self.text_control(
-          text::styled_text(
+          ui::styled_text(
             spans_for(block, self.palette, block.Level == 1, false, self.active, self.hovered),
           ),
-          Maybe::new(text::style()),
+          Maybe::new(ui::text_style()),
         )
         root.add(content.control)
         removers.push(content.remove)
@@ -432,13 +429,13 @@ impl MarkdownController {
         previous_kind = block.Kind
       }
       if records.size() == 0 {
-        let empty = box::new(self.context, styles: style::new(width: style::percent(100.0)))
+        let empty = ui::box(self.context, styles: ui::style(width: ui::percent(100.0)))
         empty.add(
-          text::new(
+          ui::text(
             self.context,
             content: self.empty_label,
             selectable: false,
-            text_style: text::style(
+            text_style: ui::text_style(
               foreground: interaction_foreground(self.active, self.hovered, self.palette),
               dim: not self.active and not self.hovered,
             ),

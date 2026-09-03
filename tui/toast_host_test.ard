@@ -1,8 +1,8 @@
 use ard/testing as assertions
 
 use cooper/animation
-use cooper/style
 use cooper/testing
+use cooper/ui
 use tinear/tui/theme
 use tinear/tui/toast_host
 
@@ -49,7 +49,7 @@ test fn toast_host_stacks_and_expires_entries() Void!Str {
   )
   try assertions::assert(host.entries.size() == 2, "toasts should stack")
   try assertions::assert(
-    host.entries.at(0).expect("success toast").root.style().border == style::Border::rounded,
+    host.entries.at(0).expect("success toast").root.style().border == ui::Border::rounded,
     "toasts should use a rounded border",
   )
   try assertions::assert(
@@ -99,7 +99,7 @@ test fn toast_host_stacks_and_expires_entries() Void!Str {
     "dismissal should destroy its Timeline",
   )
   try assertions::assert(cancellations == 2, "expiry and dismissal should cancel both timers")
-  assertions::assert(host.root.style().display == style::Display::none, "empty host should hide")
+  assertions::assert(host.root.style().display == ui::Display::none, "empty host should hide")
 }
 
 test fn toast_host_disposal_suppresses_late_expiry() Void!Str {

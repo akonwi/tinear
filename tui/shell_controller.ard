@@ -1,8 +1,5 @@
-use cooper/box
-use cooper/event
-use cooper/runtime
-use cooper/style
-use cooper/text
+use cooper
+use cooper/ui
 use go:strings
 use tinear/models/cache
 use tinear/models/shell as shell_model
@@ -11,9 +8,9 @@ use tinear/tui/hints_bar
 use tinear/tui/theme as tinear_theme
 
 struct Screen {
-  root: mut box::Box,
+  root: mut ui::Box,
   focus: fn(),
-  handle_key: fn(mut event::KeyEvent) Bool,
+  handle_key: fn(mut cooper::KeyEvent) Bool,
   dispose: fn(),
 }
 
@@ -23,16 +20,16 @@ struct DynamicScreen {
 }
 
 struct TabChip {
-  root: mut box::Box,
+  root: mut ui::Box,
   remove_mouse: fn(),
   remove_close_mouse: fn(),
 }
 
 struct ShellController {
-  root: mut box::Box,
-  context: mut runtime::Runtime,
-  tab_bar: mut box::Box,
-  body_host: mut box::Box,
+  root: mut ui::Box,
+  context: mut cooper::Runtime,
+  tab_bar: mut ui::Box,
+  body_host: mut ui::Box,
   hints: mut hints_bar::HintsBar,
   model: shell_model::Model,
   inbox: Screen,
@@ -61,13 +58,13 @@ fn tab_chip_width(label_cells: Int, dynamic: Bool) Int {
   }
 }
 
-private fn body_style(current: style::Style, display: style::Display) style::Style {
+private fn body_style(current: ui::Style, display: ui::Display) ui::Style {
   let updated = mut current
   updated.display = display
-  updated.width = style::percent(100.0)
-  updated.height = style::percent(100.0)
+  updated.width = ui::percent(100.0)
+  updated.height = ui::percent(100.0)
   updated.flex_grow = 1.0
-  updated.overflow = style::Overflow::hidden
+  updated.overflow = ui::Overflow::hidden
   updated.@
 }
 
@@ -126,7 +123,7 @@ private fn hints_for(model: shell_model::Model) [hints_bar::Hint] {
 }
 
 fn new(
-  ctx: mut runtime::Runtime,
+  ctx: mut cooper::Runtime,
   palette: tinear_theme::Theme,
   initial_model: shell_model::Model,
   inbox: Screen,
@@ -137,51 +134,51 @@ fn new(
   on_search: fn(),
   on_create: fn(),
 ) mut ShellController {
-  let root = box::new(
+  let root = ui::box(
     ctx,
-    styles: style::new(
-      width: style::percent(100.0),
-      height: style::percent(100.0),
-      flex_direction: style::FlexDirection::column,
-      overflow: style::Overflow::hidden,
+    styles: ui::style(
+      width: ui::percent(100.0),
+      height: ui::percent(100.0),
+      flex_direction: ui::FlexDirection::column,
+      overflow: ui::Overflow::hidden,
     ),
   )
-  let tab_bar = box::new(
+  let tab_bar = ui::box(
     ctx,
-    styles: style::new(
-      width: style::percent(100.0),
-      height: style::cells(1),
+    styles: ui::style(
+      width: ui::percent(100.0),
+      height: ui::cells(1),
       flex_shrink: 0.0,
-      flex_direction: style::FlexDirection::row,
-      overflow: style::Overflow::hidden,
+      flex_direction: ui::FlexDirection::row,
+      overflow: ui::Overflow::hidden,
     ),
   )
-  let body_host = box::new(
+  let body_host = ui::box(
     ctx,
-    styles: style::new(
-      width: style::percent(100.0),
-      height: style::cells(1),
+    styles: ui::style(
+      width: ui::percent(100.0),
+      height: ui::cells(1),
       flex_grow: 1.0,
-      overflow: style::Overflow::hidden,
+      overflow: ui::Overflow::hidden,
     ),
   )
-  let tab_rule = text::new(
+  let tab_rule = ui::text(
     ctx,
     content: strings::Repeat("─", 512),
     selectable: false,
-    wrap: text::TextWrap::none,
-    overflow: text::TextOverflow::clip,
-    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
-    text_style: text::style(dim: true),
+    wrap: ui::TextWrap::none,
+    overflow: ui::TextOverflow::clip,
+    styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
+    text_style: ui::text_style(dim: true),
   )
-  let footer_rule = text::new(
+  let footer_rule = ui::text(
     ctx,
     content: strings::Repeat("─", 512),
     selectable: false,
-    wrap: text::TextWrap::none,
-    overflow: text::TextOverflow::clip,
-    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
-    text_style: text::style(dim: true),
+    wrap: ui::TextWrap::none,
+    overflow: ui::TextOverflow::clip,
+    styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
+    text_style: ui::text_style(dim: true),
   )
   let hints = hints_bar::new(ctx, palette, hints_for(initial_model))
   root.add(tab_bar)
@@ -228,7 +225,7 @@ impl ShellController {
     }
     if not found {
       let screen = self.make_dynamic(reference)
-      screen.root.set_style(body_style(screen.root.style(), style::Display::none))
+      screen.root.set_style(body_style(screen.root.style(), ui::Display::none))
       self.body_host.add(screen.root)
       self.dynamic_screens.push(DynamicScreen{reference: reference, screen: screen})
     }
@@ -247,14 +244,14 @@ impl ShellController {
 
   private fn mut add_tab_chip(index: Int, label: Str, dynamic: Bool) {
     let width = tab_chip_width(self.context.measure_text(label), dynamic)
-    let chip = box::new(
+    let chip = ui::box(
       self.context,
-      styles: style::new(
-        width: style::cells(width),
-        height: style::cells(1),
+      styles: ui::style(
+        width: ui::cells(width),
+        height: ui::cells(1),
         flex_shrink: 0.0,
-        flex_direction: style::FlexDirection::row,
-        overflow: style::Overflow::hidden,
+        flex_direction: ui::FlexDirection::row,
+        overflow: ui::Overflow::hidden,
       ),
     )
     let selected = index == self.model.tab_index
@@ -263,45 +260,45 @@ impl ShellController {
       false => width,
     }
     chip.add(
-      text::new(
+      ui::text(
         self.context,
-        content: text::styled_text(
+        content: ui::styled_text(
           [
-            text::span(" "),
-            text::span(
+            ui::span(" "),
+            ui::span(
               label,
               style: match selected {
-                true => text::span_style(foreground: self.palette.accent, bold: true),
-                false => text::span_style(dim: true),
+                true => ui::span_style(foreground: self.palette.accent, bold: true),
+                false => ui::span_style(dim: true),
               },
             ),
-            text::span(" "),
+            ui::span(" "),
           ],
         ),
         selectable: false,
-        wrap: text::TextWrap::none,
-        overflow: text::TextOverflow::ellipsis,
-        styles: style::new(
-          width: style::cells(label_width),
-          height: style::cells(1),
+        wrap: ui::TextWrap::none,
+        overflow: ui::TextOverflow::ellipsis,
+        styles: ui::style(
+          width: ui::cells(label_width),
+          height: ui::cells(1),
           flex_shrink: 0.0,
         ),
       ),
     )
     mut remove_close_mouse = fn() {}
     if dynamic {
-      let close = text::new(
+      let close = ui::text(
         self.context,
         content: "× ",
         selectable: false,
-        wrap: text::TextWrap::none,
-        styles: style::new(width: style::cells(2), height: style::cells(1), flex_shrink: 0.0),
-        text_style: text::style(dim: true),
+        wrap: ui::TextWrap::none,
+        styles: ui::style(width: ui::cells(2), height: ui::cells(1), flex_shrink: 0.0),
+        text_style: ui::text_style(dim: true),
       )
       chip.add(close)
       let dynamic_index = index - 2
-      remove_close_mouse = close.on_mouse(fn(received: mut event::MouseEvent) {
-        if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
+      remove_close_mouse = close.on_mouse(fn(received: mut cooper::MouseEvent) {
+        if received.event_type == cooper::MouseEventType::down and received.button == cooper::MouseButton::left {
           match self.model.tabs.at(dynamic_index) {
             reference => {
               let _ = self.close(reference)
@@ -312,8 +309,8 @@ impl ShellController {
         }
       })
     }
-    let remove_mouse = chip.on_mouse(fn(received: mut event::MouseEvent) {
-      if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
+    let remove_mouse = chip.on_mouse(fn(received: mut cooper::MouseEvent) {
+      if received.event_type == cooper::MouseEventType::down and received.button == cooper::MouseButton::left {
         self.select_tab(index)
         received.stop_propagation()
       }
@@ -342,8 +339,8 @@ impl ShellController {
       body_style(
         self.inbox.root.style(),
         match self.model.tab_index == 0 {
-          true => style::Display::flex,
-          false => style::Display::none,
+          true => ui::Display::flex,
+          false => ui::Display::none,
         },
       ),
     )
@@ -351,8 +348,8 @@ impl ShellController {
       body_style(
         self.board.root.style(),
         match self.model.tab_index == 1 {
-          true => style::Display::flex,
-          false => style::Display::none,
+          true => ui::Display::flex,
+          false => ui::Display::none,
         },
       ),
     )
@@ -361,8 +358,8 @@ impl ShellController {
         body_style(
           dynamic.screen.root.style(),
           match self.model.tab_index == 2 + index {
-            true => style::Display::flex,
-            false => style::Display::none,
+            true => ui::Display::flex,
+            false => ui::Display::none,
           },
         ),
       )
@@ -458,7 +455,7 @@ impl ShellController {
     }
   }
 
-  private fn mut handle_active(received: mut event::KeyEvent) Bool {
+  private fn mut handle_active(received: mut cooper::KeyEvent) Bool {
     match self.model.tab_index {
       0 => self.inbox.handle_key(received),
       1 => self.board.handle_key(received),
@@ -472,8 +469,8 @@ impl ShellController {
     }
   }
 
-  fn mut handle_key(received: mut event::KeyEvent) Bool {
-    if self.disposed or received.event_type == event::KeyEventType::release {
+  fn mut handle_key(received: mut cooper::KeyEvent) Bool {
+    if self.disposed or received.event_type == cooper::KeyEventType::release {
       false
     } else {
       mut handled = true

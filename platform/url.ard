@@ -1,6 +1,6 @@
 use ard/async
 
-use cooper/runtime
+use cooper
 use go:os/exec
 
 fn is_supported(target: Str) Bool {
@@ -44,7 +44,7 @@ fn open_with_fallback(target: Str, fallback: fn(Str) Void!Error) Void!Error {
   }
 }
 
-fn open(ctx: mut runtime::Runtime, target: Str) Void!Error {
+fn open(ctx: mut cooper::Runtime, target: Str) Void!Error {
   open_with_fallback(target, fn(url: Str) Void!Error {
     ctx.open_url(url)
   })

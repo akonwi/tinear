@@ -1,10 +1,5 @@
-use cooper/box
-use cooper/event
-use cooper/input
-use cooper/runtime
-use cooper/scroll_box
-use cooper/style
-use cooper/text
+use cooper
+use cooper/ui
 use go:strings
 use tinear/tui/theme as tinear_theme
 
@@ -20,19 +15,19 @@ struct Option {
 
 struct Row {
   option_id: Str,
-  root: mut box::Box,
-  surface: mut box::Box,
-  label: mut text::Text,
-  description: mut text::Text,
+  root: mut ui::Box,
+  surface: mut ui::Box,
+  label: mut ui::Text,
+  description: mut ui::Text,
   remove_mouse: fn(),
 }
 
 struct PickerController {
-  root: mut box::Box,
-  context: mut runtime::Runtime,
-  query: mut input::Input,
-  results: mut scroll_box::ScrollBox,
-  empty_text: mut text::Text,
+  root: mut ui::Box,
+  context: mut cooper::Runtime,
+  query: mut ui::Input,
+  results: mut ui::ScrollBox,
+  empty_text: mut ui::Text,
   options: [Option],
   filtered: [Option],
   filterable: Bool,
@@ -57,24 +52,24 @@ private fn row_height(option: Option) Int {
   }
 }
 
-private fn row_style(option: Option) style::Style {
-  style::new(
-    width: style::percent(100.0),
-    height: style::cells(row_height(option)),
+private fn row_style(option: Option) ui::Style {
+  ui::style(
+    width: ui::percent(100.0),
+    height: ui::cells(row_height(option)),
     flex_shrink: 0.0,
-    flex_direction: style::FlexDirection::row,
-    overflow: style::Overflow::hidden,
+    flex_direction: ui::FlexDirection::row,
+    overflow: ui::Overflow::hidden,
   )
 }
 
-private fn description_style(option: Option) style::Style {
-  style::new(
+private fn description_style(option: Option) ui::Style {
+  ui::style(
     display: match option.description.is_empty() {
-      true => style::Display::none,
-      false => style::Display::flex,
+      true => ui::Display::none,
+      false => ui::Display::flex,
     },
-    width: style::percent(100.0),
-    height: style::cells(1),
+    width: ui::percent(100.0),
+    height: ui::cells(1),
     flex_shrink: 0.0,
   )
 }
@@ -97,39 +92,39 @@ private fn visible_result_rows(options: [Option]) Int {
   }
 }
 
-private fn root_style(options: [Option], has_filter: Bool) style::Style {
+private fn root_style(options: [Option], has_filter: Bool) ui::Style {
   let filter_rows = match has_filter {
     true => 2,
     false => 0,
   }
-  style::new(
-    width: style::percent(100.0),
-    height: style::cells(visible_result_rows(options) + filter_rows),
-    flex_direction: style::FlexDirection::column,
-    overflow: style::Overflow::hidden,
+  ui::style(
+    width: ui::percent(100.0),
+    height: ui::cells(visible_result_rows(options) + filter_rows),
+    flex_direction: ui::FlexDirection::column,
+    overflow: ui::Overflow::hidden,
   )
 }
 
-private fn filter_control_style(display: style::Display) style::Style {
-  style::new(
+private fn filter_control_style(display: ui::Display) ui::Style {
+  ui::style(
     display: display,
-    width: style::percent(100.0),
-    height: style::cells(1),
+    width: ui::percent(100.0),
+    height: ui::cells(1),
     flex_shrink: 0.0,
   )
 }
 
-private fn empty_style(display: style::Display) style::Style {
-  style::new(
+private fn empty_style(display: ui::Display) ui::Style {
+  ui::style(
     display: display,
-    width: style::percent(100.0),
-    height: style::cells(1),
+    width: ui::percent(100.0),
+    height: ui::cells(1),
     flex_shrink: 0.0,
   )
 }
 
 fn new(
-  ctx: mut runtime::Runtime,
+  ctx: mut cooper::Runtime,
   palette: tinear_theme::Theme,
   placeholder: Str,
   options: [Option],
@@ -138,34 +133,34 @@ fn new(
 ) mut PickerController {
   let has_filter = filterable(options)
   let filter_display = match has_filter {
-    true => style::Display::flex,
-    false => style::Display::none,
+    true => ui::Display::flex,
+    false => ui::Display::none,
   }
-  let root = box::new(ctx, styles: root_style(options, has_filter))
-  let query = input::new(
+  let root = ui::box(ctx, styles: root_style(options, has_filter))
+  let query = ui::input(
     ctx,
     placeholder: placeholder,
     styles: filter_control_style(filter_display),
   )
-  let rule = text::new(
+  let rule = ui::text(
     ctx,
     content: RESULT_RULE,
     selectable: false,
-    wrap: text::TextWrap::none,
-    overflow: text::TextOverflow::clip,
+    wrap: ui::TextWrap::none,
+    overflow: ui::TextOverflow::clip,
     styles: filter_control_style(filter_display),
-    text_style: text::style(dim: true),
+    text_style: ui::text_style(dim: true),
   )
-  let results = scroll_box::new(
+  let results = ui::scroll_box(
     ctx,
-    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_grow: 1.0),
+    styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_grow: 1.0),
   )
-  let empty_text = text::new(
+  let empty_text = ui::text(
     ctx,
     content: "  No matches",
     selectable: false,
-    styles: empty_style(style::Display::none),
-    text_style: text::style(dim: true),
+    styles: empty_style(ui::Display::none),
+    text_style: ui::text_style(dim: true),
   )
   results.add(empty_text)
   root.add(query)
@@ -199,8 +194,8 @@ fn new(
       }),
     )
     picker.listeners.push(
-      query.on_key(fn(received: mut event::KeyEvent) {
-        if received.event_type != event::KeyEventType::release {
+      query.on_key(fn(received: mut cooper::KeyEvent) {
+        if received.event_type != cooper::KeyEventType::release {
           mut handled = true
           match {
             received.matches("down") => picker.move_cursor(1),
@@ -217,8 +212,8 @@ fn new(
     )
   } else {
     picker.listeners.push(
-      results.on_key(fn(received: mut event::KeyEvent) {
-        if received.event_type != event::KeyEventType::release {
+      results.on_key(fn(received: mut cooper::KeyEvent) {
+        if received.event_type != cooper::KeyEventType::release {
           mut handled = true
           match {
             received.matches("j") or received.matches("down") => picker.move_cursor(1),
@@ -239,49 +234,49 @@ fn new(
 
 impl PickerController {
   private fn mut create_row(option: Option) Row {
-    let root = box::new(self.context, styles: row_style(option))
-    let content = box::new(
+    let root = ui::box(self.context, styles: row_style(option))
+    let content = ui::box(
       self.context,
-      styles: style::new(
-        width: style::cells(1),
-        height: style::cells(row_height(option)),
+      styles: ui::style(
+        width: ui::cells(1),
+        height: ui::cells(row_height(option)),
         flex_grow: 1.0,
         background: self.palette.background,
-        padding: style::Edges{
-          top: style::cells(0),
-          right: style::cells(1),
-          bottom: style::cells(0),
-          left: style::cells(1),
+        padding: ui::Edges{
+          top: ui::cells(0),
+          right: ui::cells(1),
+          bottom: ui::cells(0),
+          left: ui::cells(1),
         },
       ),
     )
-    let label = text::new(
+    let label = ui::text(
       self.context,
       content: option.label,
       selectable: false,
-      wrap: text::TextWrap::none,
-      overflow: text::TextOverflow::ellipsis,
-      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+      wrap: ui::TextWrap::none,
+      overflow: ui::TextOverflow::ellipsis,
+      styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
     )
-    let description = text::new(
+    let description = ui::text(
       self.context,
       content: option.description,
       selectable: false,
-      wrap: text::TextWrap::none,
-      overflow: text::TextOverflow::ellipsis,
+      wrap: ui::TextWrap::none,
+      overflow: ui::TextOverflow::ellipsis,
       styles: description_style(option),
-      text_style: text::style(dim: true),
+      text_style: ui::text_style(dim: true),
     )
     content.add(label)
     content.add(description)
     root.add(content)
     let option_id = option.id
-    let remove_mouse = content.on_mouse(fn(received: mut event::MouseEvent) {
-      if received.event_type == event::MouseEventType::move {
+    let remove_mouse = content.on_mouse(fn(received: mut cooper::MouseEvent) {
+      if received.event_type == cooper::MouseEventType::move {
         self.set_hovered(option_id)
-      } else if received.event_type == event::MouseEventType::out {
+      } else if received.event_type == cooper::MouseEventType::out {
         self.clear_hovered(option_id)
-      } else if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
+      } else if received.event_type == cooper::MouseEventType::down and received.button == cooper::MouseButton::left {
         self.select_id(option_id)
         self.activate()
         received.stop_propagation()
@@ -338,8 +333,8 @@ impl PickerController {
     self.empty_text.set_style(
       empty_style(
         match self.filtered.size() == 0 {
-          true => style::Display::flex,
-          false => style::Display::none,
+          true => ui::Display::flex,
+          false => ui::Display::none,
         },
       ),
     )
@@ -379,9 +374,9 @@ impl PickerController {
           let surface_style = mut row.surface.style()
           surface_style.background = Maybe::new(background)
           row.surface.set_style(surface_style.@)
-          row.label.set_text_style(text::style(foreground: foreground, bold: active))
+          row.label.set_text_style(ui::text_style(foreground: foreground, bold: active))
           row.description.set_text_style(
-            text::style(foreground: foreground, dim: (not active) and not hovered),
+            ui::text_style(foreground: foreground, dim: (not active) and not hovered),
           )
         },
         _ => (),

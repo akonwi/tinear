@@ -1,6 +1,6 @@
 use ard/testing as assertions
 
-use cooper/color
+use cooper/ui
 
 // Tinear's theme is grounded in the host terminal palette.
 //
@@ -9,34 +9,34 @@ use cooper/color
 // source of truth on light and dark backgrounds. Tinear does not own a canvas
 // color or a dark/light mode.
 struct Theme {
-  foreground: color::Color,
-  background: color::Color,
-  item_hover_foreground: color::Color,
-  item_hover_background: color::Color,
-  item_active_foreground: color::Color,
-  item_active_background: color::Color,
-  border: color::Color,
-  accent: color::Color,
-  danger: color::Color,
-  warning: color::Color,
-  success: color::Color,
+  foreground: ui::Color,
+  background: ui::Color,
+  item_hover_foreground: ui::Color,
+  item_hover_background: ui::Color,
+  item_active_foreground: ui::Color,
+  item_active_background: ui::Color,
+  border: ui::Color,
+  accent: ui::Color,
+  danger: ui::Color,
+  warning: ui::Color,
+  success: ui::Color,
 }
 
 fn new() Theme {
   Theme{
     // Explicit defaults fill retained surfaces without owning a canvas color.
     // Interactive item states use host ANSI gray/blue with bright host text.
-    foreground: color::terminal_default(),
-    background: color::terminal_default(),
-    item_hover_foreground: color::indexed(15),
-    item_hover_background: color::indexed(8),
-    item_active_foreground: color::indexed(15),
-    item_active_background: color::indexed(4),
-    border: color::indexed(8),
-    accent: color::indexed(4),
-    danger: color::indexed(1),
-    warning: color::indexed(3),
-    success: color::indexed(2),
+    foreground: ui::terminal_default(),
+    background: ui::terminal_default(),
+    item_hover_foreground: ui::indexed(15),
+    item_hover_background: ui::indexed(8),
+    item_active_foreground: ui::indexed(15),
+    item_active_background: ui::indexed(4),
+    border: ui::indexed(8),
+    accent: ui::indexed(4),
+    danger: ui::indexed(1),
+    warning: ui::indexed(3),
+    success: ui::indexed(2),
   }
 }
 

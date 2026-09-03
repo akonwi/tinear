@@ -1,11 +1,5 @@
-use cooper/app
-use cooper/box
-use cooper/event
-use cooper/runtime
-use cooper/scroll_box
-use cooper/style
-use cooper/text
-use cooper/text_area
+use cooper
+use cooper/ui
 use go:strings
 use tinear/models/cache
 use tinear/models/shell as shell_model
@@ -14,52 +8,52 @@ use tinear/tui/application_shell
 use tinear/tui/shell_controller
 use tinear/tui/theme
 
-private fn basic_screen(ctx: mut runtime::Runtime, label: Str) shell_controller::Screen {
-  let root = box::new(
+private fn basic_screen(ctx: mut cooper::Runtime, label: Str) shell_controller::Screen {
+  let root = ui::box(
     ctx,
-    styles: style::new(
-      width: style::percent(100.0),
-      height: style::percent(100.0),
-      flex_direction: style::FlexDirection::column,
+    styles: ui::style(
+      width: ui::percent(100.0),
+      height: ui::percent(100.0),
+      flex_direction: ui::FlexDirection::column,
     ),
   )
   root.set_focusable(true)
-  root.add(text::new(ctx, content: label, selectable: true))
+  root.add(ui::text(ctx, content: label, selectable: true))
   shell_controller::Screen{
     root: root,
     focus: fn() {
       let _ = root.focus()
     },
-    handle_key: fn(received: mut event::KeyEvent) Bool {
+    handle_key: fn(received: mut cooper::KeyEvent) Bool {
       false
     },
     dispose: fn() {},
   }
 }
 
-private fn inbox_screen(ctx: mut runtime::Runtime) shell_controller::Screen {
-  let root = box::new(
+private fn inbox_screen(ctx: mut cooper::Runtime) shell_controller::Screen {
+  let root = ui::box(
     ctx,
-    styles: style::new(
-      width: style::percent(100.0),
-      height: style::percent(100.0),
-      flex_direction: style::FlexDirection::column,
+    styles: ui::style(
+      width: ui::percent(100.0),
+      height: ui::percent(100.0),
+      flex_direction: ui::FlexDirection::column,
     ),
   )
-  let copy = text::new(ctx, content: "COPY-ME", selectable: true)
-  let editor = text_area::new(
+  let copy = ui::text(ctx, content: "COPY-ME", selectable: true)
+  let editor = ui::text_area(
     ctx,
     placeholder: "Paste here…",
-    styles: style::new(width: style::percent(100.0), height: style::cells(3), flex_shrink: 0.0),
+    styles: ui::style(width: ui::percent(100.0), height: ui::cells(3), flex_shrink: 0.0),
   )
-  let status = text::new(ctx, content: "value: empty", selectable: false)
-  let scroll = scroll_box::new(
+  let status = ui::text(ctx, content: "value: empty", selectable: false)
+  let scroll = ui::scroll_box(
     ctx,
-    styles: style::new(width: style::percent(100.0), height: style::cells(5), flex_shrink: 0.0),
+    styles: ui::style(width: ui::percent(100.0), height: ui::cells(5), flex_shrink: 0.0),
   )
   mut index = 0
   while index < 20 {
-    scroll.add(text::new(ctx, content: "scroll row {index}", selectable: true))
+    scroll.add(ui::text(ctx, content: "scroll row {index}", selectable: true))
     index =+ 1
   }
   root.add(copy)
@@ -74,7 +68,7 @@ private fn inbox_screen(ctx: mut runtime::Runtime) shell_controller::Screen {
     focus: fn() {
       let _ = editor.focus()
     },
-    handle_key: fn(received: mut event::KeyEvent) Bool {
+    handle_key: fn(received: mut cooper::KeyEvent) Bool {
       false
     },
     dispose: fn() {},
@@ -82,7 +76,7 @@ private fn inbox_screen(ctx: mut runtime::Runtime) shell_controller::Screen {
 }
 
 fn main() {
-  let application = app::new(exit_on_ctrl_c: false).expect("create Tinear PTY fixture")
+  let application = cooper::app(exit_on_ctrl_c: false).expect("create Tinear PTY fixture")
   defer application.destroy()
   let ctx = application.context
   let palette = theme::new()
@@ -114,8 +108,8 @@ fn main() {
   })
   controller.focus_active()
 
-  let _ = application.on_key(fn(received: mut event::KeyEvent) {
-    if received.event_type != event::KeyEventType::release and received.matches("c", ctrl: true) {
+  let _ = application.on_key(fn(received: mut cooper::KeyEvent) {
+    if received.event_type != cooper::KeyEventType::release and received.matches("c", ctrl: true) {
       shell_host.dispose()
       application.destroy()
       received.prevent_default()

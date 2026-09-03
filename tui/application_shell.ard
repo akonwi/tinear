@@ -1,36 +1,33 @@
-use cooper/box
-use cooper/event
-use cooper/runtime
-use cooper/selection
-use cooper/style
+use cooper
+use cooper/ui
 use tinear/tui/modal_host
 use tinear/tui/scheduler
 use tinear/tui/theme as tinear_theme
 use tinear/tui/toast_host
 
 struct ApplicationShell {
-  root: mut box::Box,
-  screen_host: mut box::Box,
+  root: mut ui::Box,
+  screen_host: mut ui::Box,
   modal: mut modal_host::ModalHost,
   toasts: mut toast_host::ToastHost,
-  current_screen: (mut box::Box)?,
+  current_screen: (mut ui::Box)?,
   current_dispose: fn()?,
-  context: mut runtime::Runtime,
+  context: mut cooper::Runtime,
   disposed: Bool,
 }
 
-fn new(ctx: mut runtime::Runtime, palette: tinear_theme::Theme, schedule: scheduler::Schedule) mut ApplicationShell {
-  let root = box::new(
+fn new(ctx: mut cooper::Runtime, palette: tinear_theme::Theme, schedule: scheduler::Schedule) mut ApplicationShell {
+  let root = ui::box(
     ctx,
-    styles: style::new(
-      position: style::Position::relative,
-      width: style::percent(100.0),
-      height: style::percent(100.0),
+    styles: ui::style(
+      position: ui::Position::relative,
+      width: ui::percent(100.0),
+      height: ui::percent(100.0),
     ),
   )
-  let screen_host = box::new(
+  let screen_host = ui::box(
     ctx,
-    styles: style::new(width: style::percent(100.0), height: style::percent(100.0)),
+    styles: ui::style(width: ui::percent(100.0), height: ui::percent(100.0)),
   )
   let modal = modal_host::new(ctx, palette)
   let toasts = toast_host::new(ctx, palette, schedule)
@@ -42,7 +39,7 @@ fn new(ctx: mut runtime::Runtime, palette: tinear_theme::Theme, schedule: schedu
     screen_host: screen_host,
     modal: modal,
     toasts: toasts,
-    current_screen: Maybe::new<mut box::Box>(),
+    current_screen: Maybe::new<mut ui::Box>(),
     current_dispose: Maybe::new<fn()>(),
     context: ctx,
     disposed: false,
@@ -50,13 +47,13 @@ fn new(ctx: mut runtime::Runtime, palette: tinear_theme::Theme, schedule: schedu
 }
 
 impl ApplicationShell {
-  fn mut set_screen(screen: mut box::Box, dispose: fn()) {
+  fn mut set_screen(screen: mut ui::Box, dispose: fn()) {
     if self.disposed {
       panic("cannot set the screen on a disposed application shell")
     }
     let previous = self.current_screen
     let previous_dispose = self.current_dispose
-    self.current_screen = Maybe::new<mut box::Box>(screen)
+    self.current_screen = Maybe::new<mut ui::Box>(screen)
     self.current_dispose = Maybe::new<fn()>(dispose)
 
     match previous {
@@ -76,8 +73,8 @@ impl ApplicationShell {
     self.screen_host.add(screen)
   }
 
-  fn mut handle_key(received: mut event::KeyEvent, current_selection: selection::Selection?) Bool {
-    if self.disposed or received.event_type == event::KeyEventType::release {
+  fn mut handle_key(received: mut cooper::KeyEvent, current_selection: ui::Selection?) Bool {
+    if self.disposed or received.event_type == cooper::KeyEventType::release {
       false
     } else if self.modal.is_open() and received.matches("escape") {
       let _ = self.modal.dismiss()
@@ -106,7 +103,7 @@ impl ApplicationShell {
       self.disposed = true
       let previous = self.current_screen
       let previous_dispose = self.current_dispose
-      self.current_screen = Maybe::new<mut box::Box>()
+      self.current_screen = Maybe::new<mut ui::Box>()
       self.current_dispose = Maybe::new<fn()>()
       match previous {
         old => {

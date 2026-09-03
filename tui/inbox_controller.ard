@@ -1,9 +1,5 @@
-use cooper/box
-use cooper/event
-use cooper/runtime
-use cooper/scroll_box
-use cooper/style
-use cooper/text
+use cooper
+use cooper/ui
 use go:strings
 use tinear/models/inbox
 use tinear/models/issue_state
@@ -16,10 +12,10 @@ use tinear/tui/timestamp
 
 struct Row {
   notification_id: Str,
-  root: mut box::Box,
-  surface: mut box::Box,
-  title: mut text::Text,
-  subtitle: mut text::Text,
+  root: mut ui::Box,
+  surface: mut ui::Box,
+  title: mut ui::Text,
+  subtitle: mut ui::Text,
   remove_mouse: fn(),
 }
 
@@ -29,12 +25,12 @@ struct CachedDetail {
 }
 
 struct InboxController {
-  root: mut box::Box,
-  context: mut runtime::Runtime,
-  list_scroll: mut scroll_box::ScrollBox,
-  detail_scroll: mut scroll_box::ScrollBox,
-  list_status: mut text::Text,
-  detail_text: mut text::Text,
+  root: mut ui::Box,
+  context: mut cooper::Runtime,
+  list_scroll: mut ui::ScrollBox,
+  detail_scroll: mut ui::ScrollBox,
+  list_status: mut ui::Text,
+  detail_text: mut ui::Text,
   rows: [Row],
   items: [inbox::Item],
   reported_count: Int,
@@ -55,87 +51,87 @@ struct InboxController {
   palette: tinear_theme::Theme,
 }
 
-private fn status_style(display: style::Display) style::Style {
-  style::new(
+private fn status_style(display: ui::Display) ui::Style {
+  ui::style(
     display: display,
-    width: style::percent(100.0),
-    height: style::cells(1),
+    width: ui::percent(100.0),
+    height: ui::cells(1),
     flex_shrink: 0.0,
   )
 }
 
-private fn detail_content(item: inbox::Item, detail: inbox::Detail, palette: tinear_theme::Theme) text::StyledText {
-  let spans = mut List::new<text::Span>()
+private fn detail_content(item: inbox::Item, detail: inbox::Detail, palette: tinear_theme::Theme) ui::StyledText {
+  let spans = mut List::new<ui::Span>()
   spans.push(
-    text::span(
+    ui::span(
       "{item.actor_name} {item.type_label}",
-      style: text::span_style(foreground: palette.accent, bold: true),
+      style: ui::span_style(foreground: palette.accent, bold: true),
     ),
   )
   let identity = match detail.team_key.is_empty() {
     true => detail.identifier,
     false => "{detail.identifier} · {detail.team_key}",
   }
-  spans.push(text::span("\n{identity}", style: text::span_style(dim: true)))
-  spans.push(text::span("\n\n{detail.title}", style: text::span_style(bold: true)))
+  spans.push(ui::span("\n{identity}", style: ui::span_style(dim: true)))
+  spans.push(ui::span("\n\n{detail.title}", style: ui::span_style(bold: true)))
   spans.push(
-    text::span(
+    ui::span(
       "\n\n── Details ─────────────────────────",
-      style: text::span_style(dim: true),
+      style: ui::span_style(dim: true),
     ),
   )
   if not detail.state_name.is_empty() {
-    spans.push(text::span("\nStatus      ", style: text::span_style(dim: true)))
-    spans.push(text::span(detail.state_name))
+    spans.push(ui::span("\nStatus      ", style: ui::span_style(dim: true)))
+    spans.push(ui::span(detail.state_name))
   }
   if (not detail.assignee_name.is_empty()) and not detail.assignee_name == "—" {
-    spans.push(text::span("\nAssignee    ", style: text::span_style(dim: true)))
-    spans.push(text::span(detail.assignee_name))
+    spans.push(ui::span("\nAssignee    ", style: ui::span_style(dim: true)))
+    spans.push(ui::span(detail.assignee_name))
   }
   let priority = issue_state::priority_label(detail.priority)
   if not priority == "—" {
-    spans.push(text::span("\nPriority    ", style: text::span_style(dim: true)))
-    spans.push(text::span(priority))
+    spans.push(ui::span("\nPriority    ", style: ui::span_style(dim: true)))
+    spans.push(ui::span(priority))
   }
   if not detail.team_name.is_empty() {
-    spans.push(text::span("\nTeam        ", style: text::span_style(dim: true)))
-    spans.push(text::span(detail.team_name))
+    spans.push(ui::span("\nTeam        ", style: ui::span_style(dim: true)))
+    spans.push(ui::span(detail.team_name))
   }
   if not detail.project_name.is_empty() and not detail.project_name == "—" {
-    spans.push(text::span("\nProject     ", style: text::span_style(dim: true)))
-    spans.push(text::span(detail.project_name))
+    spans.push(ui::span("\nProject     ", style: ui::span_style(dim: true)))
+    spans.push(ui::span(detail.project_name))
   }
   if not detail.description.is_empty() {
     spans.push(
-      text::span(
+      ui::span(
         "\n\n── Description ─────────────────────",
-        style: text::span_style(dim: true),
+        style: ui::span_style(dim: true),
       ),
     )
-    spans.push(text::span("\n{detail.description}"))
+    spans.push(ui::span("\n{detail.description}"))
   }
   match detail.triggering_comment {
     comment => {
       spans.push(
-        text::span(
+        ui::span(
           "\n\n── Activity ────────────────────────",
-          style: text::span_style(dim: true),
+          style: ui::span_style(dim: true),
         ),
       )
       let header = match comment.created_at.is_empty() {
         true => comment.author,
         false => "{comment.author} · {timestamp::friendly(comment.created_at)}",
       }
-      spans.push(text::span("\n{header}", style: text::span_style(dim: true)))
-      spans.push(text::span("\n{comment.body}"))
+      spans.push(ui::span("\n{header}", style: ui::span_style(dim: true)))
+      spans.push(ui::span("\n{comment.body}"))
     },
     _ => (),
   }
   if detail.comments.size() > 0 {
     spans.push(
-      text::span(
+      ui::span(
         "\n\n── Comments ────────────────────────",
-        style: text::span_style(dim: true),
+        style: ui::span_style(dim: true),
       ),
     )
     for comment in detail.comments {
@@ -143,63 +139,63 @@ private fn detail_content(item: inbox::Item, detail: inbox::Detail, palette: tin
         true => comment.author,
         false => "{comment.author} · {timestamp::friendly(comment.created_at)}",
       }
-      spans.push(text::span("\n{header}", style: text::span_style(dim: true)))
-      spans.push(text::span("\n{comment.body}\n"))
+      spans.push(ui::span("\n{header}", style: ui::span_style(dim: true)))
+      spans.push(ui::span("\n{comment.body}\n"))
     }
   }
   if detail.history.size() > 0 {
     spans.push(
-      text::span(
+      ui::span(
         "\n\n── History ─────────────────────────",
-        style: text::span_style(dim: true),
+        style: ui::span_style(dim: true),
       ),
     )
     for history in detail.history {
       spans.push(
-        text::span(
+        ui::span(
           "\n{history.from_state} → {history.to_state}",
-          style: text::span_style(dim: true),
+          style: ui::span_style(dim: true),
         ),
       )
     }
   }
-  text::styled_text(spans.@)
+  ui::styled_text(spans.@)
 }
 
-private fn detail_preview(item: inbox::Item, palette: tinear_theme::Theme) text::StyledText {
-  text::styled_text(
+private fn detail_preview(item: inbox::Item, palette: tinear_theme::Theme) ui::StyledText {
+  ui::styled_text(
     [
-      text::span(
+      ui::span(
         "{item.actor_name} {item.type_label}",
-        style: text::span_style(foreground: palette.accent, bold: true),
+        style: ui::span_style(foreground: palette.accent, bold: true),
       ),
-      text::span("\n{item.target_id}", style: text::span_style(dim: true)),
-      text::span("\n\n{item.title}", style: text::span_style(bold: true)),
-      text::span("\n\nLoading details…", style: text::span_style(dim: true)),
+      ui::span("\n{item.target_id}", style: ui::span_style(dim: true)),
+      ui::span("\n\n{item.title}", style: ui::span_style(bold: true)),
+      ui::span("\n\nLoading details…", style: ui::span_style(dim: true)),
     ],
   )
 }
 
-private fn detail_error(item: inbox::Item, message: Str, palette: tinear_theme::Theme) text::StyledText {
-  text::styled_text(
+private fn detail_error(item: inbox::Item, message: Str, palette: tinear_theme::Theme) ui::StyledText {
+  ui::styled_text(
     [
-      text::span(
+      ui::span(
         "{item.actor_name} {item.type_label}",
-        style: text::span_style(foreground: palette.accent, bold: true),
+        style: ui::span_style(foreground: palette.accent, bold: true),
       ),
-      text::span("\n{item.target_id}", style: text::span_style(dim: true)),
-      text::span("\n\n{item.title}", style: text::span_style(bold: true)),
-      text::span(
+      ui::span("\n{item.target_id}", style: ui::span_style(dim: true)),
+      ui::span("\n\n{item.title}", style: ui::span_style(bold: true)),
+      ui::span(
         "\n\n! Couldn't load details",
-        style: text::span_style(foreground: palette.danger, bold: true),
+        style: ui::span_style(foreground: palette.danger, bold: true),
       ),
-      text::span("\n{message}", style: text::span_style(dim: true)),
+      ui::span("\n{message}", style: ui::span_style(dim: true)),
     ],
   )
 }
 
 fn new(
-  ctx: mut runtime::Runtime,
+  ctx: mut cooper::Runtime,
   palette: tinear_theme::Theme,
   service: inbox_service::Service,
   schedule: scheduler::Schedule,
@@ -207,77 +203,77 @@ fn new(
   open_url: fn(Str),
   notify_error: fn(Str, Str),
 ) mut InboxController {
-  let root = box::new(
+  let root = ui::box(
     ctx,
-    styles: style::new(
-      width: style::percent(100.0),
-      height: style::percent(100.0),
-      flex_direction: style::FlexDirection::row,
-      overflow: style::Overflow::hidden,
+    styles: ui::style(
+      width: ui::percent(100.0),
+      height: ui::percent(100.0),
+      flex_direction: ui::FlexDirection::row,
+      overflow: ui::Overflow::hidden,
     ),
   )
-  let list_scroll = scroll_box::new(
+  let list_scroll = ui::scroll_box(
     ctx,
-    styles: style::new(
-      width: style::percent(35.0),
-      height: style::percent(100.0),
+    styles: ui::style(
+      width: ui::percent(35.0),
+      height: ui::percent(100.0),
       flex_shrink: 0.0,
-      padding: style::Edges{
-        top: style::cells(0),
-        right: style::cells(1),
-        bottom: style::cells(0),
-        left: style::cells(0),
+      padding: ui::Edges{
+        top: ui::cells(0),
+        right: ui::cells(1),
+        bottom: ui::cells(0),
+        left: ui::cells(0),
       },
     ),
   )
-  let separator = text::new(
+  let separator = ui::text(
     ctx,
     content: strings::Repeat("│\n", 256),
     selectable: false,
-    wrap: text::TextWrap::none,
-    overflow: text::TextOverflow::clip,
-    styles: style::new(width: style::cells(1), height: style::percent(100.0), flex_shrink: 0.0),
-    text_style: text::style(dim: true),
+    wrap: ui::TextWrap::none,
+    overflow: ui::TextOverflow::clip,
+    styles: ui::style(width: ui::cells(1), height: ui::percent(100.0), flex_shrink: 0.0),
+    text_style: ui::text_style(dim: true),
   )
-  let detail_pane = box::new(
+  let detail_pane = ui::box(
     ctx,
-    styles: style::new(
-      width: style::cells(0),
-      height: style::percent(100.0),
+    styles: ui::style(
+      width: ui::cells(0),
+      height: ui::percent(100.0),
       flex_grow: 1.0,
       flex_shrink: 1.0,
-      min_width: style::cells(0),
-      padding: style::Edges{
-        top: style::cells(0),
-        right: style::cells(1),
-        bottom: style::cells(0),
-        left: style::cells(1),
+      min_width: ui::cells(0),
+      padding: ui::Edges{
+        top: ui::cells(0),
+        right: ui::cells(1),
+        bottom: ui::cells(0),
+        left: ui::cells(1),
       },
     ),
   )
-  let detail_scroll = scroll_box::new(
+  let detail_scroll = ui::scroll_box(
     ctx,
-    styles: style::new(
-      width: style::percent(100.0),
-      height: style::cells(0),
+    styles: ui::style(
+      width: ui::percent(100.0),
+      height: ui::cells(0),
       flex_grow: 1.0,
-      min_height: style::cells(0),
+      min_height: ui::cells(0),
     ),
   )
-  let list_status = text::new(
+  let list_status = ui::text(
     ctx,
     content: "Loading Inbox…",
     selectable: false,
-    styles: status_style(style::Display::flex),
-    text_style: text::style(dim: true),
+    styles: status_style(ui::Display::flex),
+    text_style: ui::text_style(dim: true),
   )
-  let detail_text = text::new(
+  let detail_text = ui::text(
     ctx,
     content: "Select a notification",
     selectable: true,
-    styles: style::new(width: style::percent(100.0), flex_shrink: 0.0),
-    wrap: text::TextWrap::word,
-    text_style: text::style(dim: true),
+    styles: ui::style(width: ui::percent(100.0), flex_shrink: 0.0),
+    wrap: ui::TextWrap::word,
+    text_style: ui::text_style(dim: true),
   )
   list_scroll.add(list_status)
   detail_scroll.add(detail_text)
@@ -335,58 +331,58 @@ impl InboxController {
   }
 
   private fn mut create_row(item: inbox::Item) Row {
-    let root = box::new(
+    let root = ui::box(
       self.context,
-      styles: style::new(
-        width: style::percent(100.0),
-        height: style::cells(3),
+      styles: ui::style(
+        width: ui::percent(100.0),
+        height: ui::cells(3),
         flex_shrink: 0.0,
-        flex_direction: style::FlexDirection::row,
-        overflow: style::Overflow::hidden,
+        flex_direction: ui::FlexDirection::row,
+        overflow: ui::Overflow::hidden,
       ),
     )
-    let content = box::new(
+    let content = ui::box(
       self.context,
-      styles: style::new(
-        width: style::cells(1),
-        height: style::cells(2),
+      styles: ui::style(
+        width: ui::cells(1),
+        height: ui::cells(2),
         flex_grow: 1.0,
         background: self.palette.background,
-        padding: style::Edges{
-          top: style::cells(0),
-          right: style::cells(0),
-          bottom: style::cells(0),
-          left: style::cells(1),
+        padding: ui::Edges{
+          top: ui::cells(0),
+          right: ui::cells(0),
+          bottom: ui::cells(0),
+          left: ui::cells(1),
         },
       ),
     )
-    let title = text::new(
+    let title = ui::text(
       self.context,
       content: item.title,
       selectable: false,
-      wrap: text::TextWrap::none,
-      overflow: text::TextOverflow::ellipsis,
-      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+      wrap: ui::TextWrap::none,
+      overflow: ui::TextOverflow::ellipsis,
+      styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
     )
-    let subtitle = text::new(
+    let subtitle = ui::text(
       self.context,
       content: "{item.actor_name} {item.type_label} · {item.target_id}",
       selectable: false,
-      wrap: text::TextWrap::none,
-      overflow: text::TextOverflow::ellipsis,
-      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
-      text_style: text::style(dim: true),
+      wrap: ui::TextWrap::none,
+      overflow: ui::TextOverflow::ellipsis,
+      styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
+      text_style: ui::text_style(dim: true),
     )
     content.add(title)
     content.add(subtitle)
     root.add(content)
     let notification_id = item.notification_id
-    let remove_mouse = content.on_mouse(fn(received: mut event::MouseEvent) {
-      if received.event_type == event::MouseEventType::move {
+    let remove_mouse = content.on_mouse(fn(received: mut cooper::MouseEvent) {
+      if received.event_type == cooper::MouseEventType::move {
         self.set_hovered(notification_id)
-      } else if received.event_type == event::MouseEventType::out {
+      } else if received.event_type == cooper::MouseEventType::out {
         self.clear_hovered(notification_id)
-      } else if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
+      } else if received.event_type == cooper::MouseEventType::down and received.button == cooper::MouseButton::left {
         self.select_id(notification_id)
         received.stop_propagation()
       }
@@ -472,9 +468,9 @@ impl InboxController {
       let surface_style = mut row.surface.style()
       surface_style.background = Maybe::new(background)
       row.surface.set_style(surface_style.@)
-      row.title.set_text_style(text::style(foreground: foreground, bold: active))
+      row.title.set_text_style(ui::text_style(foreground: foreground, bold: active))
       row.subtitle.set_text_style(
-        text::style(foreground: foreground, dim: (not active) and not hovered),
+        ui::text_style(foreground: foreground, dim: (not active) and not hovered),
       )
     }
   }
@@ -488,15 +484,15 @@ impl InboxController {
     )
     self.list_status.set_text_style(
       match error {
-        true => text::style(foreground: self.palette.danger, bold: true),
-        false => text::style(dim: true),
+        true => ui::text_style(foreground: self.palette.danger, bold: true),
+        false => ui::text_style(dim: true),
       },
     )
     self.list_status.set_style(
       status_style(
         match message.is_empty() {
-          true => style::Display::none,
-          false => style::Display::flex,
+          true => ui::Display::none,
+          false => ui::Display::flex,
         },
       ),
     )
@@ -525,7 +521,7 @@ impl InboxController {
       0 => {
         self.show_list_status("No notifications", false)
         self.detail_notification_id = ""
-        self.detail_text.set_text_style(text::style(dim: true))
+        self.detail_text.set_text_style(ui::text_style(dim: true))
         self.detail_text.set_content("You're all caught up.")
       },
       _ => {
@@ -607,7 +603,7 @@ impl InboxController {
         let generation = self.detail_generation
         let notification_id = item.notification_id
         self.detail_notification_id = notification_id
-        self.detail_text.set_text_style(text::style())
+        self.detail_text.set_text_style(ui::text_style())
         let cached = self.cached_detail(notification_id)
         let had_cached = cached.is_some()
         match cached {
@@ -639,7 +635,7 @@ impl InboxController {
       },
       _ => {
         self.detail_notification_id = ""
-        self.detail_text.set_text_style(text::style(dim: true))
+        self.detail_text.set_text_style(ui::text_style(dim: true))
         self.detail_text.set_content("Select a notification")
       },
     }
@@ -729,7 +725,7 @@ impl InboxController {
             self.detail_generation =+ 1
             self.detail_notification_id = ""
             self.show_list_status("No notifications", false)
-            self.detail_text.set_text_style(text::style(dim: true))
+            self.detail_text.set_text_style(ui::text_style(dim: true))
             self.detail_text.set_content("You're all caught up.")
           },
           _ => self.load_selected_detail(),
@@ -755,8 +751,8 @@ impl InboxController {
     let _ = self.list_scroll.focus()
   }
 
-  fn mut handle_key(received: mut event::KeyEvent) Bool {
-    if self.scope.disposed or received.event_type == event::KeyEventType::release {
+  fn mut handle_key(received: mut cooper::KeyEvent) Bool {
+    if self.scope.disposed or received.event_type == cooper::KeyEventType::release {
       false
     } else {
       mut handled = true
@@ -791,7 +787,7 @@ impl InboxController {
       focus: fn() {
         self.focus()
       },
-      handle_key: fn(received: mut event::KeyEvent) Bool {
+      handle_key: fn(received: mut cooper::KeyEvent) Bool {
         self.handle_key(received)
       },
       dispose: fn() {

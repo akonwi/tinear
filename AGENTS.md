@@ -4,10 +4,10 @@
 
 - **Do not run `git commit` without explicit direction from the user.**
 
-Tinear is being rewritten from scratch as an Ard application using
+Tinear is an Ard application using
 [Cooper](https://github.com/akonwi/cooper), an imperative retained-mode TUI
-framework. The previous vaxis/ui implementation remains available on the
-`main` branch and should be consulted with `git show main:<path>` rather than
+framework. The previous vaxis/ui implementation remains available at commit
+`84ff69a` and should be consulted with `git show 84ff69a:<path>` rather than
 restored wholesale.
 
 ## Build, run, and test
@@ -24,6 +24,10 @@ The Ard dependency is pinned to a remote Cooper commit; `../cooper` remains the 
 ## Architecture guidance
 
 - Use Cooper controls directly; do not add a widget or binding layer.
+- Application and custom-view modules should normally import only `cooper` for
+  App, Runtime, and events plus `cooper/ui` for controls and view values. Keep
+  focused imports such as `cooper/animation`, `cooper/testing`, or
+  `cooper/event` only for specialized APIs and test event constructors.
 - Construct retained controls once and mutate them through setters.
 - Build the initial tree before starting the application.
 - After startup, mutate controls only from Cooper callbacks or through

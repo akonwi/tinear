@@ -1,11 +1,9 @@
 use ard/testing as assertions
 
-use cooper/box
+use cooper
 use cooper/event
-use cooper/runtime
-use cooper/style
 use cooper/testing
-use cooper/text
+use cooper/ui
 use tinear/models/cache
 use tinear/models/shell as shell_model
 use tinear/models/tabs
@@ -22,8 +20,8 @@ private struct Counter {
   value: Int,
 }
 
-private fn modifiers() event::Modifiers {
-  event::Modifiers{
+private fn modifiers() cooper::Modifiers {
+  cooper::Modifiers{
     shift: false,
     ctrl: false,
     alt: false,
@@ -31,8 +29,8 @@ private fn modifiers() event::Modifiers {
   }
 }
 
-private fn key(value: Str) mut event::KeyEvent {
-  event::key(value, value, event::KeyEventType::press, modifiers())
+private fn key(value: Str) mut cooper::KeyEvent {
+  event::key(value, value, cooper::KeyEventType::press, modifiers())
 }
 
 test fn tab_chips_use_intrinsic_cell_width_with_a_document_cap() Void!Str {
@@ -59,24 +57,24 @@ test fn tab_chips_use_intrinsic_cell_width_with_a_document_cap() Void!Str {
   )
 }
 
-private fn fake_screen(ctx: mut runtime::Runtime, label: Str, state: mut ScreenState) shell_controller::Screen {
-  let root = box::new(
+private fn fake_screen(ctx: mut cooper::Runtime, label: Str, state: mut ScreenState) shell_controller::Screen {
+  let root = ui::box(
     ctx,
-    styles: style::new(
-      width: style::percent(100.0),
-      height: style::percent(100.0),
-      flex_direction: style::FlexDirection::row,
+    styles: ui::style(
+      width: ui::percent(100.0),
+      height: ui::percent(100.0),
+      flex_direction: ui::FlexDirection::row,
     ),
   )
   root.set_focusable(true)
-  root.add(text::new(ctx, content: label))
+  root.add(ui::text(ctx, content: label))
   shell_controller::Screen{
     root: root,
     focus: fn() {
       state.focuses =+ 1
       let _ = root.focus()
     },
-    handle_key: fn(received: mut event::KeyEvent) Bool {
+    handle_key: fn(received: mut cooper::KeyEvent) Bool {
       if received.matches("x") {
         state.handled =+ 1
         true
@@ -90,7 +88,7 @@ private fn fake_screen(ctx: mut runtime::Runtime, label: Str, state: mut ScreenS
   }
 }
 
-private fn dynamic_factory(ctx: mut runtime::Runtime, created: mut Counter, disposed: mut Counter) fn(tabs::TabRef) shell_controller::Screen {
+private fn dynamic_factory(ctx: mut cooper::Runtime, created: mut Counter, disposed: mut Counter) fn(tabs::TabRef) shell_controller::Screen {
   fn(reference: tabs::TabRef) shell_controller::Screen {
     created.value =+ 1
     let state = mut ScreenState{
@@ -112,7 +110,7 @@ private fn dynamic_factory(ctx: mut runtime::Runtime, created: mut Counter, disp
 }
 
 private fn tracked_dynamic_factory(
-  ctx: mut runtime::Runtime,
+  ctx: mut cooper::Runtime,
   created: mut Counter,
   disposed: mut Counter,
   handled: mut Counter,
@@ -128,7 +126,7 @@ private fn tracked_dynamic_factory(
     shell_controller::Screen{
       root: base.root,
       focus: base.focus,
-      handle_key: fn(received: mut event::KeyEvent) Bool {
+      handle_key: fn(received: mut cooper::KeyEvent) Bool {
         if received.matches("x") {
           handled.value =+ 1
           true
@@ -177,7 +175,7 @@ test fn shell_switches_persistent_tabs_and_persists_selection() Void!Str {
   application.root.add(controller.root)
   application.render()
   try assertions::assert(
-    controller.inbox.root.style().flex_direction == style::FlexDirection::row,
+    controller.inbox.root.style().flex_direction == ui::FlexDirection::row,
     "shell visibility changes must preserve the screen's own layout style",
   )
   try testing::assert_contains(application.frame().text(), "Inbox body")
@@ -197,7 +195,7 @@ test fn shell_switches_persistent_tabs_and_persists_selection() Void!Str {
     "tab bar should end with a dim rule",
   )
   try assertions::assert(
-    controller.board.root.style().display == style::Display::none,
+    controller.board.root.style().display == ui::Display::none,
     "board should stay mounted but hidden",
   )
   let first_hint = application.frame().cell(0, 15).expect("left-aligned footer hint")
@@ -232,7 +230,7 @@ test fn shell_switches_persistent_tabs_and_persists_selection() Void!Str {
   try assertions::assert(snapshots.size() == 1, "selection should persist")
   try testing::assert_contains(application.frame().text(), "Board body")
   try assertions::assert(
-    controller.inbox.root.style().display == style::Display::none,
+    controller.inbox.root.style().display == ui::Display::none,
     "Inbox should remain mounted but hidden",
   )
   for size in [[60, 20], [100, 30], [160, 40]] {
@@ -278,7 +276,7 @@ test fn shell_restores_opens_reuses_retitles_and_closes_dynamic_tabs() Void!Str 
   application.root.add(controller.root)
   try assertions::assert(created.value == 1, "restored tab should create one retained controller")
   try assertions::assert(
-    controller.dynamic_screens.at(0).expect("restored").screen.root.style().display == style::Display::none,
+    controller.dynamic_screens.at(0).expect("restored").screen.root.style().display == ui::Display::none,
     "inactive restored tab should be hidden",
   )
 
@@ -349,8 +347,8 @@ test fn shell_routes_mouse_global_and_active_commands() Void!Str {
       event::key(
         "?",
         "?",
-        event::KeyEventType::press,
-        event::Modifiers{
+        cooper::KeyEventType::press,
+        cooper::Modifiers{
           shift: true,
           ctrl: false,
           alt: false,

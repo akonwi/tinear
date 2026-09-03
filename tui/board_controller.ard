@@ -1,10 +1,5 @@
-use cooper/box
-use cooper/event
-use cooper/geometry
-use cooper/runtime
-use cooper/scroll_box
-use cooper/style
-use cooper/text
+use cooper
+use cooper/ui
 use tinear/models/issue_state
 use tinear/models/issues
 use tinear/services/board_service
@@ -23,35 +18,35 @@ let DROP_COLUMN_RULE: Str = "━━━━━━━━━━━━━━━━━
 
 struct CardRecord {
   issue_id: Str,
-  root: mut box::Box,
-  surface: mut box::Box,
-  id_line: mut text::Text,
-  title: mut text::Text,
-  metadata: mut text::Text,
+  root: mut ui::Box,
+  surface: mut ui::Box,
+  id_line: mut ui::Text,
+  title: mut ui::Text,
+  metadata: mut ui::Text,
   remove_mouse: fn(),
 }
 
 struct ColumnRecord {
   key: Str,
-  root: mut box::Box,
-  header_label: mut text::Text,
-  header_rule: mut text::Text,
-  scroll: mut scroll_box::ScrollBox,
+  root: mut ui::Box,
+  header_label: mut ui::Text,
+  header_rule: mut ui::Text,
+  scroll: mut ui::ScrollBox,
   cards: [CardRecord],
   remove_mouse: fn(),
 }
 
 struct BoardController {
-  root: mut box::Box,
-  context: mut runtime::Runtime,
-  status: mut text::Text,
-  outer_scroll: mut scroll_box::ScrollBox,
-  columns_row: mut box::Box,
-  drag_layer: mut box::Box,
-  drag_ghost: mut box::Box,
-  drag_ghost_id: mut text::Text,
-  drag_ghost_title: mut text::Text,
-  drag_ghost_metadata: mut text::Text,
+  root: mut ui::Box,
+  context: mut cooper::Runtime,
+  status: mut ui::Text,
+  outer_scroll: mut ui::ScrollBox,
+  columns_row: mut ui::Box,
+  drag_layer: mut ui::Box,
+  drag_ghost: mut ui::Box,
+  drag_ghost_id: mut ui::Text,
+  drag_ghost_title: mut ui::Text,
+  drag_ghost_metadata: mut ui::Text,
   remove_drag_layer_mouse: fn(),
   remove_focus_blur: fn(),
   remove_terminal_focus: fn(),
@@ -96,33 +91,33 @@ private fn column_key(column: issues::BoardColumn) Str {
   column.raw_state_name
 }
 
-private fn status_style(display: style::Display) style::Style {
-  style::new(
+private fn status_style(display: ui::Display) ui::Style {
+  ui::style(
     display: display,
-    width: style::percent(100.0),
-    height: style::cells(1),
+    width: ui::percent(100.0),
+    height: ui::cells(1),
     flex_shrink: 0.0,
   )
 }
 
-private fn board_style(display: style::Display) style::Style {
-  style::new(
+private fn board_style(display: ui::Display) ui::Style {
+  ui::style(
     display: display,
-    width: style::percent(100.0),
-    height: style::cells(1),
+    width: ui::percent(100.0),
+    height: ui::cells(1),
     flex_grow: 1.0,
   )
 }
 
-private fn drag_layer_style(display: style::Display) style::Style {
-  style::new(
+private fn drag_layer_style(display: ui::Display) ui::Style {
+  ui::style(
     display: display,
-    position: style::Position::absolute,
-    left: style::cells(0),
-    top: style::cells(0),
-    width: style::percent(100.0),
-    height: style::percent(100.0),
-    overflow: style::Overflow::hidden,
+    position: ui::Position::absolute,
+    left: ui::cells(0),
+    top: ui::cells(0),
+    width: ui::percent(100.0),
+    height: ui::percent(100.0),
+    overflow: ui::Overflow::hidden,
     z_index: 100,
   )
 }
@@ -133,20 +128,20 @@ private fn drag_ghost_style(
   width: Int,
   height: Int,
   palette: tinear_theme::Theme,
-) style::Style {
-  style::new(
-    position: style::Position::absolute,
-    left: style::cells(left),
-    top: style::cells(top),
-    width: style::cells(width),
-    height: style::cells(height),
-    padding: style::Edges{
-      top: style::cells(0),
-      right: style::cells(1),
-      bottom: style::cells(0),
-      left: style::cells(1),
+) ui::Style {
+  ui::style(
+    position: ui::Position::absolute,
+    left: ui::cells(left),
+    top: ui::cells(top),
+    width: ui::cells(width),
+    height: ui::cells(height),
+    padding: ui::Edges{
+      top: ui::cells(0),
+      right: ui::cells(1),
+      bottom: ui::cells(0),
+      left: ui::cells(1),
     },
-    overflow: style::Overflow::hidden,
+    overflow: ui::Overflow::hidden,
     background: palette.item_active_background,
     z_index: 1,
   )
@@ -180,31 +175,31 @@ private fn clamp_position(value: Int, maximum: Int) Int {
   }
 }
 
-private fn columns_row_style(count: Int) style::Style {
+private fn columns_row_style(count: Int) ui::Style {
   let gaps = match count > 0 {
     true => count - 1,
     false => 0,
   }
-  style::new(
-    width: style::cells(count * COLUMN_WIDTH + gaps * COLUMN_GAP),
-    height: style::percent(100.0),
-    flex_direction: style::FlexDirection::row,
-    align_items: style::Align::stretch,
-    gap: style::cells(COLUMN_GAP),
+  ui::style(
+    width: ui::cells(count * COLUMN_WIDTH + gaps * COLUMN_GAP),
+    height: ui::percent(100.0),
+    flex_direction: ui::FlexDirection::row,
+    align_items: ui::Align::stretch,
+    gap: ui::cells(COLUMN_GAP),
   )
 }
 
-private fn priority_style(priority: Int?, palette: tinear_theme::Theme) text::SpanStyle {
+private fn priority_style(priority: Int?, palette: tinear_theme::Theme) ui::SpanStyle {
   match priority {
     value => {
       match value {
-        1 => text::span_style(foreground: palette.danger, bold: true),
-        2 => text::span_style(foreground: palette.warning, bold: true),
-        4 => text::span_style(dim: true),
-        _ => text::span_style(),
+        1 => ui::span_style(foreground: palette.danger, bold: true),
+        2 => ui::span_style(foreground: palette.warning, bold: true),
+        4 => ui::span_style(dim: true),
+        _ => ui::span_style(),
       }
     },
-    _ => text::span_style(),
+    _ => ui::span_style(),
   }
 }
 
@@ -224,7 +219,7 @@ private fn id_content(
   palette: tinear_theme::Theme,
   active: Bool?,
   hovered: Bool?,
-) text::StyledText {
+) ui::StyledText {
   let is_active = active.or(false)
   let is_hovered = hovered.or(false)
   let foreground = match {
@@ -232,31 +227,31 @@ private fn id_content(
     is_hovered => palette.item_hover_foreground,
     _ => palette.foreground,
   }
-  text::styled_text(
+  ui::styled_text(
     [
-      text::span(
+      ui::span(
         issue_state::priority_glyph(issue.priority),
         style: match is_active or is_hovered {
-          true => text::span_style(foreground: foreground, bold: true),
+          true => ui::span_style(foreground: foreground, bold: true),
           false => priority_style(issue.priority, palette),
         },
       ),
-      text::span(" {issue.identifier}", style: text::span_style(foreground: foreground, bold: true)),
+      ui::span(" {issue.identifier}", style: ui::span_style(foreground: foreground, bold: true)),
     ],
   )
 }
 
-private fn header_content(column: issues::BoardColumn, selected: Bool, palette: tinear_theme::Theme) text::StyledText {
-  text::styled_text(
+private fn header_content(column: issues::BoardColumn, selected: Bool, palette: tinear_theme::Theme) ui::StyledText {
+  ui::styled_text(
     [
-      text::span(
+      ui::span(
         column.name,
         style: match selected {
-          true => text::span_style(foreground: palette.accent, bold: true),
-          false => text::span_style(bold: true),
+          true => ui::span_style(foreground: palette.accent, bold: true),
+          false => ui::span_style(bold: true),
         },
       ),
-      text::span("  {column.issues.size()}", style: text::span_style(dim: true)),
+      ui::span("  {column.issues.size()}", style: ui::span_style(dim: true)),
     ],
   )
 }
@@ -375,7 +370,7 @@ private fn move_between_columns(
 }
 
 fn new(
-  ctx: mut runtime::Runtime,
+  ctx: mut cooper::Runtime,
   palette: tinear_theme::Theme,
   service: board_service::Service,
   schedule: scheduler::Schedule,
@@ -384,54 +379,54 @@ fn new(
   on_issue_moved: fn(issues::Issue),
   notify_error: fn(Str, Str),
 ) mut BoardController {
-  let root = box::new(
+  let root = ui::box(
     ctx,
-    styles: style::new(
-      width: style::percent(100.0),
-      height: style::percent(100.0),
-      overflow: style::Overflow::hidden,
+    styles: ui::style(
+      width: ui::percent(100.0),
+      height: ui::percent(100.0),
+      overflow: ui::Overflow::hidden,
     ),
   )
-  let status = text::new(
+  let status = ui::text(
     ctx,
     content: "Loading My Issues…",
     selectable: false,
-    styles: status_style(style::Display::flex),
-    text_style: text::style(dim: true),
+    styles: status_style(ui::Display::flex),
+    text_style: ui::text_style(dim: true),
   )
-  let outer_scroll = scroll_box::new(ctx, styles: board_style(style::Display::none))
-  let columns_row = box::new(ctx, styles: columns_row_style(0))
+  let outer_scroll = ui::scroll_box(ctx, styles: board_style(ui::Display::none))
+  let columns_row = ui::box(ctx, styles: columns_row_style(0))
   outer_scroll.add(columns_row)
-  let drag_layer = box::new(ctx, styles: drag_layer_style(style::Display::none))
-  let drag_ghost = box::new(
+  let drag_layer = ui::box(ctx, styles: drag_layer_style(ui::Display::none))
+  let drag_ghost = ui::box(
     ctx,
     styles: drag_ghost_style(0, 0, COLUMN_WIDTH, CARD_HEIGHT - 1, palette),
   )
-  let drag_ghost_id = text::new(
+  let drag_ghost_id = ui::text(
     ctx,
     content: "",
     selectable: false,
-    wrap: text::TextWrap::none,
-    overflow: text::TextOverflow::ellipsis,
-    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+    wrap: ui::TextWrap::none,
+    overflow: ui::TextOverflow::ellipsis,
+    styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
   )
-  let drag_ghost_title = text::new(
+  let drag_ghost_title = ui::text(
     ctx,
     content: "",
     selectable: false,
-    wrap: text::TextWrap::word,
-    overflow: text::TextOverflow::ellipsis,
-    styles: style::new(width: style::percent(100.0), height: style::cells(2), flex_shrink: 0.0),
-    text_style: text::style(foreground: palette.item_active_foreground, bold: true),
+    wrap: ui::TextWrap::word,
+    overflow: ui::TextOverflow::ellipsis,
+    styles: ui::style(width: ui::percent(100.0), height: ui::cells(2), flex_shrink: 0.0),
+    text_style: ui::text_style(foreground: palette.item_active_foreground, bold: true),
   )
-  let drag_ghost_metadata = text::new(
+  let drag_ghost_metadata = ui::text(
     ctx,
     content: "",
     selectable: false,
-    wrap: text::TextWrap::none,
-    overflow: text::TextOverflow::ellipsis,
-    styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
-    text_style: text::style(foreground: palette.item_active_foreground, dim: true),
+    wrap: ui::TextWrap::none,
+    overflow: ui::TextOverflow::ellipsis,
+    styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
+    text_style: ui::text_style(foreground: palette.item_active_foreground, dim: true),
   )
   drag_ghost.add(drag_ghost_id)
   drag_ghost.add(drag_ghost_title)
@@ -490,11 +485,11 @@ fn new(
     notify_error: notify_error,
     palette: palette,
   }
-  controller.remove_drag_layer_mouse = drag_layer.on_mouse(fn(received: mut event::MouseEvent) {
-    if received.event_type == event::MouseEventType::drop and received.button == event::MouseButton::left {
+  controller.remove_drag_layer_mouse = drag_layer.on_mouse(fn(received: mut cooper::MouseEvent) {
+    if received.event_type == cooper::MouseEventType::drop and received.button == cooper::MouseButton::left {
       controller.drop_on_column(controller.column_key_at(received.x, received.y))
       received.stop_propagation()
-    } else if received.event_type == event::MouseEventType::scroll and not controller.dragging_issue_id.is_empty() {
+    } else if received.event_type == cooper::MouseEventType::scroll and not controller.dragging_issue_id.is_empty() {
       controller.scroll_during_drag(received)
       received.stop_propagation()
     }
@@ -505,8 +500,8 @@ fn new(
     controller.clear_drag_visuals()
     controller.run_pending_refresh()
   })
-  controller.remove_terminal_focus = ctx.on_terminal_focus(fn(value: event::TerminalFocus) {
-    if value == event::TerminalFocus::lost {
+  controller.remove_terminal_focus = ctx.on_terminal_focus(fn(value: cooper::TerminalFocus) {
+    if value == cooper::TerminalFocus::lost {
       controller.pointer_issue_id = ""
       controller.suppress_open_issue_id = ""
       controller.clear_drag_visuals()
@@ -580,7 +575,7 @@ impl BoardController {
     self.drag_ghost.set_style(
       drag_ghost_style(left, top, self.drag_width, self.drag_height, self.palette),
     )
-    self.drag_layer.set_style(drag_layer_style(style::Display::flex))
+    self.drag_layer.set_style(drag_layer_style(ui::Display::flex))
   }
 
   private fn passed_drag_threshold(x: Int, y: Int) Bool {
@@ -588,67 +583,67 @@ impl BoardController {
   }
 
   private fn mut create_card(issue: issues::Issue) CardRecord {
-    let root = box::new(
+    let root = ui::box(
       self.context,
-      styles: style::new(
-        width: style::percent(100.0),
-        height: style::cells(CARD_HEIGHT),
+      styles: ui::style(
+        width: ui::percent(100.0),
+        height: ui::cells(CARD_HEIGHT),
         flex_shrink: 0.0,
-        flex_direction: style::FlexDirection::row,
-        overflow: style::Overflow::hidden,
+        flex_direction: ui::FlexDirection::row,
+        overflow: ui::Overflow::hidden,
       ),
     )
-    let surface = box::new(
+    let surface = ui::box(
       self.context,
-      styles: style::new(
-        width: style::cells(1),
-        height: style::cells(CARD_HEIGHT - 1),
+      styles: ui::style(
+        width: ui::cells(1),
+        height: ui::cells(CARD_HEIGHT - 1),
         flex_grow: 1.0,
         background: self.palette.background,
-        padding: style::Edges{
-          top: style::cells(0),
-          right: style::cells(1),
-          bottom: style::cells(0),
-          left: style::cells(1),
+        padding: ui::Edges{
+          top: ui::cells(0),
+          right: ui::cells(1),
+          bottom: ui::cells(0),
+          left: ui::cells(1),
         },
       ),
     )
-    let id_line = text::new(
+    let id_line = ui::text(
       self.context,
       content: id_content(issue, self.palette, false, false),
       selectable: false,
-      wrap: text::TextWrap::none,
-      overflow: text::TextOverflow::ellipsis,
-      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+      wrap: ui::TextWrap::none,
+      overflow: ui::TextOverflow::ellipsis,
+      styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
     )
-    let title = text::new(
+    let title = ui::text(
       self.context,
       content: issue.title,
       selectable: false,
-      wrap: text::TextWrap::word,
-      overflow: text::TextOverflow::ellipsis,
-      styles: style::new(width: style::percent(100.0), height: style::cells(2), flex_shrink: 0.0),
+      wrap: ui::TextWrap::word,
+      overflow: ui::TextOverflow::ellipsis,
+      styles: ui::style(width: ui::percent(100.0), height: ui::cells(2), flex_shrink: 0.0),
     )
-    let metadata = text::new(
+    let metadata = ui::text(
       self.context,
       content: card_metadata(issue),
       selectable: false,
-      wrap: text::TextWrap::none,
-      overflow: text::TextOverflow::ellipsis,
-      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
-      text_style: text::style(dim: true),
+      wrap: ui::TextWrap::none,
+      overflow: ui::TextOverflow::ellipsis,
+      styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
+      text_style: ui::text_style(dim: true),
     )
     surface.add(id_line)
     surface.add(title)
     surface.add(metadata)
     root.add(surface)
     let issue_id = issue.id
-    let remove_mouse = surface.on_mouse(fn(received: mut event::MouseEvent) {
-      if received.event_type == event::MouseEventType::move {
+    let remove_mouse = surface.on_mouse(fn(received: mut cooper::MouseEvent) {
+      if received.event_type == cooper::MouseEventType::move {
         self.set_hovered(issue_id)
-      } else if received.event_type == event::MouseEventType::out {
+      } else if received.event_type == cooper::MouseEventType::out {
         self.clear_hovered(issue_id)
-      } else if received.event_type == event::MouseEventType::down and received.button == event::MouseButton::left {
+      } else if received.event_type == cooper::MouseEventType::down and received.button == cooper::MouseButton::left {
         if self.load_in_flight {
           self.generation =+ 1
           self.load_in_flight = false
@@ -667,7 +662,7 @@ impl BoardController {
         self.pointer_start_y = received.y
         self.arm_drag(issue_id, bounds.width, bounds.height, received.local_x, received.local_y)
         received.stop_propagation()
-      } else if received.event_type == event::MouseEventType::drag and received.button == event::MouseButton::left {
+      } else if received.event_type == cooper::MouseEventType::drag and received.button == cooper::MouseButton::left {
         if self.pointer_issue_id == issue_id and self.passed_drag_threshold(received.x, received.y) {
           self.suppress_open_issue_id = issue_id
           if self.moving_issue_id.is_empty() {
@@ -682,7 +677,7 @@ impl BoardController {
           }
         }
         received.stop_propagation()
-      } else if received.event_type == event::MouseEventType::drag_end and received.button == event::MouseButton::left {
+      } else if received.event_type == cooper::MouseEventType::drag_end and received.button == cooper::MouseButton::left {
         if self.dragging_issue_id == issue_id {
           let generation = self.drag_generation
           let _ = self.context.dispatch(fn() {
@@ -693,7 +688,7 @@ impl BoardController {
           })
         }
         received.stop_propagation()
-      } else if received.event_type == event::MouseEventType::up and received.button == event::MouseButton::left {
+      } else if received.event_type == cooper::MouseEventType::up and received.button == cooper::MouseButton::left {
         if self.pointer_issue_id == issue_id {
           let suppress_open = self.suppress_open_issue_id == issue_id
           self.pointer_issue_id = ""
@@ -719,7 +714,7 @@ impl BoardController {
   }
 
   private fn mut reconcile_cards(
-    scroll: mut scroll_box::ScrollBox,
+    scroll: mut ui::ScrollBox,
     previous: [CardRecord],
     values: [issues::Issue],
   ) [CardRecord] {
@@ -760,42 +755,42 @@ impl BoardController {
   }
 
   private fn mut create_column(column: issues::BoardColumn) ColumnRecord {
-    let root = box::new(
+    let root = ui::box(
       self.context,
-      styles: style::new(
-        width: style::cells(COLUMN_WIDTH),
-        height: style::percent(100.0),
+      styles: ui::style(
+        width: ui::cells(COLUMN_WIDTH),
+        height: ui::percent(100.0),
         flex_shrink: 0.0,
-        overflow: style::Overflow::hidden,
+        overflow: ui::Overflow::hidden,
       ),
     )
-    let header_label = text::new(
+    let header_label = ui::text(
       self.context,
       content: "",
       selectable: false,
-      wrap: text::TextWrap::none,
-      overflow: text::TextOverflow::ellipsis,
-      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
+      wrap: ui::TextWrap::none,
+      overflow: ui::TextOverflow::ellipsis,
+      styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
     )
-    let header_rule = text::new(
+    let header_rule = ui::text(
       self.context,
       content: COLUMN_RULE,
       selectable: false,
-      wrap: text::TextWrap::none,
-      overflow: text::TextOverflow::clip,
-      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_shrink: 0.0),
-      text_style: text::style(dim: true),
+      wrap: ui::TextWrap::none,
+      overflow: ui::TextOverflow::clip,
+      styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
+      text_style: ui::text_style(dim: true),
     )
-    let scroll = scroll_box::new(
+    let scroll = ui::scroll_box(
       self.context,
-      styles: style::new(width: style::percent(100.0), height: style::cells(1), flex_grow: 1.0),
+      styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_grow: 1.0),
     )
     root.add(header_label)
     root.add(header_rule)
     root.add(scroll)
     let key = column_key(column)
-    let remove_mouse = root.on_mouse(fn(received: mut event::MouseEvent) {
-      if received.event_type == event::MouseEventType::drop and received.button == event::MouseButton::left {
+    let remove_mouse = root.on_mouse(fn(received: mut cooper::MouseEvent) {
+      if received.event_type == cooper::MouseEventType::drop and received.button == cooper::MouseButton::left {
         self.drop_on_column(key)
         received.stop_propagation()
       }
@@ -880,9 +875,9 @@ impl BoardController {
     let viewport = self.outer_scroll.layout().screen
     mut found = ""
     mut closest = COLUMN_GAP + 1
-    if geometry::contains(viewport, x, y) {
+    if ui::contains(viewport, x, y) {
       for column in self.column_records {
-        let visible = geometry::intersect(column.root.layout().screen, viewport)
+        let visible = ui::intersect(column.root.layout().screen, viewport)
         if visible.width > 0 and visible.height > 0 and y >= visible.y and y < visible.y + visible.height {
           let distance = match {
             x < visible.x => visible.x - x,
@@ -899,7 +894,7 @@ impl BoardController {
     found
   }
 
-  private fn mut scroll_during_drag(received: mut event::MouseEvent) {
+  private fn mut scroll_during_drag(received: mut cooper::MouseEvent) {
     mut changed = false
     if received.scroll_x != 0 {
       changed = self.outer_scroll.scroll_by_x(wheel_step(received.scroll_x)) or changed
@@ -946,7 +941,7 @@ impl BoardController {
     self.dragging_issue_id = ""
     self.drag_target_key = ""
     self.hovered_issue_id = ""
-    self.drag_layer.set_style(drag_layer_style(style::Display::none))
+    self.drag_layer.set_style(drag_layer_style(ui::Display::none))
     self.refresh_selection_styles()
   }
 
@@ -1063,8 +1058,8 @@ impl BoardController {
           )
           column.header_rule.set_text_style(
             match drop_target {
-              true => text::style(foreground: self.palette.accent, bold: true),
-              false => text::style(dim: true),
+              true => ui::text_style(foreground: self.palette.accent, bold: true),
+              false => ui::text_style(dim: true),
             },
           )
         },
@@ -1093,20 +1088,20 @@ impl BoardController {
             card.surface.set_style(surface_style.@)
             if is_dragging {
               card.id_line.set_content(
-                text::styled_text(
+                ui::styled_text(
                   [
-                    text::span("  ↳ {issue.identifier} · drop on a column", style: text::span_style(dim: true)),
+                    ui::span("  ↳ {issue.identifier} · drop on a column", style: ui::span_style(dim: true)),
                   ],
                 ),
               )
               card.title.set_content("")
-              card.title.set_text_style(text::style(dim: true))
+              card.title.set_text_style(ui::text_style(dim: true))
               card.metadata.set_content("")
-              card.metadata.set_text_style(text::style(dim: true))
+              card.metadata.set_text_style(ui::text_style(dim: true))
             } else {
               card.id_line.set_content(id_content(issue, self.palette, active, hovered))
               card.title.set_content(issue.title)
-              card.title.set_text_style(text::style(foreground: foreground, bold: active))
+              card.title.set_text_style(ui::text_style(foreground: foreground, bold: active))
               card.metadata.set_content(
                 match {
                   move_failed => "! move failed",
@@ -1116,8 +1111,8 @@ impl BoardController {
               )
               card.metadata.set_text_style(
                 match move_failed {
-                  true => text::style(foreground: self.palette.danger, bold: true),
-                  false => text::style(foreground: foreground, dim: is_moving or (not active) and (not hovered)),
+                  true => ui::text_style(foreground: self.palette.danger, bold: true),
+                  false => ui::text_style(foreground: foreground, dim: is_moving or (not active) and (not hovered)),
                 },
               )
             }
@@ -1136,23 +1131,23 @@ impl BoardController {
     )
     self.status.set_text_style(
       match error {
-        true => text::style(foreground: self.palette.danger, bold: true),
-        false => text::style(dim: true),
+        true => ui::text_style(foreground: self.palette.danger, bold: true),
+        false => ui::text_style(dim: true),
       },
     )
     self.status.set_style(
       status_style(
         match message.is_empty() {
-          true => style::Display::none,
-          false => style::Display::flex,
+          true => ui::Display::none,
+          false => ui::Display::flex,
         },
       ),
     )
     self.outer_scroll.set_style(
       board_style(
         match message.is_empty() {
-          true => style::Display::flex,
-          false => style::Display::none,
+          true => ui::Display::flex,
+          false => ui::Display::none,
         },
       ),
     )
@@ -1189,7 +1184,7 @@ impl BoardController {
     self.suppress_open_issue_id = ""
     self.dragging_issue_id = ""
     self.drag_target_key = ""
-    self.drag_layer.set_style(drag_layer_style(style::Display::none))
+    self.drag_layer.set_style(drag_layer_style(ui::Display::none))
     let previous_id = match preserve_selection {
       true => self.selected_issue_id(),
       false => "",
@@ -1384,8 +1379,8 @@ impl BoardController {
     let _ = self.outer_scroll.focus()
   }
 
-  fn mut handle_key(received: mut event::KeyEvent) Bool {
-    if self.scope.disposed or received.event_type == event::KeyEventType::release {
+  fn mut handle_key(received: mut cooper::KeyEvent) Bool {
+    if self.scope.disposed or received.event_type == cooper::KeyEventType::release {
       false
     } else if not self.dragging_issue_id.is_empty() {
       if received.matches("escape") {
@@ -1423,7 +1418,7 @@ impl BoardController {
       focus: fn() {
         self.focus()
       },
-      handle_key: fn(received: mut event::KeyEvent) Bool {
+      handle_key: fn(received: mut cooper::KeyEvent) Bool {
         self.handle_key(received)
       },
       dispose: fn() {
