@@ -1,0 +1,155 @@
+use ard/testing
+
+use tinear/models/issues
+
+// Application-wide events published on the shell-scoped bus so retained
+// views stay in sync without knowing about each other.
+//
+// New event kinds: add a struct, extend the `Event` union, and the
+// compiler's exhaustiveness check will point at every subscriber that
+// must decide how to react.
+
+// An existing issue was mutated somewhere in the UI (field picker,
+// editor save, board drag-and-drop).
+struct IssueChanged {
+  issue_id: Str,
+  identifier: Str,
+  // Fresh payload when the mutation site has one; subscribers without it
+  // should silently refetch.
+  issue: issues::Issue?,
+}
+
+// A new issue was created.
+struct IssueCreated {
+  identifier: Str,
+}
+
+type Event = IssueChanged | IssueCreated
+
+// Constructor helpers that widen to `Event`, since union members don't
+// implicitly widen at generic call sites like `Bus.publish`.
+fn issue_changed(issue_id: Str, identifier: Str) Event {
+  IssueChanged{
+    issue_id: issue_id,
+    identifier: identifier,
+    issue: Maybe::new<issues::Issue>(),
+  }
+}
+
+fn issue_created(identifier: Str) Event {
+  IssueCreated{identifier: identifier}
+}
+
+// A minimal synchronous pub/sub bus.
+//
+// Publish must only happen on the Cooper dispatch context (i.e. from a
+// Cooper callback or inside `Runtime.dispatch`); subscribers are invoked
+// synchronously and in subscription order, so they inherit that context
+// and stay deterministic under TestApp coverage.
+//
+// Subscribers are removed by token rather than by comparing function
+// values (function equality is undefined in Ard).
+
+struct Subscriber {
+  id: Int,
+  notify: fn($E),
+}
+
+struct Bus {
+  subscribers: [Subscriber<$E>],
+  next_id: Int,
+}
+
+fn new() mut Bus<$E> {
+  (mut Bus<$E>{subscribers: [], next_id: 0})
+}
+
+impl Bus {
+  // NOTE: `unsubscribe` must stay declared before `subscribe`. The Ard
+  // compiler currently fails to lower closures inside generic impl methods
+  // that call instance methods declared later in the impl block
+  // ("unsupported AIR instance method ... on mut Bus").
+  private fn mut unsubscribe(id: Int) {
+    let remaining = mut List::new<Subscriber<$E>>()
+    for existing in self.subscribers {
+      if existing.id != id {
+        remaining.push(existing)
+      }
+    }
+    self.subscribers = remaining.@
+  }
+
+  // Registers a subscriber and returns its unsubscribe fn.
+  // Callers must run the returned fn in their dispose path so closed
+  // views stop receiving events.
+  fn mut subscribe(notify: fn($E)) fn() {
+    self.next_id =+ 1
+    let id = self.next_id
+    let next = mut List::new<Subscriber<$E>>()
+    for existing in self.subscribers {
+      next.push(existing)
+    }
+    next.push(Subscriber<$E>{id: id, notify: notify})
+    self.subscribers = next.@
+    fn() {
+      self.unsubscribe(id)
+    }
+  }
+
+  fn publish(event: $E) {
+    for subscriber in self.subscribers {
+      subscriber.notify(event)
+    }
+  }
+}
+
+test fn bus_delivers_events_to_all_subscribers_in_order() Void!Str {
+  let hub = new<Str>()
+  let seen = mut List::new<Str>()
+  let _ = hub.subscribe(fn(event: Str) {
+    seen.push("first:{event}")
+  })
+  let _ = hub.subscribe(fn(event: Str) {
+    seen.push("second:{event}")
+  })
+  hub.publish("a")
+  try testing::assert(seen.size() == 2, "both subscribers should hear the event")
+  try testing::assert(seen.at(0).or("") == "first:a", "first subscriber runs first")
+  try testing::assert(seen.at(1).or("") == "second:a", "second subscriber runs second")
+  hub.publish("b")
+  try testing::assert(seen.size() == 4, "subscribers should hear every publish")
+  testing::assert(seen.at(3).or("") == "second:b", "later publishes keep subscription order")
+}
+
+test fn bus_unsubscribe_stops_delivery_without_affecting_others() Void!Str {
+  let hub = new<Int>()
+  let first = mut List::new<Int>()
+  let second = mut List::new<Int>()
+  let unsubscribe_first = hub.subscribe(fn(event: Int) {
+    first.push(event)
+  })
+  let _ = hub.subscribe(fn(event: Int) {
+    second.push(event)
+  })
+  hub.publish(1)
+  unsubscribe_first()
+  hub.publish(2)
+  try testing::assert(first.size() == 1, "unsubscribed listener should not hear later events")
+  try testing::assert(second.size() == 2, "remaining listener should keep hearing events")
+  // Unsubscribing twice is harmless.
+  unsubscribe_first()
+  hub.publish(3)
+  testing::assert(second.size() == 3, "double unsubscribe should not break the bus")
+}
+
+test fn bus_publish_with_no_subscribers_is_a_no_op() Void!Str {
+  let hub = new<Bool>()
+  hub.publish(true)
+  let heard = mut List::new<Bool>()
+  let unsubscribe = hub.subscribe(fn(event: Bool) {
+    heard.push(event)
+  })
+  unsubscribe()
+  hub.publish(false)
+  testing::assert(heard.size() == 0, "events before subscribe or after unsubscribe are dropped")
+}

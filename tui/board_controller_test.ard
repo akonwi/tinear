@@ -99,6 +99,8 @@ private fn column(name: Str, position: Float64, cards: [issues::Issue]) issues::
 
 private fn ignore_picker(field: issue_field_picker_controller::Field, selected: issues::Issue) {}
 
+private fn ignore_moved(moved: issues::Issue) {}
+
 private fn modifiers() event::Modifiers {
   event::Modifiers{
     shift: false,
@@ -161,6 +163,7 @@ test fn board_builds_nested_retained_columns_and_navigates_cards() Void!Str {
       opened.count =+ 1
     },
     ignore_picker,
+    ignore_moved,
     fn(title: Str, message: Str) {},
   )
   application.root.add(controller.root)
@@ -253,6 +256,7 @@ test fn board_drag_moves_issue_optimistically_and_confirms_team_state() Void!Str
       opened.count =+ 1
     },
     ignore_picker,
+    ignore_moved,
     fn(title: Str, message: Str) {},
   )
   application.root.add(controller.root)
@@ -420,6 +424,7 @@ test fn board_drag_rolls_back_failure_and_never_reuses_another_teams_state() Voi
     fake_schedule(scheduled),
     fn(identifier: Str) {},
     ignore_picker,
+    ignore_moved,
     fn(title: Str, message: Str) {
       errors.identifier = title
       errors.count =+ 1
@@ -495,6 +500,7 @@ test fn board_drag_threshold_same_column_and_interrupted_drops_are_safe() Void!S
       opened.count =+ 1
     },
     ignore_picker,
+    ignore_moved,
     fn(title: Str, message: Str) {},
   )
   application.root.add(controller.root)
@@ -601,6 +607,7 @@ test fn board_refresh_completion_waits_for_pointer_gesture() Void!Str {
       opened.count =+ 1
     },
     ignore_picker,
+    ignore_moved,
     fn(title: Str, message: Str) {},
   )
   application.root.add(controller.root)
@@ -641,6 +648,7 @@ test fn board_drag_layer_forwards_horizontal_wheel_to_reach_offscreen_column() V
     fake_schedule(scheduled),
     fn(identifier: Str) {},
     ignore_picker,
+    ignore_moved,
     fn(title: Str, message: Str) {},
   )
   application.root.add(controller.root)
@@ -716,6 +724,7 @@ test fn board_drag_into_full_completed_column_keeps_moved_issue_visible_with_cap
     fake_schedule(scheduled),
     fn(identifier: Str) {},
     ignore_picker,
+    ignore_moved,
     fn(title: Str, message: Str) {},
   )
   application.root.add(controller.root)
@@ -759,6 +768,7 @@ test fn board_refresh_preserves_selected_issue_across_column_move() Void!Str {
     fake_schedule(scheduled),
     fn(identifier: Str) {},
     ignore_picker,
+    ignore_moved,
     fn(title: Str, message: Str) {},
   )
   application.root.add(controller.root)
@@ -807,6 +817,7 @@ test fn board_ignores_stale_load_and_handles_narrow_horizontal_navigation() Void
     fake_schedule(scheduled),
     fn(identifier: Str) {},
     ignore_picker,
+    ignore_moved,
     fn(title: Str, message: Str) {},
   )
   application.root.add(controller.root)
@@ -854,6 +865,7 @@ test fn board_routes_field_picker_commands_for_selected_issue() Void!Str {
       }
       picked.names.push("{name}:{selected.id}")
     },
+    ignore_moved,
     fn(title: Str, message: Str) {},
   )
   application.root.add(controller.root)
@@ -886,6 +898,7 @@ test fn board_initial_error_retries_to_empty_state() Void!Str {
     fake_schedule(scheduled),
     fn(identifier: Str) {},
     ignore_picker,
+    ignore_moved,
     fn(title: Str, message: Str) {},
   )
   application.root.add(controller.root)
@@ -916,6 +929,7 @@ test fn board_failed_manual_refresh_restores_existing_columns() Void!Str {
     fake_schedule(scheduled),
     fn(identifier: Str) {},
     ignore_picker,
+    ignore_moved,
     fn(title: Str, message: Str) {
       errors.identifier = title
       errors.count =+ 1
@@ -956,6 +970,7 @@ test fn board_disposal_suppresses_late_move_completion() Void!Str {
     fake_schedule(scheduled),
     fn(identifier: Str) {},
     ignore_picker,
+    ignore_moved,
     fn(title: Str, message: Str) {
       errors.count =+ 1
     },
@@ -998,6 +1013,7 @@ test fn board_disposal_cancels_refresh_and_late_completion() Void!Str {
     fake_schedule(scheduled),
     fn(identifier: Str) {},
     ignore_picker,
+    ignore_moved,
     fn(title: Str, message: Str) {},
   )
   application.root.add(controller.root)

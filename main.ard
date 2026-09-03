@@ -5,6 +5,7 @@ use cooper/runtime
 use cooper/style
 use cooper/text
 use tinear/config
+use tinear/events
 use tinear/models/cache
 use tinear/models/documents
 use tinear/models/issues
@@ -123,6 +124,7 @@ private fn issue_detail_screen(
   api_key: Str,
   identifier: Str,
   application_shell: mut application_shell::ApplicationShell,
+  hub: mut events::Bus<events::Event>,
 ) shell_controller::Screen {
   let actions = mut DetailActions{
     open_picker: fn(field: issue_field_picker_controller::Field, issue: issues::Issue) {},
@@ -169,8 +171,9 @@ private fn issue_detail_screen(
     fn() {
       detail.focus()
     },
-    fn() {
-      detail.refresh(true)
+    fn(changed: issues::Issue) {
+      // The bus fans this back to us (and every other stale view).
+      hub.publish(events::issue_changed(changed.id, changed.identifier))
     },
     fn(title: Str, message: Str) {
       let _ = application_shell.toasts.show(title, message, toast_host::Variant::error, 4000)
@@ -203,8 +206,19 @@ private fn issue_detail_screen(
   actions.edit_description = fn(issue: issues::Issue) {
     editor.open_description(issue)
   }
+  let unsubscribe = hub.subscribe(fn(event: events::Event) {
+    match event {
+      events::IssueChanged(changed) => {
+        if changed.identifier == identifier {
+          detail.refresh(true)
+        }
+      },
+      events::IssueCreated => (),
+    }
+  })
   detail.start()
   detail.screen(fn() {
+    unsubscribe()
     editor.dispose()
     field_pickers.dispose()
   })
@@ -218,6 +232,7 @@ private fn show_logged_in(
   active_route: mut ActiveRoute,
 ) {
   let writer = cache_writer::live(ctx)
+  let hub = events::new<events::Event>()
   let model = shell_model::restore(cache::load_logged_in())
   let actions = mut ShellActions{
     open_issue: fn(identifier: Str) {},
@@ -262,6 +277,9 @@ private fn show_logged_in(
     fn(field: issue_field_picker_controller::Field, issue: issues::Issue) {
       actions.open_picker(field, issue)
     },
+    fn(moved: issues::Issue) {
+      hub.publish(events::issue_changed(moved.id, moved.identifier))
+    },
     fn(title: Str, message: Str) {
       let _ = application_shell.toasts.show(title, message, toast_host::Variant::error, 4000)
     },
@@ -274,8 +292,8 @@ private fn show_logged_in(
     fn() {
       board.focus()
     },
-    fn() {
-      board.refresh(true)
+    fn(changed: issues::Issue) {
+      hub.publish(events::issue_changed(changed.id, changed.identifier))
     },
     fn(title: Str, message: Str) {
       let _ = application_shell.toasts.show(title, message, toast_host::Variant::error, 4000)
@@ -284,6 +302,21 @@ private fn show_logged_in(
   actions.open_picker = fn(field: issue_field_picker_controller::Field, issue: issues::Issue) {
     field_pickers.open(field, issue)
   }
+  // Keep the always-alive tabs in sync with mutations from anywhere.
+  // (The board's own drag-drop already self-refreshes; the extra silent
+  // refresh it gets from its own publish is harmless.)
+  let unsubscribe_board = hub.subscribe(fn(event: events::Event) {
+    match event {
+      events::IssueChanged => board.refresh(true),
+      events::IssueCreated => board.refresh(true),
+    }
+  })
+  let unsubscribe_inbox = hub.subscribe(fn(event: events::Event) {
+    match event {
+      events::IssueChanged => inbox.refresh(true),
+      events::IssueCreated => inbox.refresh(true),
+    }
+  })
   let creation = issue_creation_controller::new(
     ctx,
     application_shell.modal,
@@ -300,6 +333,7 @@ private fn show_logged_in(
       let _ = application_shell.toasts.show(title, message, variant, 4000)
     },
     fn(identifier: Str) {
+      hub.publish(events::issue_created(identifier))
       actions.open_issue(identifier)
     },
   )
@@ -326,7 +360,7 @@ private fn show_logged_in(
     board.screen(),
     fn(reference: tabs::TabRef) shell_controller::Screen {
       match reference.kind {
-        tabs::Kind::issue => issue_detail_screen(ctx, palette, api_key, reference.id, application_shell),
+        tabs::Kind::issue => issue_detail_screen(ctx, palette, api_key, reference.id, application_shell, hub),
         tabs::Kind::doc => {
           document_detail_screen(
             ctx,
@@ -345,6 +379,8 @@ private fn show_logged_in(
       writer.persist(snapshot)
     },
     fn() {
+      unsubscribe_board()
+      unsubscribe_inbox()
       creation.dispose()
       search.dispose()
       field_pickers.dispose()

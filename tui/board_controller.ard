@@ -87,6 +87,7 @@ struct BoardController {
   cancel_failed_move: fn(),
   on_open_issue: fn(Str),
   on_pick_field: fn(issue_field_picker_controller::Field, issues::Issue),
+  on_issue_moved: fn(issues::Issue),
   notify_error: fn(Str, Str),
   palette: tinear_theme::Theme,
 }
@@ -380,6 +381,7 @@ fn new(
   schedule: scheduler::Schedule,
   on_open_issue: fn(Str),
   on_pick_field: fn(issue_field_picker_controller::Field, issues::Issue),
+  on_issue_moved: fn(issues::Issue),
   notify_error: fn(Str, Str),
 ) mut BoardController {
   let root = box::new(
@@ -484,6 +486,7 @@ fn new(
     cancel_failed_move: fn() {},
     on_open_issue: on_open_issue,
     on_pick_field: on_pick_field,
+    on_issue_moved: on_issue_moved,
     notify_error: notify_error,
     palette: palette,
   }
@@ -999,6 +1002,7 @@ impl BoardController {
                             self.move_snapshot = Maybe::new<[issues::BoardColumn]>()
                             self.confirm_move(issue.id, moved.state)
                             self.queue_refresh(true)
+                            self.on_issue_moved(issue_with_state(issue, moved.state.id, target_for(target_column)))
                           },
                           err(message) => {
                             match self.move_snapshot {

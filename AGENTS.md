@@ -35,3 +35,8 @@ The Ard dependency is pinned to a remote Cooper commit; `../cooper` remains the 
   its controller's disposal and request-generation state before mutating controls.
 - Prefer deterministic Cooper `TestApp` coverage for UI behavior and PTY tests
   only for terminal integration.
+- Cross-view sync happens over the shell-scoped event bus (`events.ard`): mutation sites publish, data-owning controllers
+  subscribe with a silent refresh, and every subscription's unsubscribe fn must
+  run in the owner's dispose path. Publish only from the dispatch context;
+  subscribers run synchronously. Do not use channels for broadcast — Ard
+  channels are point-to-point.

@@ -45,7 +45,7 @@ struct Controller {
   generation: Int,
   current_ticket: modal_host::Ticket?,
   restore_focus: fn(),
-  on_changed: fn(),
+  on_changed: fn(issues::Issue),
   notify_error: fn(Str, Str),
 }
 
@@ -133,7 +133,7 @@ fn new(
   palette: tinear_theme::Theme,
   service: issue_fields_service::Service,
   restore_focus: fn(),
-  on_changed: fn(),
+  on_changed: fn(issues::Issue),
   notify_error: fn(Str, Str),
 ) mut Controller {
   (mut Controller{
@@ -453,12 +453,14 @@ impl Controller {
     ticket: modal_host::Ticket,
     generation: Int,
     title: Str,
+    issue: issues::Issue,
     result: Void!Str,
   ) {
     if (not self.scope.disposed) and generation == self.generation {
       let _ = self.modal.close_if_current(ticket)
       match result {
-        ok(_) => self.on_changed(),
+        // `issue` is the pre-update snapshot: identity only, stale fields.
+        ok(_) => self.on_changed(issue),
         err(message) => self.notify_error(title, message),
       }
     }
@@ -476,7 +478,7 @@ impl Controller {
             issue.id,
             value,
             fn(result: Void!Str) {
-              self.finish_update(ticket, generation, "Update state", result)
+              self.finish_update(ticket, generation, "Update state", issue, result)
             },
           )
         },
@@ -486,7 +488,7 @@ impl Controller {
             issue.id,
             value,
             fn(result: Void!Str) {
-              self.finish_update(ticket, generation, "Update cycle", result)
+              self.finish_update(ticket, generation, "Update cycle", issue, result)
             },
           )
         },
@@ -502,7 +504,7 @@ impl Controller {
             issue.id,
             priority,
             fn(result: Void!Str) {
-              self.finish_update(ticket, generation, "Update priority", result)
+              self.finish_update(ticket, generation, "Update priority", issue, result)
             },
           )
         },
@@ -512,7 +514,7 @@ impl Controller {
             issue.id,
             value,
             fn(result: Void!Str) {
-              self.finish_update(ticket, generation, "Assign", result)
+              self.finish_update(ticket, generation, "Assign", issue, result)
             },
           )
         },
@@ -522,7 +524,7 @@ impl Controller {
             issue.id,
             value,
             fn(result: Void!Str) {
-              self.finish_update(ticket, generation, "Update project", result)
+              self.finish_update(ticket, generation, "Update project", issue, result)
             },
           )
         },

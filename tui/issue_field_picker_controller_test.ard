@@ -36,6 +36,7 @@ struct FakeState {
 
 struct Outcome {
   changed: Int,
+  changed_identifier: Str,
   errors: Int,
   error_title: Str,
 }
@@ -168,8 +169,9 @@ private fn controller(
     theme::new(),
     fake_service(state),
     fn() {},
-    fn() {
+    fn(issue: issues::Issue) {
       outcome.changed =+ 1
+      outcome.changed_identifier = issue.identifier
     },
     fn(title: Str, message: Str) {
       outcome.errors =+ 1
@@ -269,6 +271,7 @@ test fn state_picker_ignores_dismissed_load_and_reports_mutation_failure() Void!
   let state = fake_state()
   let outcome = mut Outcome{
     changed: 0,
+    changed_identifier: "",
     errors: 0,
     error_title: "",
   }
@@ -347,6 +350,7 @@ test fn field_picker_load_failure_closes_and_reports() Void!Str {
   let state = fake_state()
   let outcome = mut Outcome{
     changed: 0,
+    changed_identifier: "",
     errors: 0,
     error_title: "",
   }
@@ -366,6 +370,7 @@ test fn priority_cycle_assignee_and_project_pickers_apply_and_refresh() Void!Str
   let state = fake_state()
   let outcome = mut Outcome{
     changed: 0,
+    changed_identifier: "",
     errors: 0,
     error_title: "",
   }
@@ -475,6 +480,10 @@ test fn priority_cycle_assignee_and_project_pickers_apply_and_refresh() Void!Str
   (state.project_updates.at(0).expect("project").completion)(Result::ok(()))
 
   try assertions::assert(outcome.changed == 4, "each successful mutation should request board refresh")
+  try assertions::assert(
+    outcome.changed_identifier == "AKO-1",
+    "change notification should carry the mutated issue's identity",
+  )
   try assertions::assert(outcome.errors == 0, "successful mutations should not notify errors")
   assertions::assert(not modal.is_open(), "successful mutation should close progress modal")
 }
@@ -487,6 +496,7 @@ test fn field_picker_disposal_closes_owned_modal_and_ignores_late_load() Void!St
   let state = fake_state()
   let outcome = mut Outcome{
     changed: 0,
+    changed_identifier: "",
     errors: 0,
     error_title: "",
   }
