@@ -1,9 +1,9 @@
 use cooper
+use cooper/cui
 use cooper/ui
 use tinear/models/issue_state
 use tinear/models/issues
 use tinear/services/issue_fields_service
-use tinear/tui/lifecycle
 use tinear/tui/modal_host
 use tinear/tui/picker_controller
 use tinear/tui/theme as tinear_theme
@@ -39,7 +39,9 @@ struct Controller {
   modal: mut modal_host::ModalHost,
   palette: tinear_theme::Theme,
   service: issue_fields_service::Service,
-  scope: mut lifecycle::Scope,
+  pending_cancel: fn(),
+  stop: Chan<Bool>,
+  disposed: Bool,
   generation: Int,
   current_ticket: modal_host::Ticket?,
   restore_focus: fn(),
@@ -139,7 +141,9 @@ fn new(
     modal: modal,
     palette: palette,
     service: service,
-    scope: lifecycle::new(),
+    pending_cancel: fn() {},
+    stop: Chan::new<Bool>(),
+    disposed: false,
     generation: 0,
     current_ticket: Maybe::new<modal_host::Ticket>(),
     restore_focus: restore_focus,
@@ -148,40 +152,52 @@ fn new(
   })
 }
 
-impl Controller {
-  private fn mut present_loading(title: Str, updating: Bool, dispose: fn()) modal_host::Ticket {
-    let body = ui::box(
-      self.context,
-      styles: ui::style(
-        width: ui::percent(100.0),
-        height: ui::cells(3),
-        align_items: ui::Align::center,
-        justify_content: ui::Justify::center,
-      ),
-    )
-    body.add(
-      ui::text(
-        self.context,
-        content: match updating {
+// Transient loading/updating body.
+private fn status_view(updating: Bool) cui::View {
+  cui::box(
+    [
+      cui::text(
+        match updating {
           true => "Updating…",
           false => "Loading…",
         },
         selectable: false,
         text_style: ui::text_style(dim: true),
       ),
-    )
-    let ticket = self.modal.present(
+    ],
+    styles: ui::style(
+      width: ui::percent(100.0),
+      height: ui::cells(3),
+      align_items: ui::Align::center,
+      justify_content: ui::Justify::center,
+    ),
+  )
+}
+
+impl Controller {
+  private fn mut cancel_pending() {
+    let cancel = self.pending_cancel
+    self.pending_cancel = fn() {}
+    cancel()
+  }
+
+  private fn mut present_loading(title: Str, updating: Bool, dispose: fn()) modal_host::Ticket {
+    // Cancellation runs when this transient body is replaced or dismissed.
+    self.cancel_pending()
+    self.pending_cancel = dispose
+    let ticket = self.modal.present_view(
       title,
-      body,
+      status_view(updating),
       match updating {
         true => "",
         false => "Esc cancel",
       },
-      dispose,
-      fn() {},
       self.restore_focus,
       fn() Bool {
         not updating
+      },
+      on_close: fn() {
+        self.cancel_pending()
       },
     )
     self.current_ticket = Maybe::new(ticket)
@@ -196,7 +212,7 @@ impl Controller {
     issue: issues::Issue,
     field: Field,
   ) {
-    if not self.scope.disposed {
+    if not self.disposed {
       let ticket = self.modal.present_view(
         title,
         picker_controller::view(
@@ -219,7 +235,7 @@ impl Controller {
   }
 
   private fn mut fail_load(ticket: modal_host::Ticket, title: Str, message: Str) {
-    if (not self.scope.disposed) and self.modal.is_current(ticket) {
+    if (not self.disposed) and self.modal.is_current(ticket) {
       let _ = self.modal.close_if_current(ticket)
       self.notify_error(title, message)
     }
@@ -234,7 +250,7 @@ impl Controller {
       cancellation.stop.receiver(),
       issue.team_id,
       fn(result: [issues::WorkflowState]!Str) {
-        if (not self.scope.disposed) and generation == self.generation and self.modal.is_current(ticket) {
+        if (not self.disposed) and generation == self.generation and self.modal.is_current(ticket) {
           match result {
             ok(states) => {
               let options = mut List::new<picker_controller::Option>()
@@ -272,7 +288,7 @@ impl Controller {
       cancellation.stop.receiver(),
       issue.team_id,
       fn(result: issues::TeamCyclesResult!Str) {
-        if (not self.scope.disposed) and generation == self.generation and self.modal.is_current(ticket) {
+        if (not self.disposed) and generation == self.generation and self.modal.is_current(ticket) {
           match result {
             ok(value) => {
               let options = mut List::new<picker_controller::Option>()
@@ -344,7 +360,7 @@ impl Controller {
       cancellation.stop.receiver(),
       issue.team_id,
       fn(result: [issues::Member]!Str) {
-        if (not self.scope.disposed) and generation == self.generation and self.modal.is_current(ticket) {
+        if (not self.disposed) and generation == self.generation and self.modal.is_current(ticket) {
           match result {
             ok(members) => {
               let options = mut List::new<picker_controller::Option>()
@@ -389,7 +405,7 @@ impl Controller {
       cancellation.stop.receiver(),
       issue.team_id,
       fn(result: [issues::Project]!Str) {
-        if (not self.scope.disposed) and generation == self.generation and self.modal.is_current(ticket) {
+        if (not self.disposed) and generation == self.generation and self.modal.is_current(ticket) {
           match result {
             ok(projects) => {
               let options = mut List::new<picker_controller::Option>()
@@ -426,7 +442,7 @@ impl Controller {
   }
 
   fn mut open(field: Field, issue: issues::Issue) {
-    if not self.scope.disposed {
+    if not self.disposed {
       self.generation =+ 1
       let generation = self.generation
       match field {
@@ -446,7 +462,7 @@ impl Controller {
     issue: issues::Issue,
     result: Void!Str,
   ) {
-    if (not self.scope.disposed) and generation == self.generation {
+    if (not self.disposed) and generation == self.generation {
       let _ = self.modal.close_if_current(ticket)
       match result {
         // `issue` is the pre-update snapshot: identity only, stale fields.
@@ -457,14 +473,14 @@ impl Controller {
   }
 
   private fn mut apply(field: Field, issue: issues::Issue, value: Str) {
-    if not self.scope.disposed {
+    if not self.disposed {
       self.generation =+ 1
       let generation = self.generation
       let ticket = self.present_loading("Updating {issue.identifier}", true, fn() {})
       match field {
         Field::state => {
           self.service.update_state(
-            self.scope.stop.receiver(),
+            self.stop.receiver(),
             issue.id,
             value,
             fn(result: Void!Str) {
@@ -474,7 +490,7 @@ impl Controller {
         },
         Field::cycle => {
           self.service.update_cycle(
-            self.scope.stop.receiver(),
+            self.stop.receiver(),
             issue.id,
             value,
             fn(result: Void!Str) {
@@ -490,7 +506,7 @@ impl Controller {
             }
           }
           self.service.update_priority(
-            self.scope.stop.receiver(),
+            self.stop.receiver(),
             issue.id,
             priority,
             fn(result: Void!Str) {
@@ -500,7 +516,7 @@ impl Controller {
         },
         Field::assignee => {
           self.service.update_assignee(
-            self.scope.stop.receiver(),
+            self.stop.receiver(),
             issue.id,
             value,
             fn(result: Void!Str) {
@@ -510,7 +526,7 @@ impl Controller {
         },
         Field::project => {
           self.service.update_project(
-            self.scope.stop.receiver(),
+            self.stop.receiver(),
             issue.id,
             value,
             fn(result: Void!Str) {
@@ -523,9 +539,11 @@ impl Controller {
   }
 
   fn mut dispose() {
-    if not self.scope.disposed {
+    if not self.disposed {
       self.generation =+ 1
-      self.scope.dispose()
+      self.disposed = true
+      self.cancel_pending()
+      self.stop.close()
       match self.current_ticket {
         ticket => {
           let _ = self.modal.close_if_current(ticket)

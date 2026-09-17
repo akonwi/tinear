@@ -65,6 +65,7 @@ struct ModalHost {
   disposed: Bool,
   view_restore_focus: fn(),
   view_can_dismiss: fn() Bool,
+  view_on_close: fn(),
   palette: tinear_theme::Theme,
 }
 
@@ -177,6 +178,7 @@ fn new(ctx: mut cooper::Runtime, root: mut cooper::Root, palette: tinear_theme::
     view_can_dismiss: fn() Bool {
       true
     },
+    view_on_close: fn() {},
     palette: palette,
   })
 }
@@ -193,6 +195,9 @@ impl ModalHost {
   // Retire the active body. CUI runs the dispose path for committed bodies;
   // bodies that never reached a commit are disposed eagerly here.
   private fn mut clear_current() {
+    let on_close = self.view_on_close
+    self.view_on_close = fn() {}
+    on_close()
     let old = self.current
     self.current = Maybe::new<mut Current>()
     self.presented = false
@@ -261,6 +266,7 @@ impl ModalHost {
     footer: Str,
     restore_focus: fn(),
     can_dismiss: fn() Bool,
+    on_close: fn()?,
   ) Ticket {
     if self.presented {
       self.clear_current()
@@ -271,6 +277,7 @@ impl ModalHost {
     self.presented = true
     self.view_restore_focus = restore_focus
     self.view_can_dismiss = can_dismiss
+    self.view_on_close = on_close.or(fn() {})
     self.cui.update(fn() {
       self.model.open = true
       self.model.title = title
