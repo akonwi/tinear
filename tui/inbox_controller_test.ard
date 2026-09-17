@@ -2,6 +2,7 @@ use ard/testing as assertions
 
 use cooper
 use cooper/event
+use cooper/cui/renderer
 use cooper/testing
 use tinear/models/inbox
 use tinear/services/inbox_service
@@ -82,6 +83,51 @@ private fn detail(identifier: Str, title: Str) inbox::Detail {
   }
 }
 
+// Text right of the pane divider: the detail pane only.
+private fn detail_text(application: testing::TestApp) Str {
+  let _ = application.flush()
+  application.render()
+  mut divider = -1
+  mut x = 0
+  while x < application.frame().width() {
+    match application.frame().cell(x, 0) {
+      cell => {
+        if cell.grapheme == "│" and divider == -1 {
+          divider = x
+        }
+      },
+      _ => (),
+    }
+    x =+ 1
+  }
+  mut collected = ""
+  mut y = 0
+  while y < application.frame().height() {
+    mut column = divider + 1
+    while column < application.frame().width() {
+      match application.frame().cell(column, y) {
+        cell => { collected = "{collected}{cell.grapheme}" },
+        _ => (),
+      }
+      column =+ 1
+    }
+    collected = "{collected}\n"
+    y =+ 1
+  }
+  collected
+}
+
+// Commit queued renders before reading the frame.
+private fn frame_text(application: testing::TestApp) Str {
+  let _ = application.flush()
+  application.render()
+  application.frame().text()
+}
+
+private struct Notifier {
+  invalidate: fn(),
+}
+
 private fn no_schedule(milliseconds: Int, action: fn()) fn() {
   fn() {}
 }
@@ -118,11 +164,15 @@ test fn inbox_loads_rows_and_discards_stale_detail_completion() Void!Str {
     archives: [],
   }
   let opened = mut Calls{value: "", count: 0}
+  let notifier = mut Notifier{invalidate: fn() {}}
   let controller = inbox_controller::new(
     application.context,
     theme::new(),
     fake_service(fake),
     no_schedule,
+    fn() {
+      (notifier.invalidate)()
+    },
     fn(identifier: Str) {
       opened.value = identifier
       opened.count =+ 1
@@ -130,7 +180,12 @@ test fn inbox_loads_rows_and_discards_stale_detail_completion() Void!Str {
     fn(url: Str) {},
     fn(title: Str, message: Str) {},
   )
-  application.root.add(controller.root)
+  let mounted = renderer::mount(application.context, application.root, controller.view())
+  defer mounted.destroy()
+  notifier.invalidate = fn() {
+    mounted.invalidate()
+  }
+  let _ = application.flush()
   controller.start()
   try assertions::assert(fake.loads.size() == 1, "start should request Inbox")
   (fake.loads.at(0).expect("load"))(
@@ -141,16 +196,17 @@ test fn inbox_loads_rows_and_discards_stale_detail_completion() Void!Str {
       ],
     ),
   )
-  try assertions::assert(controller.rows.size() == 2, "loaded notifications should create rows")
+  try assertions::assert(controller.items.size() == 2, "loaded notifications should create rows")
   try assertions::assert(
     application.terminal_titles().at(0).expect("Inbox terminal title") == "tinear (2)",
     "loaded notification count should update the terminal title",
   )
   try assertions::assert(fake.details.size() == 1, "first item should request detail")
   try assertions::assert(
-    controller.detail_text.content().contains("Title AKO-1"),
+    detail_text(application).contains("Title AKO-1"),
     "selected notification summary should render before detail returns",
   )
+  let _ = application.flush()
   application.render()
   let selected_surface = application.frame().cell(0, 0).expect("selected Inbox surface")
   try assertions::assert(
@@ -163,6 +219,7 @@ test fn inbox_loads_rows_and_discards_stale_detail_completion() Void!Str {
     "selected Inbox row should use readable active text",
   )
   application.mouse_move(3, 3)
+  let _ = application.flush()
   application.render()
   let hovered_surface = application.frame().cell(0, 3).expect("hovered Inbox surface")
   try assertions::assert(
@@ -170,6 +227,7 @@ test fn inbox_loads_rows_and_discards_stale_detail_completion() Void!Str {
     "hovered Inbox row should use the hover background",
   )
   application.mouse_move(3, 2)
+  let _ = application.flush()
   application.render()
   try assertions::assert(
     application.frame().cell(
@@ -186,22 +244,23 @@ test fn inbox_loads_rows_and_discards_stale_detail_completion() Void!Str {
     "Inbox panes should use a dim divider",
   )
   try assertions::assert(
-    controller.detail_scroll.layout().screen.width > controller.list_scroll.layout().screen.width,
+    controller.detail_scroll.current.expect("detail pane").layout().screen.width > controller.list_scroll.current.expect("list pane").layout().screen.width,
     "notification list should be a sidebar beside a larger detail pane",
   )
   try assertions::assert(controller.handle_key(key("down", "")), "Down should move selection")
   try assertions::assert(controller.cursor == 1, "cursor should move to second item")
   try assertions::assert(fake.details.size() == 2, "selection should request new detail")
   try assertions::assert(
-    controller.detail_text.content().contains("Title AKO-2") and not controller.detail_text.content().contains("Title AKO-1"),
+    detail_text(application).contains("Title AKO-2") and not detail_text(application).contains("Title AKO-1"),
     "detail preview should follow the cursor immediately",
   )
   (fake.details.at(0).expect("stale").completion)(Result::ok(detail("AKO-1", "Stale detail")))
   try assertions::assert(
-    not controller.detail_text.content().contains("Stale detail"),
+    not detail_text(application).contains("Stale detail"),
     "stale detail should be ignored",
   )
   (fake.details.at(1).expect("current").completion)(Result::ok(detail("AKO-2", "Current detail")))
+  let _ = application.flush()
   application.render()
   try testing::assert_contains(application.frame().text(), "Current detail")
   try testing::assert_contains(application.frame().text(), "── Details")
@@ -210,11 +269,11 @@ test fn inbox_loads_rows_and_discards_stale_detail_completion() Void!Str {
     application.resize(size.at(0).expect("width"), size.at(1).expect("height"))
     try assertions::assert(controller.cursor == 1, "resize should preserve Inbox selection")
     try assertions::assert(
-      controller.list_scroll.layout().screen.width > 0,
+      controller.list_scroll.current.expect("list pane").layout().screen.width > 0,
       "list pane should remain visible",
     )
     try assertions::assert(
-      controller.detail_scroll.layout().screen.width > 0,
+      controller.detail_scroll.current.expect("detail pane").layout().screen.width > 0,
       "detail pane should remain visible",
     )
     try testing::assert_contains(application.frame().text(), "Current detail")
@@ -226,7 +285,7 @@ test fn inbox_loads_rows_and_discards_stale_detail_completion() Void!Str {
   )
   let _ = controller.handle_key(key("down", ""))
   try assertions::assert(
-    controller.detail_text.content().contains("Current detail"),
+    detail_text(application).contains("Current detail"),
     "returning to a loaded notification should render cached detail immediately",
   )
 
@@ -245,11 +304,15 @@ test fn inbox_opens_pr_in_browser_and_archives_optimistically() Void!Str {
   }
   let browser = mut Calls{value: "", count: 0}
   let errors = mut Calls{value: "", count: 0}
+  let notifier = mut Notifier{invalidate: fn() {}}
   let controller = inbox_controller::new(
     application.context,
     theme::new(),
     fake_service(fake),
     no_schedule,
+    fn() {
+      (notifier.invalidate)()
+    },
     fn(identifier: Str) {},
     fn(url: Str) {
       browser.value = url
@@ -260,7 +323,12 @@ test fn inbox_opens_pr_in_browser_and_archives_optimistically() Void!Str {
       errors.count =+ 1
     },
   )
-  application.root.add(controller.root)
+  let mounted = renderer::mount(application.context, application.root, controller.view())
+  defer mounted.destroy()
+  notifier.invalidate = fn() {
+    mounted.invalidate()
+  }
+  let _ = application.flush()
   controller.start()
   (fake.loads.at(0).expect("load"))(
     Result::ok(
@@ -297,7 +365,7 @@ test fn inbox_opens_pr_in_browser_and_archives_optimistically() Void!Str {
     Result::ok(detail("AKO-2", "Late detail")),
   )
   assertions::assert(
-    controller.detail_text.content() == "You're all caught up.",
+    detail_text(application).contains("You're all caught up."),
     "late detail must not replace empty state",
   )
 }
@@ -311,16 +379,25 @@ test fn inbox_refresh_preserves_selection_by_notification_id() Void!Str {
     archives: [],
   }
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
+  let notifier = mut Notifier{invalidate: fn() {}}
   let controller = inbox_controller::new(
     application.context,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
+    fn() {
+      (notifier.invalidate)()
+    },
     fn(identifier: Str) {},
     fn(url: Str) {},
     fn(title: Str, message: Str) {},
   )
-  application.root.add(controller.root)
+  let mounted = renderer::mount(application.context, application.root, controller.view())
+  defer mounted.destroy()
+  notifier.invalidate = fn() {
+    mounted.invalidate()
+  }
+  let _ = application.flush()
   controller.start()
   (fake.loads.at(0).expect("load"))(
     Result::ok([item("n1", "AKO-1", "issueMention", ""), item("n2", "AKO-2", "issueMention", "")]),
@@ -339,6 +416,7 @@ test fn inbox_refresh_preserves_selection_by_notification_id() Void!Str {
     "same notification should remain selected",
   )
   controller.dispose()
+  let _ = application.flush()
   assertions::assert(scheduled.cancellations == 2, "reschedule and disposal should cancel timers")
 }
 
@@ -350,26 +428,35 @@ test fn inbox_initial_error_retries_to_empty_and_detail_errors_render() Void!Str
     details: [],
     archives: [],
   }
+  let notifier = mut Notifier{invalidate: fn() {}}
   let controller = inbox_controller::new(
     application.context,
     theme::new(),
     fake_service(fake),
     no_schedule,
+    fn() {
+      (notifier.invalidate)()
+    },
     fn(identifier: Str) {},
     fn(url: Str) {},
     fn(title: Str, message: Str) {},
   )
-  application.root.add(controller.root)
+  let mounted = renderer::mount(application.context, application.root, controller.view())
+  defer mounted.destroy()
+  notifier.invalidate = fn() {
+    mounted.invalidate()
+  }
+  let _ = application.flush()
   controller.start()
   (fake.loads.at(0).expect("initial load"))(Result::err("offline"))
   try assertions::assert(
-    controller.list_status.content().contains("offline"),
+    frame_text(application).contains("offline"),
     "initial list errors should be visible",
   )
   let _ = controller.handle_key(key("r", "r"))
   (fake.loads.at(1).expect("retry"))(Result::ok([]))
   try assertions::assert(
-    controller.list_status.content().contains("No notifications"),
+    frame_text(application).contains("No notifications"),
     "successful empty retry should render empty state",
   )
 
@@ -379,7 +466,7 @@ test fn inbox_initial_error_retries_to_empty_and_detail_errors_render() Void!Str
   )
   (fake.details.at(0).expect("detail").completion)(Result::err("forbidden"))
   assertions::assert(
-    controller.detail_text.content().contains("Couldn't load details") and controller.detail_text.content().contains("forbidden"),
+    detail_text(application).contains("Couldn't load details") and detail_text(application).contains("forbidden"),
     "detail errors should render without clearing the selected notification summary",
   )
 }
@@ -393,11 +480,15 @@ test fn inbox_disposal_suppresses_late_detail_and_archive_completions() Void!Str
     archives: [],
   }
   let errors = mut Calls{value: "", count: 0}
+  let notifier = mut Notifier{invalidate: fn() {}}
   let controller = inbox_controller::new(
     application.context,
     theme::new(),
     fake_service(fake),
     no_schedule,
+    fn() {
+      (notifier.invalidate)()
+    },
     fn(identifier: Str) {},
     fn(url: Str) {},
     fn(title: Str, message: Str) {
@@ -405,7 +496,12 @@ test fn inbox_disposal_suppresses_late_detail_and_archive_completions() Void!Str
       errors.count =+ 1
     },
   )
-  application.root.add(controller.root)
+  let mounted = renderer::mount(application.context, application.root, controller.view())
+  defer mounted.destroy()
+  notifier.invalidate = fn() {
+    mounted.invalidate()
+  }
+  let _ = application.flush()
   controller.start()
   (fake.loads.at(0).expect("load"))(Result::ok([item("n1", "AKO-1", "issueMention", "")]))
   let _ = controller.handle_key(key("backspace", ""))
@@ -413,7 +509,7 @@ test fn inbox_disposal_suppresses_late_detail_and_archive_completions() Void!Str
   (fake.details.at(0).expect("detail").completion)(Result::ok(detail("AKO-1", "Late detail")))
   (fake.archives.at(0).expect("archive").completion)(Result::err("denied"))
   try assertions::assert(
-    not controller.detail_text.content().contains("Late detail"),
+    not detail_text(application).contains("Late detail"),
     "disposed Inbox should ignore detail completion",
   )
   assertions::assert(errors.count == 0, "disposed Inbox should ignore archive completion")
@@ -427,16 +523,25 @@ test fn inbox_disposal_suppresses_late_list_completion() Void!Str {
     details: [],
     archives: [],
   }
+  let notifier = mut Notifier{invalidate: fn() {}}
   let controller = inbox_controller::new(
     application.context,
     theme::new(),
     fake_service(fake),
     no_schedule,
+    fn() {
+      (notifier.invalidate)()
+    },
     fn(identifier: Str) {},
     fn(url: Str) {},
     fn(title: Str, message: Str) {},
   )
-  application.root.add(controller.root)
+  let mounted = renderer::mount(application.context, application.root, controller.view())
+  defer mounted.destroy()
+  notifier.invalidate = fn() {
+    mounted.invalidate()
+  }
+  let _ = application.flush()
   controller.start()
   controller.dispose()
   (fake.loads.at(0).expect("load"))(Result::ok([item("n1", "AKO-1", "issueMention", "")]))
