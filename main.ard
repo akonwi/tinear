@@ -276,6 +276,9 @@ private fn show_logged_in(
     palette,
     board_service::live(ctx, api_key),
     scheduler::for_context(ctx),
+    fn() {
+      application_shell.invalidate()
+    },
     fn(identifier: Str) {
       actions.open_issue(identifier)
     },
