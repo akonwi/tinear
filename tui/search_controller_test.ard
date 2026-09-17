@@ -131,27 +131,34 @@ test fn search_debounces_rejects_stale_results_and_opens_document() Void!Str {
   application.render()
   try testing::assert_contains(application.frame().text(), "Type to search issues and docs")
 
+  let _ = application.flush()
   application.paste(event::paste("a"))
+  let _ = application.flush()
   application.paste(event::paste("b"))
   try assertions::assert(scheduled.actions.size() == 2, "each query generation should schedule debounce")
   (scheduled.actions.at(0).expect("stale debounce"))()
+  let _ = application.flush()
   try assertions::assert(fake.requests.size() == 0, "stale debounce should not search")
   (scheduled.actions.at(1).expect("current debounce"))()
+  let _ = application.flush()
   try assertions::assert(fake.requests.size() == 1, "current debounce should search")
   try assertions::assert(
     fake.requests.at(0).expect("request").term == "ab",
     "trimmed query should be searched",
   )
 
+  let _ = application.flush()
   application.paste(event::paste("c"))
   fake.requests.at(
     0,
   ).expect(
     "stale request",
   ).completion(Result::ok(search_service::Outcome{hits: [issue()], warning: ""}))
+  let _ = application.flush()
   application.key(key("return"))
   try assertions::assert(opened.issue_id.is_empty(), "stale results should not be activated")
   (scheduled.actions.at(2).expect("latest debounce"))()
+  let _ = application.flush()
   try assertions::assert(fake.requests.size() == 2, "latest query should search")
   fake.requests.at(
     1,
@@ -162,6 +169,7 @@ test fn search_debounces_rejects_stale_results_and_opens_document() Void!Str {
       search_service::Outcome{hits: [issue(), document()], warning: "Document search unavailable"},
     ),
   )
+  let _ = application.flush()
   application.render()
   try testing::assert_contains(application.frame().text(), "Document search unavailable")
   application.key(key("down"))
@@ -185,19 +193,26 @@ test fn search_renders_loading_empty_and_error_states() Void!Str {
     try assertions::assert(modal.is_open(), "search modal should survive resize")
     try testing::assert_contains(application.frame().text(), "Type to search issues and docs")
   }
+  let _ = application.flush()
   application.paste(event::paste("query"))
+  let _ = application.flush()
   application.render()
   try testing::assert_contains(application.frame().text(), "Searching…")
   (scheduled.actions.at(0).expect("empty debounce"))()
+  let _ = application.flush()
   fake.requests.at(
     0,
   ).expect("empty request").completion(Result::ok(search_service::Outcome{hits: [], warning: ""}))
+  let _ = application.flush()
   application.render()
   try testing::assert_contains(application.frame().text(), "No results found")
 
+  let _ = application.flush()
   application.paste(event::paste("x"))
   (scheduled.actions.at(1).expect("error debounce"))()
+  let _ = application.flush()
   fake.requests.at(1).expect("error request").completion(Result::err("both sources failed"))
+  let _ = application.flush()
   application.render()
   testing::assert_contains(application.frame().text(), "Unable to search: both sources failed")
 }
@@ -214,6 +229,7 @@ test fn search_disposal_cancels_debounce_and_ignores_late_response() Void!Str {
   let _ = application.flush()
   application.paste(event::paste("query"))
   (scheduled.actions.at(0).expect("debounce"))()
+  let _ = application.flush()
   search.dispose()
   let _ = application.flush()
   try assertions::assert(not modal.is_open(), "disposing search should close its modal")
@@ -222,6 +238,7 @@ test fn search_disposal_cancels_debounce_and_ignores_late_response() Void!Str {
   ).expect(
     "late request",
   ).completion(Result::ok(search_service::Outcome{hits: [issue()], warning: ""}))
+  let _ = application.flush()
   try assertions::assert(opened.issue_id.is_empty(), "disposed search should ignore late results")
   assertions::assert(scheduled.cancellations > 0, "disposing search should cancel debounce")
 }
