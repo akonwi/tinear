@@ -80,7 +80,7 @@ fn main() {
   defer application.destroy()
   let ctx = application.context
   let palette = theme::new()
-  let shell_host = application_shell::new(ctx, palette, fn(milliseconds: Int, action: fn()) fn() {
+  let shell_host = application_shell::new(ctx, application.root, palette, fn(milliseconds: Int, action: fn()) fn() {
     fn() {}
   })
   application.root.add(shell_host.root)

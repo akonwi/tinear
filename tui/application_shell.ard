@@ -16,7 +16,12 @@ struct ApplicationShell {
   disposed: Bool,
 }
 
-fn new(ctx: mut cooper::Runtime, palette: tinear_theme::Theme, schedule: scheduler::Schedule) mut ApplicationShell {
+fn new(
+  ctx: mut cooper::Runtime,
+  application_root: mut cooper::Root,
+  palette: tinear_theme::Theme,
+  schedule: scheduler::Schedule,
+) mut ApplicationShell {
   let root = ui::box(
     ctx,
     styles: ui::style(
@@ -30,9 +35,8 @@ fn new(ctx: mut cooper::Runtime, palette: tinear_theme::Theme, schedule: schedul
     styles: ui::style(width: ui::percent(100.0), height: ui::percent(100.0)),
   )
   let modal = modal_host::new(ctx, palette)
-  let toasts = toast_host::new(ctx, palette, schedule)
+  let toasts = toast_host::new(ctx, application_root, palette, schedule)
   root.add(screen_host)
-  root.add(toasts.root)
   root.add(modal.root)
   (mut ApplicationShell{
     root: root,

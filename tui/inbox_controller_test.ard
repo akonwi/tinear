@@ -180,7 +180,7 @@ test fn inbox_loads_rows_and_discards_stale_detail_completion() Void!Str {
   )
   application.click(3, 5)
   try assertions::assert(controller.cursor == 0, "clicking row spacing should not select an item")
-  let divider = application.frame().cell(59, 0).expect("Inbox pane divider")
+  let divider = application.frame().cell(60, 0).expect("Inbox pane divider")
   try assertions::assert(
     divider.grapheme == "│" and divider.style.dim,
     "Inbox panes should use a dim divider",

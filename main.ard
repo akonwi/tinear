@@ -417,7 +417,7 @@ fn main() {
   defer application.destroy()
   let ctx = application.context
   let palette = theme::new()
-  let application_shell = application_shell::new(ctx, palette, scheduler::for_context(ctx))
+  let application_shell = application_shell::new(ctx, application.root, palette, scheduler::for_context(ctx))
   let active_route = mut ActiveRoute{handle: fn(received: mut cooper::KeyEvent) Bool {
     false
   }}
