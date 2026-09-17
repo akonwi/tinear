@@ -15,8 +15,6 @@ struct Model {
   screen_attached: fn(),
   screen_view: cui::View?,
   generation: Int,
-  modal_root: mut ui::Box,
-  modal_dispose: fn(),
 }
 
 private struct ShellProps {
@@ -52,7 +50,6 @@ impl cui::Component for Shell {
       screen_view => children.push(screen_view),
       _ => (),
     }
-    children.push(cui_bridge::view(model.modal_root, model.modal_dispose, fn() {}, key: "modal"))
     cui::box(
       children.@,
       styles: ui::style(
@@ -80,21 +77,13 @@ fn new(
   schedule: scheduler::Schedule,
 ) mut ApplicationShell {
   let toasts = toast_host::new(ctx, application_root, palette, schedule)
-  let modal = modal_host::new(ctx, palette)
+  let modal = modal_host::new(ctx, application_root, palette)
   let model = mut Model{
     screen: Maybe::new<mut ui::Box>(),
     screen_dispose: fn() {},
     screen_attached: fn() {},
     screen_view: Maybe::new<cui::View>(),
     generation: 0,
-    modal_root: modal.root,
-    modal_dispose: fn() {
-      // Runtime teardown destroys the retained tree before unmount hooks run;
-      // only close through live controls.
-      if not modal.root.node_ref.is_destroyed() {
-        let _ = modal.close()
-      }
-    },
   }
   let mounted = renderer::mount(ctx, application_root, cui::child(shell, ShellProps{model: model}))
   (mut ApplicationShell{
@@ -164,9 +153,10 @@ impl ApplicationShell {
   fn mut dispose() {
     if not self.disposed {
       self.disposed = true
-      // Retires the screen and modal bridges synchronously, running each
-      // bridge's dispose path before destroying its orphaned controls.
+      // Retires the screen bridge synchronously, running its dispose path
+      // before destroying its orphaned controls.
       self.cui.destroy()
+      self.modal.dispose()
       self.toasts.dispose()
     }
   }

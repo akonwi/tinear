@@ -121,13 +121,13 @@ private fn controller(
 test fn search_debounces_rejects_stale_results_and_opens_document() Void!Str {
   let application = testing::new(90, 28)
   defer application.destroy()
-  let modal = modal_host::new(application.context, theme::new())
-  application.root.add(modal.root)
+  let modal = modal_host::new(application.context, application.root, theme::new())
   let fake = mut FakeState{requests: []}
   let scheduled = mut Scheduled{actions: [], cancellations: 0}
   let opened = mut Opened{issue_id: "", document_slug: ""}
   let search = controller(application, modal, fake, scheduled, opened)
   search.open(application.context)
+  let _ = application.flush()
   application.render()
   try testing::assert_contains(application.frame().text(), "Type to search issues and docs")
 
@@ -173,13 +173,13 @@ test fn search_debounces_rejects_stale_results_and_opens_document() Void!Str {
 test fn search_renders_loading_empty_and_error_states() Void!Str {
   let application = testing::new(70, 22)
   defer application.destroy()
-  let modal = modal_host::new(application.context, theme::new())
-  application.root.add(modal.root)
+  let modal = modal_host::new(application.context, application.root, theme::new())
   let fake = mut FakeState{requests: []}
   let scheduled = mut Scheduled{actions: [], cancellations: 0}
   let opened = mut Opened{issue_id: "", document_slug: ""}
   let search = controller(application, modal, fake, scheduled, opened)
   search.open(application.context)
+  let _ = application.flush()
   for size in [[60, 20], [100, 30], [160, 40]] {
     application.resize(size.at(0).expect("width"), size.at(1).expect("height"))
     try assertions::assert(modal.is_open(), "search modal should survive resize")
@@ -205,16 +205,17 @@ test fn search_renders_loading_empty_and_error_states() Void!Str {
 test fn search_disposal_cancels_debounce_and_ignores_late_response() Void!Str {
   let application = testing::new(70, 22)
   defer application.destroy()
-  let modal = modal_host::new(application.context, theme::new())
-  application.root.add(modal.root)
+  let modal = modal_host::new(application.context, application.root, theme::new())
   let fake = mut FakeState{requests: []}
   let scheduled = mut Scheduled{actions: [], cancellations: 0}
   let opened = mut Opened{issue_id: "", document_slug: ""}
   let search = controller(application, modal, fake, scheduled, opened)
   search.open(application.context)
+  let _ = application.flush()
   application.paste(event::paste("query"))
   (scheduled.actions.at(0).expect("debounce"))()
   search.dispose()
+  let _ = application.flush()
   try assertions::assert(not modal.is_open(), "disposing search should close its modal")
   fake.requests.at(
     0,

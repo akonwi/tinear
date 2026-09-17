@@ -267,8 +267,7 @@ test fn field_picker_sorts_states_and_filters_cycles() Void!Str {
 test fn state_picker_ignores_dismissed_load_and_reports_mutation_failure() Void!Str {
   let application = testing::new(80, 24)
   defer application.destroy()
-  let modal = modal_host::new(application.context, theme::new())
-  application.root.add(modal.root)
+  let modal = modal_host::new(application.context, application.root, theme::new())
   let state = fake_state()
   let outcome = mut Outcome{
     changed: 0,
@@ -279,8 +278,10 @@ test fn state_picker_ignores_dismissed_load_and_reports_mutation_failure() Void!
   let picker = controller(application, modal, state, outcome)
 
   picker.open(issue_field_picker_controller::Field::state, issue())
+  let _ = application.flush()
   try assertions::assert(state.state_loads.size() == 1, "state picker should load team states")
   try assertions::assert(modal.dismiss(), "loading picker should be dismissible")
+  let _ = application.flush()
   let load_cancelled = select {
     state.state_cancellations.at(0).expect("cancellation").recv() => true,
     _ => false,
@@ -299,9 +300,11 @@ test fn state_picker_ignores_dismissed_load_and_reports_mutation_failure() Void!
       ],
     ),
   )
+  let _ = application.flush()
   try assertions::assert(not modal.is_open(), "dismissed load must not reopen modal")
 
   picker.open(issue_field_picker_controller::Field::state, issue())
+  let _ = application.flush()
   (state.state_loads.at(1).expect("current load"))(
     Result::ok(
       [
@@ -322,6 +325,7 @@ test fn state_picker_ignores_dismissed_load_and_reports_mutation_failure() Void!
       ],
     ),
   )
+  let _ = application.flush()
   application.render()
   for size in [[60, 20], [100, 30], [160, 40]] {
     application.resize(size.at(0).expect("width"), size.at(1).expect("height"))
@@ -346,8 +350,7 @@ test fn state_picker_ignores_dismissed_load_and_reports_mutation_failure() Void!
 test fn field_picker_load_failure_closes_and_reports() Void!Str {
   let application = testing::new(80, 24)
   defer application.destroy()
-  let modal = modal_host::new(application.context, theme::new())
-  application.root.add(modal.root)
+  let modal = modal_host::new(application.context, application.root, theme::new())
   let state = fake_state()
   let outcome = mut Outcome{
     changed: 0,
@@ -357,7 +360,9 @@ test fn field_picker_load_failure_closes_and_reports() Void!Str {
   }
   let picker = controller(application, modal, state, outcome)
   picker.open(issue_field_picker_controller::Field::state, issue())
+  let _ = application.flush()
   (state.state_loads.at(0).expect("state load"))(Result::err("forbidden"))
+  let _ = application.flush()
   try assertions::assert(not modal.is_open(), "picker load failure should close loading modal")
   try assertions::assert(outcome.errors == 1, "picker load failure should notify")
   assertions::assert(outcome.error_title == "State picker", "load error should identify the picker")
@@ -366,8 +371,7 @@ test fn field_picker_load_failure_closes_and_reports() Void!Str {
 test fn priority_cycle_assignee_and_project_pickers_apply_and_refresh() Void!Str {
   let application = testing::new(80, 24)
   defer application.destroy()
-  let modal = modal_host::new(application.context, theme::new())
-  application.root.add(modal.root)
+  let modal = modal_host::new(application.context, application.root, theme::new())
   let state = fake_state()
   let outcome = mut Outcome{
     changed: 0,
@@ -379,6 +383,7 @@ test fn priority_cycle_assignee_and_project_pickers_apply_and_refresh() Void!Str
   let selected = issue()
 
   picker.open(issue_field_picker_controller::Field::priority, selected)
+  let _ = application.flush()
   application.render()
   application.key(key("down"))
   application.key(key("return"))
@@ -410,6 +415,7 @@ test fn priority_cycle_assignee_and_project_pickers_apply_and_refresh() Void!Str
   let _ = modal.close()
 
   picker.open(issue_field_picker_controller::Field::cycle, selected)
+  let _ = application.flush()
   (state.cycle_loads.at(0).expect("cycles"))(
     Result::ok(
       issues::TeamCyclesResult{
@@ -437,6 +443,7 @@ test fn priority_cycle_assignee_and_project_pickers_apply_and_refresh() Void!Str
       },
     ),
   )
+  let _ = application.flush()
   application.render()
   application.key(key("up"))
   application.key(key("up"))
@@ -448,11 +455,13 @@ test fn priority_cycle_assignee_and_project_pickers_apply_and_refresh() Void!Str
   (state.cycle_updates.at(0).expect("cycle").completion)(Result::ok(()))
 
   picker.open(issue_field_picker_controller::Field::assignee, selected)
+  let _ = application.flush()
   (state.member_loads.at(0).expect("members"))(
     Result::ok(
       [issues::Member{id: "user-1", name: "Alex"}, issues::Member{id: "user-2", name: "Blair"}],
     ),
   )
+  let _ = application.flush()
   application.render()
   application.key(key("down"))
   application.key(key("return"))
@@ -463,6 +472,7 @@ test fn priority_cycle_assignee_and_project_pickers_apply_and_refresh() Void!Str
   (state.assignee_updates.at(0).expect("assignee").completion)(Result::ok(()))
 
   picker.open(issue_field_picker_controller::Field::project, selected)
+  let _ = application.flush()
   (state.project_loads.at(0).expect("projects"))(
     Result::ok(
       [
@@ -471,6 +481,7 @@ test fn priority_cycle_assignee_and_project_pickers_apply_and_refresh() Void!Str
       ],
     ),
   )
+  let _ = application.flush()
   application.render()
   application.key(key("down"))
   application.key(key("return"))
@@ -492,8 +503,7 @@ test fn priority_cycle_assignee_and_project_pickers_apply_and_refresh() Void!Str
 test fn field_picker_disposal_closes_owned_modal_and_ignores_late_load() Void!Str {
   let application = testing::new(60, 20)
   defer application.destroy()
-  let modal = modal_host::new(application.context, theme::new())
-  application.root.add(modal.root)
+  let modal = modal_host::new(application.context, application.root, theme::new())
   let state = fake_state()
   let outcome = mut Outcome{
     changed: 0,
@@ -503,11 +513,13 @@ test fn field_picker_disposal_closes_owned_modal_and_ignores_late_load() Void!St
   }
   let picker = controller(application, modal, state, outcome)
   picker.open(issue_field_picker_controller::Field::project, issue())
+  let _ = application.flush()
   picker.dispose()
   try assertions::assert(not modal.is_open(), "dispose should close picker-owned modal")
   (state.project_loads.at(0).expect("late load"))(
     Result::ok([issues::Project{id: "late", name: "Late"}]),
   )
+  let _ = application.flush()
   try assertions::assert(not modal.is_open(), "late load should stay suppressed")
   assertions::assert(outcome.errors == 0, "late completion should not notify")
 }

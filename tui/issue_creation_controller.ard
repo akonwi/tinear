@@ -158,8 +158,7 @@ impl CreationSession {
       ),
     )
     self.replace_stage(loading, fn() {})
-    self.modal.title_text.set_content("New issue")
-    self.modal.footer_text.set_content("Esc cancel")
+    self.modal.set_chrome("New issue", "Esc cancel")
   }
 
   private fn mut show_team_picker(teams: [issues::Team]) {
@@ -191,8 +190,7 @@ impl CreationSession {
     self.replace_stage(picker.root, fn() {
       picker.dispose()
     })
-    self.modal.title_text.set_content("New issue — choose team")
-    self.modal.footer_text.set_content("↑↓ select   Enter confirm   Esc cancel")
+    self.modal.set_chrome("New issue — choose team", "↑↓ select   Enter confirm   Esc cancel")
     let _ = picker.focus()
   }
 
@@ -336,8 +334,7 @@ impl CreationSession {
     self.replace_stage(root, fn() {
       form.dispose()
     })
-    self.modal.title_text.set_content("New issue — {team.name}")
-    self.modal.footer_text.set_content("Tab next field   Ctrl+Enter create   Esc cancel")
+    self.modal.set_chrome("New issue — {team.name}", "Tab next field   Ctrl+Enter create   Esc cancel")
     let _ = title.focus()
   }
 

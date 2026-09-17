@@ -141,8 +141,7 @@ private fn controller(
 test fn comment_editor_validates_submits_once_and_refreshes_comments() Void!Str {
   let application = testing::new(80, 24)
   defer application.destroy()
-  let modal = modal_host::new(application.context, theme::new())
-  application.root.add(modal.root)
+  let modal = modal_host::new(application.context, application.root, theme::new())
   let state = mut FakeState{comments: [], descriptions: []}
   let outcome = mut Outcome{
     comments_changed: 0,
@@ -153,6 +152,7 @@ test fn comment_editor_validates_submits_once_and_refreshes_comments() Void!Str 
   }
   let editor = controller(application, modal, state, outcome)
   editor.open_comment(issue(), "parent-1", "Alex")
+  let _ = application.flush()
   application.render()
 
   application.key(key("return", ctrl: true))
@@ -172,8 +172,10 @@ test fn comment_editor_validates_submits_once_and_refreshes_comments() Void!Str 
   try assertions::assert(not modal.dismiss(), "posting comment should guard dismissal")
   application.paste(event::paste(" discarded"))
   editor.open_description(issue())
+  let _ = application.flush()
+  application.render()
   try assertions::assert(
-    modal.title_text.content() == "Reply to Alex — AKO-1",
+    application.frame().text().contains("Reply to Alex — AKO-1"),
     "another editor should not replace an in-flight mutation",
   )
   request.completion(Result::err("retry"))
@@ -200,8 +202,7 @@ test fn comment_editor_validates_submits_once_and_refreshes_comments() Void!Str 
 test fn description_editor_saves_draft_and_recovers_from_failure() Void!Str {
   let application = testing::new(80, 24)
   defer application.destroy()
-  let modal = modal_host::new(application.context, theme::new())
-  application.root.add(modal.root)
+  let modal = modal_host::new(application.context, application.root, theme::new())
   let state = mut FakeState{comments: [], descriptions: []}
   let outcome = mut Outcome{
     comments_changed: 0,
@@ -212,6 +213,7 @@ test fn description_editor_saves_draft_and_recovers_from_failure() Void!Str {
   }
   let editor = controller(application, modal, state, outcome)
   editor.open_description(issue())
+  let _ = application.flush()
   application.render()
   application.key(select_all())
   application.paste(event::paste("New **description**"))
@@ -225,6 +227,7 @@ test fn description_editor_saves_draft_and_recovers_from_failure() Void!Str {
   try assertions::assert(outcome.description.is_empty(), "failed save should not update detail")
 
   editor.open_description(issue())
+  let _ = application.flush()
   application.render()
   application.key(select_all())
   application.paste(event::paste("Saved"))
@@ -253,8 +256,7 @@ test fn description_editor_saves_draft_and_recovers_from_failure() Void!Str {
 test fn replaced_comment_editor_refreshes_without_stealing_modal_focus() Void!Str {
   let application = testing::new(70, 20)
   defer application.destroy()
-  let modal = modal_host::new(application.context, theme::new())
-  application.root.add(modal.root)
+  let modal = modal_host::new(application.context, application.root, theme::new())
   let state = mut FakeState{comments: [], descriptions: []}
   let outcome = mut Outcome{
     comments_changed: 0,
@@ -265,6 +267,7 @@ test fn replaced_comment_editor_refreshes_without_stealing_modal_focus() Void!St
   }
   let editor = controller(application, modal, state, outcome)
   editor.open_comment(issue(), "", "")
+  let _ = application.flush()
   application.paste(event::paste("Posted elsewhere"))
   application.key(key("return", ctrl: true))
   let replacement = ui::box(application.context)
@@ -291,8 +294,7 @@ test fn replaced_comment_editor_refreshes_without_stealing_modal_focus() Void!St
 test fn editor_disposal_closes_owned_modal_and_ignores_late_completion() Void!Str {
   let application = testing::new(60, 20)
   defer application.destroy()
-  let modal = modal_host::new(application.context, theme::new())
-  application.root.add(modal.root)
+  let modal = modal_host::new(application.context, application.root, theme::new())
   let state = mut FakeState{comments: [], descriptions: []}
   let outcome = mut Outcome{
     comments_changed: 0,
@@ -303,6 +305,7 @@ test fn editor_disposal_closes_owned_modal_and_ignores_late_completion() Void!St
   }
   let editor = controller(application, modal, state, outcome)
   editor.open_comment(issue(), "", "")
+  let _ = application.flush()
   application.paste(event::paste("Late"))
   application.key(key("return", ctrl: true))
   editor.dispose()
