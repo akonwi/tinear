@@ -391,6 +391,8 @@ private fn show_logged_in(
   )
   application_shell.set_screen(controller.root, fn() {
     controller.dispose()
+  }, on_attached: fn() {
+    controller.focus_active()
   })
   actions.open_issue = fn(identifier: Str) {
     controller.open(tabs::issue_tab(identifier))
@@ -409,7 +411,6 @@ private fn show_logged_in(
   }
   inbox.start()
   board.start()
-  controller.focus_active()
 }
 
 fn main() {
@@ -421,7 +422,6 @@ fn main() {
   let active_route = mut ActiveRoute{handle: fn(received: mut cooper::KeyEvent) Bool {
     false
   }}
-  application.root.add(application_shell.root)
 
   let configured = match config::load() {
     ok(value) => value,
@@ -435,8 +435,9 @@ fn main() {
       })
       application_shell.set_screen(welcome.root, fn() {
         welcome.dispose()
+      }, on_attached: fn() {
+        let _ = welcome.focus()
       })
-      let _ = welcome.focus()
     },
   }
 

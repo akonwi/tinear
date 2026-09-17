@@ -83,7 +83,6 @@ fn main() {
   let shell_host = application_shell::new(ctx, application.root, palette, fn(milliseconds: Int, action: fn()) fn() {
     fn() {}
   })
-  application.root.add(shell_host.root)
   let restored = tabs::doc_tab("restored", "Restored doc")
   cache::save_logged_in(
     cache::LoggedInCache{tab_index: 2, tabs: [restored]},
@@ -105,8 +104,9 @@ fn main() {
   )
   shell_host.set_screen(controller.root, fn() {
     controller.dispose()
+  }, on_attached: fn() {
+    controller.focus_active()
   })
-  controller.focus_active()
 
   let _ = application.on_key(fn(received: mut cooper::KeyEvent) {
     if received.event_type != cooper::KeyEventType::release and received.matches("c", ctrl: true) {
