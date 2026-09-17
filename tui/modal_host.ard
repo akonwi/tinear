@@ -15,6 +15,7 @@ struct Model {
   title: Str,
   footer: Str,
   body: (mut ui::Box)?,
+  body_view: cui::View?,
   body_dispose: fn(),
   body_attached: fn(),
   generation: Int,
@@ -62,6 +63,8 @@ struct ModalHost {
   generation: Int,
   presented: Bool,
   disposed: Bool,
+  view_restore_focus: fn(),
+  view_can_dismiss: fn() Bool,
   palette: tinear_theme::Theme,
 }
 
@@ -101,6 +104,10 @@ impl cui::Component for Host {
             ),
           )
         },
+        _ => (),
+      }
+      match model.body_view {
+        body_view => frame_children.push(body_view),
         _ => (),
       }
       frame_children.push(cui::text(model.footer, text_style: ui::text_style(dim: true)))
@@ -149,6 +156,7 @@ fn new(ctx: mut cooper::Runtime, root: mut cooper::Root, palette: tinear_theme::
     title: "",
     footer: "",
     body: Maybe::new<mut ui::Box>(),
+    body_view: Maybe::new<cui::View>(),
     body_dispose: fn() {},
     body_attached: fn() {},
     generation: 0,
@@ -165,6 +173,10 @@ fn new(ctx: mut cooper::Runtime, root: mut cooper::Root, palette: tinear_theme::
     generation: 0,
     presented: false,
     disposed: false,
+    view_restore_focus: fn() {},
+    view_can_dismiss: fn() Bool {
+      true
+    },
     palette: palette,
   })
 }
@@ -187,6 +199,7 @@ impl ModalHost {
     self.cui.update(fn() {
       self.model.open = false
       self.model.body = Maybe::new<mut ui::Box>()
+      self.model.body_view = Maybe::new<cui::View>()
       self.model.body_dispose = fn() {}
       self.model.body_attached = fn() {}
     })
@@ -229,11 +242,43 @@ impl ModalHost {
       self.model.title = title
       self.model.footer = footer
       self.model.body = Maybe::new(body)
+      self.model.body_view = Maybe::new<cui::View>()
       self.model.body_dispose = dispose
       self.model.body_attached = fn() {
         current.attached = true
         initial_focus()
       }
+      self.model.generation = generation
+    })
+    Ticket{generation: generation}
+  }
+
+  // Present a declarative body. CUI owns the component's lifetime, so no
+  // dispose or attach hook is needed; focus is described by the component.
+  fn mut present_view(
+    title: Str,
+    body: cui::View,
+    footer: Str,
+    restore_focus: fn(),
+    can_dismiss: fn() Bool,
+  ) Ticket {
+    if self.presented {
+      self.clear_current()
+    }
+    self.generation =+ 1
+    let generation = self.generation
+    self.current = Maybe::new<mut Current>()
+    self.presented = true
+    self.view_restore_focus = restore_focus
+    self.view_can_dismiss = can_dismiss
+    self.cui.update(fn() {
+      self.model.open = true
+      self.model.title = title
+      self.model.footer = footer
+      self.model.body = Maybe::new<mut ui::Box>()
+      self.model.body_dispose = fn() {}
+      self.model.body_attached = fn() {}
+      self.model.body_view = Maybe::new(body)
       self.model.generation = generation
     })
     Ticket{generation: generation}
@@ -257,8 +302,9 @@ impl ModalHost {
       let closing_generation = self.generation
       let restore = match self.current {
         current => current.restore_focus,
-        _ => fn() {},
+        _ => self.view_restore_focus,
       }
+      self.view_restore_focus = fn() {}
       self.clear_current()
       if (not self.presented) and self.generation == closing_generation {
         restore()
@@ -273,7 +319,7 @@ impl ModalHost {
     } else {
       let allowed = match self.current {
         current => (current.can_dismiss)(),
-        _ => true,
+        _ => (self.view_can_dismiss)(),
       }
       if allowed {
         self.close()

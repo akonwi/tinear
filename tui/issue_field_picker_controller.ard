@@ -197,26 +197,18 @@ impl Controller {
     field: Field,
   ) {
     if not self.scope.disposed {
-      let picker = picker_controller::new(
-        self.context,
-        self.palette,
-        placeholder,
-        options,
-        selected_id,
-        fn(option: picker_controller::Option) {
-          self.apply(field, issue, option.id)
-        },
-      )
-      let ticket = self.modal.present(
+      let ticket = self.modal.present_view(
         title,
-        picker.root,
+        picker_controller::view(
+          self.palette,
+          placeholder,
+          options,
+          selected_id,
+          fn(option: picker_controller::Option) {
+            self.apply(field, issue, option.id)
+          },
+        ),
         "↑↓ navigate   Enter select   Esc cancel",
-        fn() {
-          picker.dispose()
-        },
-        fn() {
-          picker.focus()
-        },
         self.restore_focus,
         fn() Bool {
           true

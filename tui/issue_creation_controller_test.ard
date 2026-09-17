@@ -121,14 +121,19 @@ test fn creation_with_one_team_validates_retries_and_opens_issue() Void!Str {
   }
 
   application.key(key("return", ctrl: true))
+  let _ = application.flush()
+  application.render()
   try assertions::assert(state.creates.size() == 0, "empty title should not submit")
   try assertions::assert(
     application.frame().text().contains("Title is required"),
     "validation error should render",
   )
   application.paste(event::paste("  New issue  "))
+  let _ = application.flush()
   application.key(key("tab"))
+  let _ = application.flush()
   application.paste(event::paste("Description body"))
+  let _ = application.flush()
   application.key(key("return", ctrl: true))
   application.key(key("return", ctrl: true))
   try assertions::assert(state.creates.size() == 1, "duplicate submission chords should be ignored")
@@ -138,6 +143,7 @@ test fn creation_with_one_team_validates_retries_and_opens_issue() Void!Str {
   try assertions::assert(request.description == "Description body", "description should be submitted")
   try assertions::assert(not modal.dismiss(), "in-flight creation should guard dismissal")
   request.completion(Result::err("permission denied"))
+  let _ = application.flush()
   application.render()
   try assertions::assert(
     application.frame().text().contains("permission denied"),
@@ -146,6 +152,7 @@ test fn creation_with_one_team_validates_retries_and_opens_issue() Void!Str {
   application.key(key("return", ctrl: true))
   try assertions::assert(state.creates.size() == 2, "failed submission should allow retry")
   state.creates.at(1).expect("retry").completion(Result::ok("AKO-42"))
+  let _ = application.flush()
   try assertions::assert(not modal.is_open(), "successful creation should close modal")
   try assertions::assert(
     outcome.successes.at(0).expect("success toast") == "AKO-42",
@@ -189,13 +196,17 @@ test fn creation_handles_zero_and_many_team_flows() Void!Str {
   try assertions::assert(application.frame().text().contains("choose team"), "team picker should render")
   application.key(key("down"))
   application.key(key("return"))
+  let _ = application.flush()
   application.paste(event::paste("Mobile issue"))
+  let _ = application.flush()
   application.key(key("return", ctrl: true))
+  let _ = application.flush()
   try assertions::assert(
     state.creates.at(0).expect("many-team create").team_id == "team-2",
     "picker should choose team",
   )
   state.creates.at(0).expect("many-team success").completion(Result::ok("MOBILE-1"))
+  let _ = application.flush()
   assertions::assert(
     outcome.created.at(0).expect("created") == "MOBILE-1",
     "many-team flow should open issue",
@@ -217,6 +228,7 @@ test fn creation_team_load_error_closes_and_reports() Void!Str {
   let _ = application.flush()
   try assertions::assert(modal.is_open(), "loading teams should own the modal")
   (state.team_loads.at(0).expect("team load"))(Result::err("workspace unavailable"))
+  let _ = application.flush()
   try assertions::assert(not modal.is_open(), "team load failure should close creation")
   assertions::assert(
     outcome.errors.at(0).expect("load error") == "workspace unavailable",
