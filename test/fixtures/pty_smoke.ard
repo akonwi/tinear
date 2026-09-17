@@ -110,7 +110,6 @@ fn main() {
       controller.dispose()
     },
   )
-  controller.focus_active()
 
   let _ = application.on_key(fn(received: mut cooper::KeyEvent) {
     if received.event_type != cooper::KeyEventType::release and received.matches("c", ctrl: true) {

@@ -126,6 +126,12 @@ impl cui::Lifecycle for Editor {
   fn mut mounted(ctx: cui::Context) {}
 
   fn mut unmounting(ctx: cui::Context) {
+    // Cancelling the request means the service may never complete, so release
+    // the controller-owned operation guard here; otherwise it stays held for
+    // the process lifetime and blocks every later editor.
+    if submission_active(self.props.submit_guard) {
+      (self.props.finish)()
+    }
     self.stop.close()
   }
 }

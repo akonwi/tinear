@@ -268,7 +268,9 @@ test fn issue_detail_loads_issue_and_comments_independently_and_routes_commands(
   )
   try assertions::assert(actions.edits == 1, "e should open description editing")
 
-  controller.comments_changed("c2", true)
+  // A freshly posted comment has no mounted row yet, so focus must survive
+  // the commit that first mounts it.
+  controller.comments_changed("new", true)
   let _ = application.flush()
   application.render()
   (fake.comment_loads.at(1).expect("refreshed comments"))(
@@ -280,8 +282,10 @@ test fn issue_detail_loads_issue_and_comments_independently_and_routes_commands(
       ],
     ),
   )
+  let _ = application.flush()
+  application.render()
   try assertions::assert(
-    controller.comments.at(controller.comment_cursor).expect("created comment").id == "c2",
+    controller.comments.at(controller.comment_cursor).expect("created comment").id == "new",
     "post refresh should select the created comment by ID",
   )
   assertions::assert(

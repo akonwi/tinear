@@ -500,3 +500,52 @@ test fn shell_disposal_cleans_screens_and_persistence_once() Void!Str {
   try assertions::assert(disposed.value == 1, "dynamic screen should dispose once")
   assertions::assert(persistence_disposals.value == 1, "persistence worker should dispose once")
 }
+
+test fn shell_focuses_the_active_screen_after_its_first_commit() Void!Str {
+  let application = testing::new(80, 20)
+  defer application.destroy()
+  let inbox_state = mut ScreenState{
+    focuses: 0,
+    handled: 0,
+    disposals: 0,
+  }
+  let board_state = mut ScreenState{
+    focuses: 0,
+    handled: 0,
+    disposals: 0,
+  }
+  let created = mut Counter{value: 0}
+  let disposed = mut Counter{value: 0}
+  let controller = shell_controller::new(
+    application.context,
+    theme::new(),
+    shell_model::empty(),
+    fake_screen(application.context, "Inbox body", inbox_state),
+    fake_screen(application.context, "Board body", board_state),
+    dynamic_factory(application.context, created, disposed),
+    fn(value: cache::LoggedInCache) {},
+    fn() {},
+    fn() {},
+    fn() {},
+  )
+  let notifier = mut Notifier{invalidate: fn() {}}
+  let mounted = renderer::mount(
+    application.context,
+    application.root,
+    shell_controller::view(controller, fn() {
+      (notifier.invalidate)()
+    }),
+  )
+  defer mounted.destroy()
+  notifier.invalidate = fn() {
+    mounted.invalidate()
+  }
+
+  // Screen focus is imperative and needs mounted refs, so the shell claims it
+  // from a lifecycle hook rather than at construction.
+  try assertions::assert(inbox_state.focuses == 0, "focus must wait for the first commit")
+  let _ = application.flush()
+  application.render()
+  try assertions::assert(inbox_state.focuses == 1, "mounting should focus the active screen")
+  assertions::assert(board_state.focuses == 0, "hidden screens should not take focus")
+}

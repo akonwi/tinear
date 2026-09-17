@@ -299,7 +299,23 @@ impl IssueDetailController {
       let should_focus = self.focus_pending_comment
       self.focus_pending_comment = false
       if should_focus {
-        self.focus_selected_comment()
+        // A newly posted comment has no mounted control yet: its ref is only
+        // populated at commit. reconcile_comments has already requested a
+        // render, so queue the focus behind it.
+        let generation = self.comments_generation
+        let _ = self.context.dispatch(fn() {
+          if (not self.disposed) and generation == self.comments_generation {
+            // The row may still be uncommitted on the first pass; retry once
+            // more behind the render that mounts it.
+            if not self.focus_selected_comment() {
+              let _ = self.context.dispatch(fn() {
+                if (not self.disposed) and generation == self.comments_generation {
+                  let _ = self.focus_selected_comment()
+                }
+              })
+            }
+          }
+        })
       }
     }
   }
@@ -369,19 +385,19 @@ impl IssueDetailController {
     }
   }
 
-  private fn mut focus_selected_comment() {
+  private fn mut focus_selected_comment() Bool {
+    mut focused = false
     match self.comment_records.at(self.comment_cursor) {
       record => {
         match record.panel.current {
-          panel => {
-            let _ = panel.focus()
-          },
+          panel => { focused = panel.focus() },
           _ => (),
         }
       },
       _ => (),
     }
     self.reveal_selected_comment()
+    focused
   }
 
   fn mut select_comment(id: Str) {

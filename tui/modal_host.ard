@@ -194,11 +194,13 @@ impl ModalHost {
 
   // Retire the active body. CUI runs the dispose path for committed bodies;
   // bodies that never reached a commit are disposed eagerly here.
+  //
+  // All state is detached before `on_close` runs so that a hook which presents
+  // a replacement modal cannot have it torn down by this call.
   private fn mut clear_current() {
     let on_close = self.view_on_close
-    self.view_on_close = fn() {}
-    on_close()
     let old = self.current
+    self.view_on_close = fn() {}
     self.current = Maybe::new<mut Current>()
     self.presented = false
     self.cui.update(fn() {
@@ -217,6 +219,7 @@ impl ModalHost {
       },
       _ => (),
     }
+    on_close()
   }
 
   fn mut present(

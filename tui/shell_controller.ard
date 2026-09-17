@@ -228,6 +228,18 @@ private fn tabs_component(props: mut TabsProps) mut Tabs {
   (mut Tabs{props: props})
 }
 
+impl cui::Lifecycle for Tabs {
+  fn mut mounted(ctx: cui::Context) {
+    // Screen focus is imperative and needs mounted refs, so claim it after the
+    // first commit rather than at construction time.
+    let _ = ctx.dispatch(fn() {
+      self.props.controller.focus_active()
+    })
+  }
+
+  fn mut unmounting(ctx: cui::Context) {}
+}
+
 impl Tabs {
   private fn mut chip(index: Int, label: Str, dynamic: Bool) cui::View {
     let controller = self.props.controller

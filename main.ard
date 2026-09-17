@@ -409,7 +409,6 @@ private fn show_logged_in(
       controller.dispose()
     },
   )
-  controller.focus_active()
   actions.open_issue = fn(identifier: Str) {
     controller.open(tabs::issue_tab(identifier))
   }

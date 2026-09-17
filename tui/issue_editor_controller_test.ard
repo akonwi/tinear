@@ -330,3 +330,42 @@ test fn editor_disposal_closes_owned_modal_and_ignores_late_completion() Void!St
   let _ = application.flush()
   assertions::assert(outcome.comments_changed == 0, "disposed editor should ignore completion")
 }
+
+test fn aborted_submission_releases_the_shared_operation_guard() Void!Str {
+  let application = testing::new(60, 20)
+  defer application.destroy()
+  let modal = modal_host::new(application.context, application.root, theme::new())
+  let state = mut FakeState{comments: [], descriptions: []}
+  let outcome = mut Outcome{
+    comments_changed: 0,
+    comment_id: "",
+    focus_comment: false,
+    description: "",
+    errors: 0,
+  }
+  let editor = controller(application, modal, state, outcome)
+  editor.open_comment(issue(), "", "")
+  let _ = application.flush()
+  application.paste(event::paste("Never completes"))
+  let _ = application.flush()
+  application.key(key("return", ctrl: true))
+  let _ = application.flush()
+  try assertions::assert(state.comments.size() == 1, "submission should be in flight")
+
+  // Retiring the editor cancels the request, so the service may never call
+  // back. The controller-owned guard must still be released.
+  let replacement = ui::box(application.context)
+  let _ = modal.present("Other modal", replacement, "", fn() {}, fn() {}, fn() {}, fn() Bool {
+    true
+  })
+  let _ = application.flush()
+  let _ = modal.close()
+  let _ = application.flush()
+
+  editor.open_description(issue())
+  let _ = application.flush()
+  assertions::assert(
+    modal.is_open(),
+    "an aborted submission must not lock out later editors",
+  )
+}
