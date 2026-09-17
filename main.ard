@@ -136,6 +136,9 @@ private fn issue_detail_screen(
     identifier,
     issue_detail_service::live(ctx, api_key),
     scheduler::for_context(ctx),
+    fn() {
+      application_shell.invalidate()
+    },
     fn(target: Str) {
       match url::open(ctx, target) {
         ok(_) => (),

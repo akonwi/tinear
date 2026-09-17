@@ -102,7 +102,7 @@ impl cui::Component for DocumentDetail {
         cui::scroll_box(
           // Markdown stays imperative: Cooper's declarative text has no link
           // callback, so the rendered control is bridged instead.
-          [cui_bridge::view(self.props.markdown.root, fn() {}, fn() {}, key: "markdown")],
+          [cui_bridge::view(self.props.markdown.root, fn() {}, fn() {}, key: "markdown", destroy_on_unmount: false)],
           ref: model.body,
           styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_grow: 1.0),
         ),
