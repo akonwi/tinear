@@ -13,6 +13,7 @@ struct Model {
   screen: (mut ui::Box)?,
   screen_dispose: fn(),
   screen_attached: fn(),
+  screen_view: cui::View?,
   generation: Int,
   modal_root: mut ui::Box,
   modal_dispose: fn(),
@@ -45,6 +46,10 @@ impl cui::Component for Shell {
           ),
         )
       },
+      _ => (),
+    }
+    match model.screen_view {
+      screen_view => children.push(screen_view),
       _ => (),
     }
     children.push(cui_bridge::view(model.modal_root, model.modal_dispose, fn() {}, key: "modal"))
@@ -80,6 +85,7 @@ fn new(
     screen: Maybe::new<mut ui::Box>(),
     screen_dispose: fn() {},
     screen_attached: fn() {},
+    screen_view: Maybe::new<cui::View>(),
     generation: 0,
     modal_root: modal.root,
     modal_dispose: fn() {
@@ -112,6 +118,21 @@ impl ApplicationShell {
       self.model.screen = Maybe::new<mut ui::Box>(screen)
       self.model.screen_dispose = dispose
       self.model.screen_attached = attached
+      self.model.screen_view = Maybe::new<cui::View>()
+    })
+  }
+
+  // Host a declarative screen; CUI lifecycle owns its disposal.
+  fn mut set_view(view: cui::View) {
+    if self.disposed {
+      panic("cannot set the screen on a disposed application shell")
+    }
+    self.cui.update(fn() {
+      self.model.generation =+ 1
+      self.model.screen = Maybe::new<mut ui::Box>()
+      self.model.screen_dispose = fn() {}
+      self.model.screen_attached = fn() {}
+      self.model.screen_view = Maybe::new(view)
     })
   }
 

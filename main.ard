@@ -430,14 +430,11 @@ fn main() {
   match configured.has_auth() {
     true => show_logged_in(ctx, palette, configured.api_key, application_shell, active_route),
     false => {
-      let welcome = welcome_controller::new(ctx, palette, auth::live(ctx), fn(api_key: Str) {
-        show_logged_in(ctx, palette, api_key, application_shell, active_route)
-      })
-      application_shell.set_screen(welcome.root, fn() {
-        welcome.dispose()
-      }, on_attached: fn() {
-        let _ = welcome.focus()
-      })
+      application_shell.set_view(
+        welcome_controller::view(palette, auth::live(ctx), fn(api_key: Str) {
+          show_logged_in(ctx, palette, api_key, application_shell, active_route)
+        }),
+      )
     },
   }
 
