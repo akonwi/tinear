@@ -9,11 +9,44 @@ use tinear/tui/cui_bridge
 use tinear/tui/hints_bar
 use tinear/tui/theme as tinear_theme
 
+// A shell page. Imperative screens supply `root`; declarative screens supply
+// `view` and are wrapped in a visibility box by the shell.
 struct Screen {
+  root: (mut ui::Box)?,
+  view: cui::View?,
+  focus: fn(),
+  handle_key: fn(mut cooper::KeyEvent) Bool,
+  dispose: fn(),
+}
+
+fn imperative_screen(
   root: mut ui::Box,
   focus: fn(),
   handle_key: fn(mut cooper::KeyEvent) Bool,
   dispose: fn(),
+) Screen {
+  Screen{
+    root: Maybe::new(root),
+    view: Maybe::new<cui::View>(),
+    focus: focus,
+    handle_key: handle_key,
+    dispose: dispose,
+  }
+}
+
+fn declarative_screen(
+  view: cui::View,
+  focus: fn(),
+  handle_key: fn(mut cooper::KeyEvent) Bool,
+  dispose: fn(),
+) Screen {
+  Screen{
+    root: Maybe::new<mut ui::Box>(),
+    view: Maybe::new(view),
+    focus: focus,
+    handle_key: handle_key,
+    dispose: dispose,
+  }
 }
 
 struct DynamicScreen {
@@ -60,10 +93,53 @@ private fn body_style(current: ui::Style, display: ui::Display) ui::Style {
   updated.@
 }
 
+// Imperative pages keep their own root styling (visibility is applied to the
+// control); declarative pages are wrapped in a visibility box.
+private fn page(screen: Screen, key: Str, visible: Bool) cui::View {
+  match screen.view {
+    view => {
+      cui::box(
+        [view],
+        key: key,
+        styles: body_style(
+          ui::style(),
+          match visible {
+            true => ui::Display::flex,
+            false => ui::Display::none,
+          },
+        ),
+      )
+    },
+    _ => {
+      match screen.root {
+        root => cui_bridge::view(root, fn() {}, fn() {}, key: key),
+        _ => cui::box([], key: key),
+      }
+    },
+  }
+}
+
 private fn tab_key(reference: tabs::TabRef) Str {
   match reference.kind {
     tabs::Kind::issue => "tab-issue-{reference.id}",
     tabs::Kind::doc => "tab-doc-{reference.id}",
+  }
+}
+
+private fn show_screen(screen: Screen, visible: Bool) {
+  match screen.root {
+    root => {
+      root.set_style(
+        body_style(
+          root.style(),
+          match visible {
+            true => ui::Display::flex,
+            false => ui::Display::none,
+          },
+        ),
+      )
+    },
+    _ => (),
   }
 }
 
@@ -259,11 +335,15 @@ impl cui::Component for Tabs {
     // Screens are persistent bridges: hidden pages stay mounted so their
     // controllers keep their state, scrolling, and in-flight requests.
     let bodies = mut List::new<cui::View>()
-    bodies.push(cui_bridge::view(controller.inbox.root, fn() {}, fn() {}, key: "screen-inbox"))
-    bodies.push(cui_bridge::view(controller.board.root, fn() {}, fn() {}, key: "screen-board"))
-    for dynamic in controller.dynamic_screens {
+    bodies.push(page(controller.inbox, "screen-inbox", controller.model.tab_index == 0))
+    bodies.push(page(controller.board, "screen-board", controller.model.tab_index == 1))
+    for dynamic, index in controller.dynamic_screens {
       bodies.push(
-        cui_bridge::view(dynamic.screen.root, fn() {}, fn() {}, key: tab_key(dynamic.reference)),
+        page(
+          dynamic.screen,
+          tab_key(dynamic.reference),
+          controller.model.tab_index == 2 + index,
+        ),
       )
     }
 
@@ -379,34 +459,10 @@ impl ShellController {
   // Page visibility is applied directly to bridged screen roots so it holds
   // whether or not a render has committed yet.
   private fn mut apply_visibility() {
-    self.inbox.root.set_style(
-      body_style(
-        self.inbox.root.style(),
-        match self.model.tab_index == 0 {
-          true => ui::Display::flex,
-          false => ui::Display::none,
-        },
-      ),
-    )
-    self.board.root.set_style(
-      body_style(
-        self.board.root.style(),
-        match self.model.tab_index == 1 {
-          true => ui::Display::flex,
-          false => ui::Display::none,
-        },
-      ),
-    )
+    show_screen(self.inbox, self.model.tab_index == 0)
+    show_screen(self.board, self.model.tab_index == 1)
     for dynamic, index in self.dynamic_screens {
-      dynamic.screen.root.set_style(
-        body_style(
-          dynamic.screen.root.style(),
-          match self.model.tab_index == 2 + index {
-            true => ui::Display::flex,
-            false => ui::Display::none,
-          },
-        ),
-      )
+      show_screen(dynamic.screen, self.model.tab_index == 2 + index)
     }
   }
 

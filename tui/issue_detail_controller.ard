@@ -842,7 +842,7 @@ impl IssueDetailController {
   }
 
   fn mut screen(dispose_extra: fn()) shell_controller::Screen {
-    shell_controller::Screen{
+    shell_controller::imperative_screen(
       root: self.root,
       focus: fn() {
         self.focus()
@@ -854,7 +854,7 @@ impl IssueDetailController {
         dispose_extra()
         self.dispose()
       },
-    }
+    )
   }
 
   fn mut dispose() {

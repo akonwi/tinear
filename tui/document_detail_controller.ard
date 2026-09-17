@@ -1,58 +1,38 @@
 use cooper
+use cooper/cui
 use cooper/ui
 use go:strings
 use tinear/models/documents
 use tinear/services/document_detail_service
-use tinear/tui/lifecycle
+use tinear/tui/cui_bridge
 use tinear/tui/markdown_controller
 use tinear/tui/scheduler
 use tinear/tui/shell_controller
 use tinear/tui/theme as tinear_theme
 use tinear/tui/timestamp
 
-struct DocumentDetailController {
-  root: mut ui::Box,
-  context: mut cooper::Runtime,
-  slug_id: Str,
+// Facade-owned state; the component describes it and the controller mutates it
+// from service completions and key handling.
+struct Model {
   cached_title: Str,
-  status: mut ui::Text,
-  content: mut ui::Box,
-  title_text: mut ui::Text,
-  metadata_first: mut ui::Text,
-  metadata_second: mut ui::Text,
-  body_scroll: mut ui::ScrollBox,
-  markdown: mut markdown_controller::MarkdownController,
   document: documents::Doc?,
-  generation: Int,
-  scope: mut lifecycle::Scope,
-  service: document_detail_service::Service,
-  schedule: scheduler::Schedule,
-  cancel_refresh: fn(),
-  on_title: fn(Str),
-  on_open_url: fn(Str),
-  notify_error: fn(Str, Str),
+  status: Str,
+  status_danger: Bool,
+  body: mut cui::ScrollBoxRef,
+}
+
+struct DocumentDetailProps {
+  model: mut Model,
+  markdown: mut markdown_controller::MarkdownController,
   palette: tinear_theme::Theme,
 }
 
-private fn root_child_style(display: ui::Display) ui::Style {
-  ui::style(
-    display: display,
-    width: ui::percent(100.0),
-    height: ui::cells(1),
-    flex_grow: 1.0,
-    overflow: ui::Overflow::hidden,
-  )
+struct DocumentDetail {
+  props: mut DocumentDetailProps,
 }
 
-private fn status_style(display: ui::Display) ui::Style {
-  ui::style(
-    display: display,
-    width: ui::percent(100.0),
-    height: ui::cells(1),
-    flex_grow: 1.0,
-    justify_content: ui::Justify::center,
-    align_items: ui::Align::center,
-  )
+private fn document_detail(props: mut DocumentDetailProps) mut DocumentDetail {
+  (mut DocumentDetail{props: props})
 }
 
 private fn metadata_line(
@@ -72,6 +52,117 @@ private fn metadata_line(
   )
 }
 
+impl cui::Component for DocumentDetail {
+  fn mut render() cui::View {
+    let model = self.props.model
+    let palette = self.props.palette
+    let loaded = model.document.is_some()
+    let row = ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0)
+    let children = mut List::new<cui::View>()
+    if loaded {
+      let document = model.document.expect("loaded document")
+      children.push(
+        cui::text(
+          document.meta.title,
+          wrap: ui::TextWrap::word,
+          overflow: ui::TextOverflow::ellipsis,
+          styles: ui::style(width: ui::percent(100.0), max_height: ui::cells(2), flex_shrink: 0.0),
+          text_style: ui::text_style(bold: true),
+        ),
+      )
+      children.push(
+        cui::text(
+          metadata_line(
+            "Project",
+            document.meta.container,
+            "Creator",
+            document.meta.creator,
+            palette,
+          ),
+          styles: row,
+        ),
+      )
+      children.push(
+        cui::text(
+          metadata_line("Updated", timestamp::friendly(document.meta.updated_at), "", "", palette),
+          styles: row,
+        ),
+      )
+      children.push(
+        cui::text(
+          strings::Repeat("─", 512),
+          selectable: false,
+          wrap: ui::TextWrap::none,
+          overflow: ui::TextOverflow::clip,
+          styles: row,
+          text_style: ui::text_style(foreground: palette.border, dim: true),
+        ),
+      )
+      children.push(
+        cui::scroll_box(
+          // Markdown stays imperative: Cooper's declarative text has no link
+          // callback, so the rendered control is bridged instead.
+          [cui_bridge::view(self.props.markdown.root, fn() {}, fn() {}, key: "markdown")],
+          ref: model.body,
+          styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_grow: 1.0),
+        ),
+      )
+    } else {
+      children.push(
+        cui::text(
+          model.status,
+          selectable: false,
+          styles: ui::style(
+            width: ui::percent(100.0),
+            height: ui::cells(1),
+            flex_grow: 1.0,
+            justify_content: ui::Justify::center,
+            align_items: ui::Align::center,
+          ),
+          text_style: match model.status_danger {
+            true => ui::text_style(foreground: palette.danger, bold: true),
+            false => ui::text_style(dim: true),
+          },
+        ),
+      )
+    }
+    cui::box(
+      children.@,
+      styles: ui::style(
+        width: ui::percent(100.0),
+        height: ui::percent(100.0),
+        flex_direction: ui::FlexDirection::column,
+        overflow: ui::Overflow::hidden,
+        padding: ui::Edges{
+          top: ui::cells(0),
+          right: ui::cells(1),
+          bottom: ui::cells(0),
+          left: ui::cells(1),
+        },
+      ),
+    )
+  }
+}
+
+struct DocumentDetailController {
+  context: mut cooper::Runtime,
+  model: mut Model,
+  markdown: mut markdown_controller::MarkdownController,
+  slug_id: Str,
+  generation: Int,
+  request: Int,
+  disposed: Bool,
+  stop: Chan<Bool>,
+  service: document_detail_service::Service,
+  schedule: scheduler::Schedule,
+  cancel_refresh: fn(),
+  notify: fn(),
+  on_title: fn(Str),
+  on_open_url: fn(Str),
+  notify_error: fn(Str, Str),
+  palette: tinear_theme::Theme,
+}
+
 fn new(
   ctx: mut cooper::Runtime,
   palette: tinear_theme::Theme,
@@ -79,70 +170,22 @@ fn new(
   cached_title: Str,
   service: document_detail_service::Service,
   schedule: scheduler::Schedule,
+  notify: fn(),
   on_title: fn(Str),
   on_open_url: fn(Str),
   notify_error: fn(Str, Str),
 ) mut DocumentDetailController {
-  let root = ui::box(
-    ctx,
-    styles: ui::style(
-      width: ui::percent(100.0),
-      height: ui::percent(100.0),
-      overflow: ui::Overflow::hidden,
-      padding: ui::Edges{
-        top: ui::cells(0),
-        right: ui::cells(1),
-        bottom: ui::cells(0),
-        left: ui::cells(1),
-      },
-    ),
-  )
   let loading_title = match cached_title.is_empty() {
     true => "document",
     false => cached_title,
   }
-  let status = ui::text(
-    ctx,
-    content: "Loading {loading_title}…",
-    selectable: false,
-    styles: status_style(ui::Display::flex),
-    text_style: ui::text_style(dim: true),
-  )
-  let content = ui::box(ctx, styles: root_child_style(ui::Display::none))
-  let title_text = ui::text(
-    ctx,
-    content: cached_title,
-    selectable: true,
-    wrap: ui::TextWrap::word,
-    overflow: ui::TextOverflow::ellipsis,
-    styles: ui::style(width: ui::percent(100.0), max_height: ui::cells(2), flex_shrink: 0.0),
-    text_style: ui::text_style(bold: true),
-  )
-  let metadata_first = ui::text(
-    ctx,
-    content: "",
-    selectable: true,
-    styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
-  )
-  let metadata_second = ui::text(
-    ctx,
-    content: "",
-    selectable: true,
-    styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
-  )
-  let rule = ui::text(
-    ctx,
-    content: strings::Repeat("─", 512),
-    selectable: false,
-    wrap: ui::TextWrap::none,
-    overflow: ui::TextOverflow::clip,
-    styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
-    text_style: ui::text_style(foreground: palette.border, dim: true),
-  )
-  let body_scroll = ui::scroll_box(
-    ctx,
-    styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_grow: 1.0),
-  )
+  let model = mut Model{
+    cached_title: cached_title,
+    document: Maybe::new<documents::Doc>(),
+    status: "Loading {loading_title}…",
+    status_danger: false,
+    body: cui::scroll_box_ref(),
+  }
   let markdown = markdown_controller::new(
     ctx,
     palette,
@@ -150,106 +193,76 @@ fn new(
     on_open_url,
     empty_label: "Empty document",
   )
-  body_scroll.add(markdown.root)
-  content.add(title_text)
-  content.add(metadata_first)
-  content.add(metadata_second)
-  content.add(rule)
-  content.add(body_scroll)
-  root.add(status)
-  root.add(content)
-
-  let controller = mut DocumentDetailController{
-    root: root,
+  (mut DocumentDetailController{
     context: ctx,
-    slug_id: slug_id,
-    cached_title: cached_title,
-    status: status,
-    content: content,
-    title_text: title_text,
-    metadata_first: metadata_first,
-    metadata_second: metadata_second,
-    body_scroll: body_scroll,
+    model: model,
     markdown: markdown,
-    document: Maybe::new<documents::Doc>(),
+    slug_id: slug_id,
     generation: 0,
-    scope: lifecycle::new(),
+    request: 0,
+    disposed: false,
+    stop: Chan::new<Bool>(),
     service: service,
     schedule: schedule,
     cancel_refresh: fn() {},
+    notify: notify,
     on_title: on_title,
     on_open_url: on_open_url,
     notify_error: notify_error,
     palette: palette,
-  }
-  controller
+  })
 }
 
 impl DocumentDetailController {
   private fn mut show_document(document: documents::Doc) {
-    self.document = Maybe::new(document)
-    self.title_text.set_content(document.meta.title)
-    self.metadata_first.set_content(
-      metadata_line(
-        "Project",
-        document.meta.container,
-        "Creator",
-        document.meta.creator,
-        self.palette,
-      ),
-    )
-    self.metadata_second.set_content(
-      metadata_line("Updated", timestamp::friendly(document.meta.updated_at), "", "", self.palette),
-    )
+    self.model.document = Maybe::new(document)
     self.markdown.set_source(document.content.or(""))
-    self.status.set_style(status_style(ui::Display::none))
-    self.content.set_style(root_child_style(ui::Display::flex))
-    if document.meta.title != self.cached_title {
-      self.cached_title = document.meta.title
+    if document.meta.title != self.model.cached_title {
+      self.model.cached_title = document.meta.title
       self.on_title(document.meta.title)
     }
   }
 
   private fn mut show_initial_error(message: Str) {
-    let title = match self.cached_title.is_empty() {
+    let title = match self.model.cached_title.is_empty() {
       true => "document",
-      false => self.cached_title,
+      false => self.model.cached_title,
     }
-    self.status.set_content("Couldn't load {title}: {message}")
-    self.status.set_text_style(ui::text_style(foreground: self.palette.danger, bold: true))
-    self.status.set_style(status_style(ui::Display::flex))
-    self.content.set_style(root_child_style(ui::Display::none))
+    self.model.status = "Couldn't load {title}: {message}"
+    self.model.status_danger = true
   }
 
   fn mut refresh(silent: Bool) {
-    if not self.scope.disposed {
-      let generation = self.scope.begin_request()
-      self.generation = generation
-      if not silent and self.document.is_none() {
-        self.status.set_content("Loading {self.cached_title}…")
-        self.status.set_text_style(ui::text_style(dim: true))
+    if not self.disposed {
+      self.request =+ 1
+      let request = self.request
+      self.generation = request
+      if (not silent) and self.model.document.is_none() {
+        self.model.status = "Loading {self.model.cached_title}…"
+        self.model.status_danger = false
       }
-      self.service.load(self.scope.stop.receiver(), self.slug_id, fn(result: documents::Doc!Str) {
-        if self.scope.is_current(generation) {
+      (self.service.load)(self.stop.receiver(), self.slug_id, fn(result: documents::Doc!Str) {
+        if (not self.disposed) and self.request == request {
           match result {
             ok(document) => self.show_document(document),
             err(message) => {
-              if self.document.is_none() {
-                self.show_initial_error(message)
-              } else {
-                self.notify_error("Refresh document", message)
+              match self.model.document.is_none() {
+                true => self.show_initial_error(message),
+                false => self.notify_error("Refresh document", message),
               }
             },
           }
+          (self.notify)()
         }
       })
+      (self.notify)()
     }
   }
 
   private fn mut schedule_refresh() {
-    self.cancel_refresh()
-    self.cancel_refresh = self.schedule(5 * 60 * 1000, fn() {
-      if not self.scope.disposed {
+    (self.cancel_refresh)()
+    self.cancel_refresh = (self.schedule)(5 * 60 * 1000, fn() {
+      if not self.disposed {
         self.refresh(true)
         self.schedule_refresh()
       }
@@ -257,14 +270,14 @@ impl DocumentDetailController {
   }
 
   fn mut start() {
-    if (not self.scope.disposed) and self.generation == 0 {
+    if (not self.disposed) and self.generation == 0 {
       self.refresh(false)
       self.schedule_refresh()
     }
   }
 
   private fn mut open_browser() {
-    match self.document {
+    match self.model.document {
       loaded => {
         if not loaded.meta.url.is_empty() {
           self.on_open_url(loaded.meta.url)
@@ -275,20 +288,34 @@ impl DocumentDetailController {
   }
 
   fn mut focus() {
-    let _ = self.body_scroll.focus()
+    match self.model.body.current {
+      panel => {
+        let _ = panel.focus()
+      },
+      _ => (),
+    }
+  }
+
+  private fn mut scroll_by(delta: Int) {
+    match self.model.body.current {
+      panel => {
+        let _ = panel.scroll_by(delta)
+      },
+      _ => (),
+    }
   }
 
   fn mut handle_key(received: mut cooper::KeyEvent) Bool {
-    if self.scope.disposed or received.event_type == cooper::KeyEventType::release {
+    if self.disposed or received.event_type == cooper::KeyEventType::release {
       false
     } else {
       match {
         received.matches("j") or received.matches("down") => {
-          let _ = self.body_scroll.scroll_by(1)
+          self.scroll_by(1)
           true
         },
         received.matches("k") or received.matches("up") => {
-          let _ = self.body_scroll.scroll_by(-1)
+          self.scroll_by(-1)
           true
         },
         received.matches("o") => {
@@ -300,9 +327,21 @@ impl DocumentDetailController {
     }
   }
 
+  fn mut view() cui::View {
+    cui::child(
+      document_detail,
+      DocumentDetailProps{
+        model: self.model,
+        markdown: self.markdown,
+        palette: self.palette,
+      },
+      key: "document-{self.slug_id}",
+    )
+  }
+
   fn mut screen() shell_controller::Screen {
-    shell_controller::Screen{
-      root: self.root,
+    shell_controller::declarative_screen(
+      view: self.view(),
       focus: fn() {
         self.focus()
       },
@@ -312,14 +351,17 @@ impl DocumentDetailController {
       dispose: fn() {
         self.dispose()
       },
-    }
+    )
   }
 
   fn mut dispose() {
-    if not self.scope.disposed {
-      self.cancel_refresh()
-      self.scope.dispose()
+    if not self.disposed {
+      self.disposed = true
+      (self.cancel_refresh)()
+      self.cancel_refresh = fn() {}
+      self.stop.close()
       self.markdown.dispose()
+      self.markdown.root.destroy(recursive: true)
     }
   }
 }

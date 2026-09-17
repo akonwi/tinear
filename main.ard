@@ -65,7 +65,7 @@ private fn placeholder_screen(ctx: mut cooper::Runtime, title: Str, message: Str
   root.set_focusable(true)
   root.add(ui::text(ctx, content: title, text_style: ui::text_style(bold: true)))
   root.add(ui::text(ctx, content: message, text_style: ui::text_style(dim: true)))
-  shell_controller::Screen{
+  shell_controller::imperative_screen(
     root: root,
     focus: fn() {
       let _ = root.focus()
@@ -74,7 +74,7 @@ private fn placeholder_screen(ctx: mut cooper::Runtime, title: Str, message: Str
       false
     },
     dispose: fn() {},
-  }
+  )
 }
 
 private fn document_detail_screen(
@@ -92,6 +92,9 @@ private fn document_detail_screen(
     reference.title,
     document_detail_service::live(ctx, api_key),
     scheduler::for_context(ctx),
+    fn() {
+      application_shell.invalidate()
+    },
     on_title,
     fn(target: Str) {
       match url::open(ctx, target) {

@@ -19,7 +19,7 @@ private fn basic_screen(ctx: mut cooper::Runtime, label: Str) shell_controller::
   )
   root.set_focusable(true)
   root.add(ui::text(ctx, content: label, selectable: true))
-  shell_controller::Screen{
+  shell_controller::imperative_screen(
     root: root,
     focus: fn() {
       let _ = root.focus()
@@ -28,7 +28,7 @@ private fn basic_screen(ctx: mut cooper::Runtime, label: Str) shell_controller::
       false
     },
     dispose: fn() {},
-  }
+  )
 }
 
 private fn inbox_screen(ctx: mut cooper::Runtime) shell_controller::Screen {
@@ -63,7 +63,7 @@ private fn inbox_screen(ctx: mut cooper::Runtime) shell_controller::Screen {
   let _ = editor.on_input(fn(value: Str) {
     status.set_content("value: {strings::ReplaceAll(value, "\n", "↵")}")
   })
-  shell_controller::Screen{
+  shell_controller::imperative_screen(
     root: root,
     focus: fn() {
       let _ = editor.focus()
@@ -72,7 +72,7 @@ private fn inbox_screen(ctx: mut cooper::Runtime) shell_controller::Screen {
       false
     },
     dispose: fn() {},
-  }
+  )
 }
 
 fn main() {

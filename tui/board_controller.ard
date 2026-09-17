@@ -1413,7 +1413,7 @@ impl BoardController {
   }
 
   fn mut screen() shell_controller::Screen {
-    shell_controller::Screen{
+    shell_controller::imperative_screen(
       root: self.root,
       focus: fn() {
         self.focus()
@@ -1424,7 +1424,7 @@ impl BoardController {
       dispose: fn() {
         self.dispose()
       },
-    }
+    )
   }
 
   fn mut dispose() {
