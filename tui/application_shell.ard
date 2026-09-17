@@ -14,6 +14,7 @@ struct Model {
   screen_dispose: fn(),
   screen_attached: fn(),
   screen_view: cui::View?,
+  screen_view_dispose: fn(),
   generation: Int,
 }
 
@@ -83,6 +84,7 @@ fn new(
     screen_dispose: fn() {},
     screen_attached: fn() {},
     screen_view: Maybe::new<cui::View>(),
+    screen_view_dispose: fn() {},
     generation: 0,
   }
   let mounted = renderer::mount(ctx, application_root, cui::child(shell, ShellProps{model: model}))
@@ -111,18 +113,30 @@ impl ApplicationShell {
     })
   }
 
-  // Host a declarative screen; CUI lifecycle owns its disposal.
-  fn mut set_view(view: cui::View) {
+  // Host a declarative screen. `dispose` runs before retirement so facades
+  // can release resources while their controls are still alive.
+  fn mut set_view(view: cui::View, dispose: fn()?) {
     if self.disposed {
       panic("cannot set the screen on a disposed application shell")
     }
+    let previous_dispose = self.model.screen_view_dispose
+    previous_dispose()
     self.cui.update(fn() {
       self.model.generation =+ 1
       self.model.screen = Maybe::new<mut ui::Box>()
       self.model.screen_dispose = fn() {}
       self.model.screen_attached = fn() {}
       self.model.screen_view = Maybe::new(view)
+      self.model.screen_view_dispose = dispose.or(fn() {})
     })
+  }
+
+  // UI-thread render request for facades that mutate state outside CUI
+  // callbacks (key routing, async completions).
+  fn mut invalidate() {
+    if not self.disposed {
+      self.cui.invalidate()
+    }
   }
 
   fn mut handle_key(received: mut cooper::KeyEvent, current_selection: ui::Selection?) Bool {
@@ -153,6 +167,11 @@ impl ApplicationShell {
   fn mut dispose() {
     if not self.disposed {
       self.disposed = true
+      // Declarative screens release their resources before their controls
+      // are retired.
+      let screen_view_dispose = self.model.screen_view_dispose
+      self.model.screen_view_dispose = fn() {}
+      screen_view_dispose()
       // Retires the screen bridge synchronously, running its dispose path
       // before destroying its orphaned controls.
       self.cui.destroy()

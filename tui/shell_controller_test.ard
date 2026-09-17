@@ -2,6 +2,7 @@ use ard/testing as assertions
 
 use cooper
 use cooper/event
+use cooper/cui/renderer
 use cooper/testing
 use cooper/ui
 use tinear/models/cache
@@ -14,6 +15,10 @@ private struct ScreenState {
   focuses: Int,
   handled: Int,
   disposals: Int,
+}
+
+private struct Notifier {
+  invalidate: fn(),
 }
 
 private struct Counter {
@@ -172,7 +177,19 @@ test fn shell_switches_persistent_tabs_and_persists_selection() Void!Str {
     fn() {},
     fn() {},
   )
-  application.root.add(controller.root)
+  let notifier = mut Notifier{invalidate: fn() {}}
+  let mounted = renderer::mount(
+    application.context,
+    application.root,
+    shell_controller::view(controller, fn() {
+      (notifier.invalidate)()
+    }),
+  )
+  defer mounted.destroy()
+  notifier.invalidate = fn() {
+    mounted.invalidate()
+  }
+  let _ = application.flush()
   application.render()
   try assertions::assert(
     controller.inbox.root.style().flex_direction == ui::FlexDirection::row,
@@ -205,6 +222,7 @@ test fn shell_switches_persistent_tabs_and_persists_selection() Void!Str {
   )
 
   try assertions::assert(controller.handle_key(key("tab")), "Tab should switch views")
+  let _ = application.flush()
   application.render()
   try assertions::assert(controller.model.tab_index == 1, "Tab should select My Issues")
   let board_tab = application.frame().cell(8, 0).expect("active board tab")
@@ -217,7 +235,7 @@ test fn shell_switches_persistent_tabs_and_persists_selection() Void!Str {
     board_hint.grapheme == "r",
     "updated footer hints should remain left-aligned without a tab-title prefix",
   )
-  let board_hints = controller.hints.actions_text.content()
+  let board_hints = application.frame().text()
   try assertions::assert(
     board_hints.contains("s status") and board_hints.contains("y cycle") and board_hints.contains("p priority") and board_hints.contains("a assignee") and board_hints.contains("P project"),
     "board edit bindings should name each field action",
@@ -273,7 +291,19 @@ test fn shell_restores_opens_reuses_retitles_and_closes_dynamic_tabs() Void!Str 
     fn() {},
     fn() {},
   )
-  application.root.add(controller.root)
+  let notifier = mut Notifier{invalidate: fn() {}}
+  let mounted = renderer::mount(
+    application.context,
+    application.root,
+    shell_controller::view(controller, fn() {
+      (notifier.invalidate)()
+    }),
+  )
+  defer mounted.destroy()
+  notifier.invalidate = fn() {
+    mounted.invalidate()
+  }
+  let _ = application.flush()
   try assertions::assert(created.value == 1, "restored tab should create one retained controller")
   try assertions::assert(
     controller.dynamic_screens.at(0).expect("restored").screen.root.style().display == ui::Display::none,
@@ -281,14 +311,17 @@ test fn shell_restores_opens_reuses_retitles_and_closes_dynamic_tabs() Void!Str 
   )
 
   controller.select_tab(2)
+  let _ = application.flush()
   application.render()
   try testing::assert_contains(application.frame().text(), "Detail Restored doc")
   controller.open(tabs::doc_tab("doc-1", "ignored"))
   try assertions::assert(created.value == 1, "opening existing identity should reuse its controller")
   controller.retitle(restored_ref, "Renamed doc")
+  let _ = application.flush()
   application.render()
   try testing::assert_contains(application.frame().text(), "Renamed doc")
   controller.retitle(restored_ref, "界界界界界界界界界界界界界界界界")
+  let _ = application.flush()
   application.render()
   try testing::assert_contains(application.frame().text(), "…")
 
@@ -332,7 +365,19 @@ test fn shell_routes_mouse_global_and_active_commands() Void!Str {
       creations.value =+ 1
     },
   )
-  application.root.add(controller.root)
+  let notifier = mut Notifier{invalidate: fn() {}}
+  let mounted = renderer::mount(
+    application.context,
+    application.root,
+    shell_controller::view(controller, fn() {
+      (notifier.invalidate)()
+    }),
+  )
+  defer mounted.destroy()
+  notifier.invalidate = fn() {
+    mounted.invalidate()
+  }
+  let _ = application.flush()
   application.render()
   try assertions::assert(controller.handle_key(key("x")), "active Inbox should handle delegated key")
   try assertions::assert(
@@ -385,6 +430,7 @@ test fn shell_routes_mouse_global_and_active_commands() Void!Str {
   controller.select_tab(2)
   try assertions::assert(not controller.handle_key(key("c")), "detail tabs should own the c command")
   try assertions::assert(creations.value == 1, "detail c should not start issue creation")
+  let _ = application.flush()
   application.render()
   try assertions::assert(
     application.frame().cell(25, 0).expect("close button").grapheme == "×",
@@ -434,7 +480,19 @@ test fn shell_disposal_cleans_screens_and_persistence_once() Void!Str {
     fn() {},
     fn() {},
   )
-  application.root.add(controller.root)
+  let notifier = mut Notifier{invalidate: fn() {}}
+  let mounted = renderer::mount(
+    application.context,
+    application.root,
+    shell_controller::view(controller, fn() {
+      (notifier.invalidate)()
+    }),
+  )
+  defer mounted.destroy()
+  notifier.invalidate = fn() {
+    mounted.invalidate()
+  }
+  let _ = application.flush()
   controller.dispose()
   controller.dispose()
   try assertions::assert(inbox_state.disposals == 1, "Inbox should dispose once")

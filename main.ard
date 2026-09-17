@@ -389,11 +389,15 @@ private fn show_logged_in(
       creation.open()
     },
   )
-  application_shell.set_screen(controller.root, fn() {
-    controller.dispose()
-  }, on_attached: fn() {
-    controller.focus_active()
-  })
+  application_shell.set_view(
+    shell_controller::view(controller, fn() {
+      application_shell.invalidate()
+    }),
+    dispose: fn() {
+      controller.dispose()
+    },
+  )
+  controller.focus_active()
   actions.open_issue = fn(identifier: Str) {
     controller.open(tabs::issue_tab(identifier))
   }

@@ -1,9 +1,11 @@
 use cooper
+use cooper/cui
 use cooper/ui
 use go:strings
 use tinear/models/cache
 use tinear/models/shell as shell_model
 use tinear/models/tabs
+use tinear/tui/cui_bridge
 use tinear/tui/hints_bar
 use tinear/tui/theme as tinear_theme
 
@@ -19,28 +21,18 @@ struct DynamicScreen {
   screen: Screen,
 }
 
-struct TabChip {
-  root: mut ui::Box,
-  remove_mouse: fn(),
-  remove_close_mouse: fn(),
-}
-
 struct ShellController {
-  root: mut ui::Box,
   context: mut cooper::Runtime,
-  tab_bar: mut ui::Box,
-  body_host: mut ui::Box,
-  hints: mut hints_bar::HintsBar,
   model: shell_model::Model,
   inbox: Screen,
   board: Screen,
   dynamic_screens: [DynamicScreen],
-  tab_chips: [TabChip],
   make_dynamic: fn(tabs::TabRef) Screen,
   persist: fn(cache::LoggedInCache),
   dispose_persistence: fn(),
   on_search: fn(),
   on_create: fn(),
+  notify: fn(),
   palette: tinear_theme::Theme,
   disposed: Bool,
 }
@@ -66,6 +58,13 @@ private fn body_style(current: ui::Style, display: ui::Display) ui::Style {
   updated.flex_grow = 1.0
   updated.overflow = ui::Overflow::hidden
   updated.@
+}
+
+private fn tab_key(reference: tabs::TabRef) Str {
+  match reference.kind {
+    tabs::Kind::issue => "tab-issue-{reference.id}",
+    tabs::Kind::doc => "tab-doc-{reference.id}",
+  }
 }
 
 private fn hints_for(model: shell_model::Model) [hints_bar::Hint] {
@@ -122,153 +121,56 @@ private fn hints_for(model: shell_model::Model) [hints_bar::Hint] {
   }
 }
 
-fn new(
-  ctx: mut cooper::Runtime,
-  palette: tinear_theme::Theme,
-  initial_model: shell_model::Model,
-  inbox: Screen,
-  board: Screen,
-  make_dynamic: fn(tabs::TabRef) Screen,
-  persist: fn(cache::LoggedInCache),
-  dispose_persistence: fn(),
-  on_search: fn(),
-  on_create: fn(),
-) mut ShellController {
-  let root = ui::box(
-    ctx,
-    styles: ui::style(
-      width: ui::percent(100.0),
-      height: ui::percent(100.0),
-      flex_direction: ui::FlexDirection::column,
-      overflow: ui::Overflow::hidden,
-    ),
-  )
-  let tab_bar = ui::box(
-    ctx,
-    styles: ui::style(
-      width: ui::percent(100.0),
-      height: ui::cells(1),
-      flex_shrink: 0.0,
-      flex_direction: ui::FlexDirection::row,
-      overflow: ui::Overflow::hidden,
-    ),
-  )
-  let body_host = ui::box(
-    ctx,
-    styles: ui::style(
-      width: ui::percent(100.0),
-      height: ui::cells(1),
-      flex_grow: 1.0,
-      overflow: ui::Overflow::hidden,
-    ),
-  )
-  let tab_rule = ui::text(
-    ctx,
-    content: strings::Repeat("─", 512),
-    selectable: false,
-    wrap: ui::TextWrap::none,
-    overflow: ui::TextOverflow::clip,
-    styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
-    text_style: ui::text_style(dim: true),
-  )
-  let footer_rule = ui::text(
-    ctx,
-    content: strings::Repeat("─", 512),
-    selectable: false,
-    wrap: ui::TextWrap::none,
-    overflow: ui::TextOverflow::clip,
-    styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
-    text_style: ui::text_style(dim: true),
-  )
-  let hints = hints_bar::new(ctx, palette, hints_for(initial_model))
-  root.add(tab_bar)
-  root.add(tab_rule)
-  root.add(body_host)
-  root.add(footer_rule)
-  root.add(hints.root)
-  body_host.add(inbox.root)
-  body_host.add(board.root)
-
-  let controller = mut ShellController{
-    root: root,
-    context: ctx,
-    tab_bar: tab_bar,
-    body_host: body_host,
-    hints: hints,
-    model: initial_model,
-    inbox: inbox,
-    board: board,
-    dynamic_screens: [],
-    tab_chips: [],
-    make_dynamic: make_dynamic,
-    persist: persist,
-    dispose_persistence: dispose_persistence,
-    on_search: on_search,
-    on_create: on_create,
-    palette: palette,
-    disposed: false,
+private fn hints_content(hints: [hints_bar::Hint], palette: tinear_theme::Theme) ui::StyledText {
+  let spans = mut List::new<ui::Span>()
+  for hint, index in hints {
+    if index > 0 {
+      spans.push(ui::span("   "))
+    }
+    spans.push(
+      ui::span(hint.key, style: ui::span_style(foreground: palette.accent, bold: true)),
+    )
+    if not hint.label.is_empty() {
+      spans.push(ui::span(" {hint.label}", style: ui::span_style(dim: true)))
+    }
   }
-  for reference in initial_model.tabs {
-    controller.ensure_dynamic(reference)
-  }
-  controller.apply_selection(false)
-  controller
+  ui::styled_text(spans.@)
 }
 
-impl ShellController {
-  private fn mut ensure_dynamic(reference: tabs::TabRef) {
-    mut found = false
-    for existing in self.dynamic_screens {
-      if tabs::same(existing.reference, reference) {
-        found = true
-      }
-    }
-    if not found {
-      let screen = self.make_dynamic(reference)
-      screen.root.set_style(body_style(screen.root.style(), ui::Display::none))
-      self.body_host.add(screen.root)
-      self.dynamic_screens.push(DynamicScreen{reference: reference, screen: screen})
-    }
-  }
+// Declarative tab shell. Chips, rules, and hints are described from the
+// facade model; screens stay imperative behind persistent bridges whose
+// visibility the facade toggles synchronously.
+private struct TabsProps {
+  controller: mut ShellController,
+}
 
-  private fn mut clear_tab_chips() {
-    let chips = self.tab_chips
-    self.tab_chips = []
-    for chip in chips {
-      chip.remove_mouse()
-      chip.remove_close_mouse()
-      let _ = self.tab_bar.remove(chip.root)
-      chip.root.destroy(recursive: true)
-    }
-  }
+private struct Tabs {
+  props: mut TabsProps,
+}
 
-  private fn mut add_tab_chip(index: Int, label: Str, dynamic: Bool) {
-    let width = tab_chip_width(self.context.measure_text(label), dynamic)
-    let chip = ui::box(
-      self.context,
-      styles: ui::style(
-        width: ui::cells(width),
-        height: ui::cells(1),
-        flex_shrink: 0.0,
-        flex_direction: ui::FlexDirection::row,
-        overflow: ui::Overflow::hidden,
-      ),
-    )
-    let selected = index == self.model.tab_index
+private fn tabs_component(props: mut TabsProps) mut Tabs {
+  (mut Tabs{props: props})
+}
+
+impl Tabs {
+  private fn mut chip(index: Int, label: Str, dynamic: Bool) cui::View {
+    let controller = self.props.controller
+    let width = tab_chip_width(controller.context.measure_text(label), dynamic)
+    let selected = index == controller.model.tab_index
     let label_width = match dynamic {
       true => width - 2,
       false => width,
     }
-    chip.add(
-      ui::text(
-        self.context,
-        content: ui::styled_text(
+    let children = mut List::new<cui::View>()
+    children.push(
+      cui::text(
+        ui::styled_text(
           [
             ui::span(" "),
             ui::span(
               label,
               style: match selected {
-                true => ui::span_style(foreground: self.palette.accent, bold: true),
+                true => ui::span_style(foreground: controller.palette.accent, bold: true),
                 false => ui::span_style(dim: true),
               },
             ),
@@ -285,56 +187,198 @@ impl ShellController {
         ),
       ),
     )
-    mut remove_close_mouse = fn() {}
     if dynamic {
-      let close = ui::text(
-        self.context,
-        content: "× ",
-        selectable: false,
-        wrap: ui::TextWrap::none,
-        styles: ui::style(width: ui::cells(2), height: ui::cells(1), flex_shrink: 0.0),
-        text_style: ui::text_style(dim: true),
-      )
-      chip.add(close)
       let dynamic_index = index - 2
-      remove_close_mouse = close.on_mouse(fn(received: mut cooper::MouseEvent) {
+      children.push(
+        cui::box(
+          [
+            cui::text(
+              "× ",
+              selectable: false,
+              wrap: ui::TextWrap::none,
+              styles: ui::style(width: ui::cells(2), height: ui::cells(1)),
+              text_style: ui::text_style(dim: true),
+            ),
+          ],
+          styles: ui::style(width: ui::cells(2), height: ui::cells(1), flex_shrink: 0.0),
+          on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
+            if received.event_type == cooper::MouseEventType::down and received.button == cooper::MouseButton::left {
+              match controller.model.tabs.at(dynamic_index) {
+                reference => {
+                  let _ = controller.close(reference)
+                },
+                _ => (),
+              }
+              received.stop_propagation()
+            }
+          },
+        ),
+      )
+    }
+    cui::box(
+      children.@,
+      key: "chip-{index}",
+      styles: ui::style(
+        width: ui::cells(width),
+        height: ui::cells(1),
+        flex_shrink: 0.0,
+        flex_direction: ui::FlexDirection::row,
+        overflow: ui::Overflow::hidden,
+      ),
+      on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
         if received.event_type == cooper::MouseEventType::down and received.button == cooper::MouseButton::left {
-          match self.model.tabs.at(dynamic_index) {
-            reference => {
-              let _ = self.close(reference)
-            },
-            _ => (),
-          }
+          controller.select_tab(index)
           received.stop_propagation()
         }
-      })
-    }
-    let remove_mouse = chip.on_mouse(fn(received: mut cooper::MouseEvent) {
-      if received.event_type == cooper::MouseEventType::down and received.button == cooper::MouseButton::left {
-        self.select_tab(index)
-        received.stop_propagation()
-      }
-    })
-    self.tab_bar.add(chip)
-    self.tab_chips.push(
-      TabChip{
-        root: chip,
-        remove_mouse: remove_mouse,
-        remove_close_mouse: remove_close_mouse,
       },
     )
   }
 
-  private fn mut rebuild_tab_bar() {
-    self.clear_tab_chips()
-    self.add_tab_chip(0, "Inbox", false)
-    self.add_tab_chip(1, "My Issues", false)
-    for reference, index in self.model.tabs {
-      self.add_tab_chip(2 + index, reference.title, true)
+  private fn rule() cui::View {
+    cui::text(
+      strings::Repeat("─", 512),
+      selectable: false,
+      wrap: ui::TextWrap::none,
+      overflow: ui::TextOverflow::clip,
+      styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
+      text_style: ui::text_style(dim: true),
+    )
+  }
+}
+
+impl cui::Component for Tabs {
+  fn mut render() cui::View {
+    let controller = self.props.controller
+    let chips = mut List::new<cui::View>()
+    chips.push(self.chip(0, "Inbox", false))
+    chips.push(self.chip(1, "My Issues", false))
+    for reference, index in controller.model.tabs {
+      chips.push(self.chip(2 + index, reference.title, true))
+    }
+
+    // Screens are persistent bridges: hidden pages stay mounted so their
+    // controllers keep their state, scrolling, and in-flight requests.
+    let bodies = mut List::new<cui::View>()
+    bodies.push(cui_bridge::view(controller.inbox.root, fn() {}, fn() {}, key: "screen-inbox"))
+    bodies.push(cui_bridge::view(controller.board.root, fn() {}, fn() {}, key: "screen-board"))
+    for dynamic in controller.dynamic_screens {
+      bodies.push(
+        cui_bridge::view(dynamic.screen.root, fn() {}, fn() {}, key: tab_key(dynamic.reference)),
+      )
+    }
+
+    cui::box(
+      [
+        cui::box(
+          chips.@,
+          styles: ui::style(
+            width: ui::percent(100.0),
+            height: ui::cells(1),
+            flex_shrink: 0.0,
+            flex_direction: ui::FlexDirection::row,
+            overflow: ui::Overflow::hidden,
+          ),
+        ),
+        self.rule(),
+        cui::box(
+          bodies.@,
+          styles: ui::style(
+            width: ui::percent(100.0),
+            height: ui::cells(1),
+            flex_grow: 1.0,
+            overflow: ui::Overflow::hidden,
+          ),
+        ),
+        self.rule(),
+        cui::box(
+          [
+            cui::text(
+              hints_content(hints_for(controller.model), controller.palette),
+              selectable: false,
+              wrap: ui::TextWrap::none,
+              overflow: ui::TextOverflow::ellipsis,
+              styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 1.0),
+            ),
+          ],
+          styles: ui::style(
+            width: ui::percent(100.0),
+            height: ui::cells(1),
+            flex_shrink: 0.0,
+            flex_direction: ui::FlexDirection::row,
+            align_items: ui::Align::center,
+            justify_content: ui::Justify::start,
+            overflow: ui::Overflow::hidden,
+          ),
+        ),
+      ],
+      styles: ui::style(
+        width: ui::percent(100.0),
+        height: ui::percent(100.0),
+        flex_direction: ui::FlexDirection::column,
+        overflow: ui::Overflow::hidden,
+      ),
+    )
+  }
+}
+
+fn new(
+  ctx: mut cooper::Runtime,
+  palette: tinear_theme::Theme,
+  initial_model: shell_model::Model,
+  inbox: Screen,
+  board: Screen,
+  make_dynamic: fn(tabs::TabRef) Screen,
+  persist: fn(cache::LoggedInCache),
+  dispose_persistence: fn(),
+  on_search: fn(),
+  on_create: fn(),
+) mut ShellController {
+  let controller = mut ShellController{
+    context: ctx,
+    model: initial_model,
+    inbox: inbox,
+    board: board,
+    dynamic_screens: [],
+    make_dynamic: make_dynamic,
+    persist: persist,
+    dispose_persistence: dispose_persistence,
+    on_search: on_search,
+    on_create: on_create,
+    notify: fn() {},
+    palette: palette,
+    disposed: false,
+  }
+  for reference in initial_model.tabs {
+    controller.ensure_dynamic(reference)
+  }
+  controller.apply_visibility()
+  controller
+}
+
+// The shell's declarative view. `notify` is supplied by the host renderer so
+// facade mutations can request a render.
+fn view(controller: mut ShellController, notify: fn()) cui::View {
+  controller.notify = notify
+  cui::child(tabs_component, TabsProps{controller: controller}, key: "shell")
+}
+
+impl ShellController {
+  private fn mut ensure_dynamic(reference: tabs::TabRef) {
+    mut found = false
+    for existing in self.dynamic_screens {
+      if tabs::same(existing.reference, reference) {
+        found = true
+      }
+    }
+    if not found {
+      let screen = self.make_dynamic(reference)
+      self.dynamic_screens.push(DynamicScreen{reference: reference, screen: screen})
     }
   }
 
-  private fn mut apply_selection(should_persist: Bool) {
+  // Page visibility is applied directly to bridged screen roots so it holds
+  // whether or not a render has committed yet.
+  private fn mut apply_visibility() {
     self.inbox.root.set_style(
       body_style(
         self.inbox.root.style(),
@@ -364,8 +408,11 @@ impl ShellController {
         ),
       )
     }
-    self.rebuild_tab_bar()
-    self.hints.set(hints_for(self.model))
+  }
+
+  private fn mut apply_selection(should_persist: Bool) {
+    self.apply_visibility()
+    (self.notify)()
     if should_persist {
       self.persist(shell_model::snapshot(self.model))
     }
@@ -408,7 +455,9 @@ impl ShellController {
       self.apply_selection(true)
     }
   }
+}
 
+impl ShellController {
   fn mut close(reference: tabs::TabRef) Bool {
     if self.disposed {
       false
@@ -431,9 +480,9 @@ impl ShellController {
         let remaining = mut List::new<DynamicScreen>()
         for dynamic in self.dynamic_screens {
           if tabs::same(dynamic.reference, reference) {
+            // Dispose the controller now; dropping its key retires the
+            // bridge, which destroys the orphaned control at commit.
             dynamic.screen.dispose()
-            let _ = self.body_host.remove(dynamic.screen.root)
-            dynamic.screen.root.destroy(recursive: true)
           } else {
             remaining.push(dynamic)
           }
@@ -499,7 +548,6 @@ impl ShellController {
   fn mut dispose() {
     if not self.disposed {
       self.disposed = true
-      self.clear_tab_chips()
       self.inbox.dispose()
       self.board.dispose()
       for dynamic in self.dynamic_screens {
