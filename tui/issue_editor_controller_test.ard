@@ -155,11 +155,15 @@ test fn comment_editor_validates_submits_once_and_refreshes_comments() Void!Str 
   let _ = application.flush()
   application.render()
 
+  let _ = application.flush()
   application.key(key("return", ctrl: true))
   try assertions::assert(state.comments.size() == 0, "empty comments should not submit")
   try assertions::assert(modal.is_open(), "validation should keep editor open")
+  let _ = application.flush()
   application.paste(event::paste("A useful reply"))
+  let _ = application.flush()
   application.key(key("return", ctrl: true))
+  let _ = application.flush()
   application.key(key("return", ctrl: true))
   try assertions::assert(
     state.comments.size() == 1,
@@ -170,6 +174,7 @@ test fn comment_editor_validates_submits_once_and_refreshes_comments() Void!Str 
   try assertions::assert(request.parent_id == "parent-1", "reply should preserve parent ID")
   try assertions::assert(request.body == "A useful reply", "comment body should be trimmed and submitted")
   try assertions::assert(not modal.dismiss(), "posting comment should guard dismissal")
+  let _ = application.flush()
   application.paste(event::paste(" discarded"))
   editor.open_description(issue())
   let _ = application.flush()
@@ -179,6 +184,7 @@ test fn comment_editor_validates_submits_once_and_refreshes_comments() Void!Str 
     "another editor should not replace an in-flight mutation",
   )
   request.completion(Result::err("retry"))
+  let _ = application.flush()
   application.key(key("return", ctrl: true))
   try assertions::assert(state.comments.size() == 2, "failed submission should allow retry")
   let retry = state.comments.at(1).expect("retry request")
@@ -187,6 +193,7 @@ test fn comment_editor_validates_submits_once_and_refreshes_comments() Void!Str 
     "typing should be blocked while the previous submission is active",
   )
   retry.completion(Result::ok("comment-new"))
+  let _ = application.flush()
   try assertions::assert(not modal.is_open(), "successful comment should close editor")
   try assertions::assert(
     outcome.comment_id == "comment-new",
@@ -216,12 +223,15 @@ test fn description_editor_saves_draft_and_recovers_from_failure() Void!Str {
   let _ = application.flush()
   application.render()
   application.key(select_all())
+  let _ = application.flush()
   application.paste(event::paste("New **description**"))
+  let _ = application.flush()
   application.key(key("return", ctrl: true))
   try assertions::assert(state.descriptions.size() == 1, "save chord should submit description")
   let first = state.descriptions.at(0).expect("description request")
   try assertions::assert(first.description == "New **description**", "edited draft should be submitted")
   first.completion(Result::err("denied"))
+  let _ = application.flush()
   try assertions::assert(modal.is_open(), "failed save should keep editor open")
   try assertions::assert(modal.dismiss(), "failed save should restore dismissal")
   try assertions::assert(outcome.description.is_empty(), "failed save should not update detail")
@@ -230,7 +240,9 @@ test fn description_editor_saves_draft_and_recovers_from_failure() Void!Str {
   let _ = application.flush()
   application.render()
   application.key(select_all())
+  let _ = application.flush()
   application.paste(event::paste("Saved"))
+  let _ = application.flush()
   application.key(key("return", ctrl: true))
   let second = state.descriptions.at(1).expect("second description request")
   let replacement = ui::box(application.context)
@@ -246,6 +258,7 @@ test fn description_editor_saves_draft_and_recovers_from_failure() Void!Str {
     },
   )
   second.completion(Result::ok(()))
+  let _ = application.flush()
   try assertions::assert(outcome.description == "Saved", "successful save should update detail")
   assertions::assert(
     modal.is_current(replacement_ticket),
@@ -269,6 +282,7 @@ test fn replaced_comment_editor_refreshes_without_stealing_modal_focus() Void!St
   editor.open_comment(issue(), "", "")
   let _ = application.flush()
   application.paste(event::paste("Posted elsewhere"))
+  let _ = application.flush()
   application.key(key("return", ctrl: true))
   let replacement = ui::box(application.context)
   let replacement_ticket = modal.present(
@@ -283,6 +297,7 @@ test fn replaced_comment_editor_refreshes_without_stealing_modal_focus() Void!St
     },
   )
   state.comments.at(0).expect("request").completion(Result::ok("comment-new"))
+  let _ = application.flush()
   try assertions::assert(outcome.comments_changed == 1, "successful mutation should still refresh")
   try assertions::assert(not outcome.focus_comment, "replacement modal should retain keyboard focus")
   assertions::assert(
@@ -307,9 +322,11 @@ test fn editor_disposal_closes_owned_modal_and_ignores_late_completion() Void!St
   editor.open_comment(issue(), "", "")
   let _ = application.flush()
   application.paste(event::paste("Late"))
+  let _ = application.flush()
   application.key(key("return", ctrl: true))
   editor.dispose()
   try assertions::assert(not modal.is_open(), "dispose should close editor-owned modal")
   state.comments.at(0).expect("late request").completion(Result::ok("comment-late"))
+  let _ = application.flush()
   assertions::assert(outcome.comments_changed == 0, "disposed editor should ignore completion")
 }
