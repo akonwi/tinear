@@ -1,0 +1,592 @@
+use cooper
+use cooper/cui
+use cooper/ui
+use go:strings
+use tinear/models/cache
+use tinear/models/shell as shell_model
+use tinear/models/tabs
+use tinear/tui/hints_bar
+use tinear/tui/theme as tinear_theme
+
+// A shell page. The shell wraps each screen's view in a visibility box.
+struct Screen {
+  view: cui::View,
+  focus: fn(),
+  handle_key: fn(mut cooper::KeyEvent) Bool,
+  dispose: fn(),
+}
+
+fn screen(
+  view: cui::View,
+  focus: fn(),
+  handle_key: fn(mut cooper::KeyEvent) Bool,
+  dispose: fn(),
+) Screen {
+  Screen{
+    view: view,
+    focus: focus,
+    handle_key: handle_key,
+    dispose: dispose,
+  }
+}
+
+struct DynamicScreen {
+  // Stable for this tab instance; closing and reopening creates a new one.
+  instance_id: Int,
+  reference: tabs::TabRef,
+  screen: Screen,
+}
+
+struct Tabs {
+  props: mut Props,
+  model: shell_model::Model,
+  dynamic_screens: [DynamicScreen],
+  next_screen_id: Int,
+  invalidate: fn(),
+  // Declarative pages only become visible at the next commit, and a control
+  // inside a `display: none` subtree cannot take focus, so the focus claim is
+  // deferred past that commit.
+  focus_later: fn(),
+  disposed: Bool,
+}
+
+fn tab_chip_width(label_cells: Int, dynamic: Bool) Int {
+  match dynamic {
+    false => label_cells + 2,
+    true => {
+      let intrinsic = label_cells + 4
+      match intrinsic > 26 {
+        true => 26,
+        false => intrinsic,
+      }
+    },
+  }
+}
+
+private fn page(screen: Screen, key: Str, visible: Bool) cui::View {
+  cui::box(
+    [screen.view],
+    key: key,
+    styles: ui::style(
+      display: match visible {
+        true => ui::Display::flex,
+        false => ui::Display::none,
+      },
+      width: ui::percent(100.0),
+      height: ui::percent(100.0),
+      flex_grow: 1.0,
+      overflow: ui::Overflow::hidden,
+    ),
+  )
+}
+
+private fn tab_key(reference: tabs::TabRef) Str {
+  match reference.kind {
+    tabs::Kind::issue => "tab-issue-{reference.id}",
+    tabs::Kind::doc => "tab-doc-{reference.id}",
+  }
+}
+
+private fn hints_for(model: shell_model::Model) [hints_bar::Hint] {
+  match model.tab_index {
+    0 => {
+      [
+        hints_bar::Hint{key: "Tab", label: "switch"},
+        hints_bar::Hint{key: "↑↓", label: "select"},
+        hints_bar::Hint{key: "↵", label: "open"},
+        hints_bar::Hint{key: "r", label: "refresh"},
+        hints_bar::Hint{key: "c", label: "new issue"},
+        hints_bar::Hint{key: "?", label: "search"},
+      ]
+    },
+    1 => {
+      [
+        hints_bar::Hint{key: "r", label: "refresh"},
+        hints_bar::Hint{key: "s", label: "status"},
+        hints_bar::Hint{key: "y", label: "cycle"},
+        hints_bar::Hint{key: "p", label: "priority"},
+        hints_bar::Hint{key: "a", label: "assignee"},
+        hints_bar::Hint{key: "P", label: "project"},
+        hints_bar::Hint{key: "c", label: "new issue"},
+        hints_bar::Hint{key: "?", label: "search"},
+      ]
+    },
+    _ => {
+      match model.tabs.at(model.tab_index - 2) {
+        reference => {
+          match reference.kind {
+            tabs::Kind::doc => {
+              [
+                hints_bar::Hint{key: "↑↓", label: "scroll"},
+                hints_bar::Hint{key: "o", label: "browser"},
+                hints_bar::Hint{key: "Esc", label: "close"},
+              ]
+            },
+            _ => {
+              [
+                hints_bar::Hint{key: "d/c", label: "section"},
+                hints_bar::Hint{key: "↑↓", label: "scroll"},
+                hints_bar::Hint{key: "n/r", label: "comment"},
+                hints_bar::Hint{key: "e", label: "description"},
+                hints_bar::Hint{key: "s/y/p/a/P", label: "fields"},
+                hints_bar::Hint{key: "o", label: "browser"},
+                hints_bar::Hint{key: "Esc", label: "close"},
+              ]
+            },
+          }
+        },
+        _ => [],
+      }
+    },
+  }
+}
+
+private fn hints_content(hints: [hints_bar::Hint], palette: tinear_theme::Theme) ui::StyledText {
+  let spans = mut List::new<ui::Span>()
+  for hint, index in hints {
+    if index > 0 {
+      spans.push(ui::span("   "))
+    }
+    spans.push(ui::span(hint.key, style: ui::span_style(foreground: palette.accent, bold: true)))
+    if not hint.label.is_empty() {
+      spans.push(ui::span(" {hint.label}", style: ui::span_style(dim: true)))
+    }
+  }
+  ui::styled_text(spans.@)
+}
+
+impl cui::Lifecycle for Tabs {
+  fn mut mounted(ctx: cui::Context) {
+    self.props.commands.open = fn(reference: tabs::TabRef) {
+      self.open(reference)
+    }
+    self.props.commands.retitle = fn(reference: tabs::TabRef, title: Str) {
+      self.retitle(reference, title)
+    }
+    self.props.commands.focus_active = fn() {
+      self.focus_active()
+    }
+    self.props.commands.handle_key = fn(received: mut cooper::KeyEvent) Bool {
+      self.handle_key(received)
+    }
+    self.invalidate = ctx.invalidate_root
+    self.focus_later = fn() {
+      let _ = ctx.dispatch(fn() {
+        self.focus_active()
+      })
+    }
+    // Screen focus is imperative and needs mounted refs, so claim it after the
+    // first commit rather than at construction time.
+    let _ = ctx.dispatch(fn() {
+      self.focus_active()
+    })
+  }
+
+  fn mut unmounting(ctx: cui::Context) {
+    self.props.commands.clear()
+    self.dispose()
+    self.invalidate = fn() {}
+    self.focus_later = fn() {}
+  }
+}
+
+impl Tabs {
+  private fn mut chip(index: Int, label: Str, dynamic: Bool) cui::View {
+    let width = tab_chip_width(self.props.context.measure_text(label), dynamic)
+    let selected = index == self.model.tab_index
+    let label_width = match dynamic {
+      true => width - 2,
+      false => width,
+    }
+    let children = mut List::new<cui::View>()
+    children.push(
+      cui::text(
+        ui::styled_text(
+          [
+            ui::span(" "),
+            ui::span(
+              label,
+              style: match selected {
+                true => ui::span_style(foreground: self.props.palette.accent, bold: true),
+                false => ui::span_style(dim: true),
+              },
+            ),
+            ui::span(" "),
+          ],
+        ),
+        selectable: false,
+        wrap: ui::TextWrap::none,
+        overflow: ui::TextOverflow::ellipsis,
+        styles: ui::style(width: ui::cells(label_width), height: ui::cells(1), flex_shrink: 0.0),
+      ),
+    )
+    if dynamic {
+      let dynamic_index = index - 2
+      children.push(
+        cui::box(
+          [
+            cui::text(
+              "× ",
+              selectable: false,
+              wrap: ui::TextWrap::none,
+              styles: ui::style(width: ui::cells(2), height: ui::cells(1)),
+              text_style: ui::text_style(dim: true),
+            ),
+          ],
+          styles: ui::style(width: ui::cells(2), height: ui::cells(1), flex_shrink: 0.0),
+          on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
+            if received.event_type == cooper::MouseEventType::down and received.button == cooper::MouseButton::left {
+              match self.model.tabs.at(dynamic_index) {
+                reference => {
+                  let _ = self.close(reference)
+                },
+                _ => (),
+              }
+              received.stop_propagation()
+            }
+          },
+        ),
+      )
+    }
+    cui::box(
+      children.@,
+      key: "chip-{index}",
+      styles: ui::style(
+        width: ui::cells(width),
+        height: ui::cells(1),
+        flex_shrink: 0.0,
+        flex_direction: ui::FlexDirection::row,
+        overflow: ui::Overflow::hidden,
+      ),
+      on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
+        if received.event_type == cooper::MouseEventType::down and received.button == cooper::MouseButton::left {
+          self.select_tab(index)
+          received.stop_propagation()
+        }
+      },
+    )
+  }
+
+  private fn rule() cui::View {
+    cui::text(
+      strings::Repeat("─", 512),
+      selectable: false,
+      wrap: ui::TextWrap::none,
+      overflow: ui::TextOverflow::clip,
+      styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
+      text_style: ui::text_style(dim: true),
+    )
+  }
+}
+
+impl cui::Component for Tabs {
+  fn mut render() cui::View {
+    let chips = mut List::new<cui::View>()
+    chips.push(self.chip(0, "Inbox", false))
+    chips.push(self.chip(1, "My Issues", false))
+    for reference, index in self.model.tabs {
+      chips.push(self.chip(2 + index, reference.title, true))
+    }
+
+    // Hidden pages remain mounted, retaining component state and requests.
+    let bodies = mut List::new<cui::View>()
+    bodies.push(page(self.props.inbox, "screen-inbox", self.model.tab_index == 0))
+    bodies.push(page(self.props.board, "screen-board", self.model.tab_index == 1))
+    for dynamic, index in self.dynamic_screens {
+      bodies.push(
+        page(
+          dynamic.screen,
+          "{tab_key(dynamic.reference)}-{dynamic.instance_id}",
+          self.model.tab_index == 2 + index,
+        ),
+      )
+    }
+
+    cui::box(
+      [
+        cui::box(
+          chips.@,
+          styles: ui::style(
+            width: ui::percent(100.0),
+            height: ui::cells(1),
+            flex_shrink: 0.0,
+            flex_direction: ui::FlexDirection::row,
+            overflow: ui::Overflow::hidden,
+          ),
+        ),
+        self.rule(),
+        cui::box(
+          bodies.@,
+          styles: ui::style(
+            width: ui::percent(100.0),
+            height: ui::cells(1),
+            flex_grow: 1.0,
+            overflow: ui::Overflow::hidden,
+          ),
+        ),
+        self.rule(),
+        cui::box(
+          [
+            cui::text(
+              hints_content(hints_for(self.model), self.props.palette),
+              selectable: false,
+              wrap: ui::TextWrap::none,
+              overflow: ui::TextOverflow::ellipsis,
+              styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 1.0),
+            ),
+          ],
+          styles: ui::style(
+            width: ui::percent(100.0),
+            height: ui::cells(1),
+            flex_shrink: 0.0,
+            flex_direction: ui::FlexDirection::row,
+            align_items: ui::Align::center,
+            justify_content: ui::Justify::start,
+            overflow: ui::Overflow::hidden,
+          ),
+        ),
+      ],
+      styles: ui::style(
+        width: ui::percent(100.0),
+        height: ui::percent(100.0),
+        flex_direction: ui::FlexDirection::column,
+        overflow: ui::Overflow::hidden,
+      ),
+    )
+  }
+}
+
+// External capabilities only; tab state belongs to the mounted Tabs component.
+struct Commands {
+  open: fn(tabs::TabRef),
+  retitle: fn(tabs::TabRef, Str),
+  focus_active: fn(),
+  handle_key: fn(mut cooper::KeyEvent) Bool,
+}
+
+fn commands() mut Commands {
+  (mut Commands{
+    open: fn(reference: tabs::TabRef) {},
+    retitle: fn(reference: tabs::TabRef, title: Str) {},
+    focus_active: fn() {},
+    handle_key: fn(received: mut cooper::KeyEvent) Bool {
+      false
+    },
+  })
+}
+
+impl Commands {
+  fn mut clear() {
+    self.open = fn(reference: tabs::TabRef) {}
+    self.retitle = fn(reference: tabs::TabRef, title: Str) {}
+    self.focus_active = fn() {}
+    self.handle_key = fn(received: mut cooper::KeyEvent) Bool {
+      false
+    }
+  }
+}
+
+struct Props {
+  context: mut cooper::Runtime,
+  palette: tinear_theme::Theme,
+  initial_model: shell_model::Model,
+  inbox: Screen,
+  board: Screen,
+  make_dynamic: fn(tabs::TabRef) Screen,
+  persist: fn(cache::LoggedInCache),
+  on_dispose: fn(),
+  on_search: fn(),
+  on_create: fn(),
+  commands: mut Commands,
+}
+
+fn view(props: Props) cui::View {
+  cui::child(create, props, key: "shell")
+}
+
+fn create(props: mut Props) mut Tabs {
+  let component = mut Tabs{
+    props: props,
+    model: props.initial_model,
+    dynamic_screens: [],
+    next_screen_id: 0,
+    invalidate: fn() {},
+    focus_later: fn() {},
+    disposed: false,
+  }
+  for reference in props.initial_model.tabs {
+    component.ensure_dynamic(reference)
+  }
+  component
+}
+
+impl Tabs {
+  private fn mut ensure_dynamic(reference: tabs::TabRef) {
+    mut found = false
+    for existing in self.dynamic_screens {
+      if tabs::same(existing.reference, reference) {
+        found = true
+      }
+    }
+    if not found {
+      let screen = self.props.make_dynamic(reference)
+      self.next_screen_id =+ 1
+      self.dynamic_screens.push(
+        DynamicScreen{
+          instance_id: self.next_screen_id,
+          reference: reference,
+          screen: screen,
+        },
+      )
+    }
+  }
+
+  // Page visibility is described by `page` and therefore only takes effect at
+  // the next commit, which is why focus claims are deferred.
+  private fn mut apply_selection(should_persist: Bool) {
+    (self.invalidate)()
+    if should_persist {
+      self.props.persist(shell_model::snapshot(self.model))
+    }
+  }
+
+  fn mut focus_active() {
+    match self.model.tab_index {
+      0 => self.props.inbox.focus(),
+      1 => self.props.board.focus(),
+      _ => {
+        let dynamic_index = self.model.tab_index - 2
+        match self.dynamic_screens.at(dynamic_index) {
+          dynamic => dynamic.screen.focus(),
+          _ => (),
+        }
+      },
+    }
+  }
+
+  fn mut select_tab(index: Int) {
+    if not self.disposed {
+      self.model = shell_model::select_tab(self.model, index)
+      self.apply_selection(true)
+      (self.focus_later)()
+    }
+  }
+
+  fn mut open(reference: tabs::TabRef) {
+    if not self.disposed {
+      self.ensure_dynamic(reference)
+      self.model = shell_model::open(self.model, reference)
+      self.apply_selection(true)
+      (self.focus_later)()
+    }
+  }
+
+  fn mut retitle(reference: tabs::TabRef, title: Str) {
+    if (not self.disposed) and not shell_model::title(self.model, reference).or("") == title {
+      self.model = shell_model::retitle(self.model, reference, title)
+      self.apply_selection(true)
+    }
+  }
+}
+
+impl Tabs {
+  fn mut close(reference: tabs::TabRef) Bool {
+    if self.disposed {
+      false
+    } else {
+      mut found = false
+      for dynamic in self.dynamic_screens {
+        if tabs::same(dynamic.reference, reference) {
+          found = true
+        }
+      }
+      if not found {
+        false
+      } else {
+        let selected = shell_model::selected_dynamic(self.model)
+        let was_selected = match selected {
+          current => tabs::same(current, reference),
+          _ => false,
+        }
+        self.model = shell_model::close(self.model, reference)
+        let remaining = mut List::new<DynamicScreen>()
+        for dynamic in self.dynamic_screens {
+          if tabs::same(dynamic.reference, reference) {
+            // Close external presenters now. Dropping the key retires the
+            // screen component and its requests at the next commit.
+            dynamic.screen.dispose()
+          } else {
+            remaining.push(dynamic)
+          }
+        }
+        self.dynamic_screens = remaining.@
+        self.apply_selection(true)
+        if was_selected {
+          (self.focus_later)()
+        }
+        true
+      }
+    }
+  }
+
+  fn mut close_current() Bool {
+    match shell_model::selected_dynamic(self.model) {
+      reference => self.close(reference),
+      _ => false,
+    }
+  }
+
+  private fn mut handle_active(received: mut cooper::KeyEvent) Bool {
+    match self.model.tab_index {
+      0 => self.props.inbox.handle_key(received),
+      1 => self.props.board.handle_key(received),
+      _ => {
+        let dynamic_index = self.model.tab_index - 2
+        match self.dynamic_screens.at(dynamic_index) {
+          dynamic => dynamic.screen.handle_key(received),
+          _ => false,
+        }
+      },
+    }
+  }
+
+  fn mut handle_key(received: mut cooper::KeyEvent) Bool {
+    if self.disposed or received.event_type == cooper::KeyEventType::release {
+      false
+    } else {
+      mut handled = true
+      match {
+        received.matches("tab", shift: true) => self.select_tab(shell_model::cycle_previous(self.model)),
+        received.matches("tab") => self.select_tab(shell_model::cycle_next(self.model)),
+        received.matches("1") => self.select_tab(0),
+        received.matches("2") => self.select_tab(1),
+        received.matches("escape") and shell_model::selected_is_dynamic(self.model) => {
+          let _ = self.close_current()
+        },
+        received.matches("?") or received.matches("?", shift: true) or received.matches("/", shift: true) => {
+          self.props.on_search()
+        },
+        received.matches("c") and self.model.tab_index <= 1 => self.props.on_create(),
+        _ => { handled = self.handle_active(received) },
+      }
+      if handled {
+        received.prevent_default()
+        received.stop_propagation()
+      }
+      handled
+    }
+  }
+
+  private fn mut dispose() {
+    if not self.disposed {
+      self.disposed = true
+      self.props.inbox.dispose()
+      self.props.board.dispose()
+      for dynamic in self.dynamic_screens {
+        dynamic.screen.dispose()
+      }
+      self.dynamic_screens = []
+      self.props.on_dispose()
+    }
+  }
+}

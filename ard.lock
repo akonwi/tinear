@@ -3,12 +3,12 @@
   "root": "root",
   "packages": [
     {
-      "id": "git:383a36ce72376853:278a8fe8cf7bdc87ae96b6f2f8da6dea20b9a591",
+      "id": "git:383a36ce72376853:ce03ed0e11d9242c1b88de0c3babcfe1eb3d608b",
       "name": "cooper",
       "git": "https://github.com/akonwi/cooper.git",
-      "commit": "278a8fe8cf7bdc87ae96b6f2f8da6dea20b9a591",
-      "requested": "278a8fe8cf7bdc87ae96b6f2f8da6dea20b9a591",
-      "integrity": "sha256:c91b822dfd29eee1c0a525825d1010894784ab1644eda4da375981be7d630167"
+      "commit": "ce03ed0e11d9242c1b88de0c3babcfe1eb3d608b",
+      "requested": "ce03ed0e11d9242c1b88de0c3babcfe1eb3d608b",
+      "integrity": "sha256:46ec2de2fdfa04c6aec617ed04db85f5e28361128d2446dea399b9c82d2a031a"
     },
     {
       "id": "git:c5125d0dd6cd13cc:c590f42ec43c5d362844925a8a978d64a1846c5c",
@@ -23,7 +23,7 @@
       "name": "tinear",
       "path": ".",
       "dependencies": {
-        "cooper": "git:383a36ce72376853:278a8fe8cf7bdc87ae96b6f2f8da6dea20b9a591",
+        "cooper": "git:383a36ce72376853:ce03ed0e11d9242c1b88de0c3babcfe1eb3d608b",
         "decode": "git:c5125d0dd6cd13cc:c590f42ec43c5d362844925a8a978d64a1846c5c"
       }
     }

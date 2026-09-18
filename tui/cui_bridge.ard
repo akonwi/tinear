@@ -1,0 +1,81 @@
+use cooper/cui
+use cooper/ui
+
+// Hosts one imperative Cooper control subtree inside a CUI view.
+//
+// CUI reconciliation never touches children it did not describe, so the
+// bridged control stays attached to the slot box between renders. Retirement
+// destroys the slot box non-recursively (orphaning the bridged control), then
+// `unmounting` runs the legacy dispose path and destroys the orphaned subtree.
+struct BridgeProps {
+  control: mut ui::Box,
+  dispose: fn(),
+  on_attached: fn(),
+  // Controls that outlive this bridge (for example a markdown body reattached
+  // when a section is shown again) must not be destroyed at retirement.
+  destroy_on_unmount: Bool,
+}
+
+struct Bridge {
+  props: mut BridgeProps,
+  slot: mut cui::BoxRef,
+}
+
+private fn bridge(props: mut BridgeProps) mut Bridge {
+  (mut Bridge{props: props, slot: cui::box_ref()})
+}
+
+impl cui::Component for Bridge {
+  fn mut render() cui::View {
+    cui::box([], ref: self.slot, styles: ui::style(display: ui::Display::contents))
+  }
+}
+
+impl cui::Lifecycle for Bridge {
+  fn mut mounted(ctx: cui::Context) {
+    match self.slot.current {
+      panel => {
+        panel.add(self.props.control)
+        (self.props.on_attached)()
+      },
+      _ => (),
+    }
+  }
+
+  fn mut unmounting(ctx: cui::Context) {
+    (self.props.dispose)()
+    match self.props.destroy_on_unmount {
+      true => self.props.control.destroy(recursive: true),
+      false => {
+        // Detach so the control can be reattached by a later mount.
+        match self.slot.current {
+          panel => {
+            let _ = panel.remove(self.props.control)
+          },
+          _ => (),
+        }
+      },
+    }
+  }
+}
+
+// Describe a bridged legacy control. Each distinct key is a distinct bridge
+// identity: changing the key retires the old control and attaches the new one.
+fn view(
+  control: mut ui::Box,
+  dispose: fn(),
+  on_attached: fn(),
+  key: Str,
+  destroy_on_unmount: Bool?,
+) cui::View {
+  cui::child(
+    bridge,
+    BridgeProps{
+      control: control,
+      dispose: dispose,
+      on_attached: on_attached,
+      destroy_on_unmount: destroy_on_unmount.or(true),
+    },
+    key: key,
+  )
+}

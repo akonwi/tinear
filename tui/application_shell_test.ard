@@ -1,6 +1,7 @@
 use ard/testing as assertions
 
 use cooper
+use cooper/cui
 use cooper/event
 use cooper/testing
 use cooper/ui
@@ -12,12 +13,20 @@ private fn no_schedule(delay: Int, action: fn()) fn() {
 }
 
 private fn screen(ctx: mut cooper::Runtime, label: Str) mut ui::Box {
-  let root = ui::box(
-    ctx,
-    styles: ui::style(width: ui::percent(100.0), height: ui::percent(100.0)),
-  )
+  let root = ui::box(ctx, styles: ui::style(width: ui::percent(100.0), height: ui::percent(100.0)))
   root.add(ui::text(ctx, content: label))
   root
+}
+
+private fn screen_view(label: Str) cui::View {
+  cui::box(
+    [cui::text(label)],
+    styles: ui::style(
+      width: ui::percent(100.0),
+      height: ui::percent(100.0),
+      flex_direction: ui::FlexDirection::column,
+    ),
+  )
 }
 
 private fn modifiers(super_key: Bool) cooper::Modifiers {
@@ -32,19 +41,24 @@ private fn modifiers(super_key: Bool) cooper::Modifiers {
 test fn application_shell_replaces_screen_with_explicit_disposal() Void!Str {
   let application = testing::new(50, 12)
   defer application.destroy()
-  let shell = application_shell::new(application.context, theme::new(), no_schedule)
-  application.root.add(shell.root)
+  let shell = application_shell::new(
+    application.context,
+    application.root,
+    theme::new(),
+    no_schedule,
+  )
   mut disposals = 0
-  shell.set_screen(screen(application.context, "Welcome"), fn() {
+  shell.set_view(screen_view("Welcome"), dispose: fn() {
     disposals =+ 1
   })
+  let _ = application.flush()
   application.render()
   try testing::assert_contains(application.frame().text(), "Welcome")
 
-  shell.set_screen(screen(application.context, "Inbox"), fn() {})
+  shell.set_view(screen_view("Inbox"), dispose: fn() {})
+  let _ = application.flush()
   application.render()
   try assertions::assert(disposals == 1, "replaced screen should dispose once")
-  try assertions::assert(shell.screen_host.child_count() == 1, "only one screen should remain mounted")
   try testing::assert_contains(application.frame().text(), "Inbox")
   assertions::assert(
     not application.frame().text().contains("Welcome"),
@@ -55,13 +69,18 @@ test fn application_shell_replaces_screen_with_explicit_disposal() Void!Str {
 test fn application_shell_disposes_owned_screen_and_overlays_once() Void!Str {
   let application = testing::new(40, 10)
   defer application.destroy()
-  let shell = application_shell::new(application.context, theme::new(), no_schedule)
-  application.root.add(shell.root)
+  let shell = application_shell::new(
+    application.context,
+    application.root,
+    theme::new(),
+    no_schedule,
+  )
   mut screen_disposals = 0
   mut modal_disposals = 0
-  shell.set_screen(screen(application.context, "Inbox"), fn() {
+  shell.set_view(screen_view("Inbox"), dispose: fn() {
     screen_disposals =+ 1
   })
+  let _ = application.flush()
   let modal_body = screen(application.context, "Search")
   let _ = shell.modal.present(
     "Search",
@@ -87,8 +106,12 @@ test fn application_shell_disposes_owned_screen_and_overlays_once() Void!Str {
 test fn application_shell_copies_supplied_selection() Void!Str {
   let application = testing::new(40, 8)
   defer application.destroy()
-  let shell = application_shell::new(application.context, theme::new(), no_schedule)
-  application.root.add(shell.root)
+  let shell = application_shell::new(
+    application.context,
+    application.root,
+    theme::new(),
+    no_schedule,
+  )
   let selected = ui::Selection{
     anchor: ui::Point{x: 0, y: 0},
     focus: ui::Point{x: 5, y: 0},
@@ -112,8 +135,12 @@ test fn application_shell_copies_supplied_selection() Void!Str {
 test fn application_shell_consumes_rejected_modal_escape() Void!Str {
   let application = testing::new(50, 12)
   defer application.destroy()
-  let shell = application_shell::new(application.context, theme::new(), no_schedule)
-  application.root.add(shell.root)
+  let shell = application_shell::new(
+    application.context,
+    application.root,
+    theme::new(),
+    no_schedule,
+  )
   let modal_body = screen(application.context, "Saving")
   let _ = shell.modal.present(
     "Saving",
@@ -137,8 +164,12 @@ test fn application_shell_consumes_rejected_modal_escape() Void!Str {
 test fn application_shell_routes_escape_to_modal_first() Void!Str {
   let application = testing::new(50, 12)
   defer application.destroy()
-  let shell = application_shell::new(application.context, theme::new(), no_schedule)
-  application.root.add(shell.root)
+  let shell = application_shell::new(
+    application.context,
+    application.root,
+    theme::new(),
+    no_schedule,
+  )
   let modal_body = screen(application.context, "Search")
   let _ = shell.modal.present(
     "Search",
@@ -157,4 +188,72 @@ test fn application_shell_routes_escape_to_modal_first() Void!Str {
     "modal Escape should be handled",
   )
   assertions::assert(not shell.modal.is_open(), "Escape should close the active modal")
+}
+
+private struct ScreenLifetime {
+  mounts: Int,
+  unmounts: Int,
+}
+
+private struct StatefulProps {
+  initial_label: Str,
+  lifetime: mut ScreenLifetime,
+}
+
+private struct StatefulScreen {
+  props: mut StatefulProps,
+  label: Str,
+}
+
+private fn stateful_screen(props: mut StatefulProps) mut StatefulScreen {
+  (mut StatefulScreen{props: props, label: props.initial_label})
+}
+
+impl cui::Component for StatefulScreen {
+  fn mut render() cui::View {
+    cui::text(self.label)
+  }
+}
+
+impl cui::Lifecycle for StatefulScreen {
+  fn mut mounted(ctx: cui::Context) {
+    self.props.lifetime.mounts =+ 1
+  }
+
+  fn mut unmounting(ctx: cui::Context) {
+    self.props.lifetime.unmounts =+ 1
+  }
+}
+
+test fn replacing_root_screen_restarts_component_lifetime_even_for_same_key() Void!Str {
+  let application = testing::new(50, 12)
+  defer application.destroy()
+  let shell = application_shell::new(
+    application.context,
+    application.root,
+    theme::new(),
+    no_schedule,
+  )
+  defer shell.dispose()
+  let lifetime = mut ScreenLifetime{mounts: 0, unmounts: 0}
+  shell.set_view(
+    cui::child(
+      stateful_screen,
+      StatefulProps{initial_label: "First session", lifetime: lifetime},
+      key: "screen",
+    ),
+  )
+  let _ = application.flush()
+  shell.set_view(
+    cui::child(
+      stateful_screen,
+      StatefulProps{initial_label: "Second session", lifetime: lifetime},
+      key: "screen",
+    ),
+  )
+  let _ = application.flush()
+  application.render()
+  try assertions::assert(lifetime.mounts == 2, "each replacement should mount a new component")
+  try assertions::assert(lifetime.unmounts == 1, "replacement should retire the old component")
+  testing::assert_contains(application.frame().text(), "Second session")
 }

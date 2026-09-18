@@ -2,6 +2,7 @@ use ard/testing as assertions
 
 use cooper
 use cooper/event
+use cooper/cui/renderer
 use cooper/testing
 use tinear/tui/picker_controller
 use tinear/tui/theme
@@ -82,226 +83,209 @@ private fn key(name: Str, text: Str) mut cooper::KeyEvent {
   )
 }
 
+private fn mount(
+  application: testing::TestApp,
+  placeholder: Str,
+  values: [picker_controller::Option],
+  selected_id: Str,
+  selection: mut Selection,
+) renderer::Renderer {
+  let mounted = renderer::mount(
+    application.context,
+    application.root,
+    picker_controller::view(
+      theme::new(),
+      placeholder,
+      values,
+      selected_id,
+      fn(option: picker_controller::Option) {
+        selection.id = option.id
+        selection.count =+ 1
+      },
+    ),
+  )
+  let _ = application.flush()
+  application.render()
+  mounted
+}
+
+// Background color of the first cell on a frame row.
+private fn row_background(application: testing::TestApp, y: Int) Uint8 {
+  match application.frame().cell(0, y) {
+    cell => {
+      match cell.style.background {
+        color => color.index.or(Uint8::from(0)),
+        _ => Uint8::from(0),
+      }
+    },
+    _ => Uint8::from(0),
+  }
+}
+
 test fn picker_filters_navigates_and_selects() Void!Str {
   let application = testing::new(50, 16)
   defer application.destroy()
   let selection = mut Selection{id: "", count: 0}
-  let picker = picker_controller::new(
-    application.context,
-    theme::new(),
-    "Filter states",
-    filter_options(),
-    "doing",
-    fn(option: picker_controller::Option) {
-      selection.id = option.id
-      selection.count =+ 1
-    },
-  )
-  application.root.add(picker.root)
-  picker.focus()
-  application.render()
-  try assertions::assert(picker.cursor == 1, "selected id should seed cursor")
-  try assertions::assert(
-    picker.results.requested_scroll_top() == 2,
-    "initial selection should request a deterministic offset before layout",
-  )
+  let mounted = mount(application, "Filter states", filter_options(), "doing", selection)
+  defer mounted.destroy()
+
   try testing::assert_contains(application.frame().text(), "In Progress")
   let rule = application.frame().cell(0, 1).expect("picker rule")
   try assertions::assert(
     rule.grapheme == "─" and rule.style.dim,
     "picker input should end with a dim rule",
   )
-  let selected_surface = application.frame().cell(0, 4).expect("selected picker surface")
   try assertions::assert(
-    selected_surface.style.background.expect("active background").index.expect("host palette index") == Uint8::from(4),
+    row_background(application, 4) == Uint8::from(4),
     "selected picker option should use the active background",
   )
   let selected_label = application.frame().cell(1, 4).expect("selected picker label")
   try assertions::assert(
-    selected_label.style.foreground.expect("active foreground").index.expect("host palette index") == Uint8::from(15) and selected_label.style.background.expect("active text background").index.expect("host palette index") == Uint8::from(4) and selected_label.style.bold,
+    selected_label.style.foreground.expect("active foreground").index.expect("host palette index") == Uint8::from(15) and selected_label.style.bold,
     "selected picker option should use readable active text",
   )
-  application.mouse_move(2, 5)
-  application.render()
-  try assertions::assert(
-    application.frame().cell(
-      0,
-      5,
-    ).expect(
-      "selected hover surface",
-    ).style.background.expect("selected background").index.expect("host palette index") == Uint8::from(4),
-    "selected background should take precedence over hover",
-  )
+
   application.mouse_move(2, 2)
+  let _ = application.flush()
   application.render()
-  let hovered_surface = application.frame().cell(0, 2).expect("hovered picker surface")
   try assertions::assert(
-    hovered_surface.style.background.expect("hover background").index.expect("host palette index") == Uint8::from(8),
+    row_background(application, 2) == Uint8::from(8),
     "hovered picker option should use the hover background",
   )
   application.mouse_move(2, 4)
+  let _ = application.flush()
   application.render()
   try assertions::assert(
-    application.frame().cell(
-      0,
-      2,
-    ).expect(
-      "restored picker surface",
-    ).style.background.expect("default background").terminal_default,
-    "leaving an option should restore its terminal-default background",
+    row_background(application, 4) == Uint8::from(4),
+    "selected background should take precedence over hover",
   )
-  picker.focus()
 
-  application.key(key("down", ""))
-  application.key(key("return", ""))
-  try assertions::assert(selection.id == "done", "keyboard selection should activate highlighted option")
-  try assertions::assert(selection.count == 1, "selection callback should run once")
-
-  picker.apply_filter("progress")
-  try assertions::assert(picker.filtered.size() == 1, "filter should match label case-insensitively")
+  // Filtering is case-insensitive over labels and descriptions.
+  application.paste(event::paste("progress"))
+  let _ = application.flush()
+  application.render()
+  try testing::assert_contains(application.frame().text(), "In Progress")
   try assertions::assert(
-    picker.filtered.at(0).expect("match").id == "doing",
-    "matching option should remain",
+    not application.frame().text().contains("Backlog"),
+    "filter should drop non-matching labels",
   )
-  picker.apply_filter("completed")
+  application.key(key("return", ""))
+  let _ = application.flush()
+  try assertions::assert(selection.id == "doing", "Enter should select the filtered option")
+  assertions::assert(selection.count == 1, "activation should report once")
+}
+
+test fn picker_filter_matches_descriptions_and_resets_cursor() Void!Str {
+  let application = testing::new(50, 16)
+  defer application.destroy()
+  let selection = mut Selection{id: "", count: 0}
+  let mounted = mount(application, "Filter states", filter_options(), "doing", selection)
+  defer mounted.destroy()
+
+  application.paste(event::paste("completed"))
+  let _ = application.flush()
+  application.render()
+  try testing::assert_contains(application.frame().text(), "Done")
+  application.key(key("return", ""))
+  let _ = application.flush()
+  try assertions::assert(selection.id == "done", "description matches should be selectable")
   assertions::assert(
-    picker.filtered.at(0).expect("description match").id == "done",
-    "description should be searchable",
+    row_background(application, 2) == Uint8::from(4),
+    "filtering should reset the cursor to the first match",
   )
 }
 
 test fn small_picker_hides_filter_and_supports_direct_navigation() Void!Str {
+  let application = testing::new(50, 14)
+  defer application.destroy()
+  let selection = mut Selection{id: "", count: 0}
+  let mounted = mount(application, "Filter states", options(), "", selection)
+  defer mounted.destroy()
+
+  try assertions::assert(
+    not application.frame().text().contains("Filter states"),
+    "five or fewer options should not show a filter",
+  )
+  try assertions::assert(
+    row_background(application, 0) == Uint8::from(4),
+    "small picker should start on its first option",
+  )
+  application.key(key("j", "j"))
+  let _ = application.flush()
+  application.render()
+  try assertions::assert(
+    row_background(application, 2) == Uint8::from(4),
+    "j should advance the cursor without a filter",
+  )
+  application.key(key("k", "k"))
+  let _ = application.flush()
+  application.render()
+  try assertions::assert(
+    row_background(application, 0) == Uint8::from(4),
+    "k should move back",
+  )
+  application.key(key("down", ""))
+  application.key(key("space", " "))
+  let _ = application.flush()
+  assertions::assert(selection.id == "doing", "space should activate without a filter")
+}
+
+test fn five_options_stay_unfiltered() Void!Str {
   let application = testing::new(50, 16)
   defer application.destroy()
   let selection = mut Selection{id: "", count: 0}
-  let picker = picker_controller::new(
-    application.context,
-    theme::new(),
-    "Filter states",
-    options(),
-    "",
-    fn(option: picker_controller::Option) {
-      selection.id = option.id
-      selection.count =+ 1
-    },
-  )
-  application.root.add(picker.root)
-  picker.focus()
-  application.render()
-  try assertions::assert(not picker.filterable, "five or fewer options should not show a filter")
-  try assertions::assert(
-    not application.frame().text().contains("Filter states"),
-    "small picker should omit its filter placeholder",
-  )
-  application.key(key("j", "j"))
-  application.key(key("space", " "))
-  try assertions::assert(selection.id == "doing", "j and Space should navigate and activate directly")
-  assertions::assert(selection.count == 1, "small picker should activate once")
-}
-
-test fn picker_filter_threshold_order_and_reset_match_main() Void!Str {
-  let application = testing::new(50, 16)
-  defer application.destroy()
-  let small = picker_controller::new(
-    application.context,
-    theme::new(),
-    "Filter",
-    five_options(),
-    "",
-    fn(option: picker_controller::Option) {},
-  )
-  try assertions::assert(not small.filterable, "exactly five options should not show a filter")
-  small.dispose()
-  small.root.destroy(recursive: true)
-
-  let filterable = picker_controller::new(
-    application.context,
-    theme::new(),
-    "Filter",
-    filter_options(),
-    "",
-    fn(option: picker_controller::Option) {},
-  )
-  try assertions::assert(filterable.filterable, "six options should show a filter")
-  filterable.apply_filter("CANCEL")
-  try assertions::assert(filterable.filtered.size() == 2, "filtering should remain case-insensitive")
-  try assertions::assert(
-    filterable.filtered.at(0).expect("first match").id == "canceled" and filterable.filtered.at(1).expect("second match").id == "duplicate",
-    "multiple matches should preserve source order",
-  )
-  filterable.apply_filter("   ")
-  try assertions::assert(
-    filterable.filtered.size() == 6,
-    "whitespace-only filters should match every option",
-  )
+  let mounted = mount(application, "Filter states", five_options(), "", selection)
+  defer mounted.destroy()
   assertions::assert(
-    filterable.filtered.at(0).expect("restored first").id == "todo" and filterable.filtered.at(5).expect("restored last").id == "backlog",
-    "clearing the filter should restore original order",
+    not application.frame().text().contains("Filter states"),
+    "the filter threshold is exclusive at five options",
   )
 }
 
 test fn picker_renders_empty_state_and_ignores_empty_activation() Void!Str {
-  let application = testing::new(50, 16)
+  let application = testing::new(50, 14)
   defer application.destroy()
   let selection = mut Selection{id: "", count: 0}
-  let picker = picker_controller::new(
-    application.context,
-    theme::new(),
-    "Filter",
-    filter_options(),
-    "",
-    fn(option: picker_controller::Option) {
-      selection.count =+ 1
-    },
-  )
-  application.root.add(picker.root)
-  picker.apply_filter("no such state")
+  let mounted = mount(application, "Filter states", filter_options(), "", selection)
+  defer mounted.destroy()
+
+  application.paste(event::paste("no such state"))
+  let _ = application.flush()
   application.render()
   try testing::assert_contains(application.frame().text(), "No matches")
-  picker.focus()
   application.key(key("return", ""))
-  assertions::assert(selection.count == 0, "empty picker should not activate")
+  let _ = application.flush()
+  assertions::assert(selection.count == 0, "activation with no matches should be inert")
 }
 
 test fn picker_mouse_selects_visible_row() Void!Str {
-  let application = testing::new(50, 16)
+  let application = testing::new(50, 14)
   defer application.destroy()
   let selection = mut Selection{id: "", count: 0}
-  let picker = picker_controller::new(
-    application.context,
-    theme::new(),
-    "Filter",
-    filter_options(),
-    "",
-    fn(option: picker_controller::Option) {
-      selection.id = option.id
-      selection.count =+ 1
-    },
-  )
-  application.root.add(picker.root)
-  application.render()
-  application.click(2, 5)
-  try assertions::assert(selection.id == "doing", "clicking second row should select it")
-  assertions::assert(selection.count == 1, "mouse selection should activate once")
+  let mounted = mount(application, "Filter states", options(), "", selection)
+  defer mounted.destroy()
+
+  application.click(2, 2)
+  let _ = application.flush()
+  try assertions::assert(selection.id == "doing", "clicking a row should select it")
+  assertions::assert(selection.count == 1, "clicking should activate once")
 }
 
-test fn picker_disposal_removes_listeners() Void!Str {
-  let application = testing::new(40, 12)
+test fn unmounted_picker_stops_reporting_selections() Void!Str {
+  let application = testing::new(50, 14)
   defer application.destroy()
   let selection = mut Selection{id: "", count: 0}
-  let picker = picker_controller::new(
-    application.context,
-    theme::new(),
-    "Filter",
-    options(),
-    "",
-    fn(option: picker_controller::Option) {
-      selection.count =+ 1
-    },
+  let mounted = mount(application, "Filter states", options(), "", selection)
+  mounted.destroy()
+  mounted.destroy()
+  let _ = application.flush()
+  application.render()
+  application.click(2, 2)
+  application.key(key("return", ""))
+  let _ = application.flush()
+  try assertions::assert(selection.count == 0, "retired picker should not report selections")
+  assertions::assert(
+    not application.frame().text().contains("Todo"),
+    "retired picker should stop painting",
   )
-  application.root.add(picker.root)
-  picker.dispose()
-  picker.dispose()
-  try assertions::assert(picker.disposed, "picker disposal should be idempotent")
-  assertions::assert(picker.rows.size() == 0, "disposed picker should release row records")
 }

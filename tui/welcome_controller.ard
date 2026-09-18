@@ -1,207 +1,214 @@
 use cooper
+use cooper/cui
 use cooper/ui
 use tinear/services/auth
-use tinear/tui/lifecycle
 use tinear/tui/theme as tinear_theme
 
-struct WelcomeController {
-  root: mut ui::Box,
-  api_key: mut ui::Input,
-  login_button: mut ui::Box,
-  login_label: mut ui::Text,
-  status_text: mut ui::Text,
-  error_text: mut ui::Text,
-  scope: mut lifecycle::Scope,
+// Declarative welcome screen. Authentication supersession uses a request
+// counter; unmount closes the view cancellation channel and mount-scoped
+// dispatch suppresses late completions.
+struct WelcomeProps {
+  palette: tinear_theme::Theme,
   authenticate: auth::Authenticate,
   on_success: fn(Str),
-  listeners: [fn()],
+}
+
+struct Welcome {
+  props: mut WelcomeProps,
+  draft: Str,
   loading: Bool,
-  palette: tinear_theme::Theme,
+  error: Str,
+  request: Int,
+  initial_focus_pending: Bool,
+  button_focused: Bool,
+  button: mut cui::BoxRef,
+  stop: Chan<Bool>,
 }
 
-fn new(
-  ctx: mut cooper::Runtime,
+private fn welcome(props: mut WelcomeProps) mut Welcome {
+  (mut Welcome{
+    props: props,
+    draft: "",
+    loading: false,
+    error: "",
+    request: 0,
+    initial_focus_pending: true,
+    button_focused: false,
+    button: cui::box_ref(),
+    stop: Chan::new<Bool>(),
+  })
+}
+
+fn view(
   palette: tinear_theme::Theme,
   authenticate: auth::Authenticate,
   on_success: fn(Str),
-) mut WelcomeController {
-  let root = ui::box(
-    ctx,
-    styles: ui::style(
-      width: ui::percent(100.0),
-      height: ui::percent(100.0),
-      align_items: ui::Align::center,
-      justify_content: ui::Justify::center,
-    ),
+) cui::View {
+  cui::child(
+    welcome,
+    WelcomeProps{
+      palette: palette,
+      authenticate: authenticate,
+      on_success: on_success,
+    },
+    key: "welcome",
   )
-  let form = ui::box(
-    ctx,
-    styles: ui::style(
-      width: ui::cells(48),
-      flex_direction: ui::FlexDirection::column,
-      align_items: ui::Align::center,
-      gap: ui::cells(1),
-    ),
-  )
-  form.add(
-    ui::text(
-      ctx,
-      content: "▀█▀ ▀ █▀█ █▀▀ ▄▀█ █▀█\n █  █ █ █ ██▄ █▀█ █▀▄",
-      selectable: false,
-      text_style: ui::text_style(foreground: palette.accent, bold: true),
-    ),
-  )
-  form.add(ui::text(ctx, content: "Enter your Linear API key", selectable: false))
-  let api_key = ui::input(
-    ctx,
-    placeholder: "lin_api_…",
-    min_length: 1,
-    styles: ui::style(width: ui::cells(44), height: ui::cells(1)),
-  )
-  let login_button = ui::box(
-    ctx,
-    styles: ui::style(
-      border: ui::Border::rounded,
-      border_color: palette.border,
-      width: ui::cells(14),
-      height: ui::cells(3),
-      align_items: ui::Align::center,
-      justify_content: ui::Justify::center,
-    ),
-  )
-  login_button.set_focusable(true)
-  let login_label = ui::text(ctx, content: "Login", selectable: false)
-  login_button.add(login_label)
-  let status_text = ui::text(
-    ctx,
-    content: "",
-    selectable: false,
-    styles: ui::style(height: ui::cells(1)),
-    text_style: ui::text_style(dim: true),
-  )
-  let error_text = ui::text(
-    ctx,
-    content: "",
-    selectable: false,
-    styles: ui::style(height: ui::cells(1)),
-    text_style: ui::text_style(foreground: palette.danger, bold: true),
-  )
-  form.add(api_key)
-  form.add(login_button)
-  form.add(status_text)
-  form.add(error_text)
-  root.add(form)
-
-  let controller = mut WelcomeController{
-    root: root,
-    api_key: api_key,
-    login_button: login_button,
-    login_label: login_label,
-    status_text: status_text,
-    error_text: error_text,
-    scope: lifecycle::new(),
-    authenticate: authenticate,
-    on_success: on_success,
-    listeners: [],
-    loading: false,
-    palette: palette,
-  }
-  controller.listeners.push(
-    api_key.on_submit(fn(value: Str) {
-      controller.submit()
-    }),
-  )
-  controller.listeners.push(
-    login_button.on_key(fn(received: mut cooper::KeyEvent) {
-      if received.event_type != cooper::KeyEventType::release and (received.matches("return") or received.matches("space")) {
-        controller.submit()
-        received.prevent_default()
-        received.stop_propagation()
-      }
-    }),
-  )
-  controller.listeners.push(
-    login_button.on_mouse(fn(received: mut cooper::MouseEvent) {
-      if received.event_type == cooper::MouseEventType::down and received.button == cooper::MouseButton::left {
-        controller.submit()
-        received.stop_propagation()
-      }
-    }),
-  )
-  controller.listeners.push(
-    login_button.on_focus(fn() {
-      controller.render()
-    }),
-  )
-  controller.listeners.push(
-    login_button.on_blur(fn() {
-      controller.render()
-    }),
-  )
-  controller
 }
 
-impl WelcomeController {
-  private fn mut render() {
-    match self.loading {
-      true => {
-        self.login_label.set_content("Signing in…")
-        self.status_text.set_content("Validating with Linear")
-      },
-      false => {
-        self.login_label.set_content("Login")
-        self.status_text.set_content("")
-      },
-    }
-    let applied = mut self.login_button.style()
-    match self.login_button.is_focused() {
-      true => { applied.border_color = Maybe::new(self.palette.accent) },
-      false => { applied.border_color = Maybe::new(self.palette.border) },
-    }
-    self.login_button.set_style(applied.@)
-  }
-
-  fn mut submit() {
-    if (not self.loading) and not self.scope.disposed {
-      let api_key = self.api_key.value().trim()
+impl Welcome {
+  private fn mut submit(ctx: cui::Context) {
+    if not self.loading {
+      let api_key = self.draft.trim()
       if api_key.is_empty() {
-        self.error_text.set_content("Enter an API key")
+        self.error = "Enter an API key"
       } else {
-        self.error_text.set_content("")
+        self.error = ""
         self.loading = true
-        self.render()
-        let request = self.scope.begin_request()
-        self.authenticate(api_key, self.scope.stop.receiver(), fn(result: Void!Str) {
-          if self.scope.is_current(request) {
-            self.loading = false
-            match result {
-              ok(_) => {
-                self.render()
-                self.on_success(api_key)
-              },
-              err(message) => {
-                self.error_text.set_content(message)
-                self.render()
-              },
+        self.request =+ 1
+        let request = self.request
+        let dispatch = ctx.dispatch
+        (self.props.authenticate)(api_key, self.stop.receiver(), fn(result: Void!Str) {
+          let _ = dispatch(fn() {
+            if self.request == request {
+              self.loading = false
+              match result {
+                ok(_) => (self.props.on_success)(api_key),
+                err(message) => {
+                  self.error = message
+                },
+              }
             }
-          }
+          })
         })
       }
     }
   }
+}
 
-  fn mut focus() Bool {
-    self.api_key.focus()
+impl cui::Lifecycle for Welcome {
+  fn mut mounted(ctx: cui::Context) {
+    // Focus is described only for the initial commit; afterwards it stays
+    // imperative so renders cannot steal focus from the login button.
+    let _ = ctx.dispatch(fn() {
+      self.initial_focus_pending = false
+    })
+    match self.button.current {
+      panel => {
+        let _ = panel.node().on_focus(fn() {
+          let _ = ctx.dispatch(fn() {
+            self.button_focused = true
+          })
+        })
+        let _ = panel.node().on_blur(fn() {
+          let _ = ctx.dispatch(fn() {
+            self.button_focused = false
+          })
+        })
+      },
+      _ => (),
+    }
   }
 
-  fn mut dispose() {
-    if not self.scope.disposed {
-      self.scope.dispose()
-      let removers = self.listeners
-      self.listeners = []
-      for remove in removers {
-        remove()
-      }
+  fn mut unmounting(ctx: cui::Context) {
+    self.stop.close()
+  }
+}
+
+impl cui::Component for Welcome {
+  fn mut render() cui::View {
+    let palette = self.props.palette
+    let border_color = match self.button_focused {
+      true => palette.accent,
+      false => palette.border,
     }
+    cui::box(
+      [
+        cui::box(
+          [
+            cui::text(
+              "▀█▀ ▀ █▀█ █▀▀ ▄▀█ █▀█\n █  █ █ █ ██▄ █▀█ █▀▄",
+              selectable: false,
+              text_style: ui::text_style(foreground: palette.accent, bold: true),
+            ),
+            cui::text("Enter your Linear API key", selectable: false),
+            cui::input(
+              self.draft,
+              placeholder: "lin_api_…",
+              styles: ui::style(width: ui::cells(44), height: ui::cells(1)),
+              focused: match self.initial_focus_pending {
+                true => Maybe::new(true),
+                false => Maybe::new<Bool>(),
+              },
+              on_input: fn(value: Str, ctx: cui::Context) {
+                self.draft = value
+              },
+              on_submit: fn(value: Str, ctx: cui::Context) {
+                self.submit(ctx)
+              },
+            ),
+            cui::box(
+              [
+                cui::text(
+                  match self.loading {
+                    true => "Signing in…",
+                    false => "Login",
+                  },
+                  selectable: false,
+                ),
+              ],
+              ref: self.button,
+              styles: ui::style(
+                border: ui::Border::rounded,
+                border_color: border_color,
+                width: ui::cells(14),
+                height: ui::cells(3),
+                align_items: ui::Align::center,
+                justify_content: ui::Justify::center,
+              ),
+              on_key: fn(received: mut cooper::KeyEvent, ctx: cui::Context) {
+                if received.event_type != cooper::KeyEventType::release and (received.matches("return") or received.matches("space")) {
+                  self.submit(ctx)
+                  received.prevent_default()
+                  received.stop_propagation()
+                }
+              },
+              on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
+                if received.event_type == cooper::MouseEventType::down and received.button == cooper::MouseButton::left {
+                  self.submit(ctx)
+                  received.stop_propagation()
+                }
+              },
+            ),
+            cui::text(
+              match self.loading {
+                true => "Validating with Linear",
+                false => "",
+              },
+              selectable: false,
+              styles: ui::style(height: ui::cells(1)),
+              text_style: ui::text_style(dim: true),
+            ),
+            cui::text(
+              self.error,
+              selectable: false,
+              styles: ui::style(height: ui::cells(1)),
+              text_style: ui::text_style(foreground: palette.danger, bold: true),
+            ),
+          ],
+          styles: ui::style(
+            width: ui::cells(48),
+            flex_direction: ui::FlexDirection::column,
+            align_items: ui::Align::center,
+            gap: ui::cells(1),
+          ),
+        ),
+      ],
+      styles: ui::style(
+        width: ui::percent(100.0),
+        height: ui::percent(100.0),
+        align_items: ui::Align::center,
+        justify_content: ui::Justify::center,
+      ),
+    )
   }
 }

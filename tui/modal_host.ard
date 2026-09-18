@@ -1,25 +1,91 @@
 use cooper
+use cooper/cui
+use cooper/cui/renderer
 use cooper/ui
+use tinear/tui/cui_bridge
+use tinear/tui/focus
 use tinear/tui/theme as tinear_theme
 
 struct Ticket {
   generation: Int,
 }
 
-struct ModalHost {
-  root: mut ui::Box,
-  frame: mut ui::Box,
-  title_text: mut ui::Text,
-  body_slot: mut ui::Box,
-  footer_text: mut ui::Text,
-  current_root: (mut ui::Box)?,
-  current_dispose: fn()?,
-  current_restore_focus: fn()?,
-  current_can_dismiss: (fn() Bool)?,
+// Shared state described by the Host component and owned by the facade.
+struct Model {
+  open: Bool,
+  title: Str,
+  footer: Str,
+  body: (mut ui::Box)?,
+  body_view: cui::View?,
+  body_dispose: fn(),
+  body_attached: fn(),
   generation: Int,
-  presented: Bool,
-  hidden_style: ui::Style,
-  visible_style: ui::Style,
+}
+
+// Per-presentation record. `attached` reports whether the bridge committed;
+// replaced or closed bodies that never mounted must dispose eagerly because
+// CUI never owned them.
+struct Current {
+  body: mut ui::Box,
+  dispose: fn(),
+  restore_focus: fn(),
+  can_dismiss: fn() Bool,
+  attached: Bool,
+}
+
+private struct HostProps {
+  model: mut Model,
+}
+
+private struct Host {
+  props: mut HostProps,
+  frame: mut cui::BoxRef,
+  palette: tinear_theme::Theme,
+}
+
+// Each presentation owns a distinct subtree, even when close/open coalesce.
+private struct PresentationProps {
+  body: cui::View,
+}
+
+private struct Presentation {
+  props: mut PresentationProps,
+  frame: mut cui::BoxRef,
+}
+
+private fn presentation(props: mut PresentationProps) mut Presentation {
+  (mut Presentation{props: props, frame: cui::box_ref()})
+}
+
+impl cui::Component for Presentation {
+  fn mut render() cui::View {
+    cui::box(
+      [self.props.body],
+      ref: self.frame,
+      on_key: fn(received: mut cooper::KeyEvent, ctx: cui::Context) {},
+      styles: ui::style(width: ui::percent(100.0), flex_direction: ui::FlexDirection::column),
+    )
+  }
+}
+
+impl cui::Lifecycle for Presentation {
+  fn mut mounted(ctx: cui::Context) {
+    // Let controls claim their initial focus first; noninteractive bodies
+    // still need a keyboard barrier instead of leaving focus behind the modal.
+    // Later loading-to-form transitions must describe their own initial focus.
+    let _ = ctx.dispatch(fn() {
+      match self.frame.current {
+        frame => {
+          if not focus::within(frame.node()) {
+            let _ = frame.focus()
+          }
+        },
+        _ => (),
+      }
+    })
+  }
+
+  fn mut unmounting(ctx: cui::Context) {}
 }
 
 private fn root_style(display: ui::Display) ui::Style {
@@ -36,62 +102,142 @@ private fn root_style(display: ui::Display) ui::Style {
   )
 }
 
-fn new(ctx: mut cooper::Runtime, palette: tinear_theme::Theme) mut ModalHost {
-  let hidden_style = root_style(ui::Display::none)
-  let visible_style = root_style(ui::Display::flex)
-  let root = ui::box(ctx, styles: hidden_style)
-  let frame = ui::box(
-    ctx,
-    styles: ui::style(
-      width: ui::percent(70.0),
-      max_width: ui::cells(72),
-      max_height: ui::percent(80.0),
-      background: palette.background,
-      border: ui::Border::rounded,
-      border_color: palette.accent,
-      flex_direction: ui::FlexDirection::column,
-      padding: ui::Edges{
-        top: ui::cells(0),
-        right: ui::cells(1),
-        bottom: ui::cells(0),
-        left: ui::cells(1),
+struct ModalHost {
+  model: mut Model,
+  cui: renderer::Renderer,
+  current: (mut Current)?,
+  generation: Int,
+  presented: Bool,
+  disposed: Bool,
+  view_restore_focus: fn(),
+  view_can_dismiss: fn() Bool,
+  view_on_close: fn(),
+  palette: tinear_theme::Theme,
+}
+
+private fn host_factory(palette: tinear_theme::Theme) fn(mut HostProps) mut Host {
+  fn(props: mut HostProps) mut Host {
+    (mut Host{
+      props: props,
+      frame: cui::box_ref(),
+      palette: palette,
+    })
+  }
+}
+
+impl cui::Component for Host {
+  fn mut render() cui::View {
+    let model = self.props.model
+    let children = mut List::new<cui::View>()
+    if model.open {
+      let frame_children = mut List::new<cui::View>()
+      frame_children.push(cui::text(model.title, text_style: ui::text_style(bold: true)))
+      match model.body {
+        body => {
+          let frame = self.frame
+          let attached = model.body_attached
+          frame_children.push(
+            cui_bridge::view(
+              body,
+              model.body_dispose,
+              fn() {
+                // The full-screen layer wins hit testing; the frame is the
+                // keyboard fallback while modal content chooses its own focus.
+                match frame.current {
+                  panel => {
+                    let _ = panel.focus()
+                  },
+                  _ => (),
+                }
+                attached()
+              },
+              key: "body-{model.generation}",
+            ),
+          )
+        },
+        _ => (),
+      }
+      match model.body_view {
+        body_view => {
+          frame_children.push(
+            cui::child(
+              presentation,
+              PresentationProps{body: body_view},
+              key: "presentation-{model.generation}",
+            ),
+          )
+        },
+        _ => (),
+      }
+      frame_children.push(cui::text(model.footer, text_style: ui::text_style(dim: true)))
+      children.push(
+        cui::box(
+          frame_children.@,
+          ref: self.frame,
+          // A described key handler keeps the frame focusable across commits.
+          on_key: fn(received: mut cooper::KeyEvent, ctx: cui::Context) {},
+          styles: ui::style(
+            width: ui::percent(70.0),
+            max_width: ui::cells(72),
+            max_height: ui::percent(80.0),
+            background: self.palette.background,
+            border: ui::Border::rounded,
+            border_color: self.palette.accent,
+            flex_direction: ui::FlexDirection::column,
+            padding: ui::Edges{
+              top: ui::cells(0),
+              right: ui::cells(1),
+              bottom: ui::cells(0),
+              left: ui::cells(1),
+            },
+            gap: ui::cells(1),
+          ),
+        ),
+      )
+    }
+    let display = match model.open {
+      true => ui::Display::flex,
+      false => ui::Display::none,
+    }
+    cui::box(
+      children.@,
+      styles: root_style(display),
+      on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
+        received.stop_propagation()
       },
-      gap: ui::cells(1),
-    ),
-  )
-  frame.set_focusable(true)
-  let title_text = ui::text(ctx, content: "", text_style: ui::text_style(bold: true))
-  let body_slot = ui::box(
+    )
+  }
+}
+
+fn new(ctx: mut cooper::Runtime, root: mut cooper::Root, palette: tinear_theme::Theme) mut ModalHost {
+  let model = mut Model{
+    open: false,
+    title: "",
+    footer: "",
+    body: Maybe::new<mut ui::Box>(),
+    body_view: Maybe::new<cui::View>(),
+    body_dispose: fn() {},
+    body_attached: fn() {},
+    generation: 0,
+  }
+  let mounted = renderer::mount(
     ctx,
-    styles: ui::style(width: ui::percent(100.0), flex_direction: ui::FlexDirection::column),
+    root,
+    cui::child(host_factory(palette), HostProps{model: model}),
   )
-  let footer_text = ui::text(ctx, content: "", text_style: ui::text_style(dim: true))
-
-  frame.add(title_text)
-  frame.add(body_slot)
-  frame.add(footer_text)
-  root.add(frame)
-
-  // The full-screen, high-z root wins hit testing over background controls.
-  // Preserve normal autofocus for controls inside the modal.
-  let _ = root.on_mouse(fn(received: mut cooper::MouseEvent) {
-    received.stop_propagation()
-  })
-
   (mut ModalHost{
-    root: root,
-    frame: frame,
-    title_text: title_text,
-    body_slot: body_slot,
-    footer_text: footer_text,
-    current_root: Maybe::new<mut ui::Box>(),
-    current_dispose: Maybe::new<fn()>(),
-    current_restore_focus: Maybe::new<fn()>(),
-    current_can_dismiss: Maybe::new<fn() Bool>(),
+    model: model,
+    cui: mounted,
+    current: Maybe::new<mut Current>(),
     generation: 0,
     presented: false,
-    hidden_style: hidden_style,
-    visible_style: visible_style,
+    disposed: false,
+    view_restore_focus: fn() {},
+    view_can_dismiss: fn() Bool {
+      true
+    },
+    view_on_close: fn() {},
+    palette: palette,
   })
 }
 
@@ -104,45 +250,34 @@ impl ModalHost {
     self.presented and ticket.generation == self.generation
   }
 
-  private fn mut clear_current(restore_focus: Bool) Bool {
-    if not self.presented {
-      false
-    } else {
-      let old_root = self.current_root
-      let old_dispose = self.current_dispose
-      let old_restore_focus = self.current_restore_focus
-      let closing_generation = self.generation
-
-      self.presented = false
-      self.current_root = Maybe::new<mut ui::Box>()
-      self.current_dispose = Maybe::new<fn()>()
-      self.current_restore_focus = Maybe::new<fn()>()
-      self.current_can_dismiss = Maybe::new<fn() Bool>()
-      self.root.set_style(self.hidden_style)
-
-      match old_root {
-        body => {
-          let _ = self.body_slot.remove(body)
-        },
-        _ => (),
-      }
-      match old_dispose {
-        dispose => dispose(),
-        _ => (),
-      }
-      match old_root {
-        body => body.destroy(recursive: true),
-        _ => (),
-      }
-
-      if restore_focus and (not self.presented) and self.generation == closing_generation {
-        match old_restore_focus {
-          restore => restore(),
-          _ => (),
+  // Retire the active body. CUI runs the dispose path for committed bodies;
+  // bodies that never reached a commit are disposed eagerly here.
+  //
+  // All state is detached before `on_close` runs so that a hook which presents
+  // a replacement modal cannot have it torn down by this call.
+  private fn mut clear_current() {
+    let on_close = self.view_on_close
+    let old = self.current
+    self.view_on_close = fn() {}
+    self.current = Maybe::new<mut Current>()
+    self.presented = false
+    self.cui.update(fn() {
+      self.model.open = false
+      self.model.body = Maybe::new<mut ui::Box>()
+      self.model.body_view = Maybe::new<cui::View>()
+      self.model.body_dispose = fn() {}
+      self.model.body_attached = fn() {}
+    })
+    match old {
+      previous => {
+        if not previous.attached {
+          (previous.dispose)()
+          previous.body.destroy(recursive: true)
         }
-      }
-      true
+      },
+      _ => (),
     }
+    on_close()
   }
 
   fn mut present(
@@ -154,20 +289,77 @@ impl ModalHost {
     restore_focus: fn(),
     can_dismiss: fn() Bool,
   ) Ticket {
-    let _ = self.clear_current(false)
+    if self.presented {
+      self.clear_current()
+    }
     self.generation =+ 1
-    self.current_root = Maybe::new<mut ui::Box>(body)
-    self.current_dispose = Maybe::new<fn()>(dispose)
-    self.current_restore_focus = Maybe::new<fn()>(restore_focus)
-    self.current_can_dismiss = Maybe::new<fn() Bool>(can_dismiss)
+    let generation = self.generation
+    let current = mut Current{
+      body: body,
+      dispose: dispose,
+      restore_focus: restore_focus,
+      can_dismiss: can_dismiss,
+      attached: false,
+    }
+    self.current = Maybe::new(current)
     self.presented = true
-    self.title_text.set_content(title)
-    self.footer_text.set_content(footer)
-    self.body_slot.add(body)
-    self.root.set_style(self.visible_style)
-    let _ = self.frame.focus()
-    initial_focus()
-    Ticket{generation: self.generation}
+    self.cui.update(fn() {
+      self.model.open = true
+      self.model.title = title
+      self.model.footer = footer
+      self.model.body = Maybe::new(body)
+      self.model.body_view = Maybe::new<cui::View>()
+      self.model.body_dispose = dispose
+      self.model.body_attached = fn() {
+        current.attached = true
+        initial_focus()
+      }
+      self.model.generation = generation
+    })
+    Ticket{generation: generation}
+  }
+
+  // Present a declarative body. CUI owns the component's lifetime, so no
+  // dispose or attach hook is needed; focus is described by the component.
+  fn mut present_view(
+    title: Str,
+    body: cui::View,
+    footer: Str,
+    restore_focus: fn(),
+    can_dismiss: fn() Bool,
+    on_close: fn()?,
+  ) Ticket {
+    if self.presented {
+      self.clear_current()
+    }
+    self.generation =+ 1
+    let generation = self.generation
+    self.current = Maybe::new<mut Current>()
+    self.presented = true
+    self.view_restore_focus = restore_focus
+    self.view_can_dismiss = can_dismiss
+    self.view_on_close = on_close.or(fn() {})
+    self.cui.update(fn() {
+      self.model.open = true
+      self.model.title = title
+      self.model.footer = footer
+      self.model.body = Maybe::new<mut ui::Box>()
+      self.model.body_dispose = fn() {}
+      self.model.body_attached = fn() {}
+      self.model.body_view = Maybe::new(body)
+      self.model.generation = generation
+    })
+    Ticket{generation: generation}
+  }
+
+  // Retitle the open modal without replacing its body.
+  fn mut set_chrome(title: Str, footer: Str) {
+    if self.presented {
+      self.cui.update(fn() {
+        self.model.title = title
+        self.model.footer = footer
+      })
+    }
   }
 
   fn mut close() Bool {
@@ -175,7 +367,17 @@ impl ModalHost {
       false
     } else {
       self.generation =+ 1
-      self.clear_current(true)
+      let closing_generation = self.generation
+      let restore = match self.current {
+        current => current.restore_focus,
+        _ => self.view_restore_focus,
+      }
+      self.view_restore_focus = fn() {}
+      self.clear_current()
+      if (not self.presented) and self.generation == closing_generation {
+        restore()
+      }
+      true
     }
   }
 
@@ -183,9 +385,9 @@ impl ModalHost {
     if not self.presented {
       false
     } else {
-      let allowed = match self.current_can_dismiss {
-        check => check(),
-        _ => true,
+      let allowed = match self.current {
+        current => (current.can_dismiss)(),
+        _ => (self.view_can_dismiss)(),
       }
       if allowed {
         self.close()
@@ -200,6 +402,25 @@ impl ModalHost {
       self.close()
     } else {
       false
+    }
+  }
+
+  fn mut dispose() {
+    if not self.disposed {
+      self.disposed = true
+      match self.current {
+        current => {
+          if not current.attached {
+            (current.dispose)()
+            current.body.destroy(recursive: true)
+          }
+        },
+        _ => (),
+      }
+      self.current = Maybe::new<mut Current>()
+      self.presented = false
+      // Retires the committed body bridge, running its dispose path.
+      self.cui.destroy()
     }
   }
 }

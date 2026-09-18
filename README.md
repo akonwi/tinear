@@ -44,7 +44,7 @@ the footer.
 
 ## Build and test
 
-Building requires Ard v0.40.0 or newer. The Cooper dependency is pinned to an exact remote revision in `ard.toml` and `ard.lock`.
+Building requires Ard v0.42.0 or newer. The Cooper dependency is pinned to an exact remote revision in `ard.toml` and `ard.lock`.
 
 ```bash
 ard check main.ard

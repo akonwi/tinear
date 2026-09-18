@@ -1,5 +1,7 @@
 use cooper
 use cooper/animation
+use cooper/cui
+use cooper/cui/renderer
 use cooper/ui
 use tinear/tui/scheduler
 use tinear/tui/theme as tinear_theme
@@ -10,20 +12,34 @@ enum Variant {
   error,
 }
 
+// Immutable per-toast presentation data computed at show time so component
+// rendering stays deterministic and effect-free.
 struct Entry {
   id: Int,
-  root: mut ui::Box,
-  timeline: mut animation::Timeline,
-  cancel_expiry: fn(),
+  title: Str,
+  detail: Str,
+  marker: Str,
+  color: ui::Color,
+  background: ui::Color,
+  width: Int,
+  ttl_ms: Int,
+}
+
+struct Model {
+  entries: [Entry],
+}
+
+struct Timer {
+  id: Int,
+  cancel: fn(),
 }
 
 struct ToastHost {
-  root: mut ui::Box,
-  entries: [Entry],
+  model: mut Model,
+  cui: renderer::Renderer,
+  timers: [Timer],
   next_id: Int,
   disposed: Bool,
-  hidden_style: ui::Style,
-  visible_style: ui::Style,
   palette: tinear_theme::Theme,
   schedule: scheduler::Schedule,
   context: mut cooper::Runtime,
@@ -44,23 +60,6 @@ private fn root_style(display: ui::Display) ui::Style {
     overflow: ui::Overflow::hidden,
     z_index: 900,
   )
-}
-
-fn new(ctx: mut cooper::Runtime, palette: tinear_theme::Theme, schedule: scheduler::Schedule) mut ToastHost {
-  let hidden_style = root_style(ui::Display::none)
-  let visible_style = root_style(ui::Display::flex)
-  let root = ui::box(ctx, styles: hidden_style)
-  (mut ToastHost{
-    root: root,
-    entries: [],
-    next_id: 0,
-    disposed: false,
-    hidden_style: hidden_style,
-    visible_style: visible_style,
-    palette: palette,
-    schedule: schedule,
-    context: ctx,
-  })
 }
 
 private fn toast_width(ctx: mut cooper::Runtime, title: Str, description: Str) Int {
@@ -89,6 +88,163 @@ private fn entrance_duration(ttl_ms: Int) Int {
   }
 }
 
+// One notification. The slide-in offset is component state driven by a
+// mount-scoped animation; unmount cancels it automatically.
+private struct ToastProps {
+  entry: Entry,
+}
+
+private struct Toast {
+  props: mut ToastProps,
+  offset: Int,
+}
+
+private fn toast(props: mut ToastProps) mut Toast {
+  (mut Toast{props: props, offset: props.entry.width})
+}
+
+impl cui::Lifecycle for Toast {
+  fn mut mounted(ctx: cui::Context) {
+    let width = self.props.entry.width
+    let _ = ctx.animate(
+      entrance_duration(self.props.entry.ttl_ms),
+      fn(frame: animation::Frame) {
+        self.offset = animation::lerp_int(width, 0, frame.progress)
+      },
+      ease: animation::out_quad,
+    )
+  }
+
+  fn mut unmounting(ctx: cui::Context) {}
+}
+
+impl cui::Component for Toast {
+  fn mut render() cui::View {
+    let entry = self.props.entry
+
+    let content_height = match entry.detail.is_empty() {
+      true => 1,
+      false => 2,
+    }
+    let children = mut List::new<cui::View>()
+    children.push(
+      cui::text(
+        entry.title,
+        wrap: ui::TextWrap::none,
+        overflow: ui::TextOverflow::ellipsis,
+        styles: ui::style(
+          width: ui::fit_content(),
+          max_width: ui::cells(46),
+          height: ui::cells(1),
+        ),
+        text_style: ui::text_style(bold: true),
+      ),
+    )
+    if not entry.detail.is_empty() {
+      children.push(
+        cui::text(
+          entry.detail,
+          wrap: ui::TextWrap::none,
+          overflow: ui::TextOverflow::ellipsis,
+          styles: ui::style(
+            width: ui::fit_content(),
+            max_width: ui::cells(46),
+            height: ui::cells(1),
+          ),
+          text_style: ui::text_style(dim: true),
+        ),
+      )
+    }
+    cui::box(
+      [
+        cui::text(
+          entry.marker,
+          selectable: false,
+          styles: ui::style(width: ui::cells(2), height: ui::cells(1), flex_shrink: 0.0),
+          text_style: ui::text_style(foreground: entry.color, bold: true),
+        ),
+        cui::box(
+          children.@,
+          styles: ui::style(
+            width: ui::fit_content(),
+            max_width: ui::cells(46),
+            height: ui::cells(content_height),
+            flex_direction: ui::FlexDirection::column,
+          ),
+        ),
+      ],
+      styles: ui::style(
+        background: entry.background,
+        border: ui::Border::rounded,
+        border_color: entry.color,
+        position: ui::Position::relative,
+        left: ui::cells(self.offset),
+        width: ui::cells(entry.width),
+        height: ui::cells(content_height + 2),
+        flex_direction: ui::FlexDirection::row,
+        align_items: ui::Align::start,
+        flex_shrink: 0.0,
+        padding: ui::Edges{
+          top: ui::cells(0),
+          right: ui::cells(1),
+          bottom: ui::cells(0),
+          left: ui::cells(1),
+        },
+        overflow: ui::Overflow::hidden,
+      ),
+    )
+  }
+}
+
+// The overlay stack. Data lives in the shared Model owned by the facade;
+// this component only describes it.
+private struct HostProps {
+  model: mut Model,
+}
+
+private struct Host {
+  props: mut HostProps,
+}
+
+private fn host(props: mut HostProps) mut Host {
+  (mut Host{props: props})
+}
+
+impl cui::Component for Host {
+  fn mut render() cui::View {
+    let entries = self.props.model.entries
+    let children = mut List::new<cui::View>()
+    for entry in entries {
+      children.push(cui::child(toast, ToastProps{entry: entry}, key: "toast-{entry.id}"))
+    }
+    let display = match entries.size() == 0 {
+      true => ui::Display::none,
+      false => ui::Display::flex,
+    }
+    cui::box(children.@, styles: root_style(display))
+  }
+}
+
+fn new(
+  ctx: mut cooper::Runtime,
+  root: mut cooper::Root,
+  palette: tinear_theme::Theme,
+  schedule: scheduler::Schedule,
+) mut ToastHost {
+  let model = mut Model{entries: []}
+  let mounted = renderer::mount(ctx, root, cui::child(host, HostProps{model: model}))
+  (mut ToastHost{
+    model: model,
+    cui: mounted,
+    timers: [],
+    next_id: 0,
+    disposed: false,
+    palette: palette,
+    schedule: schedule,
+    context: ctx,
+  })
+}
+
 impl ToastHost {
   private fn mut remove(id: Int) Bool {
     if self.disposed {
@@ -96,20 +252,26 @@ impl ToastHost {
     } else {
       let remaining = mut List::new<Entry>()
       mut removed = false
-      for entry in self.entries {
+      for entry in self.model.entries {
         if entry.id == id {
-          entry.cancel_expiry()
-          entry.timeline.destroy()
-          let _ = self.root.remove(entry.root)
-          entry.root.destroy(recursive: true)
           removed = true
         } else {
           remaining.push(entry)
         }
       }
-      self.entries = remaining.@
-      if self.entries.size() == 0 {
-        self.root.set_style(self.hidden_style)
+      if removed {
+        let timers = mut List::new<Timer>()
+        for timer in self.timers {
+          if timer.id == id {
+            (timer.cancel)()
+          } else {
+            timers.push(timer)
+          }
+        }
+        self.timers = timers.@
+        self.cui.update(fn() {
+          self.model.entries = remaining.@
+        })
       }
       removed
     }
@@ -136,107 +298,23 @@ impl ToastHost {
       Variant::success => self.palette.success,
       Variant::error => self.palette.danger,
     }
-    let target_width = toast_width(self.context, title, detail)
-    let content_height = match detail.is_empty() {
-      true => 1,
-      false => 2,
+    let entry = Entry{
+      id: id,
+      title: title,
+      detail: detail,
+      marker: marker,
+      color: marker_color,
+      background: self.palette.background,
+      width: toast_width(self.context, title, detail),
+      ttl_ms: ttl_ms,
     }
-    let toast = ui::box(
-      self.context,
-      styles: ui::style(
-        background: self.palette.background,
-        border: ui::Border::rounded,
-        border_color: marker_color,
-        position: ui::Position::relative,
-        left: ui::cells(target_width),
-        width: ui::cells(target_width),
-        height: ui::cells(content_height + 2),
-        flex_direction: ui::FlexDirection::row,
-        align_items: ui::Align::start,
-        flex_shrink: 0.0,
-        padding: ui::Edges{
-          top: ui::cells(0),
-          right: ui::cells(1),
-          bottom: ui::cells(0),
-          left: ui::cells(1),
-        },
-        overflow: ui::Overflow::hidden,
-      ),
-    )
-    toast.add(
-      ui::text(
-        self.context,
-        content: marker,
-        selectable: false,
-        styles: ui::style(width: ui::cells(2), height: ui::cells(1), flex_shrink: 0.0),
-        text_style: ui::text_style(foreground: marker_color, bold: true),
-      ),
-    )
-    let content = ui::box(
-      self.context,
-      styles: ui::style(
-        width: ui::fit_content(),
-        max_width: ui::cells(46),
-        height: ui::cells(content_height),
-        flex_direction: ui::FlexDirection::column,
-      ),
-    )
-    content.add(
-      ui::text(
-        self.context,
-        content: title,
-        wrap: ui::TextWrap::none,
-        overflow: ui::TextOverflow::ellipsis,
-        styles: ui::style(
-          width: ui::fit_content(),
-          max_width: ui::cells(46),
-          height: ui::cells(1),
-        ),
-        text_style: ui::text_style(bold: true),
-      ),
-    )
-    if not detail.is_empty() {
-      content.add(
-        ui::text(
-          self.context,
-          content: detail,
-          wrap: ui::TextWrap::none,
-          overflow: ui::TextOverflow::ellipsis,
-          styles: ui::style(
-            width: ui::fit_content(),
-            max_width: ui::cells(46),
-            height: ui::cells(1),
-          ),
-          text_style: ui::text_style(dim: true),
-        ),
-      )
-    }
-    toast.add(content)
-
-    let timeline = self.context.timeline(entrance_duration(ttl_ms))
-    timeline.add(
-      timeline.duration(),
-      fn(frame: animation::Frame) {
-        let applied = mut toast.style()
-        applied.left = ui::cells(animation::lerp_int(target_width, 0, frame.progress))
-        toast.set_style(applied.@)
-      },
-      ease: animation::out_quad,
-    )
     let cancel_expiry = self.schedule(ttl_ms, fn() {
       let _ = self.remove(id)
     })
-    self.entries.push(
-      Entry{
-        id: id,
-        root: toast,
-        timeline: timeline,
-        cancel_expiry: cancel_expiry,
-      },
-    )
-    self.root.add(toast)
-    self.root.set_style(self.visible_style)
-    let _ = timeline.play()
+    self.timers.push(Timer{id: id, cancel: cancel_expiry})
+    self.cui.update(fn() {
+      self.model.entries.push(entry)
+    })
     id
   }
 
@@ -246,16 +324,14 @@ impl ToastHost {
 
   fn mut dispose() {
     if not self.disposed {
-      let entries = self.entries
-      self.entries = []
       self.disposed = true
-      for entry in entries {
-        entry.cancel_expiry()
-        entry.timeline.destroy()
-        let _ = self.root.remove(entry.root)
-        entry.root.destroy(recursive: true)
+      let timers = self.timers
+      self.timers = []
+      for timer in timers {
+        (timer.cancel)()
       }
-      self.root.set_style(self.hidden_style)
+      self.model.entries = []
+      self.cui.destroy()
     }
   }
 }

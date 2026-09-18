@@ -141,8 +141,7 @@ private fn controller(
 test fn comment_editor_validates_submits_once_and_refreshes_comments() Void!Str {
   let application = testing::new(80, 24)
   defer application.destroy()
-  let modal = modal_host::new(application.context, theme::new())
-  application.root.add(modal.root)
+  let modal = modal_host::new(application.context, application.root, theme::new())
   let state = mut FakeState{comments: [], descriptions: []}
   let outcome = mut Outcome{
     comments_changed: 0,
@@ -153,13 +152,18 @@ test fn comment_editor_validates_submits_once_and_refreshes_comments() Void!Str 
   }
   let editor = controller(application, modal, state, outcome)
   editor.open_comment(issue(), "parent-1", "Alex")
+  let _ = application.flush()
   application.render()
 
+  let _ = application.flush()
   application.key(key("return", ctrl: true))
   try assertions::assert(state.comments.size() == 0, "empty comments should not submit")
   try assertions::assert(modal.is_open(), "validation should keep editor open")
+  let _ = application.flush()
   application.paste(event::paste("A useful reply"))
+  let _ = application.flush()
   application.key(key("return", ctrl: true))
+  let _ = application.flush()
   application.key(key("return", ctrl: true))
   try assertions::assert(
     state.comments.size() == 1,
@@ -170,13 +174,17 @@ test fn comment_editor_validates_submits_once_and_refreshes_comments() Void!Str 
   try assertions::assert(request.parent_id == "parent-1", "reply should preserve parent ID")
   try assertions::assert(request.body == "A useful reply", "comment body should be trimmed and submitted")
   try assertions::assert(not modal.dismiss(), "posting comment should guard dismissal")
+  let _ = application.flush()
   application.paste(event::paste(" discarded"))
   editor.open_description(issue())
+  let _ = application.flush()
+  application.render()
   try assertions::assert(
-    modal.title_text.content() == "Reply to Alex — AKO-1",
+    application.frame().text().contains("Reply to Alex — AKO-1"),
     "another editor should not replace an in-flight mutation",
   )
   request.completion(Result::err("retry"))
+  let _ = application.flush()
   application.key(key("return", ctrl: true))
   try assertions::assert(state.comments.size() == 2, "failed submission should allow retry")
   let retry = state.comments.at(1).expect("retry request")
@@ -185,6 +193,7 @@ test fn comment_editor_validates_submits_once_and_refreshes_comments() Void!Str 
     "typing should be blocked while the previous submission is active",
   )
   retry.completion(Result::ok("comment-new"))
+  let _ = application.flush()
   try assertions::assert(not modal.is_open(), "successful comment should close editor")
   try assertions::assert(
     outcome.comment_id == "comment-new",
@@ -200,8 +209,7 @@ test fn comment_editor_validates_submits_once_and_refreshes_comments() Void!Str 
 test fn description_editor_saves_draft_and_recovers_from_failure() Void!Str {
   let application = testing::new(80, 24)
   defer application.destroy()
-  let modal = modal_host::new(application.context, theme::new())
-  application.root.add(modal.root)
+  let modal = modal_host::new(application.context, application.root, theme::new())
   let state = mut FakeState{comments: [], descriptions: []}
   let outcome = mut Outcome{
     comments_changed: 0,
@@ -212,22 +220,29 @@ test fn description_editor_saves_draft_and_recovers_from_failure() Void!Str {
   }
   let editor = controller(application, modal, state, outcome)
   editor.open_description(issue())
+  let _ = application.flush()
   application.render()
   application.key(select_all())
+  let _ = application.flush()
   application.paste(event::paste("New **description**"))
+  let _ = application.flush()
   application.key(key("return", ctrl: true))
   try assertions::assert(state.descriptions.size() == 1, "save chord should submit description")
   let first = state.descriptions.at(0).expect("description request")
   try assertions::assert(first.description == "New **description**", "edited draft should be submitted")
   first.completion(Result::err("denied"))
+  let _ = application.flush()
   try assertions::assert(modal.is_open(), "failed save should keep editor open")
   try assertions::assert(modal.dismiss(), "failed save should restore dismissal")
   try assertions::assert(outcome.description.is_empty(), "failed save should not update detail")
 
   editor.open_description(issue())
+  let _ = application.flush()
   application.render()
   application.key(select_all())
+  let _ = application.flush()
   application.paste(event::paste("Saved"))
+  let _ = application.flush()
   application.key(key("return", ctrl: true))
   let second = state.descriptions.at(1).expect("second description request")
   let replacement = ui::box(application.context)
@@ -243,6 +258,7 @@ test fn description_editor_saves_draft_and_recovers_from_failure() Void!Str {
     },
   )
   second.completion(Result::ok(()))
+  let _ = application.flush()
   try assertions::assert(outcome.description == "Saved", "successful save should update detail")
   assertions::assert(
     modal.is_current(replacement_ticket),
@@ -253,8 +269,7 @@ test fn description_editor_saves_draft_and_recovers_from_failure() Void!Str {
 test fn replaced_comment_editor_refreshes_without_stealing_modal_focus() Void!Str {
   let application = testing::new(70, 20)
   defer application.destroy()
-  let modal = modal_host::new(application.context, theme::new())
-  application.root.add(modal.root)
+  let modal = modal_host::new(application.context, application.root, theme::new())
   let state = mut FakeState{comments: [], descriptions: []}
   let outcome = mut Outcome{
     comments_changed: 0,
@@ -265,7 +280,9 @@ test fn replaced_comment_editor_refreshes_without_stealing_modal_focus() Void!St
   }
   let editor = controller(application, modal, state, outcome)
   editor.open_comment(issue(), "", "")
+  let _ = application.flush()
   application.paste(event::paste("Posted elsewhere"))
+  let _ = application.flush()
   application.key(key("return", ctrl: true))
   let replacement = ui::box(application.context)
   let replacement_ticket = modal.present(
@@ -280,6 +297,7 @@ test fn replaced_comment_editor_refreshes_without_stealing_modal_focus() Void!St
     },
   )
   state.comments.at(0).expect("request").completion(Result::ok("comment-new"))
+  let _ = application.flush()
   try assertions::assert(outcome.comments_changed == 1, "successful mutation should still refresh")
   try assertions::assert(not outcome.focus_comment, "replacement modal should retain keyboard focus")
   assertions::assert(
@@ -291,8 +309,7 @@ test fn replaced_comment_editor_refreshes_without_stealing_modal_focus() Void!St
 test fn editor_disposal_closes_owned_modal_and_ignores_late_completion() Void!Str {
   let application = testing::new(60, 20)
   defer application.destroy()
-  let modal = modal_host::new(application.context, theme::new())
-  application.root.add(modal.root)
+  let modal = modal_host::new(application.context, application.root, theme::new())
   let state = mut FakeState{comments: [], descriptions: []}
   let outcome = mut Outcome{
     comments_changed: 0,
@@ -303,10 +320,182 @@ test fn editor_disposal_closes_owned_modal_and_ignores_late_completion() Void!St
   }
   let editor = controller(application, modal, state, outcome)
   editor.open_comment(issue(), "", "")
+  let _ = application.flush()
   application.paste(event::paste("Late"))
+  let _ = application.flush()
   application.key(key("return", ctrl: true))
   editor.dispose()
   try assertions::assert(not modal.is_open(), "dispose should close editor-owned modal")
   state.comments.at(0).expect("late request").completion(Result::ok("comment-late"))
+  let _ = application.flush()
   assertions::assert(outcome.comments_changed == 0, "disposed editor should ignore completion")
+}
+
+test fn aborted_submission_releases_the_shared_operation_guard() Void!Str {
+  let application = testing::new(60, 20)
+  defer application.destroy()
+  let modal = modal_host::new(application.context, application.root, theme::new())
+  let state = mut FakeState{comments: [], descriptions: []}
+  let outcome = mut Outcome{
+    comments_changed: 0,
+    comment_id: "",
+    focus_comment: false,
+    description: "",
+    errors: 0,
+  }
+  let editor = controller(application, modal, state, outcome)
+  editor.open_comment(issue(), "", "")
+  let _ = application.flush()
+  application.paste(event::paste("Never completes"))
+  let _ = application.flush()
+  application.key(key("return", ctrl: true))
+  let _ = application.flush()
+  try assertions::assert(state.comments.size() == 1, "submission should be in flight")
+
+  // Retiring the editor cancels the request, so the service may never call
+  // back. The controller-owned guard must still be released.
+  let replacement = ui::box(application.context)
+  let _ = modal.present("Other modal", replacement, "", fn() {}, fn() {}, fn() {}, fn() Bool {
+    true
+  })
+  let _ = application.flush()
+  let _ = modal.close()
+  let _ = application.flush()
+
+  editor.open_description(issue())
+  let _ = application.flush()
+  assertions::assert(
+    modal.is_open(),
+    "an aborted submission must not lock out later editors",
+  )
+}
+
+test fn late_completion_cannot_close_or_unlock_a_newer_session() Void!Str {
+  let application = testing::new(70, 20)
+  defer application.destroy()
+  let modal = modal_host::new(application.context, application.root, theme::new())
+  let state = mut FakeState{comments: [], descriptions: []}
+  let outcome = mut Outcome{
+    comments_changed: 0,
+    comment_id: "",
+    focus_comment: false,
+    description: "",
+    errors: 0,
+  }
+  let editor = controller(application, modal, state, outcome)
+
+  // Session A submits a comment and is then abandoned in flight.
+  editor.open_comment(issue(), "", "")
+  let _ = application.flush()
+  application.paste(event::paste("Session A body"))
+  let _ = application.flush()
+  application.key(key("return", ctrl: true))
+  let _ = application.flush()
+  try assertions::assert(state.comments.size() == 1, "session A should submit")
+  let stale = state.comments.at(0).expect("session A request")
+
+  // Retiring A cancels its request, so unmount releases the shared guard.
+  let replacement = ui::box(application.context)
+  let _ = modal.present("Other modal", replacement, "", fn() {}, fn() {}, fn() {}, fn() Bool {
+    true
+  })
+  let _ = application.flush()
+  let _ = modal.close()
+  let _ = application.flush()
+
+  // Session B claims the freed guard and starts its own submission.
+  editor.open_description(issue())
+  let _ = application.flush()
+  application.render()
+  application.key(select_all())
+  let _ = application.flush()
+  application.paste(event::paste("Session B body"))
+  let _ = application.flush()
+  application.key(key("return", ctrl: true))
+  let _ = application.flush()
+  try assertions::assert(state.descriptions.size() == 1, "session B should submit")
+
+  // A's completion lands after B replaced it. It must resolve against A's own
+  // ticket and guard, never B's.
+  stale.completion(Result::ok("comment-stale"))
+  let _ = application.flush()
+  application.render()
+  try assertions::assert(modal.is_open(), "late completion must not close session B's modal")
+  try assertions::assert(
+    application.frame().text().contains("Edit description"),
+    "late completion must close its own session's modal, not whichever is current",
+  )
+  try assertions::assert(
+    outcome.comments_changed == 1,
+    "a superseded mutation should still report its result",
+  )
+  try assertions::assert(
+    not outcome.focus_comment,
+    "a superseded session must not claim focus from the newer modal",
+  )
+
+  // B still holds the operation guard, so no third session may start.
+  editor.open_comment(issue(), "", "")
+  let _ = application.flush()
+  application.render()
+  assertions::assert(
+    application.frame().text().contains("Edit description"),
+    "late completion must not release the operation guard session B holds",
+  )
+}
+
+test fn replacing_an_editor_resets_the_draft() Void!Str {
+  let application = testing::new(70, 20)
+  defer application.destroy()
+  let modal = modal_host::new(application.context, application.root, theme::new())
+  let state = mut FakeState{comments: [], descriptions: []}
+  let outcome = mut Outcome{
+    comments_changed: 0,
+    comment_id: "",
+    focus_comment: false,
+    description: "",
+    errors: 0,
+  }
+  let editor = controller(application, modal, state, outcome)
+  editor.open_description(issue())
+  let _ = application.flush()
+  application.render()
+  try assertions::assert(
+    application.frame().text().contains("Old description"),
+    "description editor should seed the current description",
+  )
+  application.key(select_all())
+  let _ = application.flush()
+  application.paste(event::paste("Draft that must not leak"))
+  let _ = application.flush()
+  application.render()
+  try assertions::assert(
+    application.frame().text().contains("Draft that must not leak"),
+    "the description draft should be editable",
+  )
+
+  // Each presentation is its own identity, so the comment session constructs a
+  // fresh editor instead of inheriting the description draft.
+  editor.open_comment(issue(), "", "")
+  let _ = application.flush()
+  application.render()
+  try assertions::assert(
+    application.frame().text().contains("Comment on AKO-1"),
+    "the comment editor should replace the description editor",
+  )
+  try assertions::assert(
+    not application.frame().text().contains("Draft that must not leak"),
+    "a replacement editor must not inherit the previous draft",
+  )
+
+  // Validation proves the value is genuinely empty rather than merely hidden:
+  // a leaked draft would submit instead of failing.
+  application.key(key("return", ctrl: true))
+  let _ = application.flush()
+  application.render()
+  try assertions::assert(state.comments.size() == 0, "a reset draft should fail validation")
+  assertions::assert(
+    application.frame().text().contains("Comment cannot be empty"),
+    "an empty replacement draft should report the validation error",
+  )
 }

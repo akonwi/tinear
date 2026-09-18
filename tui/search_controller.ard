@@ -1,70 +1,12 @@
 use cooper
+use cooper/cui
 use cooper/ui
 use tinear/models/documents
 use tinear/models/issues
 use tinear/services/search_service
-use tinear/tui/lifecycle
 use tinear/tui/modal_host
 use tinear/tui/scheduler
 use tinear/tui/theme as tinear_theme
-
-struct SearchRow {
-  root: mut ui::Box,
-  remove_mouse: fn(),
-}
-
-private struct SearchSession {
-  root: mut ui::Box,
-  context: mut cooper::Runtime,
-  query: mut ui::Input,
-  results: mut ui::ScrollBox,
-  status: mut ui::Text,
-  warning: mut ui::Text,
-  rows: [SearchRow],
-  hits: [search_service::Hit],
-  cursor: Int,
-  hovered: Int,
-  loading: Bool,
-  searched: Bool,
-  service: search_service::Service,
-  schedule: scheduler::Schedule,
-  cancel_debounce: fn(),
-  scope: mut lifecycle::Scope,
-  listeners: [fn()],
-  ticket: modal_host::Ticket?,
-  on_open: fn(search_service::Hit),
-  palette: tinear_theme::Theme,
-}
-
-private fn status_style(display: ui::Display) ui::Style {
-  ui::style(
-    display: display,
-    width: ui::percent(100.0),
-    height: ui::cells(1),
-    flex_shrink: 0.0,
-  )
-}
-
-private fn row_style(active: Bool, hovered: Bool, palette: tinear_theme::Theme) ui::Style {
-  ui::style(
-    width: ui::percent(100.0),
-    height: ui::cells(1),
-    flex_shrink: 0.0,
-    flex_direction: ui::FlexDirection::row,
-    overflow: ui::Overflow::hidden,
-    background: match {
-      active => palette.item_active_background,
-      hovered => palette.item_hover_background,
-      _ => palette.background,
-    },
-    padding: ui::Edges{
-      top: ui::cells(0),
-      right: ui::cells(1),
-      bottom: ui::cells(0),
-      left: ui::cells(1),
-    },
-  )
-}
 
 private fn hit_left(hit: search_service::Hit) Str {
   match hit {
@@ -87,275 +29,96 @@ private fn hit_right(hit: search_service::Hit) Str {
   }
 }
 
-private fn new_session(
-  ctx: mut cooper::Runtime,
+private fn hit_key(hit: search_service::Hit, index: Int) Str {
+  match hit {
+    Issue(issue) => "issue-{issue.id}-{index}",
+    DocMeta(document) => "doc-{document.slug_id}-{index}",
+  }
+}
+
+struct SearchProps {
   palette: tinear_theme::Theme,
   service: search_service::Service,
   schedule: scheduler::Schedule,
-) mut SearchSession {
-  let root = ui::box(
-    ctx,
-    styles: ui::style(
-      width: ui::percent(100.0),
-      height: ui::cells(12),
-      flex_direction: ui::FlexDirection::column,
-      overflow: ui::Overflow::hidden,
-    ),
-  )
-  let query = ui::input(
-    ctx,
-    placeholder: "Search issues and docs…",
-    styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
-  )
-  let rule = ui::text(
-    ctx,
-    content: "────────────────────────────────────────────────────────────────────────",
-    selectable: false,
-    wrap: ui::TextWrap::none,
-    overflow: ui::TextOverflow::clip,
-    styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
-    text_style: ui::text_style(dim: true),
-  )
-  let results = ui::scroll_box(
-    ctx,
-    styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_grow: 1.0),
-  )
-  let status = ui::text(
-    ctx,
-    content: "Type to search issues and docs",
-    selectable: false,
-    styles: status_style(ui::Display::flex),
-    text_style: ui::text_style(dim: true),
-  )
-  let warning = ui::text(
-    ctx,
-    content: "",
-    selectable: false,
-    styles: status_style(ui::Display::none),
-    text_style: ui::text_style(dim: true),
-  )
-  results.add(status)
-  root.add(query)
-  root.add(rule)
-  root.add(results)
-  root.add(warning)
+  on_open: fn(search_service::Hit),
+}
 
-  let session = mut SearchSession{
-    root: root,
-    context: ctx,
-    query: query,
-    results: results,
-    status: status,
-    warning: warning,
-    rows: [],
+struct Search {
+  props: mut SearchProps,
+  query: Str,
+  hits: [search_service::Hit],
+  cursor: Int,
+  hovered: Int,
+  loading: Bool,
+  status: Str,
+  status_danger: Bool,
+  warning: Str,
+  request: Int,
+  cancel_debounce: fn(),
+  stop: Chan<Bool>,
+  results: mut cui::ScrollBoxRef,
+}
+
+private fn search(props: mut SearchProps) mut Search {
+  (mut Search{
+    props: props,
+    query: "",
     hits: [],
     cursor: 0,
     hovered: -1,
     loading: false,
-    searched: false,
-    service: service,
-    schedule: schedule,
+    status: "Type to search issues and docs",
+    status_danger: false,
+    warning: "",
+    request: 0,
     cancel_debounce: fn() {},
-    scope: lifecycle::new(),
-    listeners: [],
-    ticket: Maybe::new<modal_host::Ticket>(),
-    on_open: fn(hit: search_service::Hit) {},
-    palette: palette,
-  }
-  session.listeners.push(
-    query.on_input(fn(value: Str) {
-      session.query_changed(value)
-    }),
-  )
-  session.listeners.push(
-    query.on_key(fn(received: mut cooper::KeyEvent) {
-      if received.event_type != cooper::KeyEventType::release {
-        mut handled = true
-        match {
-          received.matches("down") => session.move_cursor(1),
-          received.matches("up") => session.move_cursor(-1),
-          received.matches("return") => session.activate(),
-          _ => { handled = false },
-        }
-        if handled {
-          received.prevent_default()
-          received.stop_propagation()
-        }
-      }
-    }),
-  )
-  session
+    stop: Chan::new<Bool>(),
+    results: cui::scroll_box_ref(),
+  })
 }
 
-impl SearchSession {
+fn view(
+  palette: tinear_theme::Theme,
+  service: search_service::Service,
+  schedule: scheduler::Schedule,
+  on_open: fn(search_service::Hit),
+) cui::View {
+  cui::child(
+    search,
+    SearchProps{
+      palette: palette,
+      service: service,
+      schedule: schedule,
+      on_open: on_open,
+    },
+    key: "search",
+  )
+}
+
+impl Search {
   private fn mut show_status(message: Str, danger: Bool) {
-    self.status.set_content(message)
-    self.status.set_text_style(
-      match danger {
-        true => ui::text_style(foreground: self.palette.danger, bold: true),
-        false => ui::text_style(dim: true),
+    self.status = message
+    self.status_danger = danger
+  }
+
+  private fn mut reveal_cursor() {
+    match self.results.current {
+      panel => {
+        let _ = panel.scroll_to(self.cursor)
       },
-    )
-    self.status.set_style(status_style(ui::Display::flex))
-  }
-
-  private fn mut clear_rows() {
-    let previous = self.rows
-    self.rows = []
-    for row in previous {
-      row.remove_mouse()
-      let _ = self.results.remove(row.root)
-      row.root.destroy(recursive: true)
-    }
-  }
-
-  private fn mut refresh_row_styles() {
-    for row, index in self.rows {
-      row.root.set_style(row_style(index == self.cursor, index == self.hovered, self.palette))
+      _ => (),
     }
   }
 
   private fn mut select(index: Int) {
     if index >= 0 and index < self.hits.size() {
       self.cursor = index
-      self.refresh_row_styles()
-      match self.rows.at(index) {
-        row => {
-          let _ = self.results.scroll_child_into_view(row.root)
-        },
-        _ => (),
-      }
-    }
-  }
-
-  private fn mut create_row(hit: search_service::Hit, index: Int) SearchRow {
-    let root = ui::box(self.context, styles: row_style(index == self.cursor, false, self.palette))
-    let left = ui::text(
-      self.context,
-      content: hit_left(hit),
-      selectable: false,
-      wrap: ui::TextWrap::none,
-      overflow: ui::TextOverflow::ellipsis,
-      styles: ui::style(width: ui::cells(11), height: ui::cells(1), flex_shrink: 0.0),
-      text_style: match hit {
-        Issue(_) => ui::text_style(bold: true),
-        DocMeta(_) => ui::text_style(dim: true, bold: true),
-      },
-    )
-    let title = ui::text(
-      self.context,
-      content: hit_title(hit),
-      selectable: false,
-      wrap: ui::TextWrap::none,
-      overflow: ui::TextOverflow::ellipsis,
-      styles: ui::style(width: ui::cells(1), height: ui::cells(1), flex_grow: 1.0),
-    )
-    let right = ui::text(
-      self.context,
-      content: hit_right(hit),
-      selectable: false,
-      wrap: ui::TextWrap::none,
-      overflow: ui::TextOverflow::ellipsis,
-      styles: ui::style(width: ui::cells(15), height: ui::cells(1), flex_shrink: 0.0),
-      text_style: ui::text_style(dim: true),
-    )
-    root.add(left)
-    root.add(title)
-    root.add(right)
-    let remove_mouse = root.on_mouse(fn(received: mut cooper::MouseEvent) {
-      if received.event_type == cooper::MouseEventType::move {
-        self.hovered = index
-        self.refresh_row_styles()
-      } else if received.event_type == cooper::MouseEventType::out and self.hovered == index {
-        self.hovered = -1
-        self.refresh_row_styles()
-      } else if received.event_type == cooper::MouseEventType::down and received.button == cooper::MouseButton::left {
-        self.select(index)
-        self.activate()
-        received.stop_propagation()
-      }
-    })
-    SearchRow{root: root, remove_mouse: remove_mouse}
-  }
-
-  private fn mut show_outcome(outcome: search_service::Outcome) {
-    self.loading = false
-    self.searched = true
-    self.hits = outcome.hits
-    self.cursor = 0
-    self.hovered = -1
-    self.clear_rows()
-    let _ = self.results.scroll_to(0)
-    self.warning.set_content(outcome.warning)
-    self.warning.set_style(
-      status_style(
-        match outcome.warning.is_empty() {
-          true => ui::Display::none,
-          false => ui::Display::flex,
-        },
-      ),
-    )
-    if self.hits.size() == 0 {
-      self.show_status("No results found", false)
-    } else {
-      self.status.set_style(status_style(ui::Display::none))
-      let rows = mut List::new<SearchRow>()
-      for hit, index in self.hits {
-        let row = self.create_row(hit, index)
-        self.results.add(row.root)
-        rows.push(row)
-      }
-      self.rows = rows.@
-      self.refresh_row_styles()
-    }
-  }
-
-  private fn mut query_changed(value: Str) {
-    if not self.scope.disposed {
-      self.cancel_debounce()
-      let generation = self.scope.begin_request()
-      let query = value.trim()
-      self.loading = not query.is_empty()
-      self.searched = false
-      self.hits = []
-      self.cursor = 0
-      self.hovered = -1
-      self.clear_rows()
-      let _ = self.results.scroll_to(0)
-      self.warning.set_content("")
-      self.warning.set_style(status_style(ui::Display::none))
-      if query.is_empty() {
-        self.show_status("Type to search issues and docs", false)
-      } else {
-        self.show_status("Searching…", false)
-        self.cancel_debounce = self.schedule(300, fn() {
-          if self.scope.is_current(generation) and self.query.value().trim() == query {
-            self.service.search(
-              self.scope.stop.receiver(),
-              query,
-              fn(result: search_service::Outcome!Str) {
-                if self.scope.is_current(generation) and self.query.value().trim() == query {
-                  match result {
-                    ok(outcome) => self.show_outcome(outcome),
-                    err(message) => {
-                      self.loading = false
-                      self.searched = true
-                      self.hits = []
-                      self.clear_rows()
-                      self.show_status("Unable to search: {message}", true)
-                    },
-                  }
-                }
-              },
-            )
-          }
-        })
-      }
+      self.reveal_cursor()
     }
   }
 
   private fn mut move_cursor(delta: Int) {
-    if not self.loading and self.hits.size() > 0 {
+    if (not self.loading) and self.hits.size() > 0 {
       mut next = self.cursor + delta
       if next < 0 {
         next = 0
@@ -370,25 +133,247 @@ impl SearchSession {
   private fn mut activate() {
     if not self.loading {
       match self.hits.at(self.cursor) {
-        hit => self.on_open(hit),
+        hit => (self.props.on_open)(hit),
         _ => (),
       }
     }
   }
 
-  fn mut dispose() {
-    if not self.scope.disposed {
-      self.cancel_debounce()
-      self.scope.dispose()
-      for remove in self.listeners {
-        remove()
-      }
-      self.listeners = []
-      for row in self.rows {
-        row.remove_mouse()
-      }
-      self.rows = []
+  private fn mut show_outcome(outcome: search_service::Outcome) {
+    self.loading = false
+    self.hits = outcome.hits
+    self.cursor = 0
+    self.hovered = -1
+    self.warning = outcome.warning
+    match self.results.current {
+      panel => {
+        let _ = panel.scroll_to(0)
+      },
+      _ => (),
     }
+    match self.hits.size() == 0 {
+      true => self.show_status("No results found", false),
+      false => self.show_status("", false),
+    }
+  }
+
+  private fn mut query_changed(value: Str, ctx: cui::Context) {
+    (self.cancel_debounce)()
+    self.query = value
+    self.request =+ 1
+    let request = self.request
+    let query = value.trim()
+    self.loading = not query.is_empty()
+    self.hits = []
+    self.cursor = 0
+    self.hovered = -1
+    self.warning = ""
+    match self.results.current {
+      panel => {
+        let _ = panel.scroll_to(0)
+      },
+      _ => (),
+    }
+    if query.is_empty() {
+      self.show_status("Type to search issues and docs", false)
+    } else {
+      self.show_status("Searching…", false)
+      let dispatch = ctx.dispatch
+      self.cancel_debounce = (self.props.schedule)(300, fn() {
+        if self.request == request {
+          (self.props.service.search)(
+            self.stop.receiver(),
+            query,
+            fn(result: search_service::Outcome!Str) {
+              let _ = dispatch(fn() {
+                if self.request == request {
+                  match result {
+                    ok(outcome) => self.show_outcome(outcome),
+                    err(message) => {
+                      self.loading = false
+                      self.hits = []
+                      self.show_status("Unable to search: {message}", true)
+                    },
+                  }
+                }
+              })
+            },
+          )
+        }
+      })
+    }
+  }
+
+  private fn mut handle_key(received: mut cooper::KeyEvent) {
+    if received.event_type != cooper::KeyEventType::release {
+      mut handled = true
+      match {
+        received.matches("down") => self.move_cursor(1),
+        received.matches("up") => self.move_cursor(-1),
+        received.matches("return") => self.activate(),
+        _ => { handled = false },
+      }
+      if handled {
+        received.prevent_default()
+        received.stop_propagation()
+      }
+    }
+  }
+
+  private fn mut row(hit: search_service::Hit, index: Int) cui::View {
+    let palette = self.props.palette
+    let active = index == self.cursor
+    let hovered = index == self.hovered
+    cui::box(
+      [
+        cui::text(
+          hit_left(hit),
+          selectable: false,
+          wrap: ui::TextWrap::none,
+          overflow: ui::TextOverflow::ellipsis,
+          styles: ui::style(width: ui::cells(11), height: ui::cells(1), flex_shrink: 0.0),
+          text_style: match hit {
+            Issue(_) => ui::text_style(bold: true),
+            DocMeta(_) => ui::text_style(dim: true, bold: true),
+          },
+        ),
+        cui::text(
+          hit_title(hit),
+          selectable: false,
+          wrap: ui::TextWrap::none,
+          overflow: ui::TextOverflow::ellipsis,
+          styles: ui::style(width: ui::cells(1), height: ui::cells(1), flex_grow: 1.0),
+        ),
+        cui::text(
+          hit_right(hit),
+          selectable: false,
+          wrap: ui::TextWrap::none,
+          overflow: ui::TextOverflow::ellipsis,
+          styles: ui::style(width: ui::cells(15), height: ui::cells(1), flex_shrink: 0.0),
+          text_style: ui::text_style(dim: true),
+        ),
+      ],
+      key: hit_key(hit, index),
+      styles: ui::style(
+        width: ui::percent(100.0),
+        height: ui::cells(1),
+        flex_shrink: 0.0,
+        flex_direction: ui::FlexDirection::row,
+        overflow: ui::Overflow::hidden,
+        background: match {
+          active => palette.item_active_background,
+          hovered => palette.item_hover_background,
+          _ => palette.background,
+        },
+        padding: ui::Edges{
+          top: ui::cells(0),
+          right: ui::cells(1),
+          bottom: ui::cells(0),
+          left: ui::cells(1),
+        },
+      ),
+      on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
+        if received.event_type == cooper::MouseEventType::move {
+          self.hovered = index
+        } else if received.event_type == cooper::MouseEventType::out and self.hovered == index {
+          self.hovered = -1
+        } else if received.event_type == cooper::MouseEventType::down and received.button == cooper::MouseButton::left {
+          self.select(index)
+          self.activate()
+          received.stop_propagation()
+        }
+      },
+    )
+  }
+}
+
+impl cui::Lifecycle for Search {
+  fn mut mounted(ctx: cui::Context) {}
+
+  fn mut unmounting(ctx: cui::Context) {
+    (self.cancel_debounce)()
+    self.cancel_debounce = fn() {}
+    self.stop.close()
+  }
+}
+
+impl cui::Component for Search {
+  fn mut render() cui::View {
+    let status_display = match self.status.is_empty() {
+      true => ui::Display::none,
+      false => ui::Display::flex,
+    }
+    let warning_display = match self.warning.is_empty() {
+      true => ui::Display::none,
+      false => ui::Display::flex,
+    }
+    let rows = mut List::new<cui::View>()
+    rows.push(
+      cui::text(
+        self.status,
+        selectable: false,
+        styles: ui::style(
+          display: status_display,
+          width: ui::percent(100.0),
+          height: ui::cells(1),
+          flex_shrink: 0.0,
+        ),
+        text_style: match self.status_danger {
+          true => ui::text_style(foreground: self.props.palette.danger, bold: true),
+          false => ui::text_style(dim: true),
+        },
+      ),
+    )
+    for hit, index in self.hits {
+      rows.push(self.row(hit, index))
+    }
+
+    cui::box(
+      [
+        cui::input(
+          self.query,
+          placeholder: "Search issues and docs…",
+          styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
+          focused: true,
+          on_input: fn(value: Str, ctx: cui::Context) {
+            self.query_changed(value, ctx)
+          },
+          on_key: fn(received: mut cooper::KeyEvent, ctx: cui::Context) {
+            self.handle_key(received)
+          },
+        ),
+        cui::text(
+          "────────────────────────────────────────────────────────────────────────",
+          selectable: false,
+          wrap: ui::TextWrap::none,
+          overflow: ui::TextOverflow::clip,
+          styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
+          text_style: ui::text_style(dim: true),
+        ),
+        cui::scroll_box(
+          rows.@,
+          ref: self.results,
+          styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_grow: 1.0),
+        ),
+        cui::text(
+          self.warning,
+          selectable: false,
+          styles: ui::style(
+            display: warning_display,
+            width: ui::percent(100.0),
+            height: ui::cells(1),
+            flex_shrink: 0.0,
+          ),
+          text_style: ui::text_style(dim: true),
+        ),
+      ],
+      styles: ui::style(
+        width: ui::percent(100.0),
+        height: ui::cells(12),
+        flex_direction: ui::FlexDirection::column,
+        overflow: ui::Overflow::hidden,
+      ),
+    )
   }
 }
 
@@ -427,41 +412,37 @@ fn new(
 }
 
 impl Controller {
+  private fn mut close_current() {
+    match self.current_ticket {
+      ticket => {
+        let _ = self.modal.close_if_current(ticket)
+      },
+      _ => (),
+    }
+    self.current_ticket = Maybe::new<modal_host::Ticket>()
+  }
+
   private fn mut open_hit(hit: search_service::Hit) {
     match hit {
-      Issue(issue) => self.on_open_issue(issue),
-      DocMeta(document) => self.on_open_document(document),
+      Issue(issue) => (self.on_open_issue)(issue),
+      DocMeta(document) => (self.on_open_document)(document),
     }
   }
 
   fn mut open(context: mut cooper::Runtime) {
     if not self.disposed {
-      let session = new_session(context, self.palette, self.service, self.schedule)
-      session.on_open = fn(hit: search_service::Hit) {
-        match session.ticket {
-          ticket => {
-            let _ = self.modal.close_if_current(ticket)
-          },
-          _ => (),
-        }
-        self.open_hit(hit)
-      }
-      let ticket = self.modal.present(
+      let ticket = self.modal.present_view(
         "Search",
-        session.root,
+        view(self.palette, self.service, self.schedule, fn(hit: search_service::Hit) {
+          self.close_current()
+          self.open_hit(hit)
+        }),
         "↑↓ select   Enter open   Esc close",
-        fn() {
-          session.dispose()
-        },
-        fn() {
-          let _ = session.query.focus()
-        },
         self.restore_focus,
         fn() Bool {
           true
         },
       )
-      session.ticket = Maybe::new(ticket)
       self.current_ticket = Maybe::new(ticket)
     }
   }
@@ -469,13 +450,7 @@ impl Controller {
   fn mut dispose() {
     if not self.disposed {
       self.disposed = true
-      match self.current_ticket {
-        ticket => {
-          let _ = self.modal.close_if_current(ticket)
-        },
-        _ => (),
-      }
-      self.current_ticket = Maybe::new<modal_host::Ticket>()
+      self.close_current()
     }
   }
 }
