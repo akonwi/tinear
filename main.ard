@@ -133,9 +133,6 @@ private fn issue_detail_screen(
     identifier,
     issue_detail_service::live(ctx, api_key),
     scheduler::for_context(ctx),
-    fn() {
-      application_shell.invalidate()
-    },
     fn(target: Str) {
       match url::open(ctx, target) {
         ok(_) => (),
@@ -245,9 +242,6 @@ private fn show_logged_in(
     palette,
     inbox_service::live(ctx, api_key),
     scheduler::for_context(ctx),
-    fn() {
-      application_shell.invalidate()
-    },
     fn(identifier: Str) {
       actions.open_issue(identifier)
     },
@@ -273,9 +267,6 @@ private fn show_logged_in(
     palette,
     board_service::live(ctx, api_key),
     scheduler::for_context(ctx),
-    fn() {
-      application_shell.invalidate()
-    },
     fn(identifier: Str) {
       actions.open_issue(identifier)
     },
@@ -399,9 +390,7 @@ private fn show_logged_in(
     },
   )
   application_shell.set_view(
-    shell_controller::view(controller, fn() {
-      application_shell.invalidate()
-    }),
+    shell_controller::view(controller),
     dispose: fn() {
       controller.dispose()
     },

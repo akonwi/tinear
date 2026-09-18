@@ -124,10 +124,6 @@ private fn frame_text(application: testing::TestApp) Str {
   application.frame().text()
 }
 
-private struct Notifier {
-  invalidate: fn(),
-}
-
 private fn no_schedule(milliseconds: Int, action: fn()) fn() {
   fn() {}
 }
@@ -164,15 +160,11 @@ test fn inbox_loads_rows_and_discards_stale_detail_completion() Void!Str {
     archives: [],
   }
   let opened = mut Calls{value: "", count: 0}
-  let notifier = mut Notifier{invalidate: fn() {}}
   let controller = inbox_controller::new(
     application.context,
     theme::new(),
     fake_service(fake),
     no_schedule,
-    fn() {
-      (notifier.invalidate)()
-    },
     fn(identifier: Str) {
       opened.value = identifier
       opened.count =+ 1
@@ -182,9 +174,6 @@ test fn inbox_loads_rows_and_discards_stale_detail_completion() Void!Str {
   )
   let mounted = renderer::mount(application.context, application.root, controller.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.start()
   try assertions::assert(fake.loads.size() == 1, "start should request Inbox")
@@ -304,15 +293,11 @@ test fn inbox_opens_pr_in_browser_and_archives_optimistically() Void!Str {
   }
   let browser = mut Calls{value: "", count: 0}
   let errors = mut Calls{value: "", count: 0}
-  let notifier = mut Notifier{invalidate: fn() {}}
   let controller = inbox_controller::new(
     application.context,
     theme::new(),
     fake_service(fake),
     no_schedule,
-    fn() {
-      (notifier.invalidate)()
-    },
     fn(identifier: Str) {},
     fn(url: Str) {
       browser.value = url
@@ -325,9 +310,6 @@ test fn inbox_opens_pr_in_browser_and_archives_optimistically() Void!Str {
   )
   let mounted = renderer::mount(application.context, application.root, controller.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.start()
   (fake.loads.at(0).expect("load"))(
@@ -379,24 +361,17 @@ test fn inbox_refresh_preserves_selection_by_notification_id() Void!Str {
     archives: [],
   }
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
-  let notifier = mut Notifier{invalidate: fn() {}}
   let controller = inbox_controller::new(
     application.context,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
-    fn() {
-      (notifier.invalidate)()
-    },
     fn(identifier: Str) {},
     fn(url: Str) {},
     fn(title: Str, message: Str) {},
   )
   let mounted = renderer::mount(application.context, application.root, controller.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.start()
   (fake.loads.at(0).expect("load"))(
@@ -428,24 +403,17 @@ test fn inbox_initial_error_retries_to_empty_and_detail_errors_render() Void!Str
     details: [],
     archives: [],
   }
-  let notifier = mut Notifier{invalidate: fn() {}}
   let controller = inbox_controller::new(
     application.context,
     theme::new(),
     fake_service(fake),
     no_schedule,
-    fn() {
-      (notifier.invalidate)()
-    },
     fn(identifier: Str) {},
     fn(url: Str) {},
     fn(title: Str, message: Str) {},
   )
   let mounted = renderer::mount(application.context, application.root, controller.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.start()
   (fake.loads.at(0).expect("initial load"))(Result::err("offline"))
@@ -480,15 +448,11 @@ test fn inbox_disposal_suppresses_late_detail_and_archive_completions() Void!Str
     archives: [],
   }
   let errors = mut Calls{value: "", count: 0}
-  let notifier = mut Notifier{invalidate: fn() {}}
   let controller = inbox_controller::new(
     application.context,
     theme::new(),
     fake_service(fake),
     no_schedule,
-    fn() {
-      (notifier.invalidate)()
-    },
     fn(identifier: Str) {},
     fn(url: Str) {},
     fn(title: Str, message: Str) {
@@ -498,9 +462,6 @@ test fn inbox_disposal_suppresses_late_detail_and_archive_completions() Void!Str
   )
   let mounted = renderer::mount(application.context, application.root, controller.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.start()
   (fake.loads.at(0).expect("load"))(Result::ok([item("n1", "AKO-1", "issueMention", "")]))
@@ -523,24 +484,17 @@ test fn inbox_disposal_suppresses_late_list_completion() Void!Str {
     details: [],
     archives: [],
   }
-  let notifier = mut Notifier{invalidate: fn() {}}
   let controller = inbox_controller::new(
     application.context,
     theme::new(),
     fake_service(fake),
     no_schedule,
-    fn() {
-      (notifier.invalidate)()
-    },
     fn(identifier: Str) {},
     fn(url: Str) {},
     fn(title: Str, message: Str) {},
   )
   let mounted = renderer::mount(application.context, application.root, controller.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.start()
   controller.dispose()

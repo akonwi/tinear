@@ -17,10 +17,6 @@ private struct ScreenState {
   disposals: Int,
 }
 
-private struct Notifier {
-  invalidate: fn(),
-}
-
 private struct Counter {
   value: Int,
 }
@@ -177,18 +173,12 @@ test fn shell_switches_persistent_tabs_and_persists_selection() Void!Str {
     fn() {},
     fn() {},
   )
-  let notifier = mut Notifier{invalidate: fn() {}}
   let mounted = renderer::mount(
     application.context,
     application.root,
-    shell_controller::view(controller, fn() {
-      (notifier.invalidate)()
-    }),
+    shell_controller::view(controller),
   )
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   application.render()
   try assertions::assert(
@@ -291,18 +281,12 @@ test fn shell_restores_opens_reuses_retitles_and_closes_dynamic_tabs() Void!Str 
     fn() {},
     fn() {},
   )
-  let notifier = mut Notifier{invalidate: fn() {}}
   let mounted = renderer::mount(
     application.context,
     application.root,
-    shell_controller::view(controller, fn() {
-      (notifier.invalidate)()
-    }),
+    shell_controller::view(controller),
   )
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   try assertions::assert(created.value == 1, "restored tab should create one retained controller")
   try assertions::assert(
@@ -365,18 +349,12 @@ test fn shell_routes_mouse_global_and_active_commands() Void!Str {
       creations.value =+ 1
     },
   )
-  let notifier = mut Notifier{invalidate: fn() {}}
   let mounted = renderer::mount(
     application.context,
     application.root,
-    shell_controller::view(controller, fn() {
-      (notifier.invalidate)()
-    }),
+    shell_controller::view(controller),
   )
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   application.render()
   try assertions::assert(controller.handle_key(key("x")), "active Inbox should handle delegated key")
@@ -480,18 +458,12 @@ test fn shell_disposal_cleans_screens_and_persistence_once() Void!Str {
     fn() {},
     fn() {},
   )
-  let notifier = mut Notifier{invalidate: fn() {}}
   let mounted = renderer::mount(
     application.context,
     application.root,
-    shell_controller::view(controller, fn() {
-      (notifier.invalidate)()
-    }),
+    shell_controller::view(controller),
   )
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.dispose()
   controller.dispose()
@@ -528,18 +500,12 @@ test fn shell_focuses_the_active_screen_after_its_first_commit() Void!Str {
     fn() {},
     fn() {},
   )
-  let notifier = mut Notifier{invalidate: fn() {}}
   let mounted = renderer::mount(
     application.context,
     application.root,
-    shell_controller::view(controller, fn() {
-      (notifier.invalidate)()
-    }),
+    shell_controller::view(controller),
   )
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
 
   // Screen focus is imperative and needs mounted refs, so the shell claims it
   // from a lifecycle hook rather than at construction.

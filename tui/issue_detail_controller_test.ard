@@ -108,16 +108,11 @@ private fn comment_focused(record: issue_detail_controller::CommentRecord) Bool 
   }
 }
 
-private struct Notifier {
-  invalidate: fn(),
-}
-
 private fn make_controller(
   application: testing::TestApp,
   fake: mut FakeState,
   scheduled: mut Scheduled,
   actions: mut Actions,
-  notifier: mut Notifier,
 ) mut issue_detail_controller::IssueDetailController {
   issue_detail_controller::new(
     application.context,
@@ -125,9 +120,6 @@ private fn make_controller(
     "AKO-1",
     fake_service(fake),
     fake_schedule(scheduled),
-    fn() {
-      (notifier.invalidate)()
-    },
     fn(url: Str) {
       actions.opened_url = url
     },
@@ -165,13 +157,9 @@ test fn issue_detail_loads_issue_and_comments_independently_and_routes_commands(
     edits: 0,
     errors: 0,
   }
-  let notifier = mut Notifier{invalidate: fn() {}}
-  let controller = make_controller(application, fake, scheduled, actions, notifier)
+  let controller = make_controller(application, fake, scheduled, actions)
   let mounted = renderer::mount(application.context, application.root, controller.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.start()
   let _ = application.flush()
@@ -306,13 +294,9 @@ test fn issue_detail_independent_errors_retry_to_issue_and_empty_comments() Void
     edits: 0,
     errors: 0,
   }
-  let notifier = mut Notifier{invalidate: fn() {}}
-  let controller = make_controller(application, fake, scheduled, actions, notifier)
+  let controller = make_controller(application, fake, scheduled, actions)
   let mounted = renderer::mount(application.context, application.root, controller.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.start()
   let _ = application.flush()
@@ -362,13 +346,9 @@ test fn issue_detail_rejects_stale_issue_and_comment_results() Void!Str {
     edits: 0,
     errors: 0,
   }
-  let notifier = mut Notifier{invalidate: fn() {}}
-  let controller = make_controller(application, fake, scheduled, actions, notifier)
+  let controller = make_controller(application, fake, scheduled, actions)
   let mounted = renderer::mount(application.context, application.root, controller.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.start()
   let _ = application.flush()
@@ -407,13 +387,9 @@ test fn created_comment_selection_survives_eventually_consistent_refresh() Void!
     edits: 0,
     errors: 0,
   }
-  let notifier = mut Notifier{invalidate: fn() {}}
-  let controller = make_controller(application, fake, scheduled, actions, notifier)
+  let controller = make_controller(application, fake, scheduled, actions)
   let mounted = renderer::mount(application.context, application.root, controller.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.start()
   let _ = application.flush()
@@ -477,13 +453,9 @@ test fn saved_description_invalidates_older_refresh_snapshot() Void!Str {
     edits: 0,
     errors: 0,
   }
-  let notifier = mut Notifier{invalidate: fn() {}}
-  let controller = make_controller(application, fake, scheduled, actions, notifier)
+  let controller = make_controller(application, fake, scheduled, actions)
   let mounted = renderer::mount(application.context, application.root, controller.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.start()
   let _ = application.flush()
@@ -525,13 +497,9 @@ test fn issue_detail_disposal_cancels_periodic_refresh_and_late_results() Void!S
     edits: 0,
     errors: 0,
   }
-  let notifier = mut Notifier{invalidate: fn() {}}
-  let controller = make_controller(application, fake, scheduled, actions, notifier)
+  let controller = make_controller(application, fake, scheduled, actions)
   let mounted = renderer::mount(application.context, application.root, controller.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.start()
   let _ = application.flush()

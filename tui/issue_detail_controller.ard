@@ -45,7 +45,7 @@ struct IssueDetailController {
   comments_generation: Int,
   stop: Chan<Bool>,
   disposed: Bool,
-  notify: fn(),
+  invalidate: fn(),
   service: issue_detail_service::Service,
   schedule: scheduler::Schedule,
   cancel_refresh: fn(),
@@ -147,7 +147,6 @@ fn new(
   identifier: Str,
   service: issue_detail_service::Service,
   schedule: scheduler::Schedule,
-  notify: fn(),
   on_open_url: fn(Str),
   on_pick_field: fn(issue_field_picker_controller::Field, issues::Issue),
   on_comment: fn(issues::Issue, Str, Str),
@@ -175,7 +174,7 @@ fn new(
     comments_generation: 0,
     stop: Chan::new<Bool>(),
     disposed: false,
-    notify: notify,
+    invalidate: fn() {},
     service: service,
     schedule: schedule,
     cancel_refresh: fn() {},
@@ -344,7 +343,7 @@ impl IssueDetailController {
     if (not self.disposed) and section != self.active_section {
       self.active_section = section
       self.scroll_to(0)
-      (self.notify)()
+      (self.invalidate)()
     }
   }
 
@@ -408,7 +407,7 @@ impl IssueDetailController {
     }
     self.refresh_comment_selection()
     self.reveal_selected_comment()
-    (self.notify)()
+    (self.invalidate)()
   }
 
   private fn mut move_comment(delta: Int) {
@@ -451,7 +450,7 @@ impl IssueDetailController {
               }
             },
           }
-          (self.notify)()
+          (self.invalidate)()
         }
       },
     )
@@ -481,7 +480,7 @@ impl IssueDetailController {
               }
             },
           }
-          (self.notify)()
+          (self.invalidate)()
         }
       },
     )
@@ -632,7 +631,7 @@ impl IssueDetailController {
       }
       if handled {
         // Key routing happens outside CUI, so request a render explicitly.
-        (self.notify)()
+        (self.invalidate)()
       }
       handled
     }
@@ -811,6 +810,18 @@ impl IssueDetailView {
       },
       false => cui_bridge::view(controller.description.root, fn() {}, fn() {}, key: "description", destroy_on_unmount: false),
     }
+  }
+}
+
+// The render request is bound at mount instead of injected at construction, so
+// the controller needs no `notify` wiring from its host or its tests.
+impl cui::Lifecycle for IssueDetailView {
+  fn mut mounted(ctx: cui::Context) {
+    self.props.controller.invalidate = ctx.invalidate_root
+  }
+
+  fn mut unmounting(ctx: cui::Context) {
+    self.props.controller.invalidate = fn() {}
   }
 }
 

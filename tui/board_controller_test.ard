@@ -11,10 +11,6 @@ use tinear/tui/board_controller
 use tinear/tui/issue_field_picker_controller
 use tinear/tui/theme
 
-private struct Notifier {
-  invalidate: fn(),
-}
-
 private struct MoveCall {
   request: board_service::MoveRequest,
   completion: fn(board_service::MoveResult!Str),
@@ -159,15 +155,11 @@ test fn board_builds_nested_retained_columns_and_navigates_cards() Void!Str {
   let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
   let opened = mut Opened{identifier: "", count: 0}
-  let notifier = mut Notifier{invalidate: fn() {}}
   let controller = board_controller::new(
     application.context,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
-    fn() {
-      (notifier.invalidate)()
-    },
     fn(identifier: Str) {
       opened.identifier = identifier
       opened.count =+ 1
@@ -178,9 +170,6 @@ test fn board_builds_nested_retained_columns_and_navigates_cards() Void!Str {
   )
   let mounted = renderer::mount(application.context, application.root, controller.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.start()
   try assertions::assert(fake.loads.size() == 1, "start should load board")
@@ -265,15 +254,11 @@ test fn board_drag_moves_issue_optimistically_and_confirms_team_state() Void!Str
   let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
   let opened = mut Opened{identifier: "", count: 0}
-  let notifier = mut Notifier{invalidate: fn() {}}
   let controller = board_controller::new(
     application.context,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
-    fn() {
-      (notifier.invalidate)()
-    },
     fn(identifier: Str) {
       opened.count =+ 1
     },
@@ -283,9 +268,6 @@ test fn board_drag_moves_issue_optimistically_and_confirms_team_state() Void!Str
   )
   let mounted = renderer::mount(application.context, application.root, controller.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.start()
   (fake.loads.at(0).expect("load"))(
@@ -450,15 +432,11 @@ test fn board_drag_rolls_back_failure_and_never_reuses_another_teams_state() Voi
   let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
   let errors = mut Opened{identifier: "", count: 0}
-  let notifier = mut Notifier{invalidate: fn() {}}
   let controller = board_controller::new(
     application.context,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
-    fn() {
-      (notifier.invalidate)()
-    },
     fn(identifier: Str) {},
     ignore_picker,
     ignore_moved,
@@ -469,9 +447,6 @@ test fn board_drag_rolls_back_failure_and_never_reuses_another_teams_state() Voi
   )
   let mounted = renderer::mount(application.context, application.root, controller.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.start()
   (fake.loads.at(0).expect("load"))(
@@ -535,15 +510,11 @@ test fn board_drag_threshold_same_column_and_interrupted_drops_are_safe() Void!S
   let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
   let opened = mut Opened{identifier: "", count: 0}
-  let notifier = mut Notifier{invalidate: fn() {}}
   let controller = board_controller::new(
     application.context,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
-    fn() {
-      (notifier.invalidate)()
-    },
     fn(identifier: Str) {
       opened.count =+ 1
     },
@@ -553,9 +524,6 @@ test fn board_drag_threshold_same_column_and_interrupted_drops_are_safe() Void!S
   )
   let mounted = renderer::mount(application.context, application.root, controller.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.start()
   (fake.loads.at(0).expect("load"))(
@@ -653,15 +621,11 @@ test fn board_refresh_completion_waits_for_pointer_gesture() Void!Str {
   let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
   let opened = mut Opened{identifier: "", count: 0}
-  let notifier = mut Notifier{invalidate: fn() {}}
   let controller = board_controller::new(
     application.context,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
-    fn() {
-      (notifier.invalidate)()
-    },
     fn(identifier: Str) {
       opened.count =+ 1
     },
@@ -671,9 +635,6 @@ test fn board_refresh_completion_waits_for_pointer_gesture() Void!Str {
   )
   let mounted = renderer::mount(application.context, application.root, controller.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.start()
   (fake.loads.at(0).expect("load"))(
@@ -706,15 +667,11 @@ test fn board_drag_layer_forwards_horizontal_wheel_to_reach_offscreen_column() V
   defer application.destroy()
   let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
-  let notifier = mut Notifier{invalidate: fn() {}}
   let controller = board_controller::new(
     application.context,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
-    fn() {
-      (notifier.invalidate)()
-    },
     fn(identifier: Str) {},
     ignore_picker,
     ignore_moved,
@@ -722,9 +679,6 @@ test fn board_drag_layer_forwards_horizontal_wheel_to_reach_offscreen_column() V
   )
   let mounted = renderer::mount(application.context, application.root, controller.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.start()
   (fake.loads.at(0).expect("load"))(
@@ -794,15 +748,11 @@ test fn board_drag_into_full_completed_column_keeps_moved_issue_visible_with_cap
   for index in 0..9 {
     completed.push(issue("done-{index}", "AKO-{index}", "Done {index}", "Done"))
   }
-  let notifier = mut Notifier{invalidate: fn() {}}
   let controller = board_controller::new(
     application.context,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
-    fn() {
-      (notifier.invalidate)()
-    },
     fn(identifier: Str) {},
     ignore_picker,
     ignore_moved,
@@ -810,9 +760,6 @@ test fn board_drag_into_full_completed_column_keeps_moved_issue_visible_with_cap
   )
   let mounted = renderer::mount(application.context, application.root, controller.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.start()
   let done = issues::BoardColumn{
@@ -848,15 +795,11 @@ test fn board_refresh_preserves_selected_issue_across_column_move() Void!Str {
   defer application.destroy()
   let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
-  let notifier = mut Notifier{invalidate: fn() {}}
   let controller = board_controller::new(
     application.context,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
-    fn() {
-      (notifier.invalidate)()
-    },
     fn(identifier: Str) {},
     ignore_picker,
     ignore_moved,
@@ -864,9 +807,6 @@ test fn board_refresh_preserves_selected_issue_across_column_move() Void!Str {
   )
   let mounted = renderer::mount(application.context, application.root, controller.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.start()
   (fake.loads.at(0).expect("load"))(
@@ -906,15 +846,11 @@ test fn board_ignores_stale_load_and_handles_narrow_horizontal_navigation() Void
   defer application.destroy()
   let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
-  let notifier = mut Notifier{invalidate: fn() {}}
   let controller = board_controller::new(
     application.context,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
-    fn() {
-      (notifier.invalidate)()
-    },
     fn(identifier: Str) {},
     ignore_picker,
     ignore_moved,
@@ -922,9 +858,6 @@ test fn board_ignores_stale_load_and_handles_narrow_horizontal_navigation() Void
   )
   let mounted = renderer::mount(application.context, application.root, controller.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.start()
   controller.refresh(false)
@@ -956,15 +889,11 @@ test fn board_routes_field_picker_commands_for_selected_issue() Void!Str {
   let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
   let picked = mut Picked{names: []}
-  let notifier = mut Notifier{invalidate: fn() {}}
   let controller = board_controller::new(
     application.context,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
-    fn() {
-      (notifier.invalidate)()
-    },
     fn(identifier: Str) {},
     fn(field: issue_field_picker_controller::Field, selected: issues::Issue) {
       let name = match field {
@@ -981,9 +910,6 @@ test fn board_routes_field_picker_commands_for_selected_issue() Void!Str {
   )
   let mounted = renderer::mount(application.context, application.root, controller.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.start()
   (fake.loads.at(0).expect("load"))(
@@ -1007,15 +933,11 @@ test fn board_initial_error_retries_to_empty_state() Void!Str {
   defer application.destroy()
   let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
-  let notifier = mut Notifier{invalidate: fn() {}}
   let controller = board_controller::new(
     application.context,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
-    fn() {
-      (notifier.invalidate)()
-    },
     fn(identifier: Str) {},
     ignore_picker,
     ignore_moved,
@@ -1023,9 +945,6 @@ test fn board_initial_error_retries_to_empty_state() Void!Str {
   )
   let mounted = renderer::mount(application.context, application.root, controller.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.start()
   (fake.loads.at(0).expect("initial load"))(Result::err("offline"))
@@ -1047,15 +966,11 @@ test fn board_failed_manual_refresh_restores_existing_columns() Void!Str {
   let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
   let errors = mut Opened{identifier: "", count: 0}
-  let notifier = mut Notifier{invalidate: fn() {}}
   let controller = board_controller::new(
     application.context,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
-    fn() {
-      (notifier.invalidate)()
-    },
     fn(identifier: Str) {},
     ignore_picker,
     ignore_moved,
@@ -1066,9 +981,6 @@ test fn board_failed_manual_refresh_restores_existing_columns() Void!Str {
   )
   let mounted = renderer::mount(application.context, application.root, controller.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.start()
   (fake.loads.at(0).expect("load"))(
@@ -1101,15 +1013,11 @@ test fn board_disposal_suppresses_late_move_completion() Void!Str {
   let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
   let errors = mut Opened{identifier: "", count: 0}
-  let notifier = mut Notifier{invalidate: fn() {}}
   let controller = board_controller::new(
     application.context,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
-    fn() {
-      (notifier.invalidate)()
-    },
     fn(identifier: Str) {},
     ignore_picker,
     ignore_moved,
@@ -1119,9 +1027,6 @@ test fn board_disposal_suppresses_late_move_completion() Void!Str {
   )
   let mounted = renderer::mount(application.context, application.root, controller.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.start()
   (fake.loads.at(0).expect("load"))(
@@ -1154,15 +1059,11 @@ test fn board_disposal_cancels_refresh_and_late_completion() Void!Str {
   defer application.destroy()
   let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
-  let notifier = mut Notifier{invalidate: fn() {}}
   let controller = board_controller::new(
     application.context,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
-    fn() {
-      (notifier.invalidate)()
-    },
     fn(identifier: Str) {},
     ignore_picker,
     ignore_moved,
@@ -1170,9 +1071,6 @@ test fn board_disposal_cancels_refresh_and_late_completion() Void!Str {
   )
   let mounted = renderer::mount(application.context, application.root, controller.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   controller.start()
   controller.dispose()

@@ -103,9 +103,7 @@ fn main() {
     fn() {},
   )
   shell_host.set_view(
-    shell_controller::view(controller, fn() {
-      shell_host.invalidate()
-    }),
+    shell_controller::view(controller),
     dispose: fn() {
       controller.dispose()
     },

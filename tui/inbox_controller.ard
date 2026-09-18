@@ -34,7 +34,7 @@ struct InboxController {
   cached_details: [CachedDetail],
   stop: Chan<Bool>,
   disposed: Bool,
-  notify: fn(),
+  invalidate: fn(),
   service: inbox_service::Service,
   schedule: scheduler::Schedule,
   cancel_refresh: fn(),
@@ -192,7 +192,6 @@ fn new(
   palette: tinear_theme::Theme,
   service: inbox_service::Service,
   schedule: scheduler::Schedule,
-  notify: fn(),
   on_open_issue: fn(Str),
   open_url: fn(Str),
   notify_error: fn(Str, Str),
@@ -216,7 +215,7 @@ fn new(
     cached_details: [],
     stop: Chan::new<Bool>(),
     disposed: false,
-    notify: notify,
+    invalidate: fn() {},
     service: service,
     schedule: schedule,
     cancel_refresh: fn() {},
@@ -350,7 +349,7 @@ impl InboxController {
             },
           }
           self.update_terminal_title()
-          (self.notify)()
+          (self.invalidate)()
         }
       })
     }
@@ -402,13 +401,13 @@ impl InboxController {
                   self.cache_detail(notification_id, detail)
                   if generation == self.detail_generation and self.detail_notification_id == notification_id {
                     self.detail_text = detail_content(item, detail, self.palette)
-                    (self.notify)()
+                    (self.invalidate)()
                   }
                 },
                 err(message) => {
                   if (not had_cached) and generation == self.detail_generation and self.detail_notification_id == notification_id {
                     self.detail_text = detail_error(item, message, self.palette)
-                    (self.notify)()
+                    (self.invalidate)()
                   }
                 },
               }
@@ -552,7 +551,7 @@ impl InboxController {
       }
       if handled {
         // Key routing happens outside CUI, so request a render explicitly.
-        (self.notify)()
+        (self.invalidate)()
       }
       handled
     }
@@ -675,6 +674,18 @@ impl InboxView {
         overflow: ui::Overflow::hidden,
       ),
     )
+  }
+}
+
+// The render request is bound at mount instead of injected at construction, so
+// the controller needs no `notify` wiring from its host or its tests.
+impl cui::Lifecycle for InboxView {
+  fn mut mounted(ctx: cui::Context) {
+    self.props.controller.invalidate = ctx.invalidate_root
+  }
+
+  fn mut unmounting(ctx: cui::Context) {
+    self.props.controller.invalidate = fn() {}
   }
 }
 
