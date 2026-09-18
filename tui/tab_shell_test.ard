@@ -9,6 +9,7 @@ use cooper/ui
 use tinear/models/cache
 use tinear/models/shell as shell_model
 use tinear/models/tabs
+use tinear/tui/screen_route
 use tinear/tui/tab_shell
 use tinear/tui/theme
 
@@ -59,28 +60,67 @@ test fn tab_chips_use_intrinsic_cell_width_with_a_document_cap() Void!Str {
   )
 }
 
-private fn fake_screen(ctx: mut cooper::Runtime, label: Str, state: mut ScreenState) tab_shell::Screen {
-  let panel = cui::box_ref()
-  tab_shell::screen(
-    view: cui::box(
+private struct FakeProps {
+  label: Str,
+  state: mut ScreenState,
+  route: mut screen_route::Route,
+}
+
+private struct FakeScreen {
+  props: mut FakeProps,
+  panel: mut cui::BoxRef,
+}
+
+private fn fake_component(props: mut FakeProps) mut FakeScreen {
+  (mut FakeScreen{props: props, panel: cui::box_ref()})
+}
+
+impl cui::Lifecycle for FakeScreen {
+  fn mut mounted(ctx: cui::Context) {
+    self.props.route.focus = fn() {
+      let _ = self.panel.focus(ctx)
+    }
+    let _ = self.panel.current.expect(
+      "mounted panel",
+    ).node().on_focus(fn() {
+      self.props.state.focuses =+ 1
+    })
+  }
+
+  fn mut unmounting(ctx: cui::Context) {
+    self.props.route.clear()
+  }
+}
+
+impl cui::Component for FakeScreen {
+  fn mut render() cui::View {
+    cui::box(
       // A no-op key handler is what makes the panel focusable.
-      [cui::text(label)],
+      [cui::text(self.props.label)],
       on_key: fn(received: mut cooper::KeyEvent, context: cui::Context) {},
-      ref: panel,
+      ref: self.panel,
       styles: ui::style(
         width: ui::percent(100.0),
         height: ui::percent(100.0),
         flex_direction: ui::FlexDirection::row,
       ),
+    )
+  }
+}
+
+private fn fake_screen(ctx: mut cooper::Runtime, label: Str, state: mut ScreenState) tab_shell::Screen {
+  let route = screen_route::new()
+  tab_shell::screen(
+    view: cui::child(
+      fake_component,
+      FakeProps{
+        label: label,
+        state: state,
+        route: route,
+      },
     ),
     focus: fn() {
-      match panel.current {
-        found => {
-          state.focuses =+ 1
-          let _ = found.focus()
-        },
-        _ => (),
-      }
+      route.focus()
     },
     handle_key: fn(received: mut cooper::KeyEvent) Bool {
       if received.matches("x") {

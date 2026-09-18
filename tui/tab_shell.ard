@@ -16,12 +16,7 @@ struct Screen {
   dispose: fn(),
 }
 
-fn screen(
-  view: cui::View,
-  focus: fn(),
-  handle_key: fn(mut cooper::KeyEvent) Bool,
-  dispose: fn(),
-) Screen {
+fn screen(view: cui::View, focus: fn(), handle_key: fn(mut cooper::KeyEvent) Bool, dispose: fn()) Screen {
   Screen{
     view: view,
     focus: focus,
@@ -43,10 +38,8 @@ struct Tabs {
   dynamic_screens: [DynamicScreen],
   next_screen_id: Int,
   invalidate: fn(),
-  // Declarative pages only become visible at the next commit, and a control
-  // inside a `display: none` subtree cannot take focus, so the focus claim is
-  // deferred past that commit.
-  focus_later: fn(),
+  // A newly created screen binds its route only when its component mounts.
+  focus_after_mount: fn(),
   disposed: Bool,
 }
 
@@ -170,23 +163,20 @@ impl cui::Lifecycle for Tabs {
       self.handle_key(received)
     }
     self.invalidate = ctx.invalidate_root
-    self.focus_later = fn() {
+    self.focus_after_mount = fn() {
       let _ = ctx.dispatch(fn() {
         self.focus_active()
       })
     }
-    // Screen focus is imperative and needs mounted refs, so claim it after the
-    // first commit rather than at construction time.
-    let _ = ctx.dispatch(fn() {
-      self.focus_active()
-    })
+    // Children have bound their routes; ref.focus handles attachment/startup.
+    self.focus_active()
   }
 
   fn mut unmounting(ctx: cui::Context) {
     self.props.commands.clear()
     self.dispose()
     self.invalidate = fn() {}
-    self.focus_later = fn() {}
+    self.focus_after_mount = fn() {}
   }
 }
 
@@ -411,7 +401,7 @@ fn create(props: mut Props) mut Tabs {
     dynamic_screens: [],
     next_screen_id: 0,
     invalidate: fn() {},
-    focus_later: fn() {},
+    focus_after_mount: fn() {},
     disposed: false,
   }
   for reference in props.initial_model.tabs {
@@ -441,8 +431,7 @@ impl Tabs {
     }
   }
 
-  // Page visibility is described by `page` and therefore only takes effect at
-  // the next commit, which is why focus claims are deferred.
+  // Queue visibility before asking the screen's ref to focus after commits.
   private fn mut apply_selection(should_persist: Bool) {
     (self.invalidate)()
     if should_persist {
@@ -468,7 +457,7 @@ impl Tabs {
     if not self.disposed {
       self.model = shell_model::select_tab(self.model, index)
       self.apply_selection(true)
-      (self.focus_later)()
+      self.focus_active()
     }
   }
 
@@ -477,7 +466,7 @@ impl Tabs {
       self.ensure_dynamic(reference)
       self.model = shell_model::open(self.model, reference)
       self.apply_selection(true)
-      (self.focus_later)()
+      (self.focus_after_mount)()
     }
   }
 
@@ -522,7 +511,7 @@ impl Tabs {
         self.dynamic_screens = remaining.@
         self.apply_selection(true)
         if was_selected {
-          (self.focus_later)()
+          self.focus_active()
         }
         true
       }

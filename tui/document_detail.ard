@@ -120,7 +120,7 @@ impl cui::Lifecycle for DocumentDetail {
   fn mut mounted(ctx: cui::Context) {
     self.invalidate = ctx.invalidate_root
     self.props.route.focus = fn() {
-      self.focus()
+      let _ = self.body.focus(ctx)
     }
     self.props.route.handle_key = fn(received: mut cooper::KeyEvent) Bool {
       self.handle_key(received)
@@ -217,15 +217,6 @@ impl DocumentDetail {
         if not loaded.meta.url.is_empty() {
           (self.props.on_open_url)(loaded.meta.url)
         }
-      },
-      _ => (),
-    }
-  }
-
-  fn mut focus() {
-    match self.body.current {
-      panel => {
-        let _ = panel.focus()
       },
       _ => (),
     }

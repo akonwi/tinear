@@ -19,7 +19,6 @@ struct Welcome {
   loading: Bool,
   error: Str,
   request: Int,
-  initial_focus_pending: Bool,
   button_focused: Bool,
   button: mut cui::BoxRef,
   stop: Chan<Bool>,
@@ -32,18 +31,13 @@ private fn welcome(props: mut WelcomeProps) mut Welcome {
     loading: false,
     error: "",
     request: 0,
-    initial_focus_pending: true,
     button_focused: false,
     button: cui::box_ref(),
     stop: Chan::new<Bool>(),
   })
 }
 
-fn view(
-  palette: tinear_theme::Theme,
-  authenticate: auth::Authenticate,
-  on_success: fn(Str),
-) cui::View {
+fn view(palette: tinear_theme::Theme, authenticate: auth::Authenticate, on_success: fn(Str)) cui::View {
   cui::child(
     welcome,
     WelcomeProps{
@@ -67,19 +61,21 @@ impl Welcome {
         self.request =+ 1
         let request = self.request
         let dispatch = ctx.dispatch
-        (self.props.authenticate)(api_key, self.stop.receiver(), fn(result: Void!Str) {
-          let _ = dispatch(fn() {
-            if self.request == request {
-              self.loading = false
-              match result {
-                ok(_) => (self.props.on_success)(api_key),
-                err(message) => {
-                  self.error = message
-                },
+        (self.props.authenticate)(
+          api_key,
+          self.stop.receiver(),
+          fn(result: Void!Str) {
+            let _ = dispatch(fn() {
+              if self.request == request {
+                self.loading = false
+                match result {
+                  ok(_) => (self.props.on_success)(api_key),
+                  err(message) => { self.error = message },
+                }
               }
-            }
-          })
-        })
+            })
+          },
+        )
       }
     }
   }
@@ -87,11 +83,6 @@ impl Welcome {
 
 impl cui::Lifecycle for Welcome {
   fn mut mounted(ctx: cui::Context) {
-    // Focus is described only for the initial commit; afterwards it stays
-    // imperative so renders cannot steal focus from the login button.
-    let _ = ctx.dispatch(fn() {
-      self.initial_focus_pending = false
-    })
     match self.button.current {
       panel => {
         let _ = panel.node().on_focus(fn() {
@@ -135,10 +126,7 @@ impl cui::Component for Welcome {
               self.draft,
               placeholder: "lin_api_…",
               styles: ui::style(width: ui::cells(44), height: ui::cells(1)),
-              focused: match self.initial_focus_pending {
-                true => Maybe::new(true),
-                false => Maybe::new<Bool>(),
-              },
+              autofocus: true,
               on_input: fn(value: Str, ctx: cui::Context) {
                 self.draft = value
               },

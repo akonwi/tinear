@@ -541,15 +541,6 @@ impl Inbox {
     }
   }
 
-  fn mut focus() {
-    match self.list_scroll.current {
-      panel => {
-        let _ = panel.focus()
-      },
-      _ => (),
-    }
-  }
-
   fn mut handle_key(received: mut cooper::KeyEvent) Bool {
     if self.disposed or received.event_type == cooper::KeyEventType::release {
       false
@@ -668,7 +659,7 @@ impl cui::Lifecycle for Inbox {
   fn mut mounted(ctx: cui::Context) {
     self.invalidate = ctx.invalidate_root
     self.props.route.focus = fn() {
-      self.focus()
+      let _ = self.list_scroll.focus(ctx)
     }
     self.props.route.handle_key = fn(received: mut cooper::KeyEvent) Bool {
       self.handle_key(received)

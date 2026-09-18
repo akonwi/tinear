@@ -94,6 +94,8 @@ def production_startup_smoke():
         screen = Screen(24, 80)
         try:
             wait_for(fd, screen, "Enter your Linear API key")
+            send(fd, "startup-focus")
+            wait_for(fd, screen, "startup-focus")
             send(fd, "\x03")
             wait_for(fd, screen, "__TTY_RESTORED__=yes")
             status = wait_exit(pid, fd, screen, timeout=2.0)

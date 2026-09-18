@@ -160,3 +160,36 @@ test fn welcome_disposal_rejects_late_authentication() Void!Str {
   let _ = application.flush()
   assertions::assert(successes == 0, "unmounted screen should suppress late success")
 }
+
+test fn welcome_button_focus_survives_authentication_error() Void!Str {
+  let application = testing::new(60, 18)
+  defer application.destroy()
+  let attempts = mut List::new<Attempt>()
+  let mounted = renderer::mount(
+    application.context,
+    application.root,
+    welcome_controller::view(theme::new(), fake_auth(attempts), fn(api_key: Str) {}),
+  )
+  defer mounted.destroy()
+  let _ = application.flush()
+  application.paste(event::paste("test-key"))
+  let _ = application.flush()
+  application.render()
+  mut row = 0
+  while row < application.frame().height() {
+    mut col = 0
+    while col + 1 < application.frame().width() {
+      if application.frame().cell(col, row).expect("cell").grapheme == "L" and application.frame().cell(col + 1, row).expect("next cell").grapheme == "o" {
+        application.click(col, row)
+      }
+      col =+ 1
+    }
+    row =+ 1
+  }
+  try assertions::assert(attempts.size() == 1, "click should focus and activate Login")
+  attempts.at(0).expect("attempt").completion(Result::err("Try again"))
+  let _ = application.flush()
+  application.render()
+  press(application, "space", " ")
+  assertions::assert(attempts.size() == 2, "error rerender must leave focus on Login")
+}
