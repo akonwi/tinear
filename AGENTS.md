@@ -46,11 +46,21 @@ The Ard dependency is pinned to a remote Cooper commit; `../cooper` remains the 
   imperatively through a ref.
 - Use refs for geometry, scrolling, and imperative capabilities the declarative
   API does not cover; guard `ref.current` since offscreen and unmounted views
-  have none.
+  have none. A ref is only populated by a commit, so anything imperative that
+  targets a freshly described view must run behind `ctx.dispatch` rather than
+  immediately after the mutation that describes it.
+- A declarative view becomes visible only at the next commit, and a control
+  inside a `display: none` subtree cannot take focus. The shell therefore
+  defers its focus claim through `focus_later` after changing the active tab.
+- `cui::box` is focusable only when it describes `on_key` or `focused`. Attach
+  a no-op `on_key` to make a panel focusable; describing `focused` instead
+  re-asserts focus on every commit.
+- Every shell screen is declarative: build one with
+  `shell_controller::declarative_screen`. There is no imperative screen shape.
 - `tui/cui_bridge` hosts an imperative subtree inside a component. It is needed
   where CUI lacks a feature — today the markdown renderer, which requires text
-  link callbacks. Pass `destroy_on_unmount: false` for controls that outlive
-  the bridge.
+  link callbacks, and imperative modal bodies. Pass `destroy_on_unmount: false`
+  for controls that outlive the bridge.
 - Keep Linear fetching and decoding separate from UI code.
 - Every async completion must check its controller's disposal and
   request-generation state before mutating state. Prefer routing service
