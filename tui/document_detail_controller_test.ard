@@ -241,3 +241,43 @@ test fn document_detail_disposal_stops_refresh_and_late_completion() Void!Str {
     "disposed scheduled action should not start another load",
   )
 }
+
+test fn focus_claimed_while_loading_lands_when_the_document_arrives() Void!Str {
+  let application = testing::new(80, 24)
+  defer application.destroy()
+  let fake = mut FakeState{loads: []}
+  let scheduled = mut Scheduled{actions: [], cancellations: 0}
+  let actions = mut Actions{
+    titles: [],
+    opened_url: "",
+    errors: 0,
+  }
+  let detail = controller(application, fake, scheduled, actions)
+  let mounted = renderer::mount(application.context, application.root, detail.view())
+  defer mounted.destroy()
+  let _ = application.flush()
+  detail.start()
+  let _ = application.flush()
+  application.render()
+
+  // The shell claims focus as soon as the tab opens, but a loading document
+  // describes no scroll box at all, so there is nothing to focus yet.
+  detail.focus()
+  try assertions::assert(detail.pending_focus, "unsatisfied focus claim should be retained")
+  try assertions::assert(
+    detail.body.current.is_none(),
+    "a loading document should describe no body to focus",
+  )
+
+  (fake.loads.at(0).expect("load"))(Result::ok(document("Fresh title", "# Heading\n\nBody")))
+  let _ = application.flush()
+  application.render()
+  try assertions::assert(
+    not detail.pending_focus,
+    "the retained claim should be satisfied once the body renders",
+  )
+  assertions::assert(
+    detail.body.current.expect("body").node().is_focused(),
+    "the document body should hold focus",
+  )
+}

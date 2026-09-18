@@ -438,8 +438,8 @@ impl ShellController {
     }
   }
 
-  // Page visibility is applied directly to bridged screen roots so it holds
-  // whether or not a render has committed yet.
+  // Page visibility is described by `page` and therefore only takes effect at
+  // the next commit, which is why focus claims are deferred.
   private fn mut apply_selection(should_persist: Bool) {
     (self.invalidate)()
     if should_persist {

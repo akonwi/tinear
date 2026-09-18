@@ -156,6 +156,7 @@ struct DocumentDetailController {
   generation: Int,
   request: Int,
   disposed: Bool,
+  pending_focus: Bool,
   stop: Chan<Bool>,
   service: document_detail_service::Service,
   schedule: scheduler::Schedule,
@@ -201,6 +202,7 @@ fn new(
     generation: 0,
     request: 0,
     disposed: false,
+    pending_focus: false,
     stop: Chan::new<Bool>(),
     service: service,
     schedule: schedule,
@@ -253,6 +255,7 @@ impl DocumentDetailController {
             },
           }
           (self.invalidate)()
+          self.retry_focus()
         }
       })
       (self.invalidate)()
@@ -287,12 +290,35 @@ impl DocumentDetailController {
     }
   }
 
-  fn mut focus() {
+  // A screen that is still loading describes no focus target, or describes one
+  // inside a hidden subtree, so the claim is remembered and retried after the
+  // commit that first reveals it.
+  private fn mut apply_focus() Bool {
+    mut applied = false
     match self.body.current {
       panel => {
-        let _ = panel.focus()
+        applied = panel.focus()
       },
       _ => (),
+    }
+    if applied {
+      self.pending_focus = false
+    }
+    applied
+  }
+
+  fn mut focus() {
+    self.pending_focus = true
+    let _ = self.apply_focus()
+  }
+
+  private fn mut retry_focus() {
+    if self.pending_focus and (not self.disposed) {
+      let _ = self.context.dispatch(fn() {
+        if self.pending_focus and (not self.disposed) {
+          let _ = self.apply_focus()
+        }
+      })
     }
   }
 
