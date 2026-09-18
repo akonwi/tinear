@@ -1,6 +1,7 @@
 use ard/testing as assertions
 
 use cooper
+use cooper/cui
 use cooper/event
 use cooper/testing
 use cooper/ui
@@ -245,4 +246,24 @@ test fn stale_modal_dispatch_does_not_touch_closed_body() Void!Str {
   let _ = host.close()
   let _ = application.flush()
   assertions::assert(applied == 0, "closed modal ticket should suppress queued completion")
+}
+
+test fn declarative_modal_uses_keyboard_barrier() Void!Str {
+  let application = testing::new(40, 10)
+  defer application.destroy()
+  let background = ui::input(application.context, placeholder: "Background")
+  application.root.add(background)
+  let host = modal_host::new(application.context, application.root, theme::new())
+  let _ = background.focus()
+  let modal_body = cui::text("Saving")
+  let _ = host.present_view("Saving", modal_body, "Please wait", fn() {}, fn() Bool {
+    false
+  })
+  let _ = application.flush()
+  application.key(event::key("x", "x", cooper::KeyEventType::press, modifiers()))
+  try assertions::assert(
+    background.value().is_empty(),
+    "background input should not receive modal keys",
+  )
+  assertions::assert(host.is_open(), "undismissable modal should stay open")
 }

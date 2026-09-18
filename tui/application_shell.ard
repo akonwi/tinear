@@ -11,7 +11,6 @@ use tinear/tui/toast_host
 struct Model {
   screen_view: cui::View?,
   screen_view_dispose: fn(),
-  generation: Int,
 }
 
 private struct ShellProps {
@@ -65,7 +64,6 @@ fn new(
   let model = mut Model{
     screen_view: Maybe::new<cui::View>(),
     screen_view_dispose: fn() {},
-    generation: 0,
   }
   let mounted = renderer::mount(ctx, application_root, cui::child(shell, ShellProps{model: model}))
   (mut ApplicationShell{
@@ -88,7 +86,6 @@ impl ApplicationShell {
     let previous_dispose = self.model.screen_view_dispose
     previous_dispose()
     self.cui.update(fn() {
-      self.model.generation =+ 1
       self.model.screen_view = Maybe::new(view)
       self.model.screen_view_dispose = dispose.or(fn() {})
     })
@@ -127,8 +124,7 @@ impl ApplicationShell {
       let screen_view_dispose = self.model.screen_view_dispose
       self.model.screen_view_dispose = fn() {}
       screen_view_dispose()
-      // Retires the screen bridge synchronously, running its dispose path
-      // before destroying its orphaned controls.
+      // Retire the screen's declarative subtree synchronously.
       self.cui.destroy()
       self.modal.dispose()
       self.toasts.dispose()

@@ -10,7 +10,7 @@ use tinear/tui/theme as tinear_theme
 
 // A shell page. The shell wraps each screen's view in a visibility box.
 struct Screen {
-  view: cui::View?,
+  view: cui::View,
   focus: fn(),
   handle_key: fn(mut cooper::KeyEvent) Bool,
   dispose: fn(),
@@ -23,7 +23,7 @@ fn declarative_screen(
   dispose: fn(),
 ) Screen {
   Screen{
-    view: Maybe::new(view),
+    view: view,
     focus: focus,
     handle_key: handle_key,
     dispose: dispose,
@@ -68,33 +68,21 @@ fn tab_chip_width(label_cells: Int, dynamic: Bool) Int {
   }
 }
 
-private fn body_style(current: ui::Style, display: ui::Display) ui::Style {
-  let updated = mut current
-  updated.display = display
-  updated.width = ui::percent(100.0)
-  updated.height = ui::percent(100.0)
-  updated.flex_grow = 1.0
-  updated.overflow = ui::Overflow::hidden
-  updated.@
-}
-
 private fn page(screen: Screen, key: Str, visible: Bool) cui::View {
-  match screen.view {
-    view => {
-      cui::box(
-        [view],
-        key: key,
-        styles: body_style(
-          ui::style(),
-          match visible {
-            true => ui::Display::flex,
-            false => ui::Display::none,
-          },
-        ),
-      )
-    },
-    _ => cui::box([], key: key),
-  }
+  cui::box(
+    [screen.view],
+    key: key,
+    styles: ui::style(
+      display: match visible {
+        true => ui::Display::flex,
+        false => ui::Display::none,
+      },
+      width: ui::percent(100.0),
+      height: ui::percent(100.0),
+      flex_grow: 1.0,
+      overflow: ui::Overflow::hidden,
+    ),
+  )
 }
 
 private fn tab_key(reference: tabs::TabRef) Str {
@@ -164,9 +152,7 @@ private fn hints_content(hints: [hints_bar::Hint], palette: tinear_theme::Theme)
     if index > 0 {
       spans.push(ui::span("   "))
     }
-    spans.push(
-      ui::span(hint.key, style: ui::span_style(foreground: palette.accent, bold: true)),
-    )
+    spans.push(ui::span(hint.key, style: ui::span_style(foreground: palette.accent, bold: true)))
     if not hint.label.is_empty() {
       spans.push(ui::span(" {hint.label}", style: ui::span_style(dim: true)))
     }
@@ -239,11 +225,7 @@ impl Tabs {
         selectable: false,
         wrap: ui::TextWrap::none,
         overflow: ui::TextOverflow::ellipsis,
-        styles: ui::style(
-          width: ui::cells(label_width),
-          height: ui::cells(1),
-          flex_shrink: 0.0,
-        ),
+        styles: ui::style(width: ui::cells(label_width), height: ui::cells(1), flex_shrink: 0.0),
       ),
     )
     if dynamic {
@@ -322,11 +304,7 @@ impl cui::Component for Tabs {
     bodies.push(page(controller.board, "screen-board", controller.model.tab_index == 1))
     for dynamic, index in controller.dynamic_screens {
       bodies.push(
-        page(
-          dynamic.screen,
-          tab_key(dynamic.reference),
-          controller.model.tab_index == 2 + index,
-        ),
+        page(dynamic.screen, tab_key(dynamic.reference), controller.model.tab_index == 2 + index),
       )
     }
 

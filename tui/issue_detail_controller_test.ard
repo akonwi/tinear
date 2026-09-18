@@ -1,6 +1,7 @@
 use ard/testing as assertions
 
 use cooper
+use cooper/ui
 use cooper/event
 use cooper/cui/renderer
 use cooper/testing
@@ -258,6 +259,7 @@ test fn issue_detail_loads_issue_and_comments_independently_and_routes_commands(
 
   // A freshly posted comment has no mounted row yet, so focus must survive
   // the commit that first mounts it.
+  controller.focus() // The editor restores screen focus when it closes.
   controller.comments_changed("new", true)
   let _ = application.flush()
   application.render()
@@ -512,4 +514,43 @@ test fn issue_detail_disposal_cancels_periodic_refresh_and_late_results() Void!S
   try assertions::assert(controller.issue.is_none(), "disposed detail should ignore late issue")
   try assertions::assert(controller.comments.size() == 0, "disposed detail should ignore late comments")
   assertions::assert(scheduled.cancellations == 1, "dispose should stop periodic refresh")
+}
+
+test fn created_comment_does_not_override_newer_focus() Void!Str {
+  let application = testing::new(70, 20)
+  defer application.destroy()
+  let fake = mut FakeState{issue_loads: [], comment_loads: []}
+  let scheduled = mut Scheduled{actions: [], cancellations: 0}
+  let actions = mut Actions{
+    opened_url: "",
+    picked: [],
+    comments: [],
+    edits: 0,
+    errors: 0,
+  }
+  let controller = make_controller(application, fake, scheduled, actions)
+  let mounted = renderer::mount(application.context, application.root, controller.view())
+  defer mounted.destroy()
+  let _ = application.flush()
+  controller.start()
+  let _ = application.flush()
+  application.render()
+  (fake.issue_loads.at(0).expect("issue"))(Result::ok(issue("Current", "Body")))
+  (fake.comment_loads.at(0).expect("comments"))(
+    Result::ok([comment("c1", "Alex", "First", 0), comment("c2", "Blair", "Second", 0)]),
+  )
+  controller.switch_section(1)
+  let _ = application.flush()
+  application.render()
+  controller.focus()
+  controller.comments_changed("new", true)
+  let other = ui::input(application.context, placeholder: "New focus owner")
+  application.root.add(other)
+  let _ = other.focus()
+  (fake.comment_loads.at(1).expect("posted comment refresh"))(
+    Result::ok([comment("new", "Me", "Posted", 0)]),
+  )
+  let _ = application.flush()
+  application.render()
+  assertions::assert(other.node().is_focused(), "comment refresh must respect newer focus")
 }

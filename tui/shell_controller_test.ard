@@ -106,7 +106,7 @@ private fn dynamic_factory(ctx: mut cooper::Runtime, created: mut Counter, dispo
     }
     let base = fake_screen(ctx, "Detail {reference.title}", state)
     shell_controller::declarative_screen(
-      view: base.view.expect("fake screen view"),
+      view: base.view,
       focus: base.focus,
       handle_key: base.handle_key,
       dispose: fn() {
@@ -132,7 +132,7 @@ private fn tracked_dynamic_factory(
     }
     let base = fake_screen(ctx, "Detail {reference.title}", state)
     shell_controller::declarative_screen(
-      view: base.view.expect("fake screen view"),
+      view: base.view,
       focus: base.focus,
       handle_key: fn(received: mut cooper::KeyEvent) Bool {
         if received.matches("x") {

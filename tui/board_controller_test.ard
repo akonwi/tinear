@@ -990,8 +990,8 @@ test fn board_failed_manual_refresh_restores_existing_columns() Void!Str {
   let _ = application.flush()
   application.render()
   try assertions::assert(
-    controller.outer_scroll.current.expect("board scroll").style().display == ui::Display::none,
-    "loading state should hide board",
+    controller.outer_scroll.current.expect("board scroll").style().display == ui::Display::flex,
+    "loading should keep the board focus target mounted and visible",
   )
   (fake.loads.at(1).expect("refresh"))(Result::err("network unavailable"))
   let _ = application.flush()

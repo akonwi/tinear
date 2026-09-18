@@ -6,6 +6,7 @@ use tinear/models/issue_state
 use tinear/models/issues
 use tinear/services/issue_detail_service
 use tinear/tui/cui_bridge
+use tinear/tui/focus
 use tinear/tui/issue_field_picker_controller
 use tinear/tui/markdown_controller
 use tinear/tui/scheduler
@@ -45,7 +46,6 @@ struct IssueDetailController {
   comments_generation: Int,
   stop: Chan<Bool>,
   disposed: Bool,
-  pending_focus: Bool,
   invalidate: fn(),
   service: issue_detail_service::Service,
   schedule: scheduler::Schedule,
@@ -105,12 +105,7 @@ private fn priority(issue: issues::Issue) Str {
 }
 
 private fn status_style(display: ui::Display) ui::Style {
-  ui::style(
-    display: display,
-    width: ui::percent(100.0),
-    height: ui::cells(1),
-    flex_shrink: 0.0,
-  )
+  ui::style(display: display, width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0)
 }
 
 private fn comment_style(
@@ -175,7 +170,6 @@ fn new(
     comments_generation: 0,
     stop: Chan::new<Bool>(),
     disposed: false,
-    pending_focus: false,
     invalidate: fn() {},
     service: service,
     schedule: schedule,
@@ -305,12 +299,12 @@ impl IssueDetailController {
         // render, so queue the focus behind it.
         let generation = self.comments_generation
         let _ = self.context.dispatch(fn() {
-          if (not self.disposed) and generation == self.comments_generation {
+          if (not self.disposed) and generation == self.comments_generation and self.owns_focus() {
             // The row may still be uncommitted on the first pass; retry once
             // more behind the render that mounts it.
             if not self.focus_selected_comment() {
               let _ = self.context.dispatch(fn() {
-                if (not self.disposed) and generation == self.comments_generation {
+                if (not self.disposed) and generation == self.comments_generation and self.owns_focus() {
                   let _ = self.focus_selected_comment()
                 }
               })
@@ -435,28 +429,23 @@ impl IssueDetailController {
       self.status = "Loading {self.identifier}…"
       self.status_danger = false
     }
-    self.service.load_issue(
-      self.stop.receiver(),
-      self.identifier,
-      fn(result: issues::Issue!Str) {
-        if (not self.disposed) and generation == self.issue_generation {
-          match result {
-            ok(issue) => {
-              self.issue = Maybe::new(issue)
-              self.show_issue(issue)
-            },
-            err(message) => {
-              match self.issue {
-                existing => self.notify_error("Issue refresh", message),
-                _ => self.show_issue_error(message),
-              }
-            },
-          }
-          (self.invalidate)()
-          self.retry_focus()
+    self.service.load_issue(self.stop.receiver(), self.identifier, fn(result: issues::Issue!Str) {
+      if (not self.disposed) and generation == self.issue_generation {
+        match result {
+          ok(issue) => {
+            self.issue = Maybe::new(issue)
+            self.show_issue(issue)
+          },
+          err(message) => {
+            match self.issue {
+              existing => self.notify_error("Issue refresh", message),
+              _ => self.show_issue_error(message),
+            }
+          },
         }
-      },
-    )
+        (self.invalidate)()
+      }
+    })
   }
 
   private fn mut refresh_comments(silent: Bool) {
@@ -596,35 +585,19 @@ impl IssueDetailController {
     }
   }
 
-  // A screen that is still loading describes no focus target, or describes one
-  // inside a hidden subtree, so the claim is remembered and retried after the
-  // commit that first reveals it.
-  private fn mut apply_focus() Bool {
-    mut applied = false
+  private fn owns_focus() Bool {
     match self.body_scroll.current {
-      panel => {
-        applied = panel.focus()
-      },
-      _ => (),
+      body => focus::within(body.node()),
+      _ => false,
     }
-    if applied {
-      self.pending_focus = false
-    }
-    applied
   }
 
   fn mut focus() {
-    self.pending_focus = true
-    let _ = self.apply_focus()
-  }
-
-  private fn mut retry_focus() {
-    if self.pending_focus and (not self.disposed) {
-      let _ = self.context.dispatch(fn() {
-        if self.pending_focus and (not self.disposed) {
-          let _ = self.apply_focus()
-        }
-      })
+    match self.body_scroll.current {
+      panel => {
+        let _ = panel.focus()
+      },
+      _ => (),
     }
   }
 
@@ -638,12 +611,8 @@ impl IssueDetailController {
         received.matches("c") => self.switch_section(COMMENTS_SECTION),
         received.matches("j") and self.active_section == COMMENTS_SECTION => self.move_comment(1),
         received.matches("k") and self.active_section == COMMENTS_SECTION => self.move_comment(-1),
-        received.matches("j") or received.matches("down") => {
-          self.scroll_by(1)
-        },
-        received.matches("k") or received.matches("up") => {
-          self.scroll_by(-1)
-        },
+        received.matches("j") or received.matches("down") => self.scroll_by(1),
+        received.matches("k") or received.matches("up") => self.scroll_by(-1),
         received.matches("n") => self.compose_comment(),
         received.matches("r") => self.reply_to_selected(),
         received.matches("e") => self.edit_description(),
@@ -664,7 +633,11 @@ impl IssueDetailController {
   }
 
   fn mut view() cui::View {
-    cui::child(issue_detail_view, IssueDetailProps{controller: self}, key: "issue-{self.identifier}")
+    cui::child(
+      issue_detail_view,
+      IssueDetailProps{controller: self},
+      key: "issue-{self.identifier}",
+    )
   }
 
   fn mut screen(dispose_extra: fn()) shell_controller::Screen {
@@ -766,6 +739,7 @@ impl IssueDetailView {
     }
     let id = record.id
     cui::box(
+      // A key handler keeps the row focusable for the post-comment focus jump.
       [
         cui::text(
           "{comment.author}  {timestamp::friendly(comment.created_at)}",
@@ -781,7 +755,6 @@ impl IssueDetailView {
       key: "comment-{id}",
       ref: record.panel,
       styles: comment_style(comment, active, hovered, palette),
-      // A key handler keeps the row focusable for the post-comment focus jump.
       on_key: fn(received: mut cooper::KeyEvent, ctx: cui::Context) {},
       on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
         if received.event_type == cooper::MouseEventType::move {
@@ -834,7 +807,15 @@ impl IssueDetailView {
           ),
         )
       },
-      false => cui_bridge::view(controller.description.root, fn() {}, fn() {}, key: "description", destroy_on_unmount: false),
+      false => {
+        cui_bridge::view(
+          controller.description.root,
+          fn() {},
+          fn() {},
+          key: "description",
+          destroy_on_unmount: false,
+        )
+      },
     }
   }
 }
@@ -856,99 +837,91 @@ impl cui::Component for IssueDetailView {
     let controller = self.props.controller
     let palette = controller.palette
     let row = ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0)
+    let children = mut List::new<cui::View>()
     match controller.issue {
       issue => {
-        cui::box(
-          [
-            cui::text(
-              issue.identifier,
-              styles: row,
-              text_style: ui::text_style(foreground: palette.accent, bold: true),
-            ),
-            cui::text(
-              issue.title,
-              wrap: ui::TextWrap::word,
-              overflow: ui::TextOverflow::ellipsis,
-              styles: ui::style(
-                width: ui::percent(100.0),
-                max_height: ui::cells(2),
-                flex_shrink: 0.0,
-              ),
-              text_style: ui::text_style(bold: true),
-            ),
-            cui::text(
-              metadata_line("State", issue.state_name, "Priority", priority(issue), palette),
-              styles: row,
-            ),
-            cui::text(
-              metadata_line("Assignee", issue.assignee_name, "Cycle", issue.cycle_label, palette),
-              styles: row,
-            ),
-            cui::text(
-              metadata_line("Project", issue.project_name, "Team", issue.team_name, palette),
-              styles: row,
-            ),
-            self.rule(),
-            cui::box(
-              [
-                self.tab("Description", DESCRIPTION_SECTION, 14),
-                self.tab("Comments ({controller.comments.size()})", COMMENTS_SECTION, 20),
-              ],
-              styles: ui::style(
-                width: ui::percent(100.0),
-                height: ui::cells(1),
-                flex_shrink: 0.0,
-                flex_direction: ui::FlexDirection::row,
-                gap: ui::cells(3),
-              ),
-            ),
-            self.rule(),
-            cui::scroll_box(
-              [self.body()],
-              ref: controller.body_scroll,
-              styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_grow: 1.0),
-            ),
-          ],
-          styles: ui::style(
-            width: ui::percent(100.0),
-            height: ui::percent(100.0),
-            flex_direction: ui::FlexDirection::column,
-            overflow: ui::Overflow::hidden,
-            padding: ui::Edges{
-              top: ui::cells(0),
-              right: ui::cells(1),
-              bottom: ui::cells(0),
-              left: ui::cells(1),
-            },
+        let header = [
+          cui::text(
+            issue.identifier,
+            styles: row,
+            text_style: ui::text_style(foreground: palette.accent, bold: true),
           ),
-        )
+          cui::text(
+            issue.title,
+            wrap: ui::TextWrap::word,
+            overflow: ui::TextOverflow::ellipsis,
+            styles: ui::style(width: ui::percent(100.0), max_height: ui::cells(2), flex_shrink: 0.0),
+            text_style: ui::text_style(bold: true),
+          ),
+          cui::text(
+            metadata_line("State", issue.state_name, "Priority", priority(issue), palette),
+            styles: row,
+          ),
+          cui::text(
+            metadata_line("Assignee", issue.assignee_name, "Cycle", issue.cycle_label, palette),
+            styles: row,
+          ),
+          cui::text(
+            metadata_line("Project", issue.project_name, "Team", issue.team_name, palette),
+            styles: row,
+          ),
+          self.rule(),
+          cui::box(
+            [
+              self.tab("Description", DESCRIPTION_SECTION, 14),
+              self.tab("Comments ({controller.comments.size()})", COMMENTS_SECTION, 20),
+            ],
+            styles: ui::style(
+              width: ui::percent(100.0),
+              height: ui::cells(1),
+              flex_shrink: 0.0,
+              flex_direction: ui::FlexDirection::row,
+              gap: ui::cells(3),
+            ),
+          ),
+          self.rule(),
+        ]
+        for child in header {
+          children.push(child)
+        }
       },
+      _ => (),
+    }
+    let content = match controller.issue {
+      _issue => self.body(),
       _ => {
-        cui::box(
-          [
-            cui::text(
-              controller.status,
-              selectable: false,
-              styles: ui::style(
-                width: ui::percent(100.0),
-                height: ui::cells(1),
-                flex_grow: 1.0,
-                justify_content: ui::Justify::center,
-                align_items: ui::Align::center,
-              ),
-              text_style: match controller.status_danger {
-                true => ui::text_style(foreground: palette.danger, bold: true),
-                false => ui::text_style(dim: true),
-              },
-            ),
-          ],
-          styles: ui::style(
-            width: ui::percent(100.0),
-            height: ui::percent(100.0),
-            overflow: ui::Overflow::hidden,
-          ),
+        cui::text(
+          controller.status,
+          selectable: false,
+          text_style: match controller.status_danger {
+            true => ui::text_style(foreground: palette.danger, bold: true),
+            false => ui::text_style(dim: true),
+          },
         )
       },
     }
+    children.push(
+      cui::scroll_box(
+        [content],
+        key: "body",
+        ref: controller.body_scroll,
+        styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_grow: 1.0),
+      ),
+    )
+    cui::box(
+      children.@,
+      styles: ui::style(
+        width: ui::percent(100.0),
+        height: ui::percent(100.0),
+        flex_direction: ui::FlexDirection::column,
+        overflow: ui::Overflow::hidden,
+        padding: ui::Edges{
+          top: ui::cells(0),
+          right: ui::cells(1),
+          bottom: ui::cells(0),
+          left: ui::cells(1),
+        },
+      ),
+    )
   }
 }

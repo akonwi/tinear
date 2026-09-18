@@ -3,6 +3,7 @@ use cooper/cui
 use cooper/cui/renderer
 use cooper/ui
 use tinear/tui/cui_bridge
+use tinear/tui/focus
 use tinear/tui/theme as tinear_theme
 
 struct Ticket {
@@ -42,6 +43,51 @@ private struct Host {
   palette: tinear_theme::Theme,
 }
 
+// Each presentation owns a distinct subtree, even when close/open coalesce.
+private struct PresentationProps {
+  body: cui::View,
+}
+
+private struct Presentation {
+  props: mut PresentationProps,
+  frame: mut cui::BoxRef,
+}
+
+private fn presentation(props: mut PresentationProps) mut Presentation {
+  (mut Presentation{props: props, frame: cui::box_ref()})
+}
+
+impl cui::Component for Presentation {
+  fn mut render() cui::View {
+    cui::box(
+      [self.props.body],
+      ref: self.frame,
+      on_key: fn(received: mut cooper::KeyEvent, ctx: cui::Context) {},
+      styles: ui::style(width: ui::percent(100.0), flex_direction: ui::FlexDirection::column),
+    )
+  }
+}
+
+impl cui::Lifecycle for Presentation {
+  fn mut mounted(ctx: cui::Context) {
+    // Let controls claim their initial focus first; noninteractive bodies
+    // still need a keyboard barrier instead of leaving focus behind the modal.
+    // Later loading-to-form transitions must describe their own initial focus.
+    let _ = ctx.dispatch(fn() {
+      match self.frame.current {
+        frame => {
+          if not focus::within(frame.node()) {
+            let _ = frame.focus()
+          }
+        },
+        _ => (),
+      }
+    })
+  }
+
+  fn mut unmounting(ctx: cui::Context) {}
+}
+
 private fn root_style(display: ui::Display) ui::Style {
   ui::style(
     display: display,
@@ -71,7 +117,11 @@ struct ModalHost {
 
 private fn host_factory(palette: tinear_theme::Theme) fn(mut HostProps) mut Host {
   fn(props: mut HostProps) mut Host {
-    (mut Host{props: props, frame: cui::box_ref(), palette: palette})
+    (mut Host{
+      props: props,
+      frame: cui::box_ref(),
+      palette: palette,
+    })
   }
 }
 
@@ -108,7 +158,15 @@ impl cui::Component for Host {
         _ => (),
       }
       match model.body_view {
-        body_view => frame_children.push(body_view),
+        body_view => {
+          frame_children.push(
+            cui::child(
+              presentation,
+              PresentationProps{body: body_view},
+              key: "presentation-{model.generation}",
+            ),
+          )
+        },
         _ => (),
       }
       frame_children.push(cui::text(model.footer, text_style: ui::text_style(dim: true)))

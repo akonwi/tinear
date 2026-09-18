@@ -58,6 +58,13 @@ The Ard dependency is pinned to a remote Cooper commit; `../cooper` remains the 
 - A declarative view becomes visible only at the next commit, and a control
   inside a `display: none` subtree cannot take focus. The shell therefore
   defers its focus claim through `focus_later` after changing the active tab.
+- Loading, error, and loaded screens keep the same keyed scroll target mounted.
+  Do not retry screen focus from data completions: a newer modal or user focus
+  choice supersedes the original request.
+- `tui/focus` isolates the pinned Cooper `core/node` dependency needed to
+  inspect focus within a retained subtree; CUI has no equivalent query.
+- Modal presentations use a generation-keyed subtree so replacing a body resets
+  its component state even when close/open coalesce into one commit.
 - `cui::box` is focusable only when it describes `on_key` or `focused`. Attach
   a no-op `on_key` to make a panel focusable; describing `focused` instead
   re-asserts focus on every commit.

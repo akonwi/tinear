@@ -71,7 +71,6 @@ struct BoardController {
   generation: Int,
   stop: Chan<Bool>,
   disposed: Bool,
-  pending_focus: Bool,
   invalidate: fn(),
   service: board_service::Service,
   schedule: scheduler::Schedule,
@@ -416,7 +415,6 @@ fn new(
     generation: 0,
     stop: Chan::new<Bool>(),
     disposed: false,
-    pending_focus: false,
     invalidate: fn() {},
     service: service,
     schedule: schedule,
@@ -1017,7 +1015,6 @@ impl BoardController {
                 },
               }
               (self.invalidate)()
-              self.retry_focus()
             }
           }
         })
@@ -1111,33 +1108,6 @@ impl BoardController {
     }
   }
 
-  // While a status banner is up the scroll box is described `display: none`,
-  // which is not focusable, so the claim is remembered and retried after the
-  // commit that first reveals the board.
-  private fn mut apply_focus() Bool {
-    mut applied = false
-    match self.outer_scroll.current {
-      panel => {
-        applied = panel.focus()
-      },
-      _ => (),
-    }
-    if applied {
-      self.pending_focus = false
-    }
-    applied
-  }
-
-  private fn mut retry_focus() {
-    if self.pending_focus and (not self.disposed) {
-      let _ = self.context.dispatch(fn() {
-        if self.pending_focus and (not self.disposed) {
-          let _ = self.apply_focus()
-        }
-      })
-    }
-  }
-
   fn mut focus() {
     if not self.pointer_issue_id.is_empty() or not self.dragging_issue_id.is_empty() {
       self.pointer_issue_id = ""
@@ -1145,8 +1115,12 @@ impl BoardController {
       self.clear_drag_visuals()
       self.run_pending_refresh()
     }
-    self.pending_focus = true
-    let _ = self.apply_focus()
+    match self.outer_scroll.current {
+      panel => {
+        let _ = panel.focus()
+      },
+      _ => (),
+    }
   }
 
   fn mut handle_key(received: mut cooper::KeyEvent) Bool {
@@ -1439,10 +1413,14 @@ impl cui::Component for BoardView {
   fn mut render() cui::View {
     let controller = self.props.controller
     let palette = controller.palette
-    // The board is hidden whenever a status message occupies the screen.
+    // Hide cards while loading, but retain the visible scroll/focus target.
     let loaded = controller.status.is_empty()
     let columns = mut List::new<cui::View>()
-    for value, index in controller.columns {
+    let visible_columns: [issues::BoardColumn] = match loaded {
+      true => controller.columns,
+      false => [],
+    }
+    for value, index in visible_columns {
       for record in controller.column_records {
         if record.key == column_key(value) {
           columns.push(self.column(value, index, record))
@@ -1469,14 +1447,9 @@ impl cui::Component for BoardView {
           },
         ),
         cui::scroll_box(
-          [cui::box(columns.@, styles: columns_row_style(controller.column_records.size()))],
+          [cui::box(columns.@, styles: columns_row_style(visible_columns.size()))],
           ref: controller.outer_scroll,
-          styles: board_style(
-            match loaded {
-              true => ui::Display::flex,
-              false => ui::Display::none,
-            },
-          ),
+          styles: board_style(ui::Display::flex),
           on_key: fn(received: mut cooper::KeyEvent, ctx: cui::Context) {},
         ),
         cui::box(

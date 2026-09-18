@@ -98,14 +98,24 @@ impl Editor {
         true => self.value,
         false => body,
       }
+      // Bind this submission to the props that started it. Reconciliation
+      // rewrites `self.props` in place whenever a later session reuses this
+      // component identity, so reading them at completion time would resolve a
+      // stale request against the newer session's guard, ticket, and callbacks.
+      let finish = self.props.finish
+      let on_success = self.props.on_success
+      let is_current = self.props.is_current
+      let notify_error = self.props.notify_error
       let handle = fn(result: Str!Str) {
-        (self.props.finish)()
+        finish()
         match result {
-          ok(value) => (self.props.on_success)(value),
+          ok(value) => on_success(value),
           err(message) => {
-            match (self.props.is_current)() {
+            match is_current() {
+              // Only the session still on screen may own the status line; a
+              // superseded one reports through the toast instead.
               true => self.set_status("⚠ {message}", true),
-              false => (self.props.notify_error)(message),
+              false => notify_error(message),
             }
           },
         }
@@ -128,10 +138,10 @@ impl cui::Lifecycle for Editor {
   fn mut unmounting(ctx: cui::Context) {
     // Cancelling the request means the service may never complete, so release
     // the controller-owned operation guard here; otherwise it stays held for
-    // the process lifetime and blocks every later editor.
-    if submission_active(self.props.submit_guard) {
-      (self.props.finish)()
-    }
+    // the process lifetime and blocks every later editor. `finish` releases
+    // only what this session acquired, so calling it unconditionally is safe
+    // and a late completion's own release stays a no-op.
+    (self.props.finish)()
     self.stop.close()
   }
 }
@@ -198,6 +208,25 @@ struct Controller {
   disposed: Bool,
 }
 
+// One editor presentation. Every closure handed to the component binds to the
+// session that created it, so a completion landing after its session was
+// replaced resolves against its own guard and ticket rather than the newest
+// session's. `holding` records whether this session actually acquired the
+// shared operation guard, which is what makes release idempotent.
+private struct Session {
+  submit_guard: Chan<Bool>,
+  ticket: modal_host::Ticket?,
+  holding: Bool,
+}
+
+private fn session() mut Session {
+  (mut Session{
+    submit_guard: Chan::new<Bool>(1),
+    ticket: Maybe::new<modal_host::Ticket>(),
+    holding: false,
+  })
+}
+
 fn new(
   ctx: mut cooper::Runtime,
   modal: mut modal_host::ModalHost,
@@ -224,6 +253,29 @@ fn new(
 }
 
 impl Controller {
+  // Acquire both guards for one session and record the acquisition.
+  private fn mut begin_session(active: mut Session) Bool {
+    if active.holding {
+      false
+    } else if begin_editor_submission(active.submit_guard, self.operation_guard) {
+      active.holding = true
+      true
+    } else {
+      false
+    }
+  }
+
+  // Idempotent: releases only the tokens this session acquired. Unmount
+  // cleanup followed by a late completion therefore pops the shared operation
+  // guard exactly once, and never the token a newer session is holding.
+  private fn mut release_session(active: mut Session) {
+    if active.holding {
+      active.holding = false
+      clear_submission(active.submit_guard)
+      clear_submission(self.operation_guard)
+    }
+  }
+
   private fn mut present(
     title: Str,
     footer: Str,
@@ -232,11 +284,10 @@ impl Controller {
     empty_error: Str,
     pending_label: Str,
     perform: fn(Str, Receiver<Bool>, fn(Str!Str)),
-    on_success: fn(Str),
+    on_success: fn(Str, Bool),
     error_title: Str,
   ) {
-    let submit_guard = Chan::new<Bool>(1)
-    let session_ticket = mut List::new<modal_host::Ticket>()
+    let active = session()
     let view = cui::child(
       editor,
       EditorProps{
@@ -245,23 +296,29 @@ impl Controller {
         placeholder: placeholder,
         empty_error: empty_error,
         pending_label: pending_label,
-        submit_guard: submit_guard,
+        submit_guard: active.submit_guard,
         begin: fn() Bool {
-          begin_editor_submission(submit_guard, self.operation_guard)
+          self.begin_session(active)
         },
         finish: fn() {
-          clear_submission(submit_guard)
-          clear_submission(self.operation_guard)
+          self.release_session(active)
         },
         perform: perform,
         // A disposed controller ignores late completions entirely.
         on_success: fn(value: Str) {
           if not self.disposed {
-            on_success(value)
+            // Close this session's own modal, never whichever modal happens to
+            // be current, so a late completion cannot dismiss a newer editor.
+            mut was_current = false
+            match active.ticket {
+              ticket => { was_current = self.close_ticket(ticket) },
+              _ => (),
+            }
+            on_success(value, was_current)
           }
         },
         is_current: fn() Bool {
-          match session_ticket.at(0) {
+          match active.ticket {
             ticket => self.modal.is_current(ticket),
             _ => false,
           }
@@ -275,9 +332,9 @@ impl Controller {
       key: "editor",
     )
     let ticket = self.modal.present_view(title, view, footer, self.restore_focus, fn() Bool {
-      not submission_active(submit_guard)
+      not submission_active(active.submit_guard)
     })
-    session_ticket.push(ticket)
+    active.ticket = Maybe::new(ticket)
     self.current_ticket = Maybe::new(ticket)
   }
 
@@ -304,13 +361,10 @@ impl Controller {
         fn(body: Str, stop: Receiver<Bool>, done: fn(Str!Str)) {
           (self.service.create_comment)(stop, issue_id, body, parent_id, done)
         },
-        fn(comment_id: Str) {
-          mut should_focus = false
-          match self.current_ticket {
-            ticket => { should_focus = self.close_ticket(ticket) },
-            _ => (),
-          }
-          self.on_comments_changed(comment_id, should_focus)
+        fn(comment_id: Str, was_current: Bool) {
+          // `was_current` is this session's own currency, so a superseded
+          // completion refreshes without stealing focus from a newer modal.
+          self.on_comments_changed(comment_id, was_current)
         },
         "Post comment",
       )
@@ -337,13 +391,7 @@ impl Controller {
             )
           })
         },
-        fn(description: Str) {
-          match self.current_ticket {
-            ticket => {
-              let _ = self.close_ticket(ticket)
-            },
-            _ => (),
-          }
+        fn(description: Str, was_current: Bool) {
           self.on_description_changed(description)
         },
         "Save description",

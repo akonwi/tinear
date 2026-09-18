@@ -34,7 +34,6 @@ struct InboxController {
   cached_details: [CachedDetail],
   stop: Chan<Bool>,
   disposed: Bool,
-  pending_focus: Bool,
   invalidate: fn(),
   service: inbox_service::Service,
   schedule: scheduler::Schedule,
@@ -216,7 +215,6 @@ fn new(
     cached_details: [],
     stop: Chan::new<Bool>(),
     disposed: false,
-    pending_focus: false,
     invalidate: fn() {},
     service: service,
     schedule: schedule,
@@ -352,7 +350,6 @@ impl InboxController {
           }
           self.update_terminal_title()
           (self.invalidate)()
-          self.retry_focus()
         }
       })
     }
@@ -517,35 +514,12 @@ impl InboxController {
     }
   }
 
-  // A screen that is still loading describes no focus target, or describes one
-  // inside a hidden subtree, so the claim is remembered and retried after the
-  // commit that first reveals it.
-  private fn mut apply_focus() Bool {
-    mut applied = false
+  fn mut focus() {
     match self.list_scroll.current {
       panel => {
-        applied = panel.focus()
+        let _ = panel.focus()
       },
       _ => (),
-    }
-    if applied {
-      self.pending_focus = false
-    }
-    applied
-  }
-
-  fn mut focus() {
-    self.pending_focus = true
-    let _ = self.apply_focus()
-  }
-
-  private fn mut retry_focus() {
-    if self.pending_focus and (not self.disposed) {
-      let _ = self.context.dispatch(fn() {
-        if self.pending_focus and (not self.disposed) {
-          let _ = self.apply_focus()
-        }
-      })
     }
   }
 

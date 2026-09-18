@@ -98,34 +98,37 @@ impl cui::Component for DocumentDetail {
           text_style: ui::text_style(foreground: palette.border, dim: true),
         ),
       )
-      children.push(
-        cui::scroll_box(
-          // Markdown stays imperative: Cooper's declarative text has no link
-          // callback, so the rendered control is bridged instead.
-          [cui_bridge::view(model.markdown.root, fn() {}, fn() {}, key: "markdown", destroy_on_unmount: false)],
-          ref: model.body,
-          styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_grow: 1.0),
-        ),
-      )
-    } else {
-      children.push(
+    }
+    let content = match loaded {
+      true => {
+        cui_bridge::view(
+          model.markdown.root,
+          fn() {},
+          fn() {},
+          key: "markdown",
+          destroy_on_unmount: false,
+        )
+      },
+      false => {
         cui::text(
           model.status,
           selectable: false,
-          styles: ui::style(
-            width: ui::percent(100.0),
-            height: ui::cells(1),
-            flex_grow: 1.0,
-            justify_content: ui::Justify::center,
-            align_items: ui::Align::center,
-          ),
           text_style: match model.status_danger {
             true => ui::text_style(foreground: palette.danger, bold: true),
             false => ui::text_style(dim: true),
           },
-        ),
-      )
+        )
+      },
     }
+    // Keep the focus/scroll target mounted across loading, failure, and success.
+    children.push(
+      cui::scroll_box(
+        [content],
+        key: "body",
+        ref: model.body,
+        styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_grow: 1.0),
+      ),
+    )
     cui::box(
       children.@,
       styles: ui::style(
@@ -156,7 +159,6 @@ struct DocumentDetailController {
   generation: Int,
   request: Int,
   disposed: Bool,
-  pending_focus: Bool,
   stop: Chan<Bool>,
   service: document_detail_service::Service,
   schedule: scheduler::Schedule,
@@ -202,7 +204,6 @@ fn new(
     generation: 0,
     request: 0,
     disposed: false,
-    pending_focus: false,
     stop: Chan::new<Bool>(),
     service: service,
     schedule: schedule,
@@ -243,33 +244,39 @@ impl DocumentDetailController {
         self.status = "Loading {self.cached_title}…"
         self.status_danger = false
       }
-      (self.service.load)(self.stop.receiver(), self.slug_id, fn(result: documents::Doc!Str) {
-        if (not self.disposed) and self.request == request {
-          match result {
-            ok(document) => self.show_document(document),
-            err(message) => {
-              match self.document.is_none() {
-                true => self.show_initial_error(message),
-                false => self.notify_error("Refresh document", message),
-              }
-            },
+      (self.service.load)(
+        self.stop.receiver(),
+        self.slug_id,
+        fn(result: documents::Doc!Str) {
+          if (not self.disposed) and self.request == request {
+            match result {
+              ok(document) => self.show_document(document),
+              err(message) => {
+                match self.document.is_none() {
+                  true => self.show_initial_error(message),
+                  false => self.notify_error("Refresh document", message),
+                }
+              },
+            }
+            (self.invalidate)()
           }
-          (self.invalidate)()
-          self.retry_focus()
-        }
-      })
+        },
+      )
       (self.invalidate)()
     }
   }
 
   private fn mut schedule_refresh() {
     (self.cancel_refresh)()
-    self.cancel_refresh = (self.schedule)(5 * 60 * 1000, fn() {
-      if not self.disposed {
-        self.refresh(true)
-        self.schedule_refresh()
-      }
-    })
+    self.cancel_refresh = (self.schedule)(
+      5 * 60 * 1000,
+      fn() {
+        if not self.disposed {
+          self.refresh(true)
+          self.schedule_refresh()
+        }
+      },
+    )
   }
 
   fn mut start() {
@@ -290,35 +297,12 @@ impl DocumentDetailController {
     }
   }
 
-  // A screen that is still loading describes no focus target, or describes one
-  // inside a hidden subtree, so the claim is remembered and retried after the
-  // commit that first reveals it.
-  private fn mut apply_focus() Bool {
-    mut applied = false
+  fn mut focus() {
     match self.body.current {
       panel => {
-        applied = panel.focus()
+        let _ = panel.focus()
       },
       _ => (),
-    }
-    if applied {
-      self.pending_focus = false
-    }
-    applied
-  }
-
-  fn mut focus() {
-    self.pending_focus = true
-    let _ = self.apply_focus()
-  }
-
-  private fn mut retry_focus() {
-    if self.pending_focus and (not self.disposed) {
-      let _ = self.context.dispatch(fn() {
-        if self.pending_focus and (not self.disposed) {
-          let _ = self.apply_focus()
-        }
-      })
     }
   }
 
