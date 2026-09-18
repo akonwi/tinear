@@ -1,4 +1,5 @@
 use cooper
+use cooper/cui
 use cooper/ui
 use go:strings
 use tinear/models/cache
@@ -9,20 +10,25 @@ use tinear/tui/shell_controller
 use tinear/tui/theme
 
 private fn basic_screen(ctx: mut cooper::Runtime, label: Str) shell_controller::Screen {
-  let root = ui::box(
-    ctx,
-    styles: ui::style(
-      width: ui::percent(100.0),
-      height: ui::percent(100.0),
-      flex_direction: ui::FlexDirection::column,
+  let panel = cui::box_ref()
+  shell_controller::declarative_screen(
+    view: cui::box(
+      [cui::text(label, selectable: true)],
+      on_key: fn(received: mut cooper::KeyEvent, context: cui::Context) {},
+      ref: panel,
+      styles: ui::style(
+        width: ui::percent(100.0),
+        height: ui::percent(100.0),
+        flex_direction: ui::FlexDirection::column,
+      ),
     ),
-  )
-  root.set_focusable(true)
-  root.add(ui::text(ctx, content: label, selectable: true))
-  shell_controller::imperative_screen(
-    root: root,
     focus: fn() {
-      let _ = root.focus()
+      match panel.current {
+        found => {
+          let _ = found.focus()
+        },
+        _ => (),
+      }
     },
     handle_key: fn(received: mut cooper::KeyEvent) Bool {
       false
@@ -31,42 +37,74 @@ private fn basic_screen(ctx: mut cooper::Runtime, label: Str) shell_controller::
   )
 }
 
-private fn inbox_screen(ctx: mut cooper::Runtime) shell_controller::Screen {
-  let root = ui::box(
-    ctx,
-    styles: ui::style(
-      width: ui::percent(100.0),
-      height: ui::percent(100.0),
-      flex_direction: ui::FlexDirection::column,
-    ),
-  )
-  let copy = ui::text(ctx, content: "COPY-ME", selectable: true)
-  let editor = ui::text_area(
-    ctx,
-    placeholder: "Paste here…",
-    styles: ui::style(width: ui::percent(100.0), height: ui::cells(3), flex_shrink: 0.0),
-  )
-  let status = ui::text(ctx, content: "value: empty", selectable: false)
-  let scroll = ui::scroll_box(
-    ctx,
-    styles: ui::style(width: ui::percent(100.0), height: ui::cells(5), flex_shrink: 0.0),
-  )
-  mut index = 0
-  while index < 20 {
-    scroll.add(ui::text(ctx, content: "scroll row {index}", selectable: true))
-    index =+ 1
+// Controlled state for the PTY fixture's editable row.
+private struct InboxState {
+  value: Str,
+  editor: mut cui::TextAreaRef,
+}
+
+private struct InboxProps {
+  state: mut InboxState,
+}
+
+private struct InboxView {
+  props: mut InboxProps,
+}
+
+private fn inbox_view(props: mut InboxProps) mut InboxView {
+  (mut InboxView{props: props})
+}
+
+impl cui::Component for InboxView {
+  fn mut render() cui::View {
+    let state = self.props.state
+    let rows = mut List::new<cui::View>()
+    mut index = 0
+    while index < 20 {
+      rows.push(cui::text("scroll row {index}", selectable: true))
+      index =+ 1
+    }
+    cui::box(
+      [
+        cui::text("COPY-ME", selectable: true),
+        cui::text_area(
+          state.value,
+          placeholder: "Paste here…",
+          ref: state.editor,
+          on_input: fn(value: Str, context: cui::Context) {
+            state.value = value
+          },
+          styles: ui::style(width: ui::percent(100.0), height: ui::cells(3), flex_shrink: 0.0),
+        ),
+        cui::text(
+          "value: {strings::ReplaceAll(state.value, "\n", "↵")}",
+          selectable: false,
+        ),
+        cui::scroll_box(
+          rows.@,
+          styles: ui::style(width: ui::percent(100.0), height: ui::cells(5), flex_shrink: 0.0),
+        ),
+      ],
+      styles: ui::style(
+        width: ui::percent(100.0),
+        height: ui::percent(100.0),
+        flex_direction: ui::FlexDirection::column,
+      ),
+    )
   }
-  root.add(copy)
-  root.add(editor)
-  root.add(status)
-  root.add(scroll)
-  let _ = editor.on_input(fn(value: Str) {
-    status.set_content("value: {strings::ReplaceAll(value, "\n", "↵")}")
-  })
-  shell_controller::imperative_screen(
-    root: root,
+}
+
+private fn inbox_screen(ctx: mut cooper::Runtime) shell_controller::Screen {
+  let state = mut InboxState{value: "", editor: cui::text_area_ref()}
+  shell_controller::declarative_screen(
+    view: cui::child(inbox_view, InboxProps{state: state}, key: "pty-inbox"),
     focus: fn() {
-      let _ = editor.focus()
+      match state.editor.current {
+        found => {
+          let _ = found.focus()
+        },
+        _ => (),
+      }
     },
     handle_key: fn(received: mut cooper::KeyEvent) Bool {
       false

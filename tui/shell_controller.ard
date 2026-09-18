@@ -5,33 +5,15 @@ use go:strings
 use tinear/models/cache
 use tinear/models/shell as shell_model
 use tinear/models/tabs
-use tinear/tui/cui_bridge
 use tinear/tui/hints_bar
 use tinear/tui/theme as tinear_theme
 
-// A shell page. Imperative screens supply `root`; declarative screens supply
-// `view` and are wrapped in a visibility box by the shell.
+// A shell page. The shell wraps each screen's view in a visibility box.
 struct Screen {
-  root: (mut ui::Box)?,
   view: cui::View?,
   focus: fn(),
   handle_key: fn(mut cooper::KeyEvent) Bool,
   dispose: fn(),
-}
-
-fn imperative_screen(
-  root: mut ui::Box,
-  focus: fn(),
-  handle_key: fn(mut cooper::KeyEvent) Bool,
-  dispose: fn(),
-) Screen {
-  Screen{
-    root: Maybe::new(root),
-    view: Maybe::new<cui::View>(),
-    focus: focus,
-    handle_key: handle_key,
-    dispose: dispose,
-  }
 }
 
 fn declarative_screen(
@@ -41,7 +23,6 @@ fn declarative_screen(
   dispose: fn(),
 ) Screen {
   Screen{
-    root: Maybe::new<mut ui::Box>(),
     view: Maybe::new(view),
     focus: focus,
     handle_key: handle_key,
@@ -66,6 +47,10 @@ struct ShellController {
   on_search: fn(),
   on_create: fn(),
   invalidate: fn(),
+  // Declarative pages only become visible at the next commit, and a control
+  // inside a `display: none` subtree cannot take focus, so the focus claim is
+  // deferred past that commit.
+  focus_later: fn(),
   palette: tinear_theme::Theme,
   disposed: Bool,
 }
@@ -93,8 +78,6 @@ private fn body_style(current: ui::Style, display: ui::Display) ui::Style {
   updated.@
 }
 
-// Imperative pages keep their own root styling (visibility is applied to the
-// control); declarative pages are wrapped in a visibility box.
 private fn page(screen: Screen, key: Str, visible: Bool) cui::View {
   match screen.view {
     view => {
@@ -110,12 +93,7 @@ private fn page(screen: Screen, key: Str, visible: Bool) cui::View {
         ),
       )
     },
-    _ => {
-      match screen.root {
-        root => cui_bridge::view(root, fn() {}, fn() {}, key: key),
-        _ => cui::box([], key: key),
-      }
-    },
+    _ => cui::box([], key: key),
   }
 }
 
@@ -123,23 +101,6 @@ private fn tab_key(reference: tabs::TabRef) Str {
   match reference.kind {
     tabs::Kind::issue => "tab-issue-{reference.id}",
     tabs::Kind::doc => "tab-doc-{reference.id}",
-  }
-}
-
-private fn show_screen(screen: Screen, visible: Bool) {
-  match screen.root {
-    root => {
-      root.set_style(
-        body_style(
-          root.style(),
-          match visible {
-            true => ui::Display::flex,
-            false => ui::Display::none,
-          },
-        ),
-      )
-    },
-    _ => (),
   }
 }
 
@@ -230,7 +191,13 @@ private fn tabs_component(props: mut TabsProps) mut Tabs {
 
 impl cui::Lifecycle for Tabs {
   fn mut mounted(ctx: cui::Context) {
-    self.props.controller.invalidate = ctx.invalidate_root
+    let controller = self.props.controller
+    controller.invalidate = ctx.invalidate_root
+    controller.focus_later = fn() {
+      let _ = ctx.dispatch(fn() {
+        controller.focus_active()
+      })
+    }
     // Screen focus is imperative and needs mounted refs, so claim it after the
     // first commit rather than at construction time.
     let _ = ctx.dispatch(fn() {
@@ -240,6 +207,7 @@ impl cui::Lifecycle for Tabs {
 
   fn mut unmounting(ctx: cui::Context) {
     self.props.controller.invalidate = fn() {}
+    self.props.controller.focus_later = fn() {}
   }
 }
 
@@ -440,13 +408,13 @@ fn new(
     on_search: on_search,
     on_create: on_create,
     invalidate: fn() {},
+    focus_later: fn() {},
     palette: palette,
     disposed: false,
   }
   for reference in initial_model.tabs {
     controller.ensure_dynamic(reference)
   }
-  controller.apply_visibility()
   controller
 }
 
@@ -472,16 +440,7 @@ impl ShellController {
 
   // Page visibility is applied directly to bridged screen roots so it holds
   // whether or not a render has committed yet.
-  private fn mut apply_visibility() {
-    show_screen(self.inbox, self.model.tab_index == 0)
-    show_screen(self.board, self.model.tab_index == 1)
-    for dynamic, index in self.dynamic_screens {
-      show_screen(dynamic.screen, self.model.tab_index == 2 + index)
-    }
-  }
-
   private fn mut apply_selection(should_persist: Bool) {
-    self.apply_visibility()
     (self.invalidate)()
     if should_persist {
       self.persist(shell_model::snapshot(self.model))
@@ -506,7 +465,7 @@ impl ShellController {
     if not self.disposed {
       self.model = shell_model::select_tab(self.model, index)
       self.apply_selection(true)
-      self.focus_active()
+      (self.focus_later)()
     }
   }
 
@@ -515,7 +474,7 @@ impl ShellController {
       self.ensure_dynamic(reference)
       self.model = shell_model::open(self.model, reference)
       self.apply_selection(true)
-      self.focus_active()
+      (self.focus_later)()
     }
   }
 
@@ -560,7 +519,7 @@ impl ShellController {
         self.dynamic_screens = remaining.@
         self.apply_selection(true)
         if was_selected {
-          self.focus_active()
+          (self.focus_later)()
         }
         true
       }

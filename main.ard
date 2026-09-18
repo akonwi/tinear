@@ -1,4 +1,5 @@
 use cooper
+use cooper/cui
 use cooper/ui
 use tinear/config
 use tinear/events
@@ -52,23 +53,32 @@ private struct DetailActions {
 }
 
 private fn placeholder_screen(ctx: mut cooper::Runtime, title: Str, message: Str) shell_controller::Screen {
-  let root = ui::box(
-    ctx,
-    styles: ui::style(
-      width: ui::percent(100.0),
-      height: ui::percent(100.0),
-      padding: ui::edges(ui::cells(1)),
-      flex_direction: ui::FlexDirection::column,
-      gap: ui::cells(1),
+  let panel = cui::box_ref()
+  shell_controller::declarative_screen(
+    view: cui::box(
+      [
+        cui::text(title, text_style: ui::text_style(bold: true)),
+        cui::text(message, text_style: ui::text_style(dim: true)),
+      ],
+      // A no-op key handler is what makes the panel focusable; describing
+      // `focused` instead would re-assert focus on every commit.
+      on_key: fn(received: mut cooper::KeyEvent, context: cui::Context) {},
+      ref: panel,
+      styles: ui::style(
+        width: ui::percent(100.0),
+        height: ui::percent(100.0),
+        padding: ui::edges(ui::cells(1)),
+        flex_direction: ui::FlexDirection::column,
+        gap: ui::cells(1),
+      ),
     ),
-  )
-  root.set_focusable(true)
-  root.add(ui::text(ctx, content: title, text_style: ui::text_style(bold: true)))
-  root.add(ui::text(ctx, content: message, text_style: ui::text_style(dim: true)))
-  shell_controller::imperative_screen(
-    root: root,
     focus: fn() {
-      let _ = root.focus()
+      match panel.current {
+        found => {
+          let _ = found.focus()
+        },
+        _ => (),
+      }
     },
     handle_key: fn(received: mut cooper::KeyEvent) Bool {
       false
