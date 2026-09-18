@@ -11,20 +11,8 @@ use tinear/tui/shell_controller
 use tinear/tui/theme as tinear_theme
 use tinear/tui/timestamp
 
-// Facade-owned state; the component describes it and the controller mutates it
-// from service completions and key handling.
-struct Model {
-  cached_title: Str,
-  document: documents::Doc?,
-  status: Str,
-  status_danger: Bool,
-  body: mut cui::ScrollBoxRef,
-}
-
 struct DocumentDetailProps {
-  model: mut Model,
-  markdown: mut markdown_controller::MarkdownController,
-  palette: tinear_theme::Theme,
+  controller: mut DocumentDetailController,
 }
 
 struct DocumentDetail {
@@ -52,10 +40,22 @@ private fn metadata_line(
   )
 }
 
+// The render request is bound at mount instead of injected at construction, so
+// the controller needs no `notify` wiring from its host or its tests.
+impl cui::Lifecycle for DocumentDetail {
+  fn mut mounted(ctx: cui::Context) {
+    self.props.controller.invalidate = ctx.invalidate_root
+  }
+
+  fn mut unmounting(ctx: cui::Context) {
+    self.props.controller.invalidate = fn() {}
+  }
+}
+
 impl cui::Component for DocumentDetail {
   fn mut render() cui::View {
-    let model = self.props.model
-    let palette = self.props.palette
+    let model = self.props.controller
+    let palette = model.palette
     let loaded = model.document.is_some()
     let row = ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0)
     let children = mut List::new<cui::View>()
@@ -102,7 +102,7 @@ impl cui::Component for DocumentDetail {
         cui::scroll_box(
           // Markdown stays imperative: Cooper's declarative text has no link
           // callback, so the rendered control is bridged instead.
-          [cui_bridge::view(self.props.markdown.root, fn() {}, fn() {}, key: "markdown", destroy_on_unmount: false)],
+          [cui_bridge::view(model.markdown.root, fn() {}, fn() {}, key: "markdown", destroy_on_unmount: false)],
           ref: model.body,
           styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_grow: 1.0),
         ),
@@ -146,7 +146,11 @@ impl cui::Component for DocumentDetail {
 
 struct DocumentDetailController {
   context: mut cooper::Runtime,
-  model: mut Model,
+  cached_title: Str,
+  document: documents::Doc?,
+  status: Str,
+  status_danger: Bool,
+  body: mut cui::ScrollBoxRef,
   markdown: mut markdown_controller::MarkdownController,
   slug_id: Str,
   generation: Int,
@@ -156,7 +160,7 @@ struct DocumentDetailController {
   service: document_detail_service::Service,
   schedule: scheduler::Schedule,
   cancel_refresh: fn(),
-  notify: fn(),
+  invalidate: fn(),
   on_title: fn(Str),
   on_open_url: fn(Str),
   notify_error: fn(Str, Str),
@@ -170,7 +174,6 @@ fn new(
   cached_title: Str,
   service: document_detail_service::Service,
   schedule: scheduler::Schedule,
-  notify: fn(),
   on_title: fn(Str),
   on_open_url: fn(Str),
   notify_error: fn(Str, Str),
@@ -178,13 +181,6 @@ fn new(
   let loading_title = match cached_title.is_empty() {
     true => "document",
     false => cached_title,
-  }
-  let model = mut Model{
-    cached_title: cached_title,
-    document: Maybe::new<documents::Doc>(),
-    status: "Loading {loading_title}…",
-    status_danger: false,
-    body: cui::scroll_box_ref(),
   }
   let markdown = markdown_controller::new(
     ctx,
@@ -195,7 +191,11 @@ fn new(
   )
   (mut DocumentDetailController{
     context: ctx,
-    model: model,
+    cached_title: cached_title,
+    document: Maybe::new<documents::Doc>(),
+    status: "Loading {loading_title}…",
+    status_danger: false,
+    body: cui::scroll_box_ref(),
     markdown: markdown,
     slug_id: slug_id,
     generation: 0,
@@ -205,7 +205,7 @@ fn new(
     service: service,
     schedule: schedule,
     cancel_refresh: fn() {},
-    notify: notify,
+    invalidate: fn() {},
     on_title: on_title,
     on_open_url: on_open_url,
     notify_error: notify_error,
@@ -215,21 +215,21 @@ fn new(
 
 impl DocumentDetailController {
   private fn mut show_document(document: documents::Doc) {
-    self.model.document = Maybe::new(document)
+    self.document = Maybe::new(document)
     self.markdown.set_source(document.content.or(""))
-    if document.meta.title != self.model.cached_title {
-      self.model.cached_title = document.meta.title
+    if document.meta.title != self.cached_title {
+      self.cached_title = document.meta.title
       self.on_title(document.meta.title)
     }
   }
 
   private fn mut show_initial_error(message: Str) {
-    let title = match self.model.cached_title.is_empty() {
+    let title = match self.cached_title.is_empty() {
       true => "document",
-      false => self.model.cached_title,
+      false => self.cached_title,
     }
-    self.model.status = "Couldn't load {title}: {message}"
-    self.model.status_danger = true
+    self.status = "Couldn't load {title}: {message}"
+    self.status_danger = true
   }
 
   fn mut refresh(silent: Bool) {
@@ -237,25 +237,25 @@ impl DocumentDetailController {
       self.request =+ 1
       let request = self.request
       self.generation = request
-      if (not silent) and self.model.document.is_none() {
-        self.model.status = "Loading {self.model.cached_title}…"
-        self.model.status_danger = false
+      if (not silent) and self.document.is_none() {
+        self.status = "Loading {self.cached_title}…"
+        self.status_danger = false
       }
       (self.service.load)(self.stop.receiver(), self.slug_id, fn(result: documents::Doc!Str) {
         if (not self.disposed) and self.request == request {
           match result {
             ok(document) => self.show_document(document),
             err(message) => {
-              match self.model.document.is_none() {
+              match self.document.is_none() {
                 true => self.show_initial_error(message),
                 false => self.notify_error("Refresh document", message),
               }
             },
           }
-          (self.notify)()
+          (self.invalidate)()
         }
       })
-      (self.notify)()
+      (self.invalidate)()
     }
   }
 
@@ -277,7 +277,7 @@ impl DocumentDetailController {
   }
 
   private fn mut open_browser() {
-    match self.model.document {
+    match self.document {
       loaded => {
         if not loaded.meta.url.is_empty() {
           self.on_open_url(loaded.meta.url)
@@ -288,7 +288,7 @@ impl DocumentDetailController {
   }
 
   fn mut focus() {
-    match self.model.body.current {
+    match self.body.current {
       panel => {
         let _ = panel.focus()
       },
@@ -297,7 +297,7 @@ impl DocumentDetailController {
   }
 
   private fn mut scroll_by(delta: Int) {
-    match self.model.body.current {
+    match self.body.current {
       panel => {
         let _ = panel.scroll_by(delta)
       },
@@ -330,11 +330,7 @@ impl DocumentDetailController {
   fn mut view() cui::View {
     cui::child(
       document_detail,
-      DocumentDetailProps{
-        model: self.model,
-        markdown: self.markdown,
-        palette: self.palette,
-      },
+      DocumentDetailProps{controller: self},
       key: "document-{self.slug_id}",
     )
   }

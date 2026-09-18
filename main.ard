@@ -92,9 +92,6 @@ private fn document_detail_screen(
     reference.title,
     document_detail_service::live(ctx, api_key),
     scheduler::for_context(ctx),
-    fn() {
-      application_shell.invalidate()
-    },
     on_title,
     fn(target: Str) {
       match url::open(ctx, target) {

@@ -70,16 +70,11 @@ private fn key(name: Str) mut cooper::KeyEvent {
   )
 }
 
-private struct Notifier {
-  invalidate: fn(),
-}
-
 private fn controller(
   application: testing::TestApp,
   fake: mut FakeState,
   scheduled: mut Scheduled,
   actions: mut Actions,
-  notifier: mut Notifier,
 ) mut document_detail_controller::DocumentDetailController {
   document_detail_controller::new(
     application.context,
@@ -88,9 +83,6 @@ private fn controller(
     "Cached title",
     service(fake),
     schedule(scheduled),
-    fn() {
-      (notifier.invalidate)()
-    },
     fn(title: Str) {
       actions.titles.push(title)
     },
@@ -113,13 +105,9 @@ test fn document_detail_loads_retitles_renders_and_routes_commands() Void!Str {
     opened_url: "",
     errors: 0,
   }
-  let notifier = mut Notifier{invalidate: fn() {}}
-  let detail = controller(application, fake, scheduled, actions, notifier)
+  let detail = controller(application, fake, scheduled, actions)
   let mounted = renderer::mount(application.context, application.root, detail.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   detail.start()
   try assertions::assert(fake.loads.size() == 1, "document should load once")
@@ -173,25 +161,21 @@ test fn document_detail_initial_error_retries_to_empty_content() Void!Str {
     opened_url: "",
     errors: 0,
   }
-  let notifier = mut Notifier{invalidate: fn() {}}
-  let detail = controller(application, fake, scheduled, actions, notifier)
+  let detail = controller(application, fake, scheduled, actions)
   let mounted = renderer::mount(application.context, application.root, detail.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   detail.start()
   (fake.loads.at(0).expect("initial load"))(Result::err("forbidden"))
   try assertions::assert(
-    detail.model.status.contains("Couldn't load Cached title: forbidden"),
+    detail.status.contains("Couldn't load Cached title: forbidden"),
     "initial document errors should be visible",
   )
   detail.refresh(false)
   let empty = mut document("Empty document", "ignored")
   empty.content = Maybe::new<Str>()
   (fake.loads.at(1).expect("retry"))(Result::ok(empty.@))
-  try assertions::assert(detail.model.document.is_some(), "successful retry should retain document metadata")
+  try assertions::assert(detail.document.is_some(), "successful retry should retain document metadata")
   assertions::assert(
     detail.markdown.source.is_empty(),
     "null document content should render as empty",
@@ -208,13 +192,9 @@ test fn document_detail_rejects_stale_load_and_preserves_content_on_refresh_fail
     opened_url: "",
     errors: 0,
   }
-  let notifier = mut Notifier{invalidate: fn() {}}
-  let detail = controller(application, fake, scheduled, actions, notifier)
+  let detail = controller(application, fake, scheduled, actions)
   let mounted = renderer::mount(application.context, application.root, detail.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   detail.start()
   detail.refresh(true)
@@ -223,7 +203,7 @@ test fn document_detail_rejects_stale_load_and_preserves_content_on_refresh_fail
     "two loads should advance generation to {detail.generation}",
   )
   (fake.loads.at(0).expect("stale load"))(Result::ok(document("Stale", "Old")))
-  try assertions::assert(detail.model.document.is_none(), "older load should be ignored")
+  try assertions::assert(detail.document.is_none(), "older load should be ignored")
   (fake.loads.at(1).expect("current load"))(Result::ok(document("Current", "Visible")))
   detail.refresh(true)
   (fake.loads.at(2).expect("failed refresh"))(Result::err("offline"))
@@ -246,19 +226,15 @@ test fn document_detail_disposal_stops_refresh_and_late_completion() Void!Str {
     opened_url: "",
     errors: 0,
   }
-  let notifier = mut Notifier{invalidate: fn() {}}
-  let detail = controller(application, fake, scheduled, actions, notifier)
+  let detail = controller(application, fake, scheduled, actions)
   let mounted = renderer::mount(application.context, application.root, detail.view())
   defer mounted.destroy()
-  notifier.invalidate = fn() {
-    mounted.invalidate()
-  }
   let _ = application.flush()
   detail.start()
   detail.dispose()
   try assertions::assert(scheduled.cancellations == 1, "dispose should cancel periodic refresh")
   (fake.loads.at(0).expect("late load"))(Result::ok(document("Late", "Ignored")))
-  try assertions::assert(detail.model.document.is_none(), "disposed detail should ignore late completion")
+  try assertions::assert(detail.document.is_none(), "disposed detail should ignore late completion")
   (scheduled.actions.at(0).expect("scheduled refresh"))()
   assertions::assert(
     fake.loads.size() == 1,
