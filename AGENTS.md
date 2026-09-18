@@ -30,11 +30,17 @@ The Ard dependency is pinned to a remote Cooper commit; `../cooper` remains the 
   specialized APIs and test event constructors.
 - Screens split a controller from a component: the controller owns data,
   requests, and cancellation; the component is passed the controller as its
-  only prop and renders it. The split is not optional — `ctx.on_key` handlers
-  return nothing, so key consumption and precedence (modal, then shell
-  globals, then the active screen) cannot be expressed declaratively, and the
-  shell needs an imperative handle per screen. CUI has no component refs, so
-  the controller is that handle.
+  only prop and renders it. The controller doubles as the handle the shell
+  needs for key routing and focus.
+- That split is a deliberate choice, not a framework limit. Keys can be
+  consumed declaratively: view-level `on_key` bubbles from the focused node to
+  the root and stops at `stop_propagation()`, and `ctx.on_key` subscriptions
+  see the same mutable event. Cooper's `examples/cui_tinear.ard` routes a
+  similar app that way. Tinear instead routes every key through
+  `application_shell` with explicit precedence (modal, shell globals, then the
+  active screen), which does not depend on focus being correct. Focus has been
+  the fragile part of this codebase, so keep that independence unless you are
+  deliberately redesigning routing.
 - Controllers request renders through `self.invalidate`, bound to
   `ctx.invalidate_root` by the component's `mounted` hook and reset to a no-op
   on `unmounting`. Never take a render callback as a constructor argument.
