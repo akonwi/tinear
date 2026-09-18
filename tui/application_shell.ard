@@ -131,14 +131,6 @@ impl ApplicationShell {
     })
   }
 
-  // UI-thread render request for facades that mutate state outside CUI
-  // callbacks (key routing, async completions).
-  fn mut invalidate() {
-    if not self.disposed {
-      self.cui.invalidate()
-    }
-  }
-
   fn mut handle_key(received: mut cooper::KeyEvent, current_selection: ui::Selection?) Bool {
     if self.disposed or received.event_type == cooper::KeyEventType::release {
       false

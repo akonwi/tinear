@@ -28,10 +28,16 @@ The Ard dependency is pinned to a remote Cooper commit; `../cooper` remains the 
   event types, `cooper/ui` for styles and view values, and `cooper/cui` for
   components. Keep `cooper/animation`, `cooper/testing`, and `cooper/event` to
   specialized APIs and test event constructors.
-- Screens follow a facade + view split: a controller owns data, requests, and
-  cancellation, and a component renders it. The controller calls its injected
-  `notify` hook to request a render after mutations that originate outside CUI
-  callbacks (key routing and service completions).
+- Screens split a controller from a component: the controller owns data,
+  requests, and cancellation; the component is passed the controller as its
+  only prop and renders it. The split is not optional — `ctx.on_key` handlers
+  return nothing, so key consumption and precedence (modal, then shell
+  globals, then the active screen) cannot be expressed declaratively, and the
+  shell needs an imperative handle per screen. CUI has no component refs, so
+  the controller is that handle.
+- Controllers request renders through `self.invalidate`, bound to
+  `ctx.invalidate_root` by the component's `mounted` hook and reset to a no-op
+  on `unmounting`. Never take a render callback as a constructor argument.
 - `render` must be deterministic and effect-free. Mutate state in event
   callbacks and lifecycle hooks only.
 - Describe focus with state (see the issue creation form's `FormFocus`).
@@ -54,8 +60,8 @@ The Ard dependency is pinned to a remote Cooper commit; `../cooper` remains the 
   `present` for imperative bodies.
 - Prefer deterministic Cooper `TestApp` coverage for UI behavior and PTY tests
   only for terminal integration. Tests drive a renderer with
-  `cui/renderer::mount`, wire `notify` to `renderer.invalidate`, and must
-  `flush()` before `render()` to commit queued renders.
+  `cui/renderer::mount` and must `flush()` before `render()` to commit queued
+  renders. Mounting is all the wiring a controller needs.
 - Cross-view sync happens over the shell-scoped event bus (`events.ard`): mutation sites publish, data-owning controllers
   subscribe with a silent refresh, and every subscription's unsubscribe fn must
   run in the owner's dispose path. Publish only from the dispatch context;
