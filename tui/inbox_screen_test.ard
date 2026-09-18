@@ -1,12 +1,15 @@
 use ard/testing as assertions
 
 use cooper
-use cooper/event
+use cooper/cui
 use cooper/cui/renderer
+use cooper/event
 use cooper/testing
+use tinear/events
 use tinear/models/inbox
 use tinear/services/inbox_service
-use tinear/tui/inbox_controller
+use tinear/tui/inbox_screen
+use tinear/tui/screen_route
 use tinear/tui/theme
 
 private struct DetailAttempt {
@@ -160,8 +163,8 @@ test fn inbox_loads_rows_and_discards_stale_detail_completion() Void!Str {
     archives: [],
   }
   let opened = mut Calls{value: "", count: 0}
-  let controller = inbox_controller::new(
-    application.context,
+  let fixture = mount_inbox(
+    application,
     theme::new(),
     fake_service(fake),
     no_schedule,
@@ -172,10 +175,10 @@ test fn inbox_loads_rows_and_discards_stale_detail_completion() Void!Str {
     fn(url: Str) {},
     fn(title: Str, message: Str) {},
   )
-  let mounted = renderer::mount(application.context, application.root, controller.view())
+  let mounted = fixture.mounted
+  let component = fixture.component
   defer mounted.destroy()
   let _ = application.flush()
-  controller.start()
   try assertions::assert(fake.loads.size() == 1, "start should request Inbox")
   (fake.loads.at(0).expect("load"))(
     Result::ok(
@@ -185,7 +188,7 @@ test fn inbox_loads_rows_and_discards_stale_detail_completion() Void!Str {
       ],
     ),
   )
-  try assertions::assert(controller.items.size() == 2, "loaded notifications should create rows")
+  try assertions::assert(component.items.size() == 2, "loaded notifications should create rows")
   try assertions::assert(
     application.terminal_titles().at(0).expect("Inbox terminal title") == "tinear (2)",
     "loaded notification count should update the terminal title",
@@ -226,18 +229,18 @@ test fn inbox_loads_rows_and_discards_stale_detail_completion() Void!Str {
     "leaving a row should restore its terminal-default background",
   )
   application.click(3, 5)
-  try assertions::assert(controller.cursor == 0, "clicking row spacing should not select an item")
+  try assertions::assert(component.cursor == 0, "clicking row spacing should not select an item")
   let divider = application.frame().cell(60, 0).expect("Inbox pane divider")
   try assertions::assert(
     divider.grapheme == "│" and divider.style.dim,
     "Inbox panes should use a dim divider",
   )
   try assertions::assert(
-    controller.detail_scroll.current.expect("detail pane").layout().screen.width > controller.list_scroll.current.expect("list pane").layout().screen.width,
+    component.detail_scroll.current.expect("detail pane").layout().screen.width > component.list_scroll.current.expect("list pane").layout().screen.width,
     "notification list should be a sidebar beside a larger detail pane",
   )
-  try assertions::assert(controller.handle_key(key("down", "")), "Down should move selection")
-  try assertions::assert(controller.cursor == 1, "cursor should move to second item")
+  try assertions::assert(component.handle_key(key("down", "")), "Down should move selection")
+  try assertions::assert(component.cursor == 1, "cursor should move to second item")
   try assertions::assert(fake.details.size() == 2, "selection should request new detail")
   try assertions::assert(
     detail_text(application).contains("Title AKO-2") and not detail_text(application).contains("Title AKO-1"),
@@ -256,29 +259,29 @@ test fn inbox_loads_rows_and_discards_stale_detail_completion() Void!Str {
   try testing::assert_contains(application.frame().text(), "Alex commented")
   for size in [[60, 20], [100, 30], [160, 40]] {
     application.resize(size.at(0).expect("width"), size.at(1).expect("height"))
-    try assertions::assert(controller.cursor == 1, "resize should preserve Inbox selection")
+    try assertions::assert(component.cursor == 1, "resize should preserve Inbox selection")
     try assertions::assert(
-      controller.list_scroll.current.expect("list pane").layout().screen.width > 0,
+      component.list_scroll.current.expect("list pane").layout().screen.width > 0,
       "list pane should remain visible",
     )
     try assertions::assert(
-      controller.detail_scroll.current.expect("detail pane").layout().screen.width > 0,
+      component.detail_scroll.current.expect("detail pane").layout().screen.width > 0,
       "detail pane should remain visible",
     )
     try testing::assert_contains(application.frame().text(), "Current detail")
   }
 
-  let _ = controller.handle_key(key("up", ""))
+  let _ = component.handle_key(key("up", ""))
   (fake.details.at(2).expect("first detail refresh").completion)(
     Result::ok(detail("AKO-1", "First detail")),
   )
-  let _ = controller.handle_key(key("down", ""))
+  let _ = component.handle_key(key("down", ""))
   try assertions::assert(
     detail_text(application).contains("Current detail"),
     "returning to a loaded notification should render cached detail immediately",
   )
 
-  try assertions::assert(controller.handle_key(key("return", "")), "Enter should open issue")
+  try assertions::assert(component.handle_key(key("return", "")), "Enter should open issue")
   try assertions::assert(opened.value == "AKO-2", "selected issue identifier should open")
   assertions::assert(opened.count == 1, "open callback should run once")
 }
@@ -293,8 +296,8 @@ test fn inbox_opens_pr_in_browser_and_archives_optimistically() Void!Str {
   }
   let browser = mut Calls{value: "", count: 0}
   let errors = mut Calls{value: "", count: 0}
-  let controller = inbox_controller::new(
-    application.context,
+  let fixture = mount_inbox(
+    application,
     theme::new(),
     fake_service(fake),
     no_schedule,
@@ -308,10 +311,10 @@ test fn inbox_opens_pr_in_browser_and_archives_optimistically() Void!Str {
       errors.count =+ 1
     },
   )
-  let mounted = renderer::mount(application.context, application.root, controller.view())
+  let mounted = fixture.mounted
+  let component = fixture.component
   defer mounted.destroy()
   let _ = application.flush()
-  controller.start()
   (fake.loads.at(0).expect("load"))(
     Result::ok(
       [
@@ -321,10 +324,10 @@ test fn inbox_opens_pr_in_browser_and_archives_optimistically() Void!Str {
     ),
   )
 
-  try assertions::assert(controller.handle_key(key("return", "")), "Enter should open PR")
+  try assertions::assert(component.handle_key(key("return", "")), "Enter should open PR")
   try assertions::assert(browser.value.ends_with("/pull/7"), "PR should open provider URL")
-  try assertions::assert(controller.handle_key(key("backspace", "")), "Backspace should archive")
-  try assertions::assert(controller.items.size() == 1, "archive should remove row immediately")
+  try assertions::assert(component.handle_key(key("backspace", "")), "Backspace should archive")
+  try assertions::assert(component.items.size() == 1, "archive should remove row immediately")
   try assertions::assert(
     application.terminal_titles().at(1).expect("archived Inbox terminal title") == "tinear (1)",
     "optimistic archive should update the terminal title",
@@ -337,8 +340,8 @@ test fn inbox_opens_pr_in_browser_and_archives_optimistically() Void!Str {
     "archive error title should be clear",
   )
 
-  try assertions::assert(controller.handle_key(key("backspace", "")), "final item should archive")
-  try assertions::assert(controller.items.size() == 0, "final archive should empty Inbox")
+  try assertions::assert(component.handle_key(key("backspace", "")), "final item should archive")
+  try assertions::assert(component.items.size() == 0, "final archive should empty Inbox")
   try assertions::assert(
     application.terminal_titles().at(2).expect("empty Inbox terminal title") == "tinear",
     "empty Inbox should clear the terminal title count",
@@ -361,8 +364,8 @@ test fn inbox_refresh_preserves_selection_by_notification_id() Void!Str {
     archives: [],
   }
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
-  let controller = inbox_controller::new(
-    application.context,
+  let fixture = mount_inbox(
+    application,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
@@ -370,14 +373,14 @@ test fn inbox_refresh_preserves_selection_by_notification_id() Void!Str {
     fn(url: Str) {},
     fn(title: Str, message: Str) {},
   )
-  let mounted = renderer::mount(application.context, application.root, controller.view())
+  let mounted = fixture.mounted
+  let component = fixture.component
   defer mounted.destroy()
   let _ = application.flush()
-  controller.start()
   (fake.loads.at(0).expect("load"))(
     Result::ok([item("n1", "AKO-1", "issueMention", ""), item("n2", "AKO-2", "issueMention", "")]),
   )
-  let _ = controller.handle_key(key("down", ""))
+  let _ = component.handle_key(key("down", ""))
   try assertions::assert(scheduled.actions.size() == 1, "start should schedule periodic refresh")
   (scheduled.actions.at(0).expect("periodic refresh"))()
   try assertions::assert(fake.loads.size() == 2, "periodic refresh should request new list")
@@ -385,12 +388,12 @@ test fn inbox_refresh_preserves_selection_by_notification_id() Void!Str {
   (fake.loads.at(1).expect("refresh"))(
     Result::ok([item("n2", "AKO-2", "issueMention", ""), item("n3", "AKO-3", "issueMention", "")]),
   )
-  try assertions::assert(controller.cursor == 0, "selected id should move with reordered results")
+  try assertions::assert(component.cursor == 0, "selected id should move with reordered results")
   try assertions::assert(
-    controller.items.at(0).expect("selected").notification_id == "n2",
+    component.items.at(0).expect("selected").notification_id == "n2",
     "same notification should remain selected",
   )
-  controller.dispose()
+  mounted.destroy()
   let _ = application.flush()
   assertions::assert(scheduled.cancellations == 2, "reschedule and disposal should cancel timers")
 }
@@ -403,8 +406,8 @@ test fn inbox_initial_error_retries_to_empty_and_detail_errors_render() Void!Str
     details: [],
     archives: [],
   }
-  let controller = inbox_controller::new(
-    application.context,
+  let fixture = mount_inbox(
+    application,
     theme::new(),
     fake_service(fake),
     no_schedule,
@@ -412,23 +415,23 @@ test fn inbox_initial_error_retries_to_empty_and_detail_errors_render() Void!Str
     fn(url: Str) {},
     fn(title: Str, message: Str) {},
   )
-  let mounted = renderer::mount(application.context, application.root, controller.view())
+  let mounted = fixture.mounted
+  let component = fixture.component
   defer mounted.destroy()
   let _ = application.flush()
-  controller.start()
   (fake.loads.at(0).expect("initial load"))(Result::err("offline"))
   try assertions::assert(
     frame_text(application).contains("offline"),
     "initial list errors should be visible",
   )
-  let _ = controller.handle_key(key("r", "r"))
+  let _ = component.handle_key(key("r", "r"))
   (fake.loads.at(1).expect("retry"))(Result::ok([]))
   try assertions::assert(
     frame_text(application).contains("No notifications"),
     "successful empty retry should render empty state",
   )
 
-  let _ = controller.handle_key(key("r", "r"))
+  let _ = component.handle_key(key("r", "r"))
   (fake.loads.at(2).expect("populated retry"))(
     Result::ok([item("n1", "AKO-1", "issueMention", "")]),
   )
@@ -448,8 +451,8 @@ test fn inbox_disposal_suppresses_late_detail_and_archive_completions() Void!Str
     archives: [],
   }
   let errors = mut Calls{value: "", count: 0}
-  let controller = inbox_controller::new(
-    application.context,
+  let fixture = mount_inbox(
+    application,
     theme::new(),
     fake_service(fake),
     no_schedule,
@@ -460,13 +463,13 @@ test fn inbox_disposal_suppresses_late_detail_and_archive_completions() Void!Str
       errors.count =+ 1
     },
   )
-  let mounted = renderer::mount(application.context, application.root, controller.view())
+  let mounted = fixture.mounted
+  let component = fixture.component
   defer mounted.destroy()
   let _ = application.flush()
-  controller.start()
   (fake.loads.at(0).expect("load"))(Result::ok([item("n1", "AKO-1", "issueMention", "")]))
-  let _ = controller.handle_key(key("backspace", ""))
-  controller.dispose()
+  let _ = component.handle_key(key("backspace", ""))
+  mounted.destroy()
   (fake.details.at(0).expect("detail").completion)(Result::ok(detail("AKO-1", "Late detail")))
   (fake.archives.at(0).expect("archive").completion)(Result::err("denied"))
   try assertions::assert(
@@ -484,8 +487,8 @@ test fn inbox_disposal_suppresses_late_list_completion() Void!Str {
     details: [],
     archives: [],
   }
-  let controller = inbox_controller::new(
-    application.context,
+  let fixture = mount_inbox(
+    application,
     theme::new(),
     fake_service(fake),
     no_schedule,
@@ -493,11 +496,86 @@ test fn inbox_disposal_suppresses_late_list_completion() Void!Str {
     fn(url: Str) {},
     fn(title: Str, message: Str) {},
   )
-  let mounted = renderer::mount(application.context, application.root, controller.view())
+  let mounted = fixture.mounted
+  let component = fixture.component
   defer mounted.destroy()
   let _ = application.flush()
-  controller.start()
-  controller.dispose()
+  mounted.destroy()
   (fake.loads.at(0).expect("load"))(Result::ok([item("n1", "AKO-1", "issueMention", "")]))
-  assertions::assert(controller.items.size() == 0, "disposed controller should ignore late load")
+  assertions::assert(component.items.size() == 0, "disposed component should ignore late load")
+}
+
+private struct Fixture {
+  mounted: renderer::Renderer,
+  component: mut inbox_screen::Inbox,
+}
+
+private fn mount_inbox(
+  application: testing::TestApp,
+  palette: theme::Theme,
+  service: inbox_service::Service,
+  schedule: fn(Int, fn()) fn(),
+  on_open_issue: fn(Str),
+  open_url: fn(Str),
+  notify_error: fn(Str, Str),
+) Fixture {
+  let instances = mut List::new<mut inbox_screen::Inbox>()
+  let mounted = renderer::mount(
+    application.context,
+    application.root,
+    cui::child(
+      fn(props: mut inbox_screen::Props) mut inbox_screen::Inbox {
+        let component = inbox_screen::create(props)
+        instances.push(component)
+        component
+      },
+      inbox_screen::Props{
+        context: application.context,
+        palette: palette,
+        service: service,
+        schedule: schedule,
+        on_open_issue: on_open_issue,
+        open_url: open_url,
+        notify_error: notify_error,
+        route: screen_route::new(),
+        hub: events::new<events::Event>(),
+      },
+    ),
+  )
+  let _ = application.flush()
+  Fixture{mounted: mounted, component: instances.at(0).expect("mounted inbox")}
+}
+
+test fn inbox_resources_follow_component_mount_not_screen_description() Void!Str {
+  let application = testing::new(60, 12)
+  defer application.destroy()
+  let fake = mut FakeState{
+    loads: [],
+    details: [],
+    archives: [],
+  }
+  let hub = events::new<events::Event>()
+  let screen = inbox_screen::new(
+    application.context,
+    theme::new(),
+    fake_service(fake),
+    no_schedule,
+    fn(identifier: Str) {},
+    fn(url: Str) {},
+    fn(title: Str, message: Str) {},
+    hub: hub,
+  )
+  try assertions::assert(fake.loads.size() == 0, "describing a screen must not start requests")
+  try assertions::assert(hub.subscribers.size() == 0, "unmounted screens must not subscribe")
+  let mounted = renderer::mount(application.context, application.root, screen.view)
+  let _ = application.flush()
+  try assertions::assert(fake.loads.size() == 1, "mount should start the initial load once")
+  try assertions::assert(hub.subscribers.size() == 1, "mount should subscribe once")
+  hub.publish(events::issue_created("AKO-1"))
+  try assertions::assert(fake.loads.size() == 2, "mounted screens should react to mutations")
+  mounted.destroy()
+  try assertions::assert(hub.subscribers.size() == 0, "unmount should unsubscribe")
+  hub.publish(events::issue_created("AKO-2"))
+  try assertions::assert(fake.loads.size() == 2, "unmounted screens must not issue requests")
+  assertions::assert(not screen.handle_key(key("j", "j")), "unmount should clear the shell route")
 }

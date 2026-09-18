@@ -1,0 +1,388 @@
+use cooper
+use cooper/cui
+use cooper/ui
+use go:strings
+use tinear/models/documents
+use tinear/services/document_detail_service
+use tinear/tui/cui_bridge
+use tinear/tui/markdown_controller
+use tinear/tui/scheduler
+use tinear/tui/screen_route
+use tinear/tui/tab_shell
+use tinear/tui/theme as tinear_theme
+use tinear/tui/timestamp
+
+// Real dependencies plus the route this screen publishes its imperative
+// capabilities on. Props are read-only input; every piece of mutable state
+// lives on the component.
+struct Props {
+  context: mut cooper::Runtime,
+  palette: tinear_theme::Theme,
+  slug_id: Str,
+  cached_title: Str,
+  service: document_detail_service::Service,
+  schedule: scheduler::Schedule,
+  route: mut screen_route::Route,
+  on_title: fn(Str),
+  on_open_url: fn(Str),
+  notify_error: fn(Str, Str),
+}
+
+// Component identity owns every resource this screen holds: the markdown
+// controller, the cancellation channel, and the periodic refresh timer.
+struct DocumentDetail {
+  props: mut Props,
+  cached_title: Str,
+  document: documents::Doc?,
+  status: Str,
+  status_danger: Bool,
+  body: mut cui::ScrollBoxRef,
+  markdown: mut markdown_controller::MarkdownController,
+  generation: Int,
+  request: Int,
+  disposed: Bool,
+  stop: Chan<Bool>,
+  cancel_refresh: fn(),
+  invalidate: fn(),
+}
+
+fn create(props: mut Props) mut DocumentDetail {
+  let loading_title = match props.cached_title.is_empty() {
+    true => "document",
+    false => props.cached_title,
+  }
+  (mut DocumentDetail{
+    props: props,
+    cached_title: props.cached_title,
+    document: Maybe::new<documents::Doc>(),
+    status: "Loading {loading_title}…",
+    status_danger: false,
+    body: cui::scroll_box_ref(),
+    markdown: markdown_controller::new(
+      props.context,
+      props.palette,
+      "",
+      props.on_open_url,
+      empty_label: "Empty document",
+    ),
+    generation: 0,
+    request: 0,
+    disposed: false,
+    stop: Chan::new<Bool>(),
+    cancel_refresh: fn() {},
+    invalidate: fn() {},
+  })
+}
+
+// The shell needs a focus and key target before this component mounts, so the
+// route is a stable handle the component fills in at mount and clears at
+// unmount. Disposal belongs to the lifecycle, not to the shell.
+fn new(
+  ctx: mut cooper::Runtime,
+  palette: tinear_theme::Theme,
+  slug_id: Str,
+  cached_title: Str,
+  service: document_detail_service::Service,
+  schedule: scheduler::Schedule,
+  on_title: fn(Str),
+  on_open_url: fn(Str),
+  notify_error: fn(Str, Str),
+) tab_shell::Screen {
+  let route = screen_route::new()
+  tab_shell::screen(
+    view: cui::child(
+      create,
+      Props{
+        context: ctx,
+        palette: palette,
+        slug_id: slug_id,
+        cached_title: cached_title,
+        service: service,
+        schedule: schedule,
+        route: route,
+        on_title: on_title,
+        on_open_url: on_open_url,
+        notify_error: notify_error,
+      },
+      key: "document-{slug_id}",
+    ),
+    focus: fn() {
+      route.focus()
+    },
+    handle_key: fn(received: mut cooper::KeyEvent) Bool {
+      route.handle_key(received)
+    },
+    dispose: fn() {},
+  )
+}
+
+impl cui::Lifecycle for DocumentDetail {
+  fn mut mounted(ctx: cui::Context) {
+    self.invalidate = ctx.invalidate_root
+    self.props.route.focus = fn() {
+      self.focus()
+    }
+    self.props.route.handle_key = fn(received: mut cooper::KeyEvent) Bool {
+      self.handle_key(received)
+    }
+    // Children mount before their parent. Defer startup until the entire
+    // tree has bound its commands, including synchronous service fakes.
+    let _ = ctx.dispatch(fn() {
+      self.start()
+    })
+  }
+
+  fn mut unmounting(ctx: cui::Context) {
+    self.invalidate = fn() {}
+    self.props.route.clear()
+    self.dispose()
+  }
+}
+
+impl DocumentDetail {
+  private fn mut show_document(document: documents::Doc) {
+    self.document = Maybe::new(document)
+    self.markdown.set_source(document.content.or(""))
+    if document.meta.title != self.cached_title {
+      self.cached_title = document.meta.title
+      (self.props.on_title)(document.meta.title)
+    }
+  }
+
+  private fn mut show_initial_error(message: Str) {
+    let title = match self.cached_title.is_empty() {
+      true => "document",
+      false => self.cached_title,
+    }
+    self.status = "Couldn't load {title}: {message}"
+    self.status_danger = true
+  }
+
+  fn mut refresh(silent: Bool) {
+    if not self.disposed {
+      self.request =+ 1
+      let request = self.request
+      self.generation = request
+      if (not silent) and self.document.is_none() {
+        self.status = "Loading {self.cached_title}…"
+        self.status_danger = false
+      }
+      (self.props.service.load)(
+        self.stop.receiver(),
+        self.props.slug_id,
+        fn(result: documents::Doc!Str) {
+          if (not self.disposed) and self.request == request {
+            match result {
+              ok(document) => self.show_document(document),
+              err(message) => {
+                match self.document.is_none() {
+                  true => self.show_initial_error(message),
+                  false => (self.props.notify_error)("Refresh document", message),
+                }
+              },
+            }
+            (self.invalidate)()
+          }
+        },
+      )
+      (self.invalidate)()
+    }
+  }
+
+  private fn mut schedule_refresh() {
+    (self.cancel_refresh)()
+    self.cancel_refresh = (self.props.schedule)(
+      5 * 60 * 1000,
+      fn() {
+        if not self.disposed {
+          self.refresh(true)
+          self.schedule_refresh()
+        }
+      },
+    )
+  }
+
+  private fn mut start() {
+    if not self.disposed {
+      if self.generation == 0 {
+        self.refresh(false)
+      }
+      self.schedule_refresh()
+    }
+  }
+
+  private fn mut open_browser() {
+    match self.document {
+      loaded => {
+        if not loaded.meta.url.is_empty() {
+          (self.props.on_open_url)(loaded.meta.url)
+        }
+      },
+      _ => (),
+    }
+  }
+
+  fn mut focus() {
+    match self.body.current {
+      panel => {
+        let _ = panel.focus()
+      },
+      _ => (),
+    }
+  }
+
+  private fn mut scroll_by(delta: Int) {
+    match self.body.current {
+      panel => {
+        let _ = panel.scroll_by(delta)
+      },
+      _ => (),
+    }
+  }
+
+  fn mut handle_key(received: mut cooper::KeyEvent) Bool {
+    if self.disposed or received.event_type == cooper::KeyEventType::release {
+      false
+    } else {
+      match {
+        received.matches("j") or received.matches("down") => {
+          self.scroll_by(1)
+          true
+        },
+        received.matches("k") or received.matches("up") => {
+          self.scroll_by(-1)
+          true
+        },
+        received.matches("o") => {
+          self.open_browser()
+          true
+        },
+        _ => false,
+      }
+    }
+  }
+
+  // Idempotent: `unmounting` is the only production caller, but retiring twice
+  // must not double-destroy the bridged markdown subtree.
+  private fn mut dispose() {
+    if not self.disposed {
+      self.disposed = true
+      (self.cancel_refresh)()
+      self.cancel_refresh = fn() {}
+      self.stop.close()
+      self.markdown.dispose()
+      self.markdown.root.destroy(recursive: true)
+    }
+  }
+}
+
+private fn metadata_line(
+  first_label: Str,
+  first_value: Str,
+  second_label: Str,
+  second_value: Str,
+  palette: tinear_theme::Theme,
+) ui::StyledText {
+  ui::styled_text(
+    [
+      ui::span(first_label, style: ui::span_style(dim: true)),
+      ui::span("  {first_value}", style: ui::span_style(foreground: palette.foreground)),
+      ui::span("     {second_label}", style: ui::span_style(dim: true)),
+      ui::span("  {second_value}", style: ui::span_style(foreground: palette.foreground)),
+    ],
+  )
+}
+
+impl cui::Component for DocumentDetail {
+  fn mut render() cui::View {
+    let palette = self.props.palette
+    let loaded = self.document.is_some()
+    let row = ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0)
+    let children = mut List::new<cui::View>()
+    if loaded {
+      let document = self.document.expect("loaded document")
+      children.push(
+        cui::text(
+          document.meta.title,
+          wrap: ui::TextWrap::word,
+          overflow: ui::TextOverflow::ellipsis,
+          styles: ui::style(width: ui::percent(100.0), max_height: ui::cells(2), flex_shrink: 0.0),
+          text_style: ui::text_style(bold: true),
+        ),
+      )
+      children.push(
+        cui::text(
+          metadata_line(
+            "Project",
+            document.meta.container,
+            "Creator",
+            document.meta.creator,
+            palette,
+          ),
+          styles: row,
+        ),
+      )
+      children.push(
+        cui::text(
+          metadata_line("Updated", timestamp::friendly(document.meta.updated_at), "", "", palette),
+          styles: row,
+        ),
+      )
+      children.push(
+        cui::text(
+          strings::Repeat("─", 512),
+          selectable: false,
+          wrap: ui::TextWrap::none,
+          overflow: ui::TextOverflow::clip,
+          styles: row,
+          text_style: ui::text_style(foreground: palette.border, dim: true),
+        ),
+      )
+    }
+    let content = match loaded {
+      true => {
+        cui_bridge::view(
+          self.markdown.root,
+          fn() {},
+          fn() {},
+          key: "markdown",
+          destroy_on_unmount: false,
+        )
+      },
+      false => {
+        cui::text(
+          self.status,
+          selectable: false,
+          text_style: match self.status_danger {
+            true => ui::text_style(foreground: palette.danger, bold: true),
+            false => ui::text_style(dim: true),
+          },
+        )
+      },
+    }
+    // Keep the focus/scroll target mounted across loading, failure, and success.
+    children.push(
+      cui::scroll_box(
+        [content],
+        key: "body",
+        ref: self.body,
+        styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_grow: 1.0),
+      ),
+    )
+    cui::box(
+      children.@,
+      styles: ui::style(
+        width: ui::percent(100.0),
+        height: ui::percent(100.0),
+        flex_direction: ui::FlexDirection::column,
+        overflow: ui::Overflow::hidden,
+        padding: ui::Edges{
+          top: ui::cells(0),
+          right: ui::cells(1),
+          bottom: ui::cells(0),
+          left: ui::cells(1),
+        },
+      ),
+    )
+  }
+}

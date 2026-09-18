@@ -1,14 +1,17 @@
 use ard/testing as assertions
 
 use cooper
-use cooper/event
+use cooper/cui
 use cooper/cui/renderer
+use cooper/event
 use cooper/testing
 use cooper/ui
+use tinear/events
 use tinear/models/issues
 use tinear/services/board_service
-use tinear/tui/board_controller
+use tinear/tui/board_screen
 use tinear/tui/issue_field_picker_controller
+use tinear/tui/screen_route
 use tinear/tui/theme
 
 private struct MoveCall {
@@ -155,8 +158,8 @@ test fn board_builds_nested_retained_columns_and_navigates_cards() Void!Str {
   let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
   let opened = mut Opened{identifier: "", count: 0}
-  let controller = board_controller::new(
-    application.context,
+  let fixture = mount_board(
+    application,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
@@ -168,10 +171,10 @@ test fn board_builds_nested_retained_columns_and_navigates_cards() Void!Str {
     ignore_moved,
     fn(title: Str, message: Str) {},
   )
-  let mounted = renderer::mount(application.context, application.root, controller.view())
+  let mounted = fixture.mounted
+  let component = fixture.component
   defer mounted.destroy()
   let _ = application.flush()
-  controller.start()
   try assertions::assert(fake.loads.size() == 1, "start should load board")
   (fake.loads.at(0).expect("load"))(
     Result::ok(
@@ -183,9 +186,9 @@ test fn board_builds_nested_retained_columns_and_navigates_cards() Void!Str {
   )
   let _ = application.flush()
   application.render()
-  try assertions::assert(controller.column_records.size() == 2, "columns should be retained")
+  try assertions::assert(component.column_records.size() == 2, "columns should be retained")
   try assertions::assert(
-    controller.column_records.at(0).expect("Todo").cards.size() == 2,
+    component.column_records.at(0).expect("Todo").cards.size() == 2,
     "cards should be retained per column",
   )
   try testing::assert_contains(application.frame().text(), "AKO-1")
@@ -231,18 +234,18 @@ test fn board_builds_nested_retained_columns_and_navigates_cards() Void!Str {
   application.click(2, 2)
   try assertions::assert(opened.identifier == "AKO-1", "clicking a card should open it")
 
-  try assertions::assert(controller.handle_key(key("down")), "Down should move within a column")
-  try assertions::assert(controller.card_index == 1, "vertical cursor should move")
-  try assertions::assert(controller.handle_key(key("right")), "Right should move columns")
-  try assertions::assert(controller.column_index == 1, "horizontal cursor should move")
-  try assertions::assert(controller.card_index == 0, "cursor should clamp to target column")
-  try assertions::assert(controller.handle_key(key("return")), "Enter should open issue")
+  try assertions::assert(component.handle_key(key("down")), "Down should move within a column")
+  try assertions::assert(component.card_index == 1, "vertical cursor should move")
+  try assertions::assert(component.handle_key(key("right")), "Right should move columns")
+  try assertions::assert(component.column_index == 1, "horizontal cursor should move")
+  try assertions::assert(component.card_index == 0, "cursor should clamp to target column")
+  try assertions::assert(component.handle_key(key("return")), "Enter should open issue")
   try assertions::assert(opened.identifier == "AKO-3", "selected issue should open")
   try assertions::assert(opened.count == 2, "mouse and keyboard activation should each open once")
   for size in [[60, 20], [100, 30], [160, 40]] {
     application.resize(size.at(0).expect("width"), size.at(1).expect("height"))
-    try assertions::assert(controller.selected_issue_id() == "i3", "resize should preserve selected issue")
-    try assertions::assert(controller.column_records.size() == 2, "resize should preserve retained columns")
+    try assertions::assert(component.selected_issue_id() == "i3", "resize should preserve selected issue")
+    try assertions::assert(component.column_records.size() == 2, "resize should preserve retained columns")
     try testing::assert_contains(application.frame().text(), "AKO-3")
   }
   assertions::assert(fake.loads.size() == 1, "resize should not trigger network loads")
@@ -254,8 +257,8 @@ test fn board_drag_moves_issue_optimistically_and_confirms_team_state() Void!Str
   let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
   let opened = mut Opened{identifier: "", count: 0}
-  let controller = board_controller::new(
-    application.context,
+  let fixture = mount_board(
+    application,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
@@ -266,10 +269,10 @@ test fn board_drag_moves_issue_optimistically_and_confirms_team_state() Void!Str
     ignore_moved,
     fn(title: Str, message: Str) {},
   )
-  let mounted = renderer::mount(application.context, application.root, controller.view())
+  let mounted = fixture.mounted
+  let component = fixture.component
   defer mounted.destroy()
   let _ = application.flush()
-  controller.start()
   (fake.loads.at(0).expect("load"))(
     Result::ok(
       [
@@ -278,14 +281,18 @@ test fn board_drag_moves_issue_optimistically_and_confirms_team_state() Void!Str
       ],
     ),
   )
-  controller.refresh(true)
+  component.refresh(true)
   try assertions::assert(fake.loads.size() == 2, "test should keep one board refresh in flight")
   let _ = application.flush()
   application.render()
-  let source = controller.column_records.at(
+  let source = component.column_records.at(
     0,
-  ).expect("source column").cards.at(0).expect("source card").surface.current.expect("card surface").layout().screen
-  let target = controller.column_records.at(1).expect("target column").root.current.expect("column root").layout().screen
+  ).expect(
+    "source column",
+  ).cards.at(0).expect("source card").surface.current.expect("card surface").layout().screen
+  let target = component.column_records.at(
+    1,
+  ).expect("target column").root.current.expect("column root").layout().screen
   application.mouse_down(source.x + 1, source.y + 1)
   try assertions::assert(
     opened.count == 0,
@@ -302,7 +309,7 @@ test fn board_drag_moves_issue_optimistically_and_confirms_team_state() Void!Str
   )
   let _ = application.flush()
   application.render()
-  let intermediate_x = controller.drag_ghost_left
+  let intermediate_x = component.drag_ghost_left
   application.mouse(
     event::mouse(
       cooper::MouseEventType::drag,
@@ -315,49 +322,47 @@ test fn board_drag_moves_issue_optimistically_and_confirms_team_state() Void!Str
   let _ = application.flush()
   application.render()
   try assertions::assert(
-    controller.drag_target_key == "Doing",
+    component.drag_target_key == "Doing",
     "drag should snap a one-cell gap near-miss to the visible target column",
   )
   try assertions::assert(
-    controller.drag_target_key == controller.column_records.at(1).expect("target").key,
+    component.drag_target_key == component.column_records.at(1).expect("target").key,
     "drop target should use a visible heavy rule",
   )
+  try assertions::assert(component.drag_visible, "drag should show the floating card layer")
+  try assertions::assert(component.drag_ghost_title == "First", "floating card should preserve its title")
   try assertions::assert(
-    controller.drag_visible,
-    "drag should show the floating card layer",
-  )
-  try assertions::assert(
-    controller.drag_ghost_title == "First",
-    "floating card should preserve its title",
-  )
-  try assertions::assert(
-    controller.drag_ghost_left == target.x - 2 and controller.drag_ghost_left > intermediate_x,
+    component.drag_ghost_left == target.x - 2 and component.drag_ghost_left > intermediate_x,
     "floating card should physically follow successive pointer movement into the target column",
   )
   try assertions::assert(
-    controller.column_records.at(
-      0,
-    ).expect("source").cards.at(0).expect("card").issue_id == controller.dragging_issue_id,
+    component.column_records.at(0).expect("source").cards.at(0).expect("card").issue_id == component.dragging_issue_id,
     "source position should explain the active gesture",
   )
-  try assertions::assert(controller.pointer_issue_id == "i1", "drag should retain pointer ownership")
-  try assertions::assert(controller.dragging_issue_id == "i1", "drag should retain card ownership")
-  try assertions::assert(controller.outer_scroll.current.expect("board scroll").is_focused(), "drag should keep board focus")
+  try assertions::assert(component.pointer_issue_id == "i1", "drag should retain pointer ownership")
+  try assertions::assert(component.dragging_issue_id == "i1", "drag should retain card ownership")
+  try assertions::assert(
+    component.outer_scroll.current.expect("board scroll").is_focused(),
+    "drag should keep board focus",
+  )
   (fake.loads.at(1).expect("refresh completing during drag"))(
     Result::ok([column("Stale", 1.0, [issue("old", "OLD-1", "Old", "Stale")])]),
   )
-  try assertions::assert(controller.dragging_issue_id == "i1", "load completion should preserve drag ownership")
   try assertions::assert(
-    controller.drag_visible,
+    component.dragging_issue_id == "i1",
+    "load completion should preserve drag ownership",
+  )
+  try assertions::assert(
+    component.drag_visible,
     "a load completing during drag should preserve the floating card",
   )
-  try assertions::assert(controller.columns.size() == 2, "a load completing during drag should preserve board data")
+  try assertions::assert(
+    component.columns.size() == 2,
+    "a load completing during drag should preserve board data",
+  )
   application.mouse_up(target.x - 1, target.y)
 
-  try assertions::assert(
-    not controller.drag_visible,
-    "drop should remove the floating card layer",
-  )
+  try assertions::assert(not component.drag_visible, "drop should remove the floating card layer")
   try assertions::assert(fake.moves.size() == 1, "drop should start one state mutation")
   try assertions::assert(opened.count == 0, "dragging must not open an issue tab")
   let request = fake.moves.at(0).expect("move").request
@@ -368,25 +373,29 @@ test fn board_drag_moves_issue_optimistically_and_confirms_team_state() Void!Str
   )
   try assertions::assert(request.target.raw_name == "Doing", "move should preserve raw target identity")
   try assertions::assert(
-    controller.columns.at(0).expect("source").issues.size() == 0,
+    component.columns.at(0).expect("source").issues.size() == 0,
     "optimistic move should empty source",
   )
   try assertions::assert(
-    controller.columns.at(1).expect("target").issues.size() == 2,
+    component.columns.at(1).expect("target").issues.size() == 2,
     "optimistic move should append target",
   )
-  try assertions::assert(controller.selected_issue_id() == "i1", "selection should follow the moved card")
+  try assertions::assert(component.selected_issue_id() == "i1", "selection should follow the moved card")
   let _ = application.flush()
   application.render()
   try testing::assert_contains(application.frame().text(), "updating")
-  controller.refresh(false)
+  component.refresh(false)
   try assertions::assert(fake.loads.size() == 2, "refresh should wait for the pending state mutation")
   let _ = application.flush()
   application.render()
-  let pending = controller.column_records.at(
+  let pending = component.column_records.at(
     1,
-  ).expect("pending column").cards.at(1).expect("pending card").surface.current.expect("card surface").layout().screen
-  let original = controller.column_records.at(0).expect("original column").root.current.expect("column root").layout().screen
+  ).expect(
+    "pending column",
+  ).cards.at(1).expect("pending card").surface.current.expect("card surface").layout().screen
+  let original = component.column_records.at(
+    0,
+  ).expect("original column").root.current.expect("column root").layout().screen
   application.drag(pending.x + 1, pending.y + 1, original.x + 1, original.y)
   try assertions::assert(
     fake.moves.size() == 1,
@@ -396,9 +405,11 @@ test fn board_drag_moves_issue_optimistically_and_confirms_team_state() Void!Str
     opened.count == 0,
     "a refused second drag should not unexpectedly open the issue",
   )
-  let unrelated = controller.column_records.at(
+  let unrelated = component.column_records.at(
     1,
-  ).expect("pending column").cards.at(0).expect("unrelated card").surface.current.expect("card surface").layout().screen
+  ).expect(
+    "pending column",
+  ).cards.at(0).expect("unrelated card").surface.current.expect("card surface").layout().screen
   application.click(unrelated.x + 1, unrelated.y + 1)
   try assertions::assert(opened.count == 1, "pending move should not block clicking an unrelated card")
 
@@ -416,12 +427,12 @@ test fn board_drag_moves_issue_optimistically_and_confirms_team_state() Void!Str
     ),
   )
   try assertions::assert(
-    controller.moving_issue_id.is_empty(),
+    component.moving_issue_id.is_empty(),
     "successful move should clear pending state",
   )
   try assertions::assert(fake.loads.size() == 3, "queued refresh should start after move completion")
   assertions::assert(
-    controller.columns.at(1).expect("target").issues.at(1).expect("moved issue").state_id == "state-Doing",
+    component.columns.at(1).expect("target").issues.at(1).expect("moved issue").state_id == "state-Doing",
     "successful move should retain the resolved state id",
   )
 }
@@ -432,8 +443,8 @@ test fn board_drag_rolls_back_failure_and_never_reuses_another_teams_state() Voi
   let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
   let errors = mut Opened{identifier: "", count: 0}
-  let controller = board_controller::new(
-    application.context,
+  let fixture = mount_board(
+    application,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
@@ -445,10 +456,10 @@ test fn board_drag_rolls_back_failure_and_never_reuses_another_teams_state() Voi
       errors.count =+ 1
     },
   )
-  let mounted = renderer::mount(application.context, application.root, controller.view())
+  let mounted = fixture.mounted
+  let component = fixture.component
   defer mounted.destroy()
   let _ = application.flush()
-  controller.start()
   (fake.loads.at(0).expect("load"))(
     Result::ok(
       [
@@ -459,10 +470,14 @@ test fn board_drag_rolls_back_failure_and_never_reuses_another_teams_state() Voi
   )
   let _ = application.flush()
   application.render()
-  let source = controller.column_records.at(
+  let source = component.column_records.at(
     0,
-  ).expect("source").cards.at(0).expect("card").surface.current.expect("card surface").layout().screen
-  let target = controller.column_records.at(1).expect("target").root.current.expect("column root").layout().screen
+  ).expect(
+    "source",
+  ).cards.at(0).expect("card").surface.current.expect("card surface").layout().screen
+  let target = component.column_records.at(
+    1,
+  ).expect("target").root.current.expect("column root").layout().screen
   application.drag(source.x + 1, source.y + 1, target.x + 1, target.y)
   try assertions::assert(fake.moves.size() == 1, "cross-team drop should still attempt resolution")
   try assertions::assert(
@@ -470,22 +485,22 @@ test fn board_drag_rolls_back_failure_and_never_reuses_another_teams_state() Voi
     "cross-team target must still resolve states for the dragged issue's team",
   )
   try assertions::assert(
-    controller.columns.at(1).expect("target").issues.size() == 2,
+    component.columns.at(1).expect("target").issues.size() == 2,
     "move should be optimistic",
   )
   (fake.moves.at(0).expect("move").completion)(
     Result::err("Review isn't available for this issue's team"),
   )
   try assertions::assert(
-    controller.columns.at(0).expect("source").issues.size() == 1,
+    component.columns.at(0).expect("source").issues.size() == 1,
     "failed move should restore source",
   )
   try assertions::assert(
-    controller.columns.at(1).expect("target").issues.size() == 1,
+    component.columns.at(1).expect("target").issues.size() == 1,
     "failed move should restore target",
   )
   try assertions::assert(
-    controller.selected_issue_id() == "i1",
+    component.selected_issue_id() == "i1",
     "rollback should preserve dragged issue selection",
   )
   try assertions::assert(errors.count == 1, "failed move should notify once")
@@ -493,11 +508,11 @@ test fn board_drag_rolls_back_failure_and_never_reuses_another_teams_state() Voi
   application.render()
   try testing::assert_contains(application.frame().text(), "move failed")
   try assertions::assert(
-    controller.failed_move_issue_id == "i1",
+    component.failed_move_issue_id == "i1",
     "rollback should mark the failed card where the user was looking",
   )
   (scheduled.actions.at(1).expect("failure expiry"))()
-  try assertions::assert(controller.failed_move_issue_id.is_empty(), "failed marker should expire")
+  try assertions::assert(component.failed_move_issue_id.is_empty(), "failed marker should expire")
   assertions::assert(
     errors.identifier == "Couldn't move AKO-1",
     "move error should identify the issue",
@@ -510,8 +525,8 @@ test fn board_drag_threshold_same_column_and_interrupted_drops_are_safe() Void!S
   let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
   let opened = mut Opened{identifier: "", count: 0}
-  let controller = board_controller::new(
-    application.context,
+  let fixture = mount_board(
+    application,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
@@ -522,24 +537,23 @@ test fn board_drag_threshold_same_column_and_interrupted_drops_are_safe() Void!S
     ignore_moved,
     fn(title: Str, message: Str) {},
   )
-  let mounted = renderer::mount(application.context, application.root, controller.view())
+  let mounted = fixture.mounted
+  let component = fixture.component
   defer mounted.destroy()
   let _ = application.flush()
-  controller.start()
   (fake.loads.at(0).expect("load"))(
     Result::ok([column("Todo", 1.0, [issue("i1", "AKO-1", "First", "Todo")])]),
   )
   let _ = application.flush()
   application.render()
-  let card = controller.column_records.at(
+  let card = component.column_records.at(
     0,
-  ).expect("column").cards.at(0).expect("card").surface.current.expect("card surface").layout().screen
+  ).expect(
+    "column",
+  ).cards.at(0).expect("card").surface.current.expect("card surface").layout().screen
   application.drag(card.x + 1, card.y + 1, card.x + 2, card.y + 1)
   try assertions::assert(opened.count == 1, "one-cell pointer jitter should remain an ordinary click")
-  try assertions::assert(
-    not controller.drag_visible,
-    "one-cell pointer jitter should not lift the card",
-  )
+  try assertions::assert(not component.drag_visible, "one-cell pointer jitter should not lift the card")
   application.drag(card.x + 1, card.y + 1, card.x + 4, card.y + 1)
   try assertions::assert(fake.moves.size() == 0, "same-column drop should not mutate")
   try assertions::assert(opened.count == 1, "same-column drag should not open again")
@@ -547,7 +561,7 @@ test fn board_drag_threshold_same_column_and_interrupted_drops_are_safe() Void!S
   application.drag(card.x + 1, card.y + 1, 95, 16)
   let _ = application.flush()
   try assertions::assert(fake.moves.size() == 0, "drop outside a column should not mutate")
-  try assertions::assert(controller.dragging_issue_id.is_empty(), "outside drop should clear drag state")
+  try assertions::assert(component.dragging_issue_id.is_empty(), "outside drop should clear drag state")
   try assertions::assert(opened.count == 1, "outside drag should not open")
 
   application.mouse_down(card.x + 1, card.y + 1)
@@ -560,16 +574,13 @@ test fn board_drag_threshold_same_column_and_interrupted_drops_are_safe() Void!S
       modifiers(),
     ),
   )
-  try assertions::assert(controller.handle_key(key("r")), "board commands should be gated during drag")
+  try assertions::assert(component.handle_key(key("r")), "board commands should be gated during drag")
   try assertions::assert(fake.loads.size() == 1, "gated refresh command should not replace the gesture")
-  try assertions::assert(controller.handle_key(key("escape")), "Escape should cancel an active drag")
-  try assertions::assert(
-    not controller.drag_visible,
-    "Escape should remove the floating card",
-  )
+  try assertions::assert(component.handle_key(key("escape")), "Escape should cancel an active drag")
+  try assertions::assert(not component.drag_visible, "Escape should remove the floating card")
   application.mouse_up(card.x + 8, card.y + 1)
 
-  controller.focus()
+  component.focus()
   application.mouse_down(card.x + 1, card.y + 1)
   application.mouse(
     event::mouse(
@@ -580,16 +591,16 @@ test fn board_drag_threshold_same_column_and_interrupted_drops_are_safe() Void!S
       modifiers(),
     ),
   )
+  try assertions::assert(component.drag_visible, "active drag should show the floating layer")
   try assertions::assert(
-    controller.drag_visible,
-    "active drag should show the floating layer",
+    component.outer_scroll.current.expect("board scroll").is_focused(),
+    "drag should keep the board scroll focused",
   )
-  try assertions::assert(controller.outer_scroll.current.expect("board scroll").is_focused(), "drag should keep the board scroll focused")
-  controller.outer_scroll.current.expect("board scroll").blur()
+  component.outer_scroll.current.expect("board scroll").blur()
   let _ = application.flush()
   application.render()
   try assertions::assert(
-    not controller.drag_visible,
+    not component.drag_visible,
     "losing board focus should clear an interrupted drag layer",
   )
   application.mouse_up(card.x + 8, card.y + 1)
@@ -608,7 +619,7 @@ test fn board_drag_threshold_same_column_and_interrupted_drops_are_safe() Void!S
   )
   application.set_terminal_focus(cooper::TerminalFocus::lost)
   try assertions::assert(
-    not controller.drag_visible,
+    not component.drag_visible,
     "terminal focus loss should clear a drag released outside the app",
   )
   application.mouse_up(card.x + 8, card.y + 1)
@@ -621,8 +632,8 @@ test fn board_refresh_completion_waits_for_pointer_gesture() Void!Str {
   let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
   let opened = mut Opened{identifier: "", count: 0}
-  let controller = board_controller::new(
-    application.context,
+  let fixture = mount_board(
+    application,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
@@ -633,25 +644,27 @@ test fn board_refresh_completion_waits_for_pointer_gesture() Void!Str {
     ignore_moved,
     fn(title: Str, message: Str) {},
   )
-  let mounted = renderer::mount(application.context, application.root, controller.view())
+  let mounted = fixture.mounted
+  let component = fixture.component
   defer mounted.destroy()
   let _ = application.flush()
-  controller.start()
   (fake.loads.at(0).expect("load"))(
     Result::ok([column("Todo", 1.0, [issue("i1", "AKO-1", "First", "Todo")])]),
   )
-  controller.refresh(true)
+  component.refresh(true)
   let _ = application.flush()
   application.render()
-  let card = controller.column_records.at(
+  let card = component.column_records.at(
     0,
-  ).expect("column").cards.at(0).expect("card").surface.current.expect("card surface").layout().screen
+  ).expect(
+    "column",
+  ).cards.at(0).expect("card").surface.current.expect("card surface").layout().screen
   application.mouse_down(card.x + 1, card.y + 1)
   (fake.loads.at(1).expect("refresh during press"))(
     Result::ok([column("Stale", 1.0, [issue("old", "OLD-1", "Old", "Stale")])]),
   )
   try assertions::assert(
-    controller.columns.at(0).expect("preserved board").issues.at(0).expect("issue").id == "i1",
+    component.columns.at(0).expect("preserved board").issues.at(0).expect("issue").id == "i1",
     "refresh completion should not invalidate a pointer press before drag threshold",
   )
   application.mouse_up(card.x + 1, card.y + 1)
@@ -667,8 +680,8 @@ test fn board_drag_layer_forwards_horizontal_wheel_to_reach_offscreen_column() V
   defer application.destroy()
   let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
-  let controller = board_controller::new(
-    application.context,
+  let fixture = mount_board(
+    application,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
@@ -677,10 +690,10 @@ test fn board_drag_layer_forwards_horizontal_wheel_to_reach_offscreen_column() V
     ignore_moved,
     fn(title: Str, message: Str) {},
   )
-  let mounted = renderer::mount(application.context, application.root, controller.view())
+  let mounted = fixture.mounted
+  let component = fixture.component
   defer mounted.destroy()
   let _ = application.flush()
-  controller.start()
   (fake.loads.at(0).expect("load"))(
     Result::ok(
       [
@@ -692,9 +705,11 @@ test fn board_drag_layer_forwards_horizontal_wheel_to_reach_offscreen_column() V
   )
   let _ = application.flush()
   application.render()
-  let source = controller.column_records.at(
+  let source = component.column_records.at(
     0,
-  ).expect("source").cards.at(0).expect("card").surface.current.expect("card surface").layout().screen
+  ).expect(
+    "source",
+  ).cards.at(0).expect("card").surface.current.expect("card surface").layout().screen
   application.mouse_down(source.x + 1, source.y + 1)
   application.mouse(
     event::mouse(cooper::MouseEventType::drag, cooper::MouseButton::left, 55, 2, modifiers()),
@@ -702,11 +717,11 @@ test fn board_drag_layer_forwards_horizontal_wheel_to_reach_offscreen_column() V
   let _ = application.flush()
   application.render()
   try assertions::assert(
-    controller.dragging_issue_id == "i1",
+    component.dragging_issue_id == "i1",
     "drag should remain active before wheel input",
   )
   try assertions::assert(
-    controller.root.current.expect("board root").layout().screen.width == 60,
+    component.root.current.expect("board root").layout().screen.width == 60,
     "drag layer should cover the board",
   )
   for index in 0..9 {
@@ -721,11 +736,11 @@ test fn board_drag_layer_forwards_horizontal_wheel_to_reach_offscreen_column() V
       ),
     )
     let _ = application.flush()
-  application.render()
+    application.render()
   }
   let _ = application.flush()
   try assertions::assert(
-    controller.outer_scroll.current.expect("board scroll").scroll_left() > 0,
+    component.outer_scroll.current.expect("board scroll").scroll_left() > 0,
     "drag layer should forward shifted wheel scrolling",
   )
   application.mouse(
@@ -748,8 +763,8 @@ test fn board_drag_into_full_completed_column_keeps_moved_issue_visible_with_cap
   for index in 0..9 {
     completed.push(issue("done-{index}", "AKO-{index}", "Done {index}", "Done"))
   }
-  let controller = board_controller::new(
-    application.context,
+  let fixture = mount_board(
+    application,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
@@ -758,10 +773,10 @@ test fn board_drag_into_full_completed_column_keeps_moved_issue_visible_with_cap
     ignore_moved,
     fn(title: Str, message: Str) {},
   )
-  let mounted = renderer::mount(application.context, application.root, controller.view())
+  let mounted = fixture.mounted
+  let component = fixture.component
   defer mounted.destroy()
   let _ = application.flush()
-  controller.start()
   let done = issues::BoardColumn{
     raw_state_name: "Done",
     name: "Done",
@@ -774,17 +789,21 @@ test fn board_drag_into_full_completed_column_keeps_moved_issue_visible_with_cap
   )
   let _ = application.flush()
   application.render()
-  let source = controller.column_records.at(
+  let source = component.column_records.at(
     0,
-  ).expect("source").cards.at(0).expect("card").surface.current.expect("card surface").layout().screen
-  let target = controller.column_records.at(1).expect("done").root.current.expect("column root").layout().screen
+  ).expect(
+    "source",
+  ).cards.at(0).expect("card").surface.current.expect("card surface").layout().screen
+  let target = component.column_records.at(
+    1,
+  ).expect("done").root.current.expect("column root").layout().screen
   application.drag(source.x + 1, source.y + 1, target.x + 1, target.y)
   try assertions::assert(
-    controller.columns.at(1).expect("done").issues.size() == 10,
+    component.columns.at(1).expect("done").issues.size() == 10,
     "optimistic completed column should retain its cap",
   )
   try assertions::assert(
-    controller.selected_issue_id() == "i1",
+    component.selected_issue_id() == "i1",
     "the newly moved issue should remain visible",
   )
   assertions::assert(fake.moves.size() == 1, "completed drop should update status")
@@ -795,8 +814,8 @@ test fn board_refresh_preserves_selected_issue_across_column_move() Void!Str {
   defer application.destroy()
   let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
-  let controller = board_controller::new(
-    application.context,
+  let fixture = mount_board(
+    application,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
@@ -805,10 +824,10 @@ test fn board_refresh_preserves_selected_issue_across_column_move() Void!Str {
     ignore_moved,
     fn(title: Str, message: Str) {},
   )
-  let mounted = renderer::mount(application.context, application.root, controller.view())
+  let mounted = fixture.mounted
+  let component = fixture.component
   defer mounted.destroy()
   let _ = application.flush()
-  controller.start()
   (fake.loads.at(0).expect("load"))(
     Result::ok(
       [
@@ -817,8 +836,8 @@ test fn board_refresh_preserves_selected_issue_across_column_move() Void!Str {
       ],
     ),
   )
-  let _ = controller.handle_key(key("down"))
-  try assertions::assert(controller.selected_issue_id() == "i2", "second issue should be selected")
+  let _ = component.handle_key(key("down"))
+  try assertions::assert(component.selected_issue_id() == "i2", "second issue should be selected")
   (scheduled.actions.at(0).expect("periodic refresh"))()
   try assertions::assert(fake.loads.size() == 2, "periodic refresh should load")
   (fake.loads.at(1).expect("refresh"))(
@@ -833,10 +852,10 @@ test fn board_refresh_preserves_selected_issue_across_column_move() Void!Str {
       ],
     ),
   )
-  try assertions::assert(controller.column_index == 1, "selection should follow issue to new column")
-  try assertions::assert(controller.card_index == 0, "selection should follow issue card index")
+  try assertions::assert(component.column_index == 1, "selection should follow issue to new column")
+  try assertions::assert(component.card_index == 0, "selection should follow issue card index")
   assertions::assert(
-    controller.selected_issue_id() == "i2",
+    component.selected_issue_id() == "i2",
     "same stable issue should remain selected",
   )
 }
@@ -846,8 +865,8 @@ test fn board_ignores_stale_load_and_handles_narrow_horizontal_navigation() Void
   defer application.destroy()
   let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
-  let controller = board_controller::new(
-    application.context,
+  let fixture = mount_board(
+    application,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
@@ -856,15 +875,15 @@ test fn board_ignores_stale_load_and_handles_narrow_horizontal_navigation() Void
     ignore_moved,
     fn(title: Str, message: Str) {},
   )
-  let mounted = renderer::mount(application.context, application.root, controller.view())
+  let mounted = fixture.mounted
+  let component = fixture.component
   defer mounted.destroy()
   let _ = application.flush()
-  controller.start()
-  controller.refresh(false)
+  component.refresh(false)
   (fake.loads.at(0).expect("stale"))(
     Result::ok([column("Stale", 1.0, [issue("old", "OLD-1", "Old", "Stale")])]),
   )
-  try assertions::assert(controller.columns.size() == 0, "older generation should be ignored")
+  try assertions::assert(component.columns.size() == 0, "older generation should be ignored")
   (fake.loads.at(1).expect("current"))(
     Result::ok(
       [
@@ -876,10 +895,10 @@ test fn board_ignores_stale_load_and_handles_narrow_horizontal_navigation() Void
   )
   let _ = application.flush()
   application.render()
-  try assertions::assert(controller.handle_key(key("right")), "narrow board should skip an empty column")
+  try assertions::assert(component.handle_key(key("right")), "narrow board should skip an empty column")
   let _ = application.flush()
   application.render()
-  try assertions::assert(controller.column_index == 2, "final column should be selected")
+  try assertions::assert(component.column_index == 2, "final column should be selected")
   testing::assert_contains(application.frame().text(), "AKO-3")
 }
 
@@ -889,8 +908,8 @@ test fn board_routes_field_picker_commands_for_selected_issue() Void!Str {
   let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
   let picked = mut Picked{names: []}
-  let controller = board_controller::new(
-    application.context,
+  let fixture = mount_board(
+    application,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
@@ -908,18 +927,18 @@ test fn board_routes_field_picker_commands_for_selected_issue() Void!Str {
     ignore_moved,
     fn(title: Str, message: Str) {},
   )
-  let mounted = renderer::mount(application.context, application.root, controller.view())
+  let mounted = fixture.mounted
+  let component = fixture.component
   defer mounted.destroy()
   let _ = application.flush()
-  controller.start()
   (fake.loads.at(0).expect("load"))(
     Result::ok([column("Todo", 1.0, [issue("i1", "AKO-1", "First", "Todo")])]),
   )
-  let _ = controller.handle_key(key("s"))
-  let _ = controller.handle_key(key("y"))
-  let _ = controller.handle_key(key("p"))
-  let _ = controller.handle_key(key("a"))
-  let _ = controller.handle_key(shifted_key("p"))
+  let _ = component.handle_key(key("s"))
+  let _ = component.handle_key(key("y"))
+  let _ = component.handle_key(key("p"))
+  let _ = component.handle_key(key("a"))
+  let _ = component.handle_key(shifted_key("p"))
   try assertions::assert(picked.names.size() == 5, "all field commands should route")
   try assertions::assert(picked.names.at(0).expect("state") == "state:i1", "s should edit state")
   try assertions::assert(picked.names.at(1).expect("cycle") == "cycle:i1", "y should edit cycle")
@@ -933,8 +952,8 @@ test fn board_initial_error_retries_to_empty_state() Void!Str {
   defer application.destroy()
   let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
-  let controller = board_controller::new(
-    application.context,
+  let fixture = mount_board(
+    application,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
@@ -943,19 +962,16 @@ test fn board_initial_error_retries_to_empty_state() Void!Str {
     ignore_moved,
     fn(title: Str, message: Str) {},
   )
-  let mounted = renderer::mount(application.context, application.root, controller.view())
+  let mounted = fixture.mounted
+  let component = fixture.component
   defer mounted.destroy()
   let _ = application.flush()
-  controller.start()
   (fake.loads.at(0).expect("initial load"))(Result::err("offline"))
-  try assertions::assert(
-    controller.status.contains("offline"),
-    "initial board errors should be visible",
-  )
-  let _ = controller.handle_key(key("r"))
+  try assertions::assert(component.status.contains("offline"), "initial board errors should be visible")
+  let _ = component.handle_key(key("r"))
   (fake.loads.at(1).expect("retry"))(Result::ok([]))
   assertions::assert(
-    controller.status.contains("No assigned issues"),
+    component.status.contains("No assigned issues"),
     "empty retry should render board empty state",
   )
 }
@@ -966,8 +982,8 @@ test fn board_failed_manual_refresh_restores_existing_columns() Void!Str {
   let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
   let errors = mut Opened{identifier: "", count: 0}
-  let controller = board_controller::new(
-    application.context,
+  let fixture = mount_board(
+    application,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
@@ -979,25 +995,25 @@ test fn board_failed_manual_refresh_restores_existing_columns() Void!Str {
       errors.count =+ 1
     },
   )
-  let mounted = renderer::mount(application.context, application.root, controller.view())
+  let mounted = fixture.mounted
+  let component = fixture.component
   defer mounted.destroy()
   let _ = application.flush()
-  controller.start()
   (fake.loads.at(0).expect("load"))(
     Result::ok([column("Todo", 1.0, [issue("i1", "AKO-1", "First", "Todo")])]),
   )
-  controller.refresh(false)
+  component.refresh(false)
   let _ = application.flush()
   application.render()
   try assertions::assert(
-    controller.outer_scroll.current.expect("board scroll").style().display == ui::Display::flex,
+    component.outer_scroll.current.expect("board scroll").style().display == ui::Display::flex,
     "loading should keep the board focus target mounted and visible",
   )
   (fake.loads.at(1).expect("refresh"))(Result::err("network unavailable"))
   let _ = application.flush()
   application.render()
   try assertions::assert(
-    controller.outer_scroll.current.expect("board scroll").style().display == ui::Display::flex,
+    component.outer_scroll.current.expect("board scroll").style().display == ui::Display::flex,
     "failed refresh should restore board",
   )
   try assertions::assert(errors.count == 1, "failed refresh should notify")
@@ -1013,8 +1029,8 @@ test fn board_disposal_suppresses_late_move_completion() Void!Str {
   let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
   let errors = mut Opened{identifier: "", count: 0}
-  let controller = board_controller::new(
-    application.context,
+  let fixture = mount_board(
+    application,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
@@ -1025,10 +1041,10 @@ test fn board_disposal_suppresses_late_move_completion() Void!Str {
       errors.count =+ 1
     },
   )
-  let mounted = renderer::mount(application.context, application.root, controller.view())
+  let mounted = fixture.mounted
+  let component = fixture.component
   defer mounted.destroy()
   let _ = application.flush()
-  controller.start()
   (fake.loads.at(0).expect("load"))(
     Result::ok(
       [
@@ -1039,17 +1055,21 @@ test fn board_disposal_suppresses_late_move_completion() Void!Str {
   )
   let _ = application.flush()
   application.render()
-  let source = controller.column_records.at(
+  let source = component.column_records.at(
     0,
-  ).expect("source").cards.at(0).expect("card").surface.current.expect("card surface").layout().screen
-  let target = controller.column_records.at(1).expect("target").root.current.expect("column root").layout().screen
+  ).expect(
+    "source",
+  ).cards.at(0).expect("card").surface.current.expect("card surface").layout().screen
+  let target = component.column_records.at(
+    1,
+  ).expect("target").root.current.expect("column root").layout().screen
   application.drag(source.x + 1, source.y + 1, target.x + 1, target.y)
   try assertions::assert(fake.moves.size() == 1, "drop should start a move")
-  controller.dispose()
+  mounted.destroy()
   (fake.moves.at(0).expect("move").completion)(Result::err("late failure"))
   try assertions::assert(errors.count == 0, "disposed board should suppress late move errors")
   assertions::assert(
-    controller.column_records.size() == 0,
+    component.column_records.size() == 0,
     "disposed board should release retained columns",
   )
 }
@@ -1059,8 +1079,8 @@ test fn board_disposal_cancels_refresh_and_late_completion() Void!Str {
   defer application.destroy()
   let fake = mut FakeState{loads: [], moves: []}
   let scheduled = mut ScheduledState{actions: [], cancellations: 0}
-  let controller = board_controller::new(
-    application.context,
+  let fixture = mount_board(
+    application,
     theme::new(),
     fake_service(fake),
     fake_schedule(scheduled),
@@ -1069,14 +1089,57 @@ test fn board_disposal_cancels_refresh_and_late_completion() Void!Str {
     ignore_moved,
     fn(title: Str, message: Str) {},
   )
-  let mounted = renderer::mount(application.context, application.root, controller.view())
+  let mounted = fixture.mounted
+  let component = fixture.component
   defer mounted.destroy()
   let _ = application.flush()
-  controller.start()
-  controller.dispose()
+  mounted.destroy()
   (fake.loads.at(0).expect("load"))(
     Result::ok([column("Todo", 1.0, [issue("i1", "AKO-1", "First", "Todo")])]),
   )
-  try assertions::assert(controller.columns.size() == 0, "disposed board should ignore late load")
+  try assertions::assert(component.columns.size() == 0, "disposed board should ignore late load")
   assertions::assert(scheduled.cancellations == 1, "dispose should cancel periodic refresh")
+}
+
+private struct Fixture {
+  mounted: renderer::Renderer,
+  component: mut board_screen::Board,
+}
+
+private fn mount_board(
+  application: testing::TestApp,
+  palette: theme::Theme,
+  service: board_service::Service,
+  schedule: fn(Int, fn()) fn(),
+  on_open_issue: fn(Str),
+  on_pick_field: fn(issue_field_picker_controller::Field, issues::Issue),
+  on_issue_moved: fn(issues::Issue),
+  notify_error: fn(Str, Str),
+) Fixture {
+  let instances = mut List::new<mut board_screen::Board>()
+  let mounted = renderer::mount(
+    application.context,
+    application.root,
+    cui::child(
+      fn(props: mut board_screen::Props) mut board_screen::Board {
+        let component = board_screen::create(props)
+        instances.push(component)
+        component
+      },
+      board_screen::Props{
+        context: application.context,
+        palette: palette,
+        service: service,
+        schedule: schedule,
+        on_open_issue: on_open_issue,
+        on_pick_field: on_pick_field,
+        on_issue_moved: on_issue_moved,
+        notify_error: notify_error,
+        route: screen_route::new(),
+        hub: events::new<events::Event>(),
+      },
+    ),
+  )
+  let _ = application.flush()
+  Fixture{mounted: mounted, component: instances.at(0).expect("mounted board")}
 }

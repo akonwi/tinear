@@ -2,11 +2,13 @@ use cooper
 use cooper/cui
 use cooper/ui
 use go:strings
+use tinear/events
 use tinear/models/inbox
 use tinear/models/issue_state
 use tinear/services/inbox_service
 use tinear/tui/scheduler
-use tinear/tui/shell_controller
+use tinear/tui/screen_route
+use tinear/tui/tab_shell
 use tinear/tui/theme as tinear_theme
 use tinear/tui/timestamp
 
@@ -15,8 +17,9 @@ struct CachedDetail {
   detail: inbox::Detail,
 }
 
-struct InboxController {
-  context: mut cooper::Runtime,
+struct Inbox {
+  props: mut Props,
+  unsubscribe: fn(),
   list_scroll: mut cui::ScrollBoxRef,
   detail_scroll: mut cui::ScrollBoxRef,
   list_status: Str,
@@ -35,22 +38,11 @@ struct InboxController {
   stop: Chan<Bool>,
   disposed: Bool,
   invalidate: fn(),
-  service: inbox_service::Service,
-  schedule: scheduler::Schedule,
   cancel_refresh: fn(),
-  on_open_issue: fn(Str),
-  open_url: fn(Str),
-  notify_error: fn(Str, Str),
-  palette: tinear_theme::Theme,
 }
 
 private fn status_style(display: ui::Display) ui::Style {
-  ui::style(
-    display: display,
-    width: ui::percent(100.0),
-    height: ui::cells(1),
-    flex_shrink: 0.0,
-  )
+  ui::style(display: display, width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0)
 }
 
 private fn detail_content(item: inbox::Item, detail: inbox::Detail, palette: tinear_theme::Theme) ui::StyledText {
@@ -145,10 +137,7 @@ private fn detail_content(item: inbox::Item, detail: inbox::Detail, palette: tin
     )
     for history in detail.history {
       spans.push(
-        ui::span(
-          "\n{history.from_state} → {history.to_state}",
-          style: ui::span_style(dim: true),
-        ),
+        ui::span("\n{history.from_state} → {history.to_state}", style: ui::span_style(dim: true)),
       )
     }
   }
@@ -187,6 +176,18 @@ private fn detail_error(item: inbox::Item, message: Str, palette: tinear_theme::
   )
 }
 
+struct Props {
+  context: mut cooper::Runtime,
+  palette: tinear_theme::Theme,
+  service: inbox_service::Service,
+  schedule: scheduler::Schedule,
+  on_open_issue: fn(Str),
+  open_url: fn(Str),
+  notify_error: fn(Str, Str),
+  route: mut screen_route::Route,
+  hub: mut events::Bus<events::Event>,
+}
+
 fn new(
   ctx: mut cooper::Runtime,
   palette: tinear_theme::Theme,
@@ -195,9 +196,39 @@ fn new(
   on_open_issue: fn(Str),
   open_url: fn(Str),
   notify_error: fn(Str, Str),
-) mut InboxController {
-  (mut InboxController{
-    context: ctx,
+  hub: mut events::Bus<events::Event>,
+) tab_shell::Screen {
+  let route = screen_route::new()
+  tab_shell::screen(
+    cui::child(
+      create,
+      Props{
+        context: ctx,
+        palette: palette,
+        service: service,
+        schedule: schedule,
+        on_open_issue: on_open_issue,
+        open_url: open_url,
+        notify_error: notify_error,
+        route: route,
+        hub: hub,
+      },
+      key: "inbox",
+    ),
+    fn() {
+      route.focus()
+    },
+    fn(received: mut cooper::KeyEvent) Bool {
+      route.handle_key(received)
+    },
+    fn() {},
+  )
+}
+
+fn create(props: mut Props) mut Inbox {
+  (mut Inbox{
+    props: props,
+    unsubscribe: fn() {},
     list_scroll: cui::scroll_box_ref(),
     detail_scroll: cui::scroll_box_ref(),
     list_status: "Loading Inbox…",
@@ -216,17 +247,11 @@ fn new(
     stop: Chan::new<Bool>(),
     disposed: false,
     invalidate: fn() {},
-    service: service,
-    schedule: schedule,
     cancel_refresh: fn() {},
-    on_open_issue: on_open_issue,
-    open_url: open_url,
-    notify_error: notify_error,
-    palette: palette,
   })
 }
 
-impl InboxController {
+impl Inbox {
   private fn mut scroll_list_to_cursor() {
     match self.list_scroll.current {
       panel => {
@@ -262,7 +287,7 @@ impl InboxController {
         true => "tinear ({count})",
         false => "tinear",
       }
-      let _ = self.context.set_title(title)
+      let _ = self.props.context.set_title(title)
     }
   }
 
@@ -312,7 +337,7 @@ impl InboxController {
 
   private fn mut schedule_refresh() {
     (self.cancel_refresh)()
-    self.cancel_refresh = self.schedule(5 * 60 * 1000, fn() {
+    self.cancel_refresh = self.props.schedule(5 * 60 * 1000, fn() {
       if not self.disposed {
         self.refresh(true)
         self.schedule_refresh()
@@ -320,9 +345,11 @@ impl InboxController {
     })
   }
 
-  fn mut start() {
-    if (not self.disposed) and self.list_generation == 0 {
-      self.refresh(false)
+  private fn mut start() {
+    if not self.disposed {
+      if self.list_generation == 0 {
+        self.refresh(false)
+      }
       self.schedule_refresh()
     }
   }
@@ -335,7 +362,7 @@ impl InboxController {
       if not silent {
         self.show_list_status("Loading Inbox…", false)
       }
-      self.service.load(self.stop.receiver(), fn(result: [inbox::Item]!Str) {
+      self.props.service.load(self.stop.receiver(), fn(result: [inbox::Item]!Str) {
         if (not self.disposed) and generation == self.list_generation {
           self.loading = false
           match result {
@@ -344,7 +371,7 @@ impl InboxController {
               if self.items.size() == 0 {
                 self.show_list_status(message, true)
               } else {
-                self.notify_error("Couldn't refresh Inbox", message)
+                self.props.notify_error("Couldn't refresh Inbox", message)
               }
             },
           }
@@ -387,11 +414,11 @@ impl InboxController {
         let cached = self.cached_detail(notification_id)
         let had_cached = cached.is_some()
         match cached {
-          detail => { self.detail_text = detail_content(item, detail, self.palette) },
-          _ => { self.detail_text = detail_preview(item, self.palette) },
+          detail => { self.detail_text = detail_content(item, detail, self.props.palette) },
+          _ => { self.detail_text = detail_preview(item, self.props.palette) },
         }
         self.scroll_detail_to(0)
-        self.service.load_detail(
+        self.props.service.load_detail(
           notification_id,
           self.stop.receiver(),
           fn(result: inbox::Detail!Str) {
@@ -400,13 +427,13 @@ impl InboxController {
                 ok(detail) => {
                   self.cache_detail(notification_id, detail)
                   if generation == self.detail_generation and self.detail_notification_id == notification_id {
-                    self.detail_text = detail_content(item, detail, self.palette)
+                    self.detail_text = detail_content(item, detail, self.props.palette)
                     (self.invalidate)()
                   }
                 },
                 err(message) => {
                   if (not had_cached) and generation == self.detail_generation and self.detail_notification_id == notification_id {
-                    self.detail_text = detail_error(item, message, self.palette)
+                    self.detail_text = detail_error(item, message, self.props.palette)
                     (self.invalidate)()
                   }
                 },
@@ -459,14 +486,14 @@ impl InboxController {
       item => {
         if browser {
           if not item.url.is_empty() {
-            self.open_url(item.url)
+            self.props.open_url(item.url)
           }
         } else if item.notification_type.starts_with("issue") {
           if (not item.target_id.is_empty()) and not item.target_id == "—" {
-            self.on_open_issue(item.target_id)
+            self.props.on_open_issue(item.target_id)
           }
         } else if not item.url.is_empty() {
-          self.open_url(item.url)
+          self.props.open_url(item.url)
         }
       },
       _ => (),
@@ -497,14 +524,14 @@ impl InboxController {
           },
           _ => self.load_selected_detail(),
         }
-        self.service.archive(
+        self.props.service.archive(
           item.notification_id,
           self.stop.receiver(),
           fn(result: Void!Str) {
             if not self.disposed {
               match result {
                 ok(_) => (),
-                err(message) => self.notify_error("Couldn't archive notification", message),
+                err(message) => self.props.notify_error("Couldn't archive notification", message),
               }
             }
           },
@@ -535,18 +562,10 @@ impl InboxController {
         received.matches("o") => self.open_selected(true),
         received.matches("backspace") => self.archive_selected(),
         received.matches("r") => self.refresh(false),
-        received.matches("l") or received.matches("right") => {
-          self.scroll_detail_by(1)
-        },
-        received.matches("h") or received.matches("left") => {
-          self.scroll_detail_by(-1)
-        },
-        received.matches("space", shift: true) => {
-          self.scroll_detail_by(-10)
-        },
-        received.matches("space") => {
-          self.scroll_detail_by(10)
-        },
+        received.matches("l") or received.matches("right") => self.scroll_detail_by(1),
+        received.matches("h") or received.matches("left") => self.scroll_detail_by(-1),
+        received.matches("space", shift: true) => self.scroll_detail_by(-10),
+        received.matches("space") => self.scroll_detail_by(10),
         _ => { handled = false },
       }
       if handled {
@@ -557,28 +576,11 @@ impl InboxController {
     }
   }
 
-  fn mut view() cui::View {
-    cui::child(inbox_view, InboxProps{controller: self}, key: "inbox")
-  }
-
-  fn mut screen() shell_controller::Screen {
-    shell_controller::declarative_screen(
-      view: self.view(),
-      focus: fn() {
-        self.focus()
-      },
-      handle_key: fn(received: mut cooper::KeyEvent) Bool {
-        self.handle_key(received)
-      },
-      dispose: fn() {
-        self.dispose()
-      },
-    )
-  }
-
-  fn mut dispose() {
+  private fn mut dispose() {
     if not self.disposed {
       self.disposed = true
+      (self.unsubscribe)()
+      self.unsubscribe = fn() {}
       (self.cancel_refresh)()
       self.cancel_refresh = fn() {}
       self.stop.close()
@@ -586,24 +588,11 @@ impl InboxController {
   }
 }
 
-struct InboxProps {
-  controller: mut InboxController,
-}
-
-struct InboxView {
-  props: mut InboxProps,
-}
-
-private fn inbox_view(props: mut InboxProps) mut InboxView {
-  (mut InboxView{props: props})
-}
-
-impl InboxView {
+impl Inbox {
   private fn mut row(item: inbox::Item, index: Int) cui::View {
-    let controller = self.props.controller
-    let palette = controller.palette
-    let active = index == controller.cursor
-    let hovered = (not active) and item.notification_id == controller.hovered_id
+    let palette = self.props.palette
+    let active = index == self.cursor
+    let hovered = (not active) and item.notification_id == self.hovered_id
     let foreground = match {
       active => palette.item_active_foreground,
       hovered => palette.item_hover_foreground,
@@ -633,10 +622,7 @@ impl InboxView {
               wrap: ui::TextWrap::none,
               overflow: ui::TextOverflow::ellipsis,
               styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
-              text_style: ui::text_style(
-                foreground: foreground,
-                dim: (not active) and not hovered,
-              ),
+              text_style: ui::text_style(foreground: foreground, dim: (not active) and not hovered),
             ),
           ],
           styles: ui::style(
@@ -653,13 +639,13 @@ impl InboxView {
           ),
           on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
             if received.event_type == cooper::MouseEventType::move {
-              controller.hovered_id = notification_id
+              self.hovered_id = notification_id
             } else if received.event_type == cooper::MouseEventType::out {
-              if controller.hovered_id == notification_id {
-                controller.hovered_id = ""
+              if self.hovered_id == notification_id {
+                self.hovered_id = ""
               }
             } else if received.event_type == cooper::MouseEventType::down and received.button == cooper::MouseButton::left {
-              controller.select_id(notification_id)
+              self.select_id(notification_id)
               received.stop_propagation()
             }
           },
@@ -677,44 +663,58 @@ impl InboxView {
   }
 }
 
-// The render request is bound at mount instead of injected at construction, so
-// the controller needs no `notify` wiring from its host or its tests.
-impl cui::Lifecycle for InboxView {
+// Component identity owns requests, subscriptions, and the shell route binding.
+impl cui::Lifecycle for Inbox {
   fn mut mounted(ctx: cui::Context) {
-    self.props.controller.invalidate = ctx.invalidate_root
+    self.invalidate = ctx.invalidate_root
+    self.props.route.focus = fn() {
+      self.focus()
+    }
+    self.props.route.handle_key = fn(received: mut cooper::KeyEvent) Bool {
+      self.handle_key(received)
+    }
+    self.unsubscribe = self.props.hub.subscribe(fn(event: events::Event) {
+      self.refresh(true)
+    })
+    // Children mount before their parent. Defer startup until the entire
+    // tree has bound its commands, including synchronous service fakes.
+    let _ = ctx.dispatch(fn() {
+      self.start()
+    })
   }
 
   fn mut unmounting(ctx: cui::Context) {
-    self.props.controller.invalidate = fn() {}
+    self.props.route.clear()
+    self.dispose()
+    self.invalidate = fn() {}
   }
 }
 
-impl cui::Component for InboxView {
+impl cui::Component for Inbox {
   fn mut render() cui::View {
-    let controller = self.props.controller
-    let palette = controller.palette
+    let palette = self.props.palette
     let list = mut List::new<cui::View>()
-    if not controller.list_status.is_empty() {
+    if not self.list_status.is_empty() {
       list.push(
         cui::text(
-          "  {controller.list_status}",
+          "  {self.list_status}",
           selectable: false,
           styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
-          text_style: match controller.list_status_error {
+          text_style: match self.list_status_error {
             true => ui::text_style(foreground: palette.danger, bold: true),
             false => ui::text_style(dim: true),
           },
         ),
       )
     }
-    for item, index in controller.items {
+    for item, index in self.items {
       list.push(self.row(item, index))
     }
     cui::box(
       [
         cui::scroll_box(
           list.@,
-          ref: controller.list_scroll,
+          ref: self.list_scroll,
           styles: ui::style(
             width: ui::percent(35.0),
             height: ui::percent(100.0),
@@ -740,13 +740,13 @@ impl cui::Component for InboxView {
             cui::scroll_box(
               [
                 cui::text(
-                  controller.detail_text,
+                  self.detail_text,
                   wrap: ui::TextWrap::word,
                   styles: ui::style(width: ui::percent(100.0), flex_shrink: 0.0),
-                  text_style: ui::text_style(dim: controller.detail_dim),
+                  text_style: ui::text_style(dim: self.detail_dim),
                 ),
               ],
-              ref: controller.detail_scroll,
+              ref: self.detail_scroll,
               styles: ui::style(
                 width: ui::percent(100.0),
                 height: ui::cells(0),

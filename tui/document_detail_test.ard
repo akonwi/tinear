@@ -1,0 +1,423 @@
+use ard/testing as assertions
+
+use cooper
+use cooper/cui
+use cooper/cui/renderer
+use cooper/event
+use cooper/testing
+use cooper/ui
+use tinear/models/documents
+use tinear/services/document_detail_service
+use tinear/tui/document_detail
+use tinear/tui/screen_route
+use tinear/tui/theme
+
+struct FakeState {
+  loads: [fn(documents::Doc!Str)],
+}
+
+struct Scheduled {
+  actions: [fn()],
+  cancellations: Int,
+}
+
+struct Actions {
+  titles: [Str],
+  opened_url: Str,
+  errors: Int,
+}
+
+// Captures the component the renderer constructs so tests can assert against
+// real component state instead of a production-only state handle.
+struct Probe {
+  components: [mut document_detail::DocumentDetail],
+}
+
+struct Fixture {
+  component: mut document_detail::DocumentDetail,
+  mounted: renderer::Renderer,
+  route: mut screen_route::Route,
+}
+
+private fn service(state: mut FakeState) document_detail_service::Service {
+  document_detail_service::Service{
+    load: fn(cancellation: Receiver<Bool>, slug_id: Str, completion: fn(documents::Doc!Str)) {
+      state.loads.push(completion)
+    },
+  }
+}
+
+private fn schedule(state: mut Scheduled) fn(Int, fn()) fn() {
+  fn(milliseconds: Int, action: fn()) fn() {
+    state.actions.push(action)
+    fn() {
+      state.cancellations =+ 1
+    }
+  }
+}
+
+private fn document(title: Str, content: Str) documents::Doc {
+  documents::Doc{
+    meta: documents::DocMeta{
+      id: "doc-1",
+      slug_id: "doc-slug",
+      title: title,
+      container: "Tinear",
+      creator: "Alex",
+      updated_at: "2026-05-26T20:17:01.313Z",
+      url: "https://linear.app/document/doc-slug",
+    },
+    content: Maybe::new(content),
+  }
+}
+
+private fn key(name: Str) mut cooper::KeyEvent {
+  event::key(
+    name,
+    "",
+    cooper::KeyEventType::press,
+    cooper::Modifiers{
+      shift: false,
+      ctrl: false,
+      alt: false,
+      super: false,
+    },
+  )
+}
+
+private fn probing(found: mut Probe) fn(mut document_detail::Props) mut document_detail::DocumentDetail {
+  fn(props: mut document_detail::Props) mut document_detail::DocumentDetail {
+    let component = document_detail::create(props)
+    found.components.push(component)
+    component
+  }
+}
+
+// Mounting is all the wiring this screen needs: `mounted` binds the route,
+// binds invalidate, and starts the initial load.
+private fn mount_detail(
+  application: testing::TestApp,
+  fake: mut FakeState,
+  scheduled: mut Scheduled,
+  actions: mut Actions,
+) mut Fixture {
+  let found = mut Probe{components: []}
+  let route = screen_route::new()
+  let mounted = renderer::mount(
+    application.context,
+    application.root,
+    cui::child(
+      probing(found),
+      document_detail::Props{
+        context: application.context,
+        palette: theme::new(),
+        slug_id: "doc-slug",
+        cached_title: "Cached title",
+        service: service(fake),
+        schedule: schedule(scheduled),
+        route: route,
+        on_title: fn(title: Str) {
+          actions.titles.push(title)
+        },
+        on_open_url: fn(url: Str) {
+          actions.opened_url = url
+        },
+        notify_error: fn(title: Str, message: Str) {
+          actions.errors =+ 1
+        },
+      },
+      key: "document-doc-slug",
+    ),
+  )
+  let _ = application.flush()
+  (mut Fixture{
+    component: found.components.at(0).expect("mounted document detail"),
+    mounted: mounted,
+    route: route,
+  })
+}
+
+private fn fake() mut FakeState {
+  (mut FakeState{loads: []})
+}
+
+private fn scheduled() mut Scheduled {
+  (mut Scheduled{actions: [], cancellations: 0})
+}
+
+private fn actions() mut Actions {
+  (mut Actions{
+    titles: [],
+    opened_url: "",
+    errors: 0,
+  })
+}
+
+test fn document_detail_loads_retitles_renders_and_routes_commands() Void!Str {
+  let application = testing::new(80, 24)
+  defer application.destroy()
+  let loads = fake()
+  let timers = scheduled()
+  let seen = actions()
+  let detail = mount_detail(application, loads, timers, seen)
+  defer detail.mounted.destroy()
+
+  try assertions::assert(loads.loads.size() == 1, "mounting should load once")
+  try assertions::assert(timers.actions.size() == 1, "mounting should schedule refresh")
+  (loads.loads.at(0).expect("load"))(Result::ok(document("Fresh title", "# Heading\n\nBody")))
+  let _ = application.flush()
+  application.render()
+
+  try assertions::assert(application.frame().text().contains("Fresh title"), "title should render")
+  try assertions::assert(application.frame().text().contains("Tinear"), "container should render")
+  try assertions::assert(
+    application.frame().text().contains("May 26, 2026"),
+    "updated timestamp should be friendly",
+  )
+  try assertions::assert(
+    detail.component.markdown.source == "# Heading\n\nBody",
+    "content should render as markdown",
+  )
+  try assertions::assert(
+    seen.titles.at(0).expect("retitle") == "Fresh title",
+    "fresh title should retitle tab",
+  )
+
+  // Commands reach the component through the route the shell holds.
+  try assertions::assert(detail.route.handle_key(key("j")), "j should scroll document")
+  try assertions::assert(detail.route.handle_key(key("k")), "k should scroll document")
+  try assertions::assert(detail.route.handle_key(key("o")), "o should open document URL")
+  try assertions::assert(
+    seen.opened_url == "https://linear.app/document/doc-slug",
+    "document URL should be routed through launcher",
+  )
+  try assertions::assert(
+    not detail.route.handle_key(key("z")),
+    "unhandled keys should fall through to the shell",
+  )
+
+  for size in [[60, 20], [100, 30], [160, 40]] {
+    application.resize(size.at(0).expect("width"), size.at(1).expect("height"))
+    try assertions::assert(
+      detail.component.markdown.source == "# Heading\n\nBody",
+      "resize should preserve Markdown source",
+    )
+    try assertions::assert(
+      application.frame().text().contains("Fresh title"),
+      "resize should preserve document identity",
+    )
+  }
+  assertions::assert(loads.loads.size() == 1, "resize should not trigger document loads")
+}
+
+test fn document_detail_initial_error_retries_to_empty_content() Void!Str {
+  let application = testing::new(70, 20)
+  defer application.destroy()
+  let loads = fake()
+  let timers = scheduled()
+  let seen = actions()
+  let detail = mount_detail(application, loads, timers, seen)
+  defer detail.mounted.destroy()
+
+  (loads.loads.at(0).expect("initial load"))(Result::err("forbidden"))
+  try assertions::assert(
+    detail.component.status.contains("Couldn't load Cached title: forbidden"),
+    "initial document errors should be visible",
+  )
+  detail.component.refresh(false)
+  let empty = mut document("Empty document", "ignored")
+  empty.content = Maybe::new<Str>()
+  (loads.loads.at(1).expect("retry"))(Result::ok(empty.@))
+  try assertions::assert(
+    detail.component.document.is_some(),
+    "successful retry should retain document metadata",
+  )
+  assertions::assert(
+    detail.component.markdown.source.is_empty(),
+    "null document content should render as empty",
+  )
+}
+
+test fn document_detail_rejects_stale_load_and_preserves_content_on_refresh_failure() Void!Str {
+  let application = testing::new(70, 20)
+  defer application.destroy()
+  let loads = fake()
+  let timers = scheduled()
+  let seen = actions()
+  let detail = mount_detail(application, loads, timers, seen)
+  defer detail.mounted.destroy()
+
+  detail.component.refresh(true)
+  try assertions::assert(
+    detail.component.generation == 2,
+    "two loads should advance generation to {detail.component.generation}",
+  )
+  (loads.loads.at(0).expect("stale load"))(Result::ok(document("Stale", "Old")))
+  try assertions::assert(detail.component.document.is_none(), "older load should be ignored")
+  (loads.loads.at(1).expect("current load"))(Result::ok(document("Current", "Visible")))
+  detail.component.refresh(true)
+  (loads.loads.at(2).expect("failed refresh"))(Result::err("offline"))
+  let _ = application.flush()
+  application.render()
+  try assertions::assert(
+    application.frame().text().contains("Current"),
+    "failed refresh should preserve visible document",
+  )
+  assertions::assert(seen.errors == 1, "failed silent refresh should report a toast")
+}
+
+test fn retiring_the_component_stops_refresh_clears_the_route_and_ignores_late_work() Void!Str {
+  let application = testing::new(60, 18)
+  defer application.destroy()
+  let loads = fake()
+  let timers = scheduled()
+  let seen = actions()
+  let detail = mount_detail(application, loads, timers, seen)
+
+  // Retirement is the only disposal path now: the component's own lifecycle
+  // owns cancellation, and the shell's screen dispose hook is a no-op.
+  detail.mounted.destroy()
+  let _ = application.flush()
+
+  try assertions::assert(timers.cancellations == 1, "retirement should cancel periodic refresh")
+  try assertions::assert(
+    not detail.route.handle_key(key("j")),
+    "a retired screen should stop claiming keys",
+  )
+  (loads.loads.at(0).expect("late load"))(Result::ok(document("Late", "Ignored")))
+  try assertions::assert(
+    detail.component.document.is_none(),
+    "retired detail should ignore late completion",
+  )
+  (timers.actions.at(0).expect("scheduled refresh"))()
+  assertions::assert(
+    loads.loads.size() == 1,
+    "a retired scheduled action should not start another load",
+  )
+}
+
+test fn loading_document_keeps_its_focus_target_when_content_arrives() Void!Str {
+  let application = testing::new(80, 24)
+  defer application.destroy()
+  let loads = fake()
+  let timers = scheduled()
+  let seen = actions()
+  let detail = mount_detail(application, loads, timers, seen)
+  defer detail.mounted.destroy()
+  application.render()
+
+  // Loading and loaded content share one stable focus target.
+  detail.route.focus()
+  try assertions::assert(
+    detail.component.body.current.expect("loading body").node().is_focused(),
+    "a loading document should already have a focus target",
+  )
+
+  (loads.loads.at(0).expect("load"))(Result::ok(document("Fresh title", "# Heading\n\nBody")))
+  let _ = application.flush()
+  application.render()
+  assertions::assert(
+    detail.component.body.current.expect("body").node().is_focused(),
+    "the document body should hold focus",
+  )
+}
+
+test fn document_completion_does_not_override_newer_focus() Void!Str {
+  let application = testing::new(80, 24)
+  defer application.destroy()
+  let loads = fake()
+  let timers = scheduled()
+  let seen = actions()
+  let detail = mount_detail(application, loads, timers, seen)
+  defer detail.mounted.destroy()
+  application.render()
+
+  detail.route.focus()
+  try assertions::assert(
+    detail.component.body.current.expect("loading body").node().is_focused(),
+    "a loading document should already have a focus target",
+  )
+
+  let other = ui::input(application.context, placeholder: "Other focus owner")
+  application.root.add(other)
+  let _ = other.focus()
+  (loads.loads.at(0).expect("load"))(Result::ok(document("Fresh title", "# Heading\n\nBody")))
+  let _ = application.flush()
+  application.render()
+  assertions::assert(other.node().is_focused(), "completion must not override newer focus")
+}
+
+private struct ParentState {
+  mounted: Bool,
+  title: Str,
+  completed_before_parent_mount: Bool,
+}
+
+private struct ParentProps {
+  child: cui::View,
+  state: mut ParentState,
+}
+
+private struct Parent {
+  props: mut ParentProps,
+}
+
+private fn parent(props: mut ParentProps) mut Parent {
+  (mut Parent{props: props})
+}
+
+impl cui::Component for Parent {
+  fn mut render() cui::View {
+    self.props.child
+  }
+}
+
+impl cui::Lifecycle for Parent {
+  fn mut mounted(ctx: cui::Context) {
+    self.props.state.mounted = true
+  }
+
+  fn mut unmounting(ctx: cui::Context) {}
+}
+
+test fn synchronous_initial_load_waits_for_parent_command_binding() Void!Str {
+  let application = testing::new(80, 24)
+  defer application.destroy()
+  let state = mut ParentState{
+    mounted: false,
+    title: "",
+    completed_before_parent_mount: false,
+  }
+  let screen = document_detail::new(
+    application.context,
+    theme::new(),
+    "doc-slug",
+    "Cached",
+    document_detail_service::Service{
+      load: fn(stop: Receiver<Bool>, slug: Str, complete: fn(documents::Doc!Str)) {
+        complete(Result::ok(document("Fresh", "Body")))
+      },
+    },
+    fn(delay: Int, action: fn()) fn() {
+      fn() {}
+    },
+    fn(title: Str) {
+      state.completed_before_parent_mount = not state.mounted
+      state.title = title
+    },
+    fn(url: Str) {},
+    fn(title: Str, message: Str) {},
+  )
+  let mounted = renderer::mount(
+    application.context,
+    application.root,
+    cui::child(parent, ParentProps{child: screen.view, state: state}),
+  )
+  defer mounted.destroy()
+  let _ = application.flush()
+  try assertions::assert(state.title == "Fresh", "initial completion should reach the parent")
+  assertions::assert(
+    not state.completed_before_parent_mount,
+    "parent must bind commands before child service completions",
+  )
+}

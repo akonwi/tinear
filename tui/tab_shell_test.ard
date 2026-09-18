@@ -1,15 +1,15 @@
 use ard/testing as assertions
 
 use cooper
-use cooper/event
 use cooper/cui
 use cooper/cui/renderer
+use cooper/event
 use cooper/testing
 use cooper/ui
 use tinear/models/cache
 use tinear/models/shell as shell_model
 use tinear/models/tabs
-use tinear/tui/shell_controller
+use tinear/tui/tab_shell
 use tinear/tui/theme
 
 private struct ScreenState {
@@ -39,32 +39,32 @@ test fn tab_chips_use_intrinsic_cell_width_with_a_document_cap() Void!Str {
   let application = testing::new(80, 12)
   defer application.destroy()
   try assertions::assert(
-    shell_controller::tab_chip_width(application.context.measure_text("CCA-1782"), true) == 12,
+    tab_shell::tab_chip_width(application.context.measure_text("CCA-1782"), true) == 12,
     "issue tabs should not reserve document-title width",
   )
   try assertions::assert(
-    shell_controller::tab_chip_width(
+    tab_shell::tab_chip_width(
       application.context.measure_text("A very long document title that needs clipping"),
       true,
     ) == 26,
     "long dynamic labels should retain the existing cap",
   )
   assertions::assert(
-    shell_controller::tab_chip_width(application.context.measure_text("Inbox"), false) == 7,
+    tab_shell::tab_chip_width(application.context.measure_text("Inbox"), false) == 7,
     "permanent tabs should preserve their padding",
   )
   assertions::assert(
-    shell_controller::tab_chip_width(application.context.measure_text("界界"), true) == 8,
+    tab_shell::tab_chip_width(application.context.measure_text("界界"), true) == 8,
     "wide graphemes should use terminal cell width rather than rune count",
   )
 }
 
-private fn fake_screen(ctx: mut cooper::Runtime, label: Str, state: mut ScreenState) shell_controller::Screen {
+private fn fake_screen(ctx: mut cooper::Runtime, label: Str, state: mut ScreenState) tab_shell::Screen {
   let panel = cui::box_ref()
-  shell_controller::declarative_screen(
+  tab_shell::screen(
     view: cui::box(
-      [cui::text(label)],
       // A no-op key handler is what makes the panel focusable.
+      [cui::text(label)],
       on_key: fn(received: mut cooper::KeyEvent, context: cui::Context) {},
       ref: panel,
       styles: ui::style(
@@ -96,8 +96,8 @@ private fn fake_screen(ctx: mut cooper::Runtime, label: Str, state: mut ScreenSt
   )
 }
 
-private fn dynamic_factory(ctx: mut cooper::Runtime, created: mut Counter, disposed: mut Counter) fn(tabs::TabRef) shell_controller::Screen {
-  fn(reference: tabs::TabRef) shell_controller::Screen {
+private fn dynamic_factory(ctx: mut cooper::Runtime, created: mut Counter, disposed: mut Counter) fn(tabs::TabRef) tab_shell::Screen {
+  fn(reference: tabs::TabRef) tab_shell::Screen {
     created.value =+ 1
     let state = mut ScreenState{
       focuses: 0,
@@ -105,7 +105,7 @@ private fn dynamic_factory(ctx: mut cooper::Runtime, created: mut Counter, dispo
       disposals: 0,
     }
     let base = fake_screen(ctx, "Detail {reference.title}", state)
-    shell_controller::declarative_screen(
+    tab_shell::screen(
       view: base.view,
       focus: base.focus,
       handle_key: base.handle_key,
@@ -122,8 +122,8 @@ private fn tracked_dynamic_factory(
   created: mut Counter,
   disposed: mut Counter,
   handled: mut Counter,
-) fn(tabs::TabRef) shell_controller::Screen {
-  fn(reference: tabs::TabRef) shell_controller::Screen {
+) fn(tabs::TabRef) tab_shell::Screen {
+  fn(reference: tabs::TabRef) tab_shell::Screen {
     created.value =+ 1
     let state = mut ScreenState{
       focuses: 0,
@@ -131,7 +131,7 @@ private fn tracked_dynamic_factory(
       disposals: 0,
     }
     let base = fake_screen(ctx, "Detail {reference.title}", state)
-    shell_controller::declarative_screen(
+    tab_shell::screen(
       view: base.view,
       focus: base.focus,
       handle_key: fn(received: mut cooper::KeyEvent) Bool {
@@ -166,8 +166,8 @@ test fn shell_switches_persistent_tabs_and_persists_selection() Void!Str {
   let created = mut Counter{value: 0}
   let disposed = mut Counter{value: 0}
   let snapshots = mut List::new<cache::LoggedInCache>()
-  let controller = shell_controller::new(
-    application.context,
+  let fixture = mount_shell(
+    application,
     theme::new(),
     shell_model::empty(),
     fake_screen(application.context, "Inbox body", inbox_state),
@@ -180,11 +180,8 @@ test fn shell_switches_persistent_tabs_and_persists_selection() Void!Str {
     fn() {},
     fn() {},
   )
-  let mounted = renderer::mount(
-    application.context,
-    application.root,
-    shell_controller::view(controller),
-  )
+  let mounted = fixture.mounted
+  let component = fixture.component
   defer mounted.destroy()
   let _ = application.flush()
   application.render()
@@ -214,10 +211,10 @@ test fn shell_switches_persistent_tabs_and_persists_selection() Void!Str {
     "footer key hints should begin at the left edge",
   )
 
-  try assertions::assert(controller.handle_key(key("tab")), "Tab should switch views")
+  try assertions::assert(component.handle_key(key("tab")), "Tab should switch views")
   let _ = application.flush()
   application.render()
-  try assertions::assert(controller.model.tab_index == 1, "Tab should select My Issues")
+  try assertions::assert(component.model.tab_index == 1, "Tab should select My Issues")
   let board_tab = application.frame().cell(8, 0).expect("active board tab")
   try assertions::assert(
     board_tab.style.bold and (not board_tab.style.underline) and (not board_tab.style.reverse),
@@ -248,7 +245,7 @@ test fn shell_switches_persistent_tabs_and_persists_selection() Void!Str {
   )
   for size in [[60, 20], [100, 30], [160, 40]] {
     application.resize(size.at(0).expect("width"), size.at(1).expect("height"))
-    try assertions::assert(controller.model.tab_index == 1, "resize should preserve active tab")
+    try assertions::assert(component.model.tab_index == 1, "resize should preserve active tab")
     try assertions::assert(
       application.frame().width() == size.at(0).expect("frame width"),
       "frame should adopt width",
@@ -274,8 +271,8 @@ test fn shell_restores_opens_reuses_retitles_and_closes_dynamic_tabs() Void!Str 
   }
   let restored_ref = tabs::doc_tab("doc-1", "Restored doc")
   let initial = shell_model::Model{tab_index: 0, tabs: [restored_ref]}
-  let controller = shell_controller::new(
-    application.context,
+  let fixture = mount_shell(
+    application,
     theme::new(),
     initial,
     fake_screen(application.context, "Inbox", fixed),
@@ -286,39 +283,36 @@ test fn shell_restores_opens_reuses_retitles_and_closes_dynamic_tabs() Void!Str 
     fn() {},
     fn() {},
   )
-  let mounted = renderer::mount(
-    application.context,
-    application.root,
-    shell_controller::view(controller),
-  )
+  let mounted = fixture.mounted
+  let component = fixture.component
   defer mounted.destroy()
   let _ = application.flush()
-  try assertions::assert(created.value == 1, "restored tab should create one retained controller")
+  try assertions::assert(created.value == 1, "restored tab should create one retained component")
   application.render()
   try assertions::assert(
     not application.frame().text().contains("Detail Restored"),
     "inactive restored tab should be hidden",
   )
 
-  controller.select_tab(2)
+  component.select_tab(2)
   let _ = application.flush()
   application.render()
   try testing::assert_contains(application.frame().text(), "Detail Restored doc")
-  controller.open(tabs::doc_tab("doc-1", "ignored"))
-  try assertions::assert(created.value == 1, "opening existing identity should reuse its controller")
-  controller.retitle(restored_ref, "Renamed doc")
+  component.open(tabs::doc_tab("doc-1", "ignored"))
+  try assertions::assert(created.value == 1, "opening existing identity should reuse its component")
+  component.retitle(restored_ref, "Renamed doc")
   let _ = application.flush()
   application.render()
   try testing::assert_contains(application.frame().text(), "Renamed doc")
-  controller.retitle(restored_ref, "界界界界界界界界界界界界界界界界")
+  component.retitle(restored_ref, "界界界界界界界界界界界界界界界界")
   let _ = application.flush()
   application.render()
   try testing::assert_contains(application.frame().text(), "…")
 
-  try assertions::assert(controller.handle_key(key("escape")), "Escape should close dynamic tab")
-  try assertions::assert(controller.model.tab_index == 1, "closing detail should return to board")
-  try assertions::assert(controller.dynamic_screens.size() == 0, "closed controller should detach")
-  assertions::assert(disposed.value == 1, "closed controller should dispose once")
+  try assertions::assert(component.handle_key(key("escape")), "Escape should close dynamic tab")
+  try assertions::assert(component.model.tab_index == 1, "closing detail should return to board")
+  try assertions::assert(component.dynamic_screens.size() == 0, "closed component should detach")
+  assertions::assert(disposed.value == 1, "closed component should dispose once")
 }
 
 test fn shell_routes_mouse_global_and_active_commands() Void!Str {
@@ -339,8 +333,8 @@ test fn shell_routes_mouse_global_and_active_commands() Void!Str {
   let searches = mut Counter{value: 0}
   let creations = mut Counter{value: 0}
   let dynamic_handled = mut Counter{value: 0}
-  let controller = shell_controller::new(
-    application.context,
+  let fixture = mount_shell(
+    application,
     theme::new(),
     shell_model::empty(),
     fake_screen(application.context, "Inbox", inbox_state),
@@ -355,24 +349,21 @@ test fn shell_routes_mouse_global_and_active_commands() Void!Str {
       creations.value =+ 1
     },
   )
-  let mounted = renderer::mount(
-    application.context,
-    application.root,
-    shell_controller::view(controller),
-  )
+  let mounted = fixture.mounted
+  let component = fixture.component
   defer mounted.destroy()
   let _ = application.flush()
   application.render()
-  try assertions::assert(controller.handle_key(key("x")), "active Inbox should handle delegated key")
+  try assertions::assert(component.handle_key(key("x")), "active Inbox should handle delegated key")
   try assertions::assert(
     inbox_state.handled == 1 and board_state.handled == 0,
     "hidden board must not receive Inbox commands",
   )
   application.click(8, 0)
-  try assertions::assert(controller.model.tab_index == 1, "clicking My Issues tab should select it")
-  try assertions::assert(controller.handle_key(key("?")), "search should be globally handled")
+  try assertions::assert(component.model.tab_index == 1, "clicking My Issues tab should select it")
+  try assertions::assert(component.handle_key(key("?")), "search should be globally handled")
   try assertions::assert(
-    controller.handle_key(
+    component.handle_key(
       event::key(
         "?",
         "?",
@@ -387,32 +378,32 @@ test fn shell_routes_mouse_global_and_active_commands() Void!Str {
     ),
     "terminal question-mark events should be globally handled with Shift",
   )
-  try assertions::assert(controller.handle_key(key("c")), "create should be globally handled")
-  try assertions::assert(controller.handle_key(key("x")), "active screen should handle remaining keys")
+  try assertions::assert(component.handle_key(key("c")), "create should be globally handled")
+  try assertions::assert(component.handle_key(key("x")), "active screen should handle remaining keys")
   try assertions::assert(searches.value == 2, "both normalized search key shapes should run the callback")
   try assertions::assert(creations.value == 1, "create callback should run")
   try assertions::assert(board_state.handled == 1, "active board should receive delegated key")
   try assertions::assert(inbox_state.handled == 1, "hidden Inbox must not receive board commands")
-  controller.open(tabs::issue_tab("AKO-1"))
+  component.open(tabs::issue_tab("AKO-1"))
   try assertions::assert(
-    controller.handle_key(key("x")),
+    component.handle_key(key("x")),
     "active dynamic tab should receive delegated key",
   )
   try assertions::assert(
     dynamic_handled.value == 1 and board_state.handled == 1,
     "hidden board must not receive dynamic-tab commands",
   )
-  controller.select_tab(0)
+  component.select_tab(0)
   try assertions::assert(
-    controller.handle_key(key("x")),
+    component.handle_key(key("x")),
     "Inbox should handle after returning from detail",
   )
   try assertions::assert(
     inbox_state.handled == 2 and dynamic_handled.value == 1,
     "hidden dynamic tabs must not receive Inbox commands",
   )
-  controller.select_tab(2)
-  try assertions::assert(not controller.handle_key(key("c")), "detail tabs should own the c command")
+  component.select_tab(2)
+  try assertions::assert(not component.handle_key(key("c")), "detail tabs should own the c command")
   try assertions::assert(creations.value == 1, "detail c should not start issue creation")
   let _ = application.flush()
   application.render()
@@ -421,13 +412,13 @@ test fn shell_routes_mouse_global_and_active_commands() Void!Str {
     "dynamic tab should render a close target",
   )
   application.click(25, 0)
-  try assertions::assert(controller.model.tabs.size() == 0, "clicking × should close the tab")
+  try assertions::assert(component.model.tabs.size() == 0, "clicking × should close the tab")
   try assertions::assert(
-    controller.model.tab_index == 1,
+    component.model.tab_index == 1,
     "closing selected tab should return to My Issues",
   )
   try assertions::assert(disposed.value == 1, "close button should dispose the dynamic screen")
-  try assertions::assert(controller.handle_key(key("x")), "board should handle after detail closes")
+  try assertions::assert(component.handle_key(key("x")), "board should handle after detail closes")
   assertions::assert(
     board_state.handled == 2 and dynamic_handled.value == 1,
     "closed dynamic screens must not receive later commands",
@@ -450,8 +441,8 @@ test fn shell_disposal_cleans_screens_and_persistence_once() Void!Str {
   let created = mut Counter{value: 0}
   let disposed = mut Counter{value: 0}
   let persistence_disposals = mut Counter{value: 0}
-  let controller = shell_controller::new(
-    application.context,
+  let fixture = mount_shell(
+    application,
     theme::new(),
     shell_model::Model{tab_index: 2, tabs: [tabs::issue_tab("AKO-1")]},
     fake_screen(application.context, "Inbox", inbox_state),
@@ -464,15 +455,12 @@ test fn shell_disposal_cleans_screens_and_persistence_once() Void!Str {
     fn() {},
     fn() {},
   )
-  let mounted = renderer::mount(
-    application.context,
-    application.root,
-    shell_controller::view(controller),
-  )
+  let mounted = fixture.mounted
+  let component = fixture.component
   defer mounted.destroy()
   let _ = application.flush()
-  controller.dispose()
-  controller.dispose()
+  mounted.destroy()
+  mounted.destroy()
   try assertions::assert(inbox_state.disposals == 1, "Inbox should dispose once")
   try assertions::assert(board_state.disposals == 1, "board should dispose once")
   try assertions::assert(disposed.value == 1, "dynamic screen should dispose once")
@@ -494,8 +482,8 @@ test fn shell_focuses_the_active_screen_after_its_first_commit() Void!Str {
   }
   let created = mut Counter{value: 0}
   let disposed = mut Counter{value: 0}
-  let controller = shell_controller::new(
-    application.context,
+  let fixture = mount_shell(
+    application,
     theme::new(),
     shell_model::empty(),
     fake_screen(application.context, "Inbox body", inbox_state),
@@ -505,12 +493,10 @@ test fn shell_focuses_the_active_screen_after_its_first_commit() Void!Str {
     fn() {},
     fn() {},
     fn() {},
+    flush: false,
   )
-  let mounted = renderer::mount(
-    application.context,
-    application.root,
-    shell_controller::view(controller),
-  )
+  let mounted = fixture.mounted
+  let component = fixture.component
   defer mounted.destroy()
 
   // Screen focus is imperative and needs mounted refs, so the shell claims it
@@ -520,4 +506,113 @@ test fn shell_focuses_the_active_screen_after_its_first_commit() Void!Str {
   application.render()
   try assertions::assert(inbox_state.focuses == 1, "mounting should focus the active screen")
   assertions::assert(board_state.focuses == 0, "hidden screens should not take focus")
+}
+
+private struct Fixture {
+  mounted: renderer::Renderer,
+  component: mut tab_shell::Tabs,
+}
+
+private fn mount_shell(
+  application: testing::TestApp,
+  palette: theme::Theme,
+  initial_model: shell_model::Model,
+  inbox: tab_shell::Screen,
+  board: tab_shell::Screen,
+  make_dynamic: fn(tabs::TabRef) tab_shell::Screen,
+  persist: fn(cache::LoggedInCache),
+  on_dispose: fn(),
+  on_search: fn(),
+  on_create: fn(),
+  flush: Bool?,
+) Fixture {
+  let instances = mut List::new<mut tab_shell::Tabs>()
+  let mounted = renderer::mount(
+    application.context,
+    application.root,
+    cui::child(
+      fn(props: mut tab_shell::Props) mut tab_shell::Tabs {
+        let component = tab_shell::create(props)
+        instances.push(component)
+        component
+      },
+      tab_shell::Props{
+        context: application.context,
+        palette: palette,
+        initial_model: initial_model,
+        inbox: inbox,
+        board: board,
+        make_dynamic: make_dynamic,
+        persist: persist,
+        on_dispose: on_dispose,
+        on_search: on_search,
+        on_create: on_create,
+        commands: tab_shell::commands(),
+      },
+    ),
+  )
+  if flush.or(true) {
+    let _ = application.flush()
+  }
+  Fixture{mounted: mounted, component: instances.at(0).expect("mounted shell")}
+}
+
+private struct GenerationProps {
+  initial: Int,
+}
+
+private struct GenerationScreen {
+  generation: Int,
+}
+
+private fn generation_screen(props: mut GenerationProps) mut GenerationScreen {
+  (mut GenerationScreen{generation: props.initial})
+}
+
+impl cui::Component for GenerationScreen {
+  fn mut render() cui::View {
+    cui::text("generation {self.generation}")
+  }
+}
+
+test fn reopening_a_tab_before_commit_creates_a_new_component_lifetime() Void!Str {
+  let application = testing::new(70, 18)
+  defer application.destroy()
+  let state = mut ScreenState{
+    focuses: 0,
+    handled: 0,
+    disposals: 0,
+  }
+  let created = mut Counter{value: 0}
+  let fixture = mount_shell(
+    application,
+    theme::new(),
+    shell_model::empty(),
+    fake_screen(application.context, "Inbox", state),
+    fake_screen(application.context, "Board", state),
+    fn(reference: tabs::TabRef) tab_shell::Screen {
+      created.value =+ 1
+      tab_shell::screen(
+        cui::child(generation_screen, GenerationProps{initial: created.value}, key: "same-child"),
+        fn() {},
+        fn(received: mut cooper::KeyEvent) Bool {
+          false
+        },
+        fn() {},
+      )
+    },
+    fn(snapshot: cache::LoggedInCache) {},
+    fn() {},
+    fn() {},
+    fn() {},
+  )
+  defer fixture.mounted.destroy()
+  let reference = tabs::doc_tab("same", "Document")
+  fixture.component.open(reference)
+  let _ = application.flush()
+  let _ = fixture.component.close(reference)
+  fixture.component.open(reference)
+  let _ = application.flush()
+  application.render()
+  testing::assert_contains(application.frame().text(), "generation 2")
 }

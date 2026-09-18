@@ -16,7 +16,7 @@ struct Screen {
   dispose: fn(),
 }
 
-fn declarative_screen(
+fn screen(
   view: cui::View,
   focus: fn(),
   handle_key: fn(mut cooper::KeyEvent) Bool,
@@ -31,27 +31,22 @@ fn declarative_screen(
 }
 
 struct DynamicScreen {
+  // Stable for this tab instance; closing and reopening creates a new one.
+  instance_id: Int,
   reference: tabs::TabRef,
   screen: Screen,
 }
 
-struct ShellController {
-  context: mut cooper::Runtime,
+struct Tabs {
+  props: mut Props,
   model: shell_model::Model,
-  inbox: Screen,
-  board: Screen,
   dynamic_screens: [DynamicScreen],
-  make_dynamic: fn(tabs::TabRef) Screen,
-  persist: fn(cache::LoggedInCache),
-  dispose_persistence: fn(),
-  on_search: fn(),
-  on_create: fn(),
+  next_screen_id: Int,
   invalidate: fn(),
   // Declarative pages only become visible at the next commit, and a control
   // inside a `display: none` subtree cannot take focus, so the focus claim is
   // deferred past that commit.
   focus_later: fn(),
-  palette: tinear_theme::Theme,
   disposed: Bool,
 }
 
@@ -160,48 +155,45 @@ private fn hints_content(hints: [hints_bar::Hint], palette: tinear_theme::Theme)
   ui::styled_text(spans.@)
 }
 
-// Declarative tab shell. Chips, rules, and hints are described from the
-// facade model; screens stay imperative behind persistent bridges whose
-// visibility the facade toggles synchronously.
-private struct TabsProps {
-  controller: mut ShellController,
-}
-
-private struct Tabs {
-  props: mut TabsProps,
-}
-
-private fn tabs_component(props: mut TabsProps) mut Tabs {
-  (mut Tabs{props: props})
-}
-
 impl cui::Lifecycle for Tabs {
   fn mut mounted(ctx: cui::Context) {
-    let controller = self.props.controller
-    controller.invalidate = ctx.invalidate_root
-    controller.focus_later = fn() {
+    self.props.commands.open = fn(reference: tabs::TabRef) {
+      self.open(reference)
+    }
+    self.props.commands.retitle = fn(reference: tabs::TabRef, title: Str) {
+      self.retitle(reference, title)
+    }
+    self.props.commands.focus_active = fn() {
+      self.focus_active()
+    }
+    self.props.commands.handle_key = fn(received: mut cooper::KeyEvent) Bool {
+      self.handle_key(received)
+    }
+    self.invalidate = ctx.invalidate_root
+    self.focus_later = fn() {
       let _ = ctx.dispatch(fn() {
-        controller.focus_active()
+        self.focus_active()
       })
     }
     // Screen focus is imperative and needs mounted refs, so claim it after the
     // first commit rather than at construction time.
     let _ = ctx.dispatch(fn() {
-      self.props.controller.focus_active()
+      self.focus_active()
     })
   }
 
   fn mut unmounting(ctx: cui::Context) {
-    self.props.controller.invalidate = fn() {}
-    self.props.controller.focus_later = fn() {}
+    self.props.commands.clear()
+    self.dispose()
+    self.invalidate = fn() {}
+    self.focus_later = fn() {}
   }
 }
 
 impl Tabs {
   private fn mut chip(index: Int, label: Str, dynamic: Bool) cui::View {
-    let controller = self.props.controller
-    let width = tab_chip_width(controller.context.measure_text(label), dynamic)
-    let selected = index == controller.model.tab_index
+    let width = tab_chip_width(self.props.context.measure_text(label), dynamic)
+    let selected = index == self.model.tab_index
     let label_width = match dynamic {
       true => width - 2,
       false => width,
@@ -215,7 +207,7 @@ impl Tabs {
             ui::span(
               label,
               style: match selected {
-                true => ui::span_style(foreground: controller.palette.accent, bold: true),
+                true => ui::span_style(foreground: self.props.palette.accent, bold: true),
                 false => ui::span_style(dim: true),
               },
             ),
@@ -244,9 +236,9 @@ impl Tabs {
           styles: ui::style(width: ui::cells(2), height: ui::cells(1), flex_shrink: 0.0),
           on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
             if received.event_type == cooper::MouseEventType::down and received.button == cooper::MouseButton::left {
-              match controller.model.tabs.at(dynamic_index) {
+              match self.model.tabs.at(dynamic_index) {
                 reference => {
-                  let _ = controller.close(reference)
+                  let _ = self.close(reference)
                 },
                 _ => (),
               }
@@ -268,7 +260,7 @@ impl Tabs {
       ),
       on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
         if received.event_type == cooper::MouseEventType::down and received.button == cooper::MouseButton::left {
-          controller.select_tab(index)
+          self.select_tab(index)
           received.stop_propagation()
         }
       },
@@ -289,22 +281,24 @@ impl Tabs {
 
 impl cui::Component for Tabs {
   fn mut render() cui::View {
-    let controller = self.props.controller
     let chips = mut List::new<cui::View>()
     chips.push(self.chip(0, "Inbox", false))
     chips.push(self.chip(1, "My Issues", false))
-    for reference, index in controller.model.tabs {
+    for reference, index in self.model.tabs {
       chips.push(self.chip(2 + index, reference.title, true))
     }
 
-    // Screens are persistent bridges: hidden pages stay mounted so their
-    // controllers keep their state, scrolling, and in-flight requests.
+    // Hidden pages remain mounted, retaining component state and requests.
     let bodies = mut List::new<cui::View>()
-    bodies.push(page(controller.inbox, "screen-inbox", controller.model.tab_index == 0))
-    bodies.push(page(controller.board, "screen-board", controller.model.tab_index == 1))
-    for dynamic, index in controller.dynamic_screens {
+    bodies.push(page(self.props.inbox, "screen-inbox", self.model.tab_index == 0))
+    bodies.push(page(self.props.board, "screen-board", self.model.tab_index == 1))
+    for dynamic, index in self.dynamic_screens {
       bodies.push(
-        page(dynamic.screen, tab_key(dynamic.reference), controller.model.tab_index == 2 + index),
+        page(
+          dynamic.screen,
+          "{tab_key(dynamic.reference)}-{dynamic.instance_id}",
+          self.model.tab_index == 2 + index,
+        ),
       )
     }
 
@@ -334,7 +328,7 @@ impl cui::Component for Tabs {
         cui::box(
           [
             cui::text(
-              hints_content(hints_for(controller.model), controller.palette),
+              hints_content(hints_for(self.model), self.props.palette),
               selectable: false,
               wrap: ui::TextWrap::none,
               overflow: ui::TextOverflow::ellipsis,
@@ -362,47 +356,71 @@ impl cui::Component for Tabs {
   }
 }
 
-fn new(
-  ctx: mut cooper::Runtime,
+// External capabilities only; tab state belongs to the mounted Tabs component.
+struct Commands {
+  open: fn(tabs::TabRef),
+  retitle: fn(tabs::TabRef, Str),
+  focus_active: fn(),
+  handle_key: fn(mut cooper::KeyEvent) Bool,
+}
+
+fn commands() mut Commands {
+  (mut Commands{
+    open: fn(reference: tabs::TabRef) {},
+    retitle: fn(reference: tabs::TabRef, title: Str) {},
+    focus_active: fn() {},
+    handle_key: fn(received: mut cooper::KeyEvent) Bool {
+      false
+    },
+  })
+}
+
+impl Commands {
+  fn mut clear() {
+    self.open = fn(reference: tabs::TabRef) {}
+    self.retitle = fn(reference: tabs::TabRef, title: Str) {}
+    self.focus_active = fn() {}
+    self.handle_key = fn(received: mut cooper::KeyEvent) Bool {
+      false
+    }
+  }
+}
+
+struct Props {
+  context: mut cooper::Runtime,
   palette: tinear_theme::Theme,
   initial_model: shell_model::Model,
   inbox: Screen,
   board: Screen,
   make_dynamic: fn(tabs::TabRef) Screen,
   persist: fn(cache::LoggedInCache),
-  dispose_persistence: fn(),
+  on_dispose: fn(),
   on_search: fn(),
   on_create: fn(),
-) mut ShellController {
-  let controller = mut ShellController{
-    context: ctx,
-    model: initial_model,
-    inbox: inbox,
-    board: board,
+  commands: mut Commands,
+}
+
+fn view(props: Props) cui::View {
+  cui::child(create, props, key: "shell")
+}
+
+fn create(props: mut Props) mut Tabs {
+  let component = mut Tabs{
+    props: props,
+    model: props.initial_model,
     dynamic_screens: [],
-    make_dynamic: make_dynamic,
-    persist: persist,
-    dispose_persistence: dispose_persistence,
-    on_search: on_search,
-    on_create: on_create,
+    next_screen_id: 0,
     invalidate: fn() {},
     focus_later: fn() {},
-    palette: palette,
     disposed: false,
   }
-  for reference in initial_model.tabs {
-    controller.ensure_dynamic(reference)
+  for reference in props.initial_model.tabs {
+    component.ensure_dynamic(reference)
   }
-  controller
+  component
 }
 
-// The shell's declarative view. The render request is bound at mount, so the
-// host supplies no callback.
-fn view(controller: mut ShellController) cui::View {
-  cui::child(tabs_component, TabsProps{controller: controller}, key: "shell")
-}
-
-impl ShellController {
+impl Tabs {
   private fn mut ensure_dynamic(reference: tabs::TabRef) {
     mut found = false
     for existing in self.dynamic_screens {
@@ -411,8 +429,15 @@ impl ShellController {
       }
     }
     if not found {
-      let screen = self.make_dynamic(reference)
-      self.dynamic_screens.push(DynamicScreen{reference: reference, screen: screen})
+      let screen = self.props.make_dynamic(reference)
+      self.next_screen_id =+ 1
+      self.dynamic_screens.push(
+        DynamicScreen{
+          instance_id: self.next_screen_id,
+          reference: reference,
+          screen: screen,
+        },
+      )
     }
   }
 
@@ -421,14 +446,14 @@ impl ShellController {
   private fn mut apply_selection(should_persist: Bool) {
     (self.invalidate)()
     if should_persist {
-      self.persist(shell_model::snapshot(self.model))
+      self.props.persist(shell_model::snapshot(self.model))
     }
   }
 
   fn mut focus_active() {
     match self.model.tab_index {
-      0 => self.inbox.focus(),
-      1 => self.board.focus(),
+      0 => self.props.inbox.focus(),
+      1 => self.props.board.focus(),
       _ => {
         let dynamic_index = self.model.tab_index - 2
         match self.dynamic_screens.at(dynamic_index) {
@@ -464,7 +489,7 @@ impl ShellController {
   }
 }
 
-impl ShellController {
+impl Tabs {
   fn mut close(reference: tabs::TabRef) Bool {
     if self.disposed {
       false
@@ -487,8 +512,8 @@ impl ShellController {
         let remaining = mut List::new<DynamicScreen>()
         for dynamic in self.dynamic_screens {
           if tabs::same(dynamic.reference, reference) {
-            // Dispose the controller now; dropping its key retires the
-            // bridge, which destroys the orphaned control at commit.
+            // Close external presenters now. Dropping the key retires the
+            // screen component and its requests at the next commit.
             dynamic.screen.dispose()
           } else {
             remaining.push(dynamic)
@@ -513,8 +538,8 @@ impl ShellController {
 
   private fn mut handle_active(received: mut cooper::KeyEvent) Bool {
     match self.model.tab_index {
-      0 => self.inbox.handle_key(received),
-      1 => self.board.handle_key(received),
+      0 => self.props.inbox.handle_key(received),
+      1 => self.props.board.handle_key(received),
       _ => {
         let dynamic_index = self.model.tab_index - 2
         match self.dynamic_screens.at(dynamic_index) {
@@ -539,9 +564,9 @@ impl ShellController {
           let _ = self.close_current()
         },
         received.matches("?") or received.matches("?", shift: true) or received.matches("/", shift: true) => {
-          self.on_search()
+          self.props.on_search()
         },
-        received.matches("c") and self.model.tab_index <= 1 => self.on_create(),
+        received.matches("c") and self.model.tab_index <= 1 => self.props.on_create(),
         _ => { handled = self.handle_active(received) },
       }
       if handled {
@@ -552,16 +577,16 @@ impl ShellController {
     }
   }
 
-  fn mut dispose() {
+  private fn mut dispose() {
     if not self.disposed {
       self.disposed = true
-      self.inbox.dispose()
-      self.board.dispose()
+      self.props.inbox.dispose()
+      self.props.board.dispose()
       for dynamic in self.dynamic_screens {
         dynamic.screen.dispose()
       }
       self.dynamic_screens = []
-      self.dispose_persistence()
+      self.props.on_dispose()
     }
   }
 }

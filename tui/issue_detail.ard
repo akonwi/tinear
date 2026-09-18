@@ -2,6 +2,7 @@ use cooper
 use cooper/cui
 use cooper/ui
 use go:strings
+use tinear/events
 use tinear/models/issue_state
 use tinear/models/issues
 use tinear/services/issue_detail_service
@@ -10,7 +11,8 @@ use tinear/tui/focus
 use tinear/tui/issue_field_picker_controller
 use tinear/tui/markdown_controller
 use tinear/tui/scheduler
-use tinear/tui/shell_controller
+use tinear/tui/screen_route
+use tinear/tui/tab_shell
 use tinear/tui/theme as tinear_theme
 use tinear/tui/timestamp
 
@@ -25,9 +27,49 @@ struct CommentRecord {
   panel: mut cui::BoxRef,
 }
 
-struct IssueDetailController {
+// Capabilities the shell and the external editor/picker controllers need
+// before this component exists. The component binds them at mount and clears
+// them at unmount, so calls outside that window are harmless no-ops.
+struct Commands {
+  route: mut screen_route::Route,
+  comments_changed: fn(Str, Bool),
+  description_changed: fn(Str),
+}
+
+fn commands() mut Commands {
+  (mut Commands{
+    route: screen_route::new(),
+    comments_changed: fn(comment_id: Str, should_focus: Bool) {},
+    description_changed: fn(description: Str) {},
+  })
+}
+
+impl Commands {
+  fn mut clear() {
+    self.route.clear()
+    self.comments_changed = fn(comment_id: Str, should_focus: Bool) {}
+    self.description_changed = fn(description: Str) {}
+  }
+}
+
+struct Props {
   context: mut cooper::Runtime,
+  palette: tinear_theme::Theme,
   identifier: Str,
+  service: issue_detail_service::Service,
+  schedule: scheduler::Schedule,
+  on_open_url: fn(Str),
+  on_pick_field: fn(issue_field_picker_controller::Field, issues::Issue),
+  on_comment: fn(issues::Issue, Str, Str),
+  on_edit_description: fn(issues::Issue),
+  notify_error: fn(Str, Str),
+  commands: mut Commands,
+  hub: mut events::Bus<events::Event>,
+}
+
+struct IssueDetail {
+  props: mut Props,
+  unsubscribe: fn(),
   status: Str,
   status_danger: Bool,
   comments_status: Str,
@@ -47,15 +89,7 @@ struct IssueDetailController {
   stop: Chan<Bool>,
   disposed: Bool,
   invalidate: fn(),
-  service: issue_detail_service::Service,
-  schedule: scheduler::Schedule,
   cancel_refresh: fn(),
-  on_open_url: fn(Str),
-  on_pick_field: fn(issue_field_picker_controller::Field, issues::Issue),
-  on_comment: fn(issues::Issue, Str, Str),
-  on_edit_description: fn(issues::Issue),
-  notify_error: fn(Str, Str),
-  palette: tinear_theme::Theme,
 }
 
 private fn root_child_style(display: ui::Display) ui::Style {
@@ -137,27 +171,16 @@ private fn comment_style(
   )
 }
 
-fn new(
-  ctx: mut cooper::Runtime,
-  palette: tinear_theme::Theme,
-  identifier: Str,
-  service: issue_detail_service::Service,
-  schedule: scheduler::Schedule,
-  on_open_url: fn(Str),
-  on_pick_field: fn(issue_field_picker_controller::Field, issues::Issue),
-  on_comment: fn(issues::Issue, Str, Str),
-  on_edit_description: fn(issues::Issue),
-  notify_error: fn(Str, Str),
-) mut IssueDetailController {
-  (mut IssueDetailController{
-    context: ctx,
-    identifier: identifier,
-    status: "Loading {identifier}…",
+fn create(props: mut Props) mut IssueDetail {
+  (mut IssueDetail{
+    props: props,
+    unsubscribe: fn() {},
+    status: "Loading {props.identifier}…",
     status_danger: false,
     comments_status: "Loading comments…",
     comments_status_danger: false,
     body_scroll: cui::scroll_box_ref(),
-    description: markdown_controller::new(ctx, palette, "", on_open_url),
+    description: markdown_controller::new(props.context, props.palette, "", props.on_open_url),
     comment_records: [],
     issue: Maybe::new<issues::Issue>(),
     comments: [],
@@ -171,32 +194,116 @@ fn new(
     stop: Chan::new<Bool>(),
     disposed: false,
     invalidate: fn() {},
-    service: service,
-    schedule: schedule,
     cancel_refresh: fn() {},
-    on_open_url: on_open_url,
-    on_pick_field: on_pick_field,
-    on_comment: on_comment,
-    on_edit_description: on_edit_description,
-    notify_error: notify_error,
-    palette: palette,
   })
 }
 
-impl IssueDetailController {
+// External editor/picker cleanup is the host's concern: wrap the returned
+// Screen's dispose if the host owns resources beyond this component.
+fn new(
+  ctx: mut cooper::Runtime,
+  palette: tinear_theme::Theme,
+  identifier: Str,
+  service: issue_detail_service::Service,
+  schedule: scheduler::Schedule,
+  on_open_url: fn(Str),
+  on_pick_field: fn(issue_field_picker_controller::Field, issues::Issue),
+  on_comment: fn(issues::Issue, Str, Str),
+  on_edit_description: fn(issues::Issue),
+  notify_error: fn(Str, Str),
+  commands: mut Commands,
+  hub: mut events::Bus<events::Event>,
+) tab_shell::Screen {
+  let route = commands.route
+  tab_shell::screen(
+    cui::child(
+      create,
+      Props{
+        context: ctx,
+        palette: palette,
+        identifier: identifier,
+        service: service,
+        schedule: schedule,
+        on_open_url: on_open_url,
+        on_pick_field: on_pick_field,
+        on_comment: on_comment,
+        on_edit_description: on_edit_description,
+        notify_error: notify_error,
+        commands: commands,
+        hub: hub,
+      },
+      key: "issue-{identifier}",
+    ),
+    fn() {
+      route.focus()
+    },
+    fn(received: mut cooper::KeyEvent) Bool {
+      route.handle_key(received)
+    },
+    fn() {},
+  )
+}
+
+impl cui::Lifecycle for IssueDetail {
+  fn mut mounted(ctx: cui::Context) {
+    self.invalidate = ctx.invalidate_root
+    self.props.commands.route.focus = fn() {
+      self.focus()
+    }
+    self.props.commands.route.handle_key = fn(received: mut cooper::KeyEvent) Bool {
+      self.handle_key(received)
+    }
+    self.props.commands.comments_changed = fn(comment_id: Str, should_focus: Bool) {
+      self.comments_changed(comment_id, should_focus)
+    }
+    self.props.commands.description_changed = fn(description: Str) {
+      self.description_changed(description)
+    }
+    // Only this issue's mutations matter; every other view refetches its own.
+    let identifier = self.props.identifier
+    self.unsubscribe = self.props.hub.subscribe(fn(event: events::Event) {
+      match event {
+        events::IssueChanged(changed) => {
+          if changed.identifier == identifier {
+            self.refresh(true)
+          }
+        },
+        events::IssueCreated => (),
+      }
+    })
+    // Children mount before their parent. Defer startup until the entire
+    // tree has bound its commands, including synchronous service fakes.
+    let _ = ctx.dispatch(fn() {
+      self.start()
+    })
+  }
+
+  fn mut unmounting(ctx: cui::Context) {
+    self.props.commands.clear()
+    self.dispose()
+    self.invalidate = fn() {}
+  }
+}
+
+impl IssueDetail {
   private fn mut show_issue(issue: issues::Issue) {
     self.description.set_source(issue.description.or(""))
   }
 
   private fn mut show_issue_error(message: Str) {
-    self.status = "Couldn't load {self.identifier}: {message}"
+    self.status = "Couldn't load {self.props.identifier}: {message}"
     self.status_danger = true
   }
 
   private fn mut create_comment(comment: issues::Comment) CommentRecord {
     CommentRecord{
       id: comment.id,
-      body: markdown_controller::new(self.context, self.palette, comment.body, self.on_open_url),
+      body: markdown_controller::new(
+        self.props.context,
+        self.props.palette,
+        comment.body,
+        self.props.on_open_url,
+      ),
       panel: cui::box_ref(),
     }
   }
@@ -298,12 +405,12 @@ impl IssueDetailController {
         // populated at commit. reconcile_comments has already requested a
         // render, so queue the focus behind it.
         let generation = self.comments_generation
-        let _ = self.context.dispatch(fn() {
+        let _ = self.props.context.dispatch(fn() {
           if (not self.disposed) and generation == self.comments_generation and self.owns_focus() {
             // The row may still be uncommitted on the first pass; retry once
             // more behind the render that mounts it.
             if not self.focus_selected_comment() {
-              let _ = self.context.dispatch(fn() {
+              let _ = self.props.context.dispatch(fn() {
                 if (not self.disposed) and generation == self.comments_generation and self.owns_focus() {
                   let _ = self.focus_selected_comment()
                 }
@@ -426,26 +533,30 @@ impl IssueDetailController {
     self.issue_generation =+ 1
     let generation = self.issue_generation
     if (not silent) and self.issue.is_none() {
-      self.status = "Loading {self.identifier}…"
+      self.status = "Loading {self.props.identifier}…"
       self.status_danger = false
     }
-    self.service.load_issue(self.stop.receiver(), self.identifier, fn(result: issues::Issue!Str) {
-      if (not self.disposed) and generation == self.issue_generation {
-        match result {
-          ok(issue) => {
-            self.issue = Maybe::new(issue)
-            self.show_issue(issue)
-          },
-          err(message) => {
-            match self.issue {
-              existing => self.notify_error("Issue refresh", message),
-              _ => self.show_issue_error(message),
-            }
-          },
+    self.props.service.load_issue(
+      self.stop.receiver(),
+      self.props.identifier,
+      fn(result: issues::Issue!Str) {
+        if (not self.disposed) and generation == self.issue_generation {
+          match result {
+            ok(issue) => {
+              self.issue = Maybe::new(issue)
+              self.show_issue(issue)
+            },
+            err(message) => {
+              match self.issue {
+                existing => self.props.notify_error("Issue refresh", message),
+                _ => self.show_issue_error(message),
+              }
+            },
+          }
+          (self.invalidate)()
         }
-        (self.invalidate)()
-      }
-    })
+      },
+    )
   }
 
   private fn mut refresh_comments(silent: Bool) {
@@ -455,9 +566,9 @@ impl IssueDetailController {
       self.comments_status = "Loading comments…"
       self.comments_status_danger = false
     }
-    self.service.load_comments(
+    self.props.service.load_comments(
       self.stop.receiver(),
-      self.identifier,
+      self.props.identifier,
       fn(result: [issues::Comment]!Str) {
         if (not self.disposed) and generation == self.comments_generation {
           match result {
@@ -468,7 +579,7 @@ impl IssueDetailController {
               if self.comments.size() == 0 {
                 self.show_comments_error(message)
               } else {
-                self.notify_error("Comments refresh", message)
+                self.props.notify_error("Comments refresh", message)
               }
             },
           }
@@ -487,7 +598,7 @@ impl IssueDetailController {
 
   private fn mut schedule_refresh() {
     (self.cancel_refresh)()
-    self.cancel_refresh = self.schedule(5 * 60 * 1000, fn() {
+    self.cancel_refresh = self.props.schedule(5 * 60 * 1000, fn() {
       if not self.disposed {
         self.refresh(true)
         self.schedule_refresh()
@@ -495,9 +606,11 @@ impl IssueDetailController {
     })
   }
 
-  fn mut start() {
-    if (not self.disposed) and self.issue_generation == 0 {
-      self.refresh(false)
+  private fn mut start() {
+    if not self.disposed {
+      if self.issue_generation == 0 {
+        self.refresh(false)
+      }
       self.schedule_refresh()
     }
   }
@@ -506,7 +619,7 @@ impl IssueDetailController {
     match self.issue {
       loaded => {
         if not loaded.url.is_empty() {
-          self.on_open_url(loaded.url)
+          self.props.on_open_url(loaded.url)
         }
       },
       _ => (),
@@ -515,7 +628,7 @@ impl IssueDetailController {
 
   private fn mut pick(field: issue_field_picker_controller::Field) {
     match self.issue {
-      loaded => self.on_pick_field(field, loaded),
+      loaded => self.props.on_pick_field(field, loaded),
       _ => (),
     }
   }
@@ -524,7 +637,7 @@ impl IssueDetailController {
     match self.issue {
       loaded => {
         self.switch_section(COMMENTS_SECTION)
-        self.on_comment(loaded, "", "")
+        self.props.on_comment(loaded, "", "")
       },
       _ => (),
     }
@@ -540,7 +653,7 @@ impl IssueDetailController {
                 true => target.id,
                 false => target.parent_id,
               }
-              self.on_comment(loaded, parent_id, target.author)
+              self.props.on_comment(loaded, parent_id, target.author)
             },
             _ => (),
           }
@@ -554,7 +667,7 @@ impl IssueDetailController {
     match self.issue {
       loaded => {
         self.switch_section(DESCRIPTION_SECTION)
-        self.on_edit_description(loaded)
+        self.props.on_edit_description(loaded)
       },
       _ => (),
     }
@@ -632,33 +745,11 @@ impl IssueDetailController {
     }
   }
 
-  fn mut view() cui::View {
-    cui::child(
-      issue_detail_view,
-      IssueDetailProps{controller: self},
-      key: "issue-{self.identifier}",
-    )
-  }
-
-  fn mut screen(dispose_extra: fn()) shell_controller::Screen {
-    shell_controller::declarative_screen(
-      view: self.view(),
-      focus: fn() {
-        self.focus()
-      },
-      handle_key: fn(received: mut cooper::KeyEvent) Bool {
-        self.handle_key(received)
-      },
-      dispose: fn() {
-        dispose_extra()
-        self.dispose()
-      },
-    )
-  }
-
-  fn mut dispose() {
+  private fn mut dispose() {
     if not self.disposed {
       self.disposed = true
+      (self.unsubscribe)()
+      self.unsubscribe = fn() {}
       (self.cancel_refresh)()
       self.cancel_refresh = fn() {}
       self.stop.close()
@@ -673,22 +764,9 @@ impl IssueDetailController {
   }
 }
 
-struct IssueDetailProps {
-  controller: mut IssueDetailController,
-}
-
-struct IssueDetailView {
-  props: mut IssueDetailProps,
-}
-
-private fn issue_detail_view(props: mut IssueDetailProps) mut IssueDetailView {
-  (mut IssueDetailView{props: props})
-}
-
-impl IssueDetailView {
-  private fn tab(label: Str, section: Int, width: Int) cui::View {
-    let controller = self.props.controller
-    let active = controller.active_section == section
+impl IssueDetail {
+  private fn mut tab(label: Str, section: Int, width: Int) cui::View {
+    let active = self.active_section == section
     cui::box(
       [
         cui::text(
@@ -697,8 +775,8 @@ impl IssueDetailView {
           styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
           text_style: ui::text_style(
             foreground: match active {
-              true => controller.palette.accent,
-              false => controller.palette.foreground,
+              true => self.props.palette.accent,
+              false => self.props.palette.foreground,
             },
             bold: active,
             dim: not active,
@@ -709,29 +787,28 @@ impl IssueDetailView {
       styles: ui::style(width: ui::cells(width), height: ui::cells(1), flex_shrink: 0.0),
       on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
         if received.event_type == cooper::MouseEventType::down and received.button == cooper::MouseButton::left {
-          controller.switch_section(section)
+          self.switch_section(section)
           received.stop_propagation()
         }
       },
     )
   }
 
-  private fn rule() cui::View {
+  private fn mut rule() cui::View {
     cui::text(
       strings::Repeat("─", 512),
       selectable: false,
       wrap: ui::TextWrap::none,
       overflow: ui::TextOverflow::clip,
       styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
-      text_style: ui::text_style(foreground: self.props.controller.palette.border, dim: true),
+      text_style: ui::text_style(foreground: self.props.palette.border, dim: true),
     )
   }
 
-  private fn comment_row(comment: issues::Comment, index: Int, record: CommentRecord) cui::View {
-    let controller = self.props.controller
-    let palette = controller.palette
-    let active = index == controller.comment_cursor
-    let hovered = (not active) and record.id == controller.hovered_comment_id
+  private fn mut comment_row(comment: issues::Comment, index: Int, record: CommentRecord) cui::View {
+    let palette = self.props.palette
+    let active = index == self.comment_cursor
+    let hovered = (not active) and record.id == self.hovered_comment_id
     let foreground = match {
       active => palette.item_active_foreground,
       hovered => palette.item_hover_foreground,
@@ -758,41 +835,40 @@ impl IssueDetailView {
       on_key: fn(received: mut cooper::KeyEvent, ctx: cui::Context) {},
       on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
         if received.event_type == cooper::MouseEventType::move {
-          controller.hovered_comment_id = id
-          controller.refresh_comment_selection()
+          self.hovered_comment_id = id
+          self.refresh_comment_selection()
         } else if received.event_type == cooper::MouseEventType::out {
-          if controller.hovered_comment_id == id {
-            controller.hovered_comment_id = ""
-            controller.refresh_comment_selection()
+          if self.hovered_comment_id == id {
+            self.hovered_comment_id = ""
+            self.refresh_comment_selection()
           }
         } else if received.event_type == cooper::MouseEventType::down and received.button == cooper::MouseButton::left {
-          controller.select_comment(id)
+          self.select_comment(id)
           received.stop_propagation()
         }
       },
     )
   }
 
-  private fn body() cui::View {
-    let controller = self.props.controller
-    match controller.active_section == COMMENTS_SECTION {
+  private fn mut body() cui::View {
+    match self.active_section == COMMENTS_SECTION {
       true => {
         let children = mut List::new<cui::View>()
-        if not controller.comments_status.is_empty() {
+        if not self.comments_status.is_empty() {
           children.push(
             cui::text(
-              controller.comments_status,
+              self.comments_status,
               selectable: false,
               styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
-              text_style: match controller.comments_status_danger {
-                true => ui::text_style(foreground: controller.palette.danger, bold: true),
+              text_style: match self.comments_status_danger {
+                true => ui::text_style(foreground: self.props.palette.danger, bold: true),
                 false => ui::text_style(dim: true),
               },
             ),
           )
         }
-        for comment, index in controller.comments {
-          match controller.record_for(comment.id) {
+        for comment, index in self.comments {
+          match self.record_for(comment.id) {
             record => children.push(self.comment_row(comment, index, record)),
             _ => (),
           }
@@ -809,7 +885,7 @@ impl IssueDetailView {
       },
       false => {
         cui_bridge::view(
-          controller.description.root,
+          self.description.root,
           fn() {},
           fn() {},
           key: "description",
@@ -820,25 +896,12 @@ impl IssueDetailView {
   }
 }
 
-// The render request is bound at mount instead of injected at construction, so
-// the controller needs no `notify` wiring from its host or its tests.
-impl cui::Lifecycle for IssueDetailView {
-  fn mut mounted(ctx: cui::Context) {
-    self.props.controller.invalidate = ctx.invalidate_root
-  }
-
-  fn mut unmounting(ctx: cui::Context) {
-    self.props.controller.invalidate = fn() {}
-  }
-}
-
-impl cui::Component for IssueDetailView {
+impl cui::Component for IssueDetail {
   fn mut render() cui::View {
-    let controller = self.props.controller
-    let palette = controller.palette
+    let palette = self.props.palette
     let row = ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0)
     let children = mut List::new<cui::View>()
-    match controller.issue {
+    match self.issue {
       issue => {
         let header = [
           cui::text(
@@ -869,7 +932,7 @@ impl cui::Component for IssueDetailView {
           cui::box(
             [
               self.tab("Description", DESCRIPTION_SECTION, 14),
-              self.tab("Comments ({controller.comments.size()})", COMMENTS_SECTION, 20),
+              self.tab("Comments ({self.comments.size()})", COMMENTS_SECTION, 20),
             ],
             styles: ui::style(
               width: ui::percent(100.0),
@@ -887,13 +950,13 @@ impl cui::Component for IssueDetailView {
       },
       _ => (),
     }
-    let content = match controller.issue {
+    let content = match self.issue {
       _issue => self.body(),
       _ => {
         cui::text(
-          controller.status,
+          self.status,
           selectable: false,
-          text_style: match controller.status_danger {
+          text_style: match self.status_danger {
             true => ui::text_style(foreground: palette.danger, bold: true),
             false => ui::text_style(dim: true),
           },
@@ -904,7 +967,7 @@ impl cui::Component for IssueDetailView {
       cui::scroll_box(
         [content],
         key: "body",
-        ref: controller.body_scroll,
+        ref: self.body_scroll,
         styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_grow: 1.0),
       ),
     )

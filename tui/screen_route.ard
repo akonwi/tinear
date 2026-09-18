@@ -1,0 +1,24 @@
+use cooper
+
+// The shell routes commands independently of terminal focus. This handle has
+// no screen state: a mounted component binds its capabilities and clears them
+// on unmount. Calls before mount or after unmount are harmless.
+struct Route {
+  focus: fn(),
+  handle_key: fn(mut cooper::KeyEvent) Bool,
+}
+
+fn new() mut Route {
+  (mut Route{focus: fn() {}, handle_key: fn(received: mut cooper::KeyEvent) Bool {
+    false
+  }})
+}
+
+impl Route {
+  fn mut clear() {
+    self.focus = fn() {}
+    self.handle_key = fn(received: mut cooper::KeyEvent) Bool {
+      false
+    }
+  }
+}

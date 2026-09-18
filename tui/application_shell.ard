@@ -9,6 +9,7 @@ use tinear/tui/toast_host
 
 // Shared shell state, mutated by the host and described by the Shell component.
 struct Model {
+  generation: Int,
   screen_view: cui::View?,
   screen_view_dispose: fn(),
 }
@@ -30,7 +31,15 @@ impl cui::Component for Shell {
     let model = self.props.model
     let children = mut List::new<cui::View>()
     match model.screen_view {
-      screen_view => children.push(screen_view),
+      screen_view => {
+        children.push(
+          cui::box(
+            [screen_view],
+            key: "screen-{model.generation}",
+            styles: ui::style(width: ui::percent(100.0), height: ui::percent(100.0)),
+          ),
+        )
+      },
       _ => (),
     }
     cui::box(
@@ -62,6 +71,7 @@ fn new(
   let toasts = toast_host::new(ctx, application_root, palette, schedule)
   let modal = modal_host::new(ctx, application_root, palette)
   let model = mut Model{
+    generation: 0,
     screen_view: Maybe::new<cui::View>(),
     screen_view_dispose: fn() {},
   }
@@ -86,6 +96,7 @@ impl ApplicationShell {
     let previous_dispose = self.model.screen_view_dispose
     previous_dispose()
     self.cui.update(fn() {
+      self.model.generation =+ 1
       self.model.screen_view = Maybe::new(view)
       self.model.screen_view_dispose = dispose.or(fn() {})
     })

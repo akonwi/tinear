@@ -1,12 +1,14 @@
 use cooper
 use cooper/cui
 use cooper/ui
+use tinear/events
 use tinear/models/issue_state
 use tinear/models/issues
 use tinear/services/board_service
 use tinear/tui/issue_field_picker_controller
 use tinear/tui/scheduler
-use tinear/tui/shell_controller
+use tinear/tui/screen_route
+use tinear/tui/tab_shell
 use tinear/tui/theme as tinear_theme
 
 let COLUMN_WIDTH: Int = 38
@@ -31,8 +33,11 @@ struct ColumnRecord {
   cards: [CardRecord],
 }
 
-struct BoardController {
-  context: mut cooper::Runtime,
+struct Board {
+  props: mut Props,
+  // Per-registration cleanup closures returned by subscribe/on_blur.
+  unsubscribe: fn(),
+  remove_blur: fn(),
   root: mut cui::BoxRef,
   status: Str,
   status_error: Bool,
@@ -43,7 +48,6 @@ struct BoardController {
   drag_ghost_left: Int,
   drag_ghost_top: Int,
   drag_visible: Bool,
-  remove_terminal_focus: fn(),
   drag_offset_x: Int,
   drag_offset_y: Int,
   drag_width: Int,
@@ -72,15 +76,8 @@ struct BoardController {
   stop: Chan<Bool>,
   disposed: Bool,
   invalidate: fn(),
-  service: board_service::Service,
-  schedule: scheduler::Schedule,
   cancel_refresh: fn(),
   cancel_failed_move: fn(),
-  on_open_issue: fn(Str),
-  on_pick_field: fn(issue_field_picker_controller::Field, issues::Issue),
-  on_issue_moved: fn(issues::Issue),
-  notify_error: fn(Str, Str),
-  palette: tinear_theme::Theme,
 }
 
 private fn column_key(column: issues::BoardColumn) Str {
@@ -88,21 +85,11 @@ private fn column_key(column: issues::BoardColumn) Str {
 }
 
 private fn status_style(display: ui::Display) ui::Style {
-  ui::style(
-    display: display,
-    width: ui::percent(100.0),
-    height: ui::cells(1),
-    flex_shrink: 0.0,
-  )
+  ui::style(display: display, width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0)
 }
 
 private fn board_style(display: ui::Display) ui::Style {
-  ui::style(
-    display: display,
-    width: ui::percent(100.0),
-    height: ui::cells(1),
-    flex_grow: 1.0,
-  )
+  ui::style(display: display, width: ui::percent(100.0), height: ui::cells(1), flex_grow: 1.0)
 }
 
 private fn drag_layer_style(display: ui::Display) ui::Style {
@@ -365,6 +352,19 @@ private fn move_between_columns(
   Result::ok(updated.@)
 }
 
+struct Props {
+  context: mut cooper::Runtime,
+  palette: tinear_theme::Theme,
+  service: board_service::Service,
+  schedule: scheduler::Schedule,
+  on_open_issue: fn(Str),
+  on_pick_field: fn(issue_field_picker_controller::Field, issues::Issue),
+  on_issue_moved: fn(issues::Issue),
+  notify_error: fn(Str, Str),
+  route: mut screen_route::Route,
+  hub: mut events::Bus<events::Event>,
+}
+
 fn new(
   ctx: mut cooper::Runtime,
   palette: tinear_theme::Theme,
@@ -374,9 +374,41 @@ fn new(
   on_pick_field: fn(issue_field_picker_controller::Field, issues::Issue),
   on_issue_moved: fn(issues::Issue),
   notify_error: fn(Str, Str),
-) mut BoardController {
-  let controller = mut BoardController{
-    context: ctx,
+  hub: mut events::Bus<events::Event>,
+) tab_shell::Screen {
+  let route = screen_route::new()
+  tab_shell::screen(
+    cui::child(
+      create,
+      Props{
+        context: ctx,
+        palette: palette,
+        service: service,
+        schedule: schedule,
+        on_open_issue: on_open_issue,
+        on_pick_field: on_pick_field,
+        on_issue_moved: on_issue_moved,
+        notify_error: notify_error,
+        route: route,
+        hub: hub,
+      },
+      key: "board",
+    ),
+    fn() {
+      route.focus()
+    },
+    fn(received: mut cooper::KeyEvent) Bool {
+      route.handle_key(received)
+    },
+    fn() {},
+  )
+}
+
+fn create(props: mut Props) mut Board {
+  let component = mut Board{
+    props: props,
+    unsubscribe: fn() {},
+    remove_blur: fn() {},
     root: cui::box_ref(),
     status: "Loading My Issues…",
     status_error: false,
@@ -387,7 +419,6 @@ fn new(
     drag_ghost_left: 0,
     drag_ghost_top: 0,
     drag_visible: false,
-    remove_terminal_focus: fn() {},
     drag_offset_x: 0,
     drag_offset_y: 0,
     drag_width: COLUMN_WIDTH,
@@ -416,28 +447,13 @@ fn new(
     stop: Chan::new<Bool>(),
     disposed: false,
     invalidate: fn() {},
-    service: service,
-    schedule: schedule,
     cancel_refresh: fn() {},
     cancel_failed_move: fn() {},
-    on_open_issue: on_open_issue,
-    on_pick_field: on_pick_field,
-    on_issue_moved: on_issue_moved,
-    notify_error: notify_error,
-    palette: palette,
   }
-  controller.remove_terminal_focus = ctx.on_terminal_focus(fn(value: cooper::TerminalFocus) {
-    if value == cooper::TerminalFocus::lost {
-      controller.pointer_issue_id = ""
-      controller.suppress_open_issue_id = ""
-      controller.clear_drag_visuals()
-      controller.run_pending_refresh()
-    }
-  })
-  controller
+  component
 }
 
-impl BoardController {
+impl Board {
   fn selected_issue_id() Str {
     match self.columns.at(self.column_index) {
       column => {
@@ -486,7 +502,7 @@ impl BoardController {
         self.drag_offset_y = offset_y
         self.drag_width = width
         self.drag_height = height
-        self.drag_ghost_id = id_content(issue, self.palette, true, false)
+        self.drag_ghost_id = id_content(issue, self.props.palette, true, false)
         self.drag_ghost_title = issue.title
         self.drag_ghost_metadata = card_metadata(issue)
       },
@@ -519,11 +535,7 @@ impl BoardController {
 
   // Pointer, drag, and click-to-open handling for one card. The view supplies
   // the record so bounds can be read from its surface ref.
-  fn mut handle_card_mouse(
-    received: mut cooper::MouseEvent,
-    issue_id: Str,
-    record: CardRecord,
-  ) {
+  fn mut handle_card_mouse(received: mut cooper::MouseEvent, issue_id: Str, record: CardRecord) {
     if received.event_type == cooper::MouseEventType::move {
       self.set_hovered(issue_id)
     } else if received.event_type == cooper::MouseEventType::out {
@@ -544,7 +556,14 @@ impl BoardController {
       received.prevent_default()
       let bounds = match record.surface.current {
         panel => panel.layout().screen,
-        _ => ui::Rect{x: 0, y: 0, width: COLUMN_WIDTH, height: CARD_HEIGHT - 1},
+        _ => {
+          ui::Rect{
+            x: 0,
+            y: 0,
+            width: COLUMN_WIDTH,
+            height: CARD_HEIGHT - 1,
+          }
+        },
       }
       self.pointer_start_x = received.x
       self.pointer_start_y = received.y
@@ -568,7 +587,7 @@ impl BoardController {
     } else if received.event_type == cooper::MouseEventType::drag_end and received.button == cooper::MouseButton::left {
       if self.dragging_issue_id == issue_id {
         let generation = self.drag_generation
-        let _ = self.context.dispatch(fn() {
+        let _ = self.props.context.dispatch(fn() {
           if self.drag_generation == generation and self.dragging_issue_id == issue_id {
             self.clear_drag_visuals()
             self.run_pending_refresh()
@@ -592,7 +611,11 @@ impl BoardController {
   }
 
   private fn mut create_card(issue: issues::Issue) CardRecord {
-    CardRecord{issue_id: issue.id, root: cui::box_ref(), surface: cui::box_ref()}
+    CardRecord{
+      issue_id: issue.id,
+      root: cui::box_ref(),
+      surface: cui::box_ref(),
+    }
   }
 
   private fn mut reconcile_cards(previous: [CardRecord], values: [issues::Issue]) [CardRecord] {
@@ -668,7 +691,14 @@ impl BoardController {
   private fn column_key_at(x: Int, y: Int) Str {
     let viewport = match self.outer_scroll.current {
       panel => panel.layout().screen,
-      _ => ui::Rect{x: 0, y: 0, width: 0, height: 0},
+      _ => {
+        ui::Rect{
+          x: 0,
+          y: 0,
+          width: 0,
+          height: 0,
+        }
+      },
     }
     mut found = ""
     mut closest = COLUMN_GAP + 1
@@ -676,7 +706,14 @@ impl BoardController {
       for column in self.column_records {
         let column_bounds = match column.root.current {
           panel => panel.layout().screen,
-          _ => ui::Rect{x: 0, y: 0, width: 0, height: 0},
+          _ => {
+            ui::Rect{
+              x: 0,
+              y: 0,
+              width: 0,
+              height: 0,
+            }
+          },
         }
         let visible = ui::intersect(column_bounds, viewport)
         if visible.width > 0 and visible.height > 0 and y >= visible.y and y < visible.y + visible.height {
@@ -726,7 +763,7 @@ impl BoardController {
       let x = received.x
       let y = received.y
       let generation = self.drag_generation
-      let _ = self.context.dispatch(fn() {
+      let _ = self.props.context.dispatch(fn() {
         if self.drag_generation == generation and not self.dragging_issue_id.is_empty() {
           self.update_drag_target(x, y)
         }
@@ -764,7 +801,7 @@ impl BoardController {
     (self.cancel_failed_move)()
     self.failed_move_issue_id = issue_id
     self.refresh_selection_styles()
-    self.cancel_failed_move = self.schedule(4000, fn() {
+    self.cancel_failed_move = self.props.schedule(4000, fn() {
       if (not self.disposed) and self.move_generation == generation and self.failed_move_issue_id == issue_id {
         self.failed_move_issue_id = ""
         self.refresh_selection_styles()
@@ -793,7 +830,7 @@ impl BoardController {
                   self.move_snapshot = Maybe::new(previous)
                   self.replace_columns(columns, false)
                   self.select_issue(issue.id)
-                  self.service.move(
+                  self.props.service.move(
                     self.stop.receiver(),
                     board_service::MoveRequest{
                       issue_id: issue.id,
@@ -808,7 +845,9 @@ impl BoardController {
                             self.move_snapshot = Maybe::new<[issues::BoardColumn]>()
                             self.confirm_move(issue.id, moved.state)
                             self.queue_refresh(true)
-                            self.on_issue_moved(issue_with_state(issue, moved.state.id, target_for(target_column)))
+                            self.props.on_issue_moved(
+                              issue_with_state(issue, moved.state.id, target_for(target_column)),
+                            )
                           },
                           err(message) => {
                             match self.move_snapshot {
@@ -817,7 +856,7 @@ impl BoardController {
                             }
                             self.move_snapshot = Maybe::new<[issues::BoardColumn]>()
                             self.show_move_failure(issue.id, move_generation)
-                            self.notify_error("Couldn't move {issue.identifier}", message)
+                            self.props.notify_error("Couldn't move {issue.identifier}", message)
                           },
                         }
                         self.run_pending_refresh()
@@ -825,7 +864,7 @@ impl BoardController {
                     },
                   )
                 },
-                err(message) => self.notify_error("Couldn't move {issue.identifier}", message),
+                err(message) => self.props.notify_error("Couldn't move {issue.identifier}", message),
               }
             },
             _ => (),
@@ -970,7 +1009,7 @@ impl BoardController {
 
   private fn mut schedule_refresh() {
     (self.cancel_refresh)()
-    self.cancel_refresh = self.schedule(5 * 60 * 1000, fn() {
+    self.cancel_refresh = self.props.schedule(5 * 60 * 1000, fn() {
       if not self.disposed {
         self.refresh(true)
         self.schedule_refresh()
@@ -978,9 +1017,11 @@ impl BoardController {
     })
   }
 
-  fn mut start() {
-    if (not self.disposed) and self.generation == 0 {
-      self.refresh(false)
+  private fn mut start() {
+    if not self.disposed {
+      if self.generation == 0 {
+        self.refresh(false)
+      }
       self.schedule_refresh()
     }
   }
@@ -997,7 +1038,7 @@ impl BoardController {
         if not silent {
           self.show_status("Loading My Issues…", false)
         }
-        self.service.load(self.stop.receiver(), fn(result: [issues::BoardColumn]!Str) {
+        self.props.service.load(self.stop.receiver(), fn(result: [issues::BoardColumn]!Str) {
           if (not self.disposed) and generation == self.generation {
             self.load_in_flight = false
             if not self.pointer_issue_id.is_empty() or not self.dragging_issue_id.is_empty() {
@@ -1010,7 +1051,7 @@ impl BoardController {
                     self.show_status(message, true)
                   } else {
                     self.show_status("", false)
-                    self.notify_error("Couldn't refresh My Issues", message)
+                    self.props.notify_error("Couldn't refresh My Issues", message)
                   }
                 },
               }
@@ -1092,7 +1133,7 @@ impl BoardController {
 
   private fn mut open_selected() {
     match self.selected_issue() {
-      issue => self.on_open_issue(issue.identifier),
+      issue => self.props.on_open_issue(issue.identifier),
       _ => (),
     }
   }
@@ -1101,7 +1142,7 @@ impl BoardController {
     match self.selected_issue() {
       issue => {
         if not issue.id == self.moving_issue_id {
-          self.on_pick_field(field, issue)
+          self.props.on_pick_field(field, issue)
         }
       },
       _ => (),
@@ -1160,26 +1201,7 @@ impl BoardController {
     }
   }
 
-  fn mut view() cui::View {
-    cui::child(board_view, BoardProps{controller: self}, key: "board")
-  }
-
-  fn mut screen() shell_controller::Screen {
-    shell_controller::declarative_screen(
-      view: self.view(),
-      focus: fn() {
-        self.focus()
-      },
-      handle_key: fn(received: mut cooper::KeyEvent) Bool {
-        self.handle_key(received)
-      },
-      dispose: fn() {
-        self.dispose()
-      },
-    )
-  }
-
-  fn mut dispose() {
+  private fn mut dispose() {
     if not self.disposed {
       if not self.dragging_issue_id.is_empty() {
         self.clear_drag_visuals()
@@ -1187,46 +1209,52 @@ impl BoardController {
       (self.cancel_refresh)()
       (self.cancel_failed_move)()
       self.disposed = true
+      (self.unsubscribe)()
+      self.unsubscribe = fn() {}
       self.stop.close()
       self.drag_generation =+ 1
       self.move_generation =+ 1
       self.refresh_pending = false
       self.load_in_flight = false
-      (self.remove_terminal_focus)()
-      self.remove_terminal_focus = fn() {}
       self.column_records = []
     }
   }
 }
 
-struct BoardProps {
-  controller: mut BoardController,
-}
-
-struct BoardView {
-  props: mut BoardProps,
-  remove_blur: fn(),
-}
-
-private fn board_view(props: mut BoardProps) mut BoardView {
-  (mut BoardView{props: props, remove_blur: fn() {}})
-}
-
-impl cui::Lifecycle for BoardView {
+impl cui::Lifecycle for Board {
   fn mut mounted(ctx: cui::Context) {
-    // The render request is bound at mount instead of injected at
-    // construction, so no `notify` wiring is needed from hosts or tests.
-    self.props.controller.invalidate = ctx.invalidate_root
+    self.invalidate = ctx.invalidate_root
+    self.props.route.focus = fn() {
+      self.focus()
+    }
+    self.props.route.handle_key = fn(received: mut cooper::KeyEvent) Bool {
+      self.handle_key(received)
+    }
+    self.unsubscribe = self.props.hub.subscribe(fn(event: events::Event) {
+      self.refresh(true)
+    })
+    let _ = ctx.on_terminal_focus(fn(value: cooper::TerminalFocus) {
+      if value == cooper::TerminalFocus::lost {
+        self.pointer_issue_id = ""
+        self.suppress_open_issue_id = ""
+        self.clear_drag_visuals()
+        self.run_pending_refresh()
+      }
+    })
+    // Children mount before their parent. Defer startup until the entire
+    // tree has bound its commands, including synchronous service fakes.
+    let _ = ctx.dispatch(fn() {
+      self.start()
+    })
     // Blur has no declarative counterpart; attach to the retained scroll box
     // so an interrupted drag is cleared when the board loses focus.
-    match self.props.controller.outer_scroll.current {
+    match self.outer_scroll.current {
       panel => {
         self.remove_blur = panel.node().on_blur(fn() {
-          let controller = self.props.controller
-          controller.pointer_issue_id = ""
-          controller.suppress_open_issue_id = ""
-          controller.clear_drag_visuals()
-          controller.run_pending_refresh()
+          self.pointer_issue_id = ""
+          self.suppress_open_issue_id = ""
+          self.clear_drag_visuals()
+          self.run_pending_refresh()
         })
       },
       _ => (),
@@ -1234,22 +1262,23 @@ impl cui::Lifecycle for BoardView {
   }
 
   fn mut unmounting(ctx: cui::Context) {
-    self.props.controller.invalidate = fn() {}
+    self.props.route.clear()
+    self.dispose()
+    self.invalidate = fn() {}
     (self.remove_blur)()
     self.remove_blur = fn() {}
   }
 }
 
-impl BoardView {
+impl Board {
   private fn mut card(issue: issues::Issue, record: CardRecord) cui::View {
-    let controller = self.props.controller
-    let palette = controller.palette
+    let palette = self.props.palette
     let issue_id = record.issue_id
-    let active = issue_id == controller.selected_issue_id()
-    let hovered = (not active) and issue_id == controller.hovered_issue_id
-    let is_dragging = issue_id == controller.dragging_issue_id
-    let is_moving = issue_id == controller.moving_issue_id
-    let move_failed = issue_id == controller.failed_move_issue_id
+    let active = issue_id == self.selected_issue_id()
+    let hovered = (not active) and issue_id == self.hovered_issue_id
+    let is_dragging = issue_id == self.dragging_issue_id
+    let is_moving = issue_id == self.moving_issue_id
+    let move_failed = issue_id == self.failed_move_issue_id
     let foreground = match {
       active and not is_dragging => palette.item_active_foreground,
       hovered => palette.item_hover_foreground,
@@ -1263,7 +1292,9 @@ impl BoardView {
     let id_line = match is_dragging {
       true => {
         ui::styled_text(
-          [ui::span("  ↳ {issue.identifier} · drop on a column", style: ui::span_style(dim: true))],
+          [
+            ui::span("  ↳ {issue.identifier} · drop on a column", style: ui::span_style(dim: true)),
+          ],
         )
       },
       false => id_content(issue, palette, active, hovered),
@@ -1309,12 +1340,7 @@ impl BoardView {
               text_style: match {
                 is_dragging => ui::text_style(dim: true),
                 move_failed => ui::text_style(foreground: palette.danger, bold: true),
-                _ => {
-                  ui::text_style(
-                    foreground: foreground,
-                    dim: is_moving or (not active) and not hovered,
-                  )
-                },
+                _ => ui::text_style(foreground: foreground, dim: is_moving or (not active) and (not hovered)),
               },
             ),
           ],
@@ -1332,7 +1358,7 @@ impl BoardView {
             },
           ),
           on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
-            controller.handle_card_mouse(received, issue_id, record)
+            self.handle_card_mouse(received, issue_id, record)
           },
         ),
       ],
@@ -1349,11 +1375,10 @@ impl BoardView {
   }
 
   private fn mut column(value: issues::BoardColumn, index: Int, record: ColumnRecord) cui::View {
-    let controller = self.props.controller
-    let palette = controller.palette
+    let palette = self.props.palette
     let key = record.key
-    let drop_target = key == controller.drag_target_key
-    let selected_column = index == controller.column_index and controller.dragging_issue_id.is_empty()
+    let drop_target = key == self.drag_target_key
+    let selected_column = index == self.column_index and self.dragging_issue_id.is_empty()
     let cards = mut List::new<cui::View>()
     for issue in value.issues {
       for card in record.cards {
@@ -1401,7 +1426,7 @@ impl BoardView {
       ),
       on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
         if received.event_type == cooper::MouseEventType::drop and received.button == cooper::MouseButton::left {
-          controller.drop_on_column(key)
+          self.drop_on_column(key)
           received.stop_propagation()
         }
       },
@@ -1409,19 +1434,18 @@ impl BoardView {
   }
 }
 
-impl cui::Component for BoardView {
+impl cui::Component for Board {
   fn mut render() cui::View {
-    let controller = self.props.controller
-    let palette = controller.palette
+    let palette = self.props.palette
     // Hide cards while loading, but retain the visible scroll/focus target.
-    let loaded = controller.status.is_empty()
+    let loaded = self.status.is_empty()
     let columns = mut List::new<cui::View>()
     let visible_columns: [issues::BoardColumn] = match loaded {
-      true => controller.columns,
+      true => self.columns,
       false => [],
     }
     for value, index in visible_columns {
-      for record in controller.column_records {
+      for record in self.column_records {
         if record.key == column_key(value) {
           columns.push(self.column(value, index, record))
         }
@@ -1430,25 +1454,25 @@ impl cui::Component for BoardView {
     cui::box(
       [
         cui::text(
-          match controller.status.is_empty() {
+          match self.status.is_empty() {
             true => "",
-            false => "  {controller.status}",
+            false => "  {self.status}",
           },
           selectable: false,
           styles: status_style(
-            match controller.status.is_empty() {
+            match self.status.is_empty() {
               true => ui::Display::none,
               false => ui::Display::flex,
             },
           ),
-          text_style: match controller.status_error {
+          text_style: match self.status_error {
             true => ui::text_style(foreground: palette.danger, bold: true),
             false => ui::text_style(dim: true),
           },
         ),
         cui::scroll_box(
           [cui::box(columns.@, styles: columns_row_style(visible_columns.size()))],
-          ref: controller.outer_scroll,
+          ref: self.outer_scroll,
           styles: board_style(ui::Display::flex),
           on_key: fn(received: mut cooper::KeyEvent, ctx: cui::Context) {},
         ),
@@ -1457,74 +1481,56 @@ impl cui::Component for BoardView {
             cui::box(
               [
                 cui::text(
-                  controller.drag_ghost_id,
+                  self.drag_ghost_id,
                   selectable: false,
                   wrap: ui::TextWrap::none,
                   overflow: ui::TextOverflow::ellipsis,
-                  styles: ui::style(
-                    width: ui::percent(100.0),
-                    height: ui::cells(1),
-                    flex_shrink: 0.0,
-                  ),
+                  styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
                 ),
                 cui::text(
-                  controller.drag_ghost_title,
+                  self.drag_ghost_title,
                   selectable: false,
                   wrap: ui::TextWrap::word,
                   overflow: ui::TextOverflow::ellipsis,
-                  styles: ui::style(
-                    width: ui::percent(100.0),
-                    height: ui::cells(2),
-                    flex_shrink: 0.0,
-                  ),
-                  text_style: ui::text_style(
-                    foreground: palette.item_active_foreground,
-                    bold: true,
-                  ),
+                  styles: ui::style(width: ui::percent(100.0), height: ui::cells(2), flex_shrink: 0.0),
+                  text_style: ui::text_style(foreground: palette.item_active_foreground, bold: true),
                 ),
                 cui::text(
-                  controller.drag_ghost_metadata,
+                  self.drag_ghost_metadata,
                   selectable: false,
                   wrap: ui::TextWrap::none,
                   overflow: ui::TextOverflow::ellipsis,
-                  styles: ui::style(
-                    width: ui::percent(100.0),
-                    height: ui::cells(1),
-                    flex_shrink: 0.0,
-                  ),
-                  text_style: ui::text_style(
-                    foreground: palette.item_active_foreground,
-                    dim: true,
-                  ),
+                  styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
+                  text_style: ui::text_style(foreground: palette.item_active_foreground, dim: true),
                 ),
               ],
               styles: drag_ghost_style(
-                controller.drag_ghost_left,
-                controller.drag_ghost_top,
-                controller.drag_width,
-                controller.drag_height,
+                self.drag_ghost_left,
+                self.drag_ghost_top,
+                self.drag_width,
+                self.drag_height,
                 palette,
               ),
             ),
           ],
           styles: drag_layer_style(
-            match controller.drag_visible {
+            match self.drag_visible {
               true => ui::Display::flex,
               false => ui::Display::none,
             },
           ),
           on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
             if received.event_type == cooper::MouseEventType::drop and received.button == cooper::MouseButton::left {
-              controller.drop_on_column(controller.column_key_at(received.x, received.y))
+              self.drop_on_column(self.column_key_at(received.x, received.y))
               received.stop_propagation()
-            } else if received.event_type == cooper::MouseEventType::scroll and not controller.dragging_issue_id.is_empty() {
-              controller.scroll_during_drag(received)
+            } else if received.event_type == cooper::MouseEventType::scroll and not self.dragging_issue_id.is_empty() {
+              self.scroll_during_drag(received)
               received.stop_propagation()
             }
           },
         ),
       ],
-      ref: controller.root,
+      ref: self.root,
       styles: ui::style(
         width: ui::percent(100.0),
         height: ui::percent(100.0),

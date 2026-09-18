@@ -6,12 +6,12 @@ use tinear/models/cache
 use tinear/models/shell as shell_model
 use tinear/models/tabs
 use tinear/tui/application_shell
-use tinear/tui/shell_controller
+use tinear/tui/tab_shell
 use tinear/tui/theme
 
-private fn basic_screen(ctx: mut cooper::Runtime, label: Str) shell_controller::Screen {
+private fn basic_screen(ctx: mut cooper::Runtime, label: Str) tab_shell::Screen {
   let panel = cui::box_ref()
-  shell_controller::declarative_screen(
+  tab_shell::screen(
     view: cui::box(
       [cui::text(label, selectable: true)],
       on_key: fn(received: mut cooper::KeyEvent, context: cui::Context) {},
@@ -76,10 +76,7 @@ impl cui::Component for InboxView {
           },
           styles: ui::style(width: ui::percent(100.0), height: ui::cells(3), flex_shrink: 0.0),
         ),
-        cui::text(
-          "value: {strings::ReplaceAll(state.value, "\n", "↵")}",
-          selectable: false,
-        ),
+        cui::text("value: {strings::ReplaceAll(state.value, "\n", "↵")}", selectable: false),
         cui::scroll_box(
           rows.@,
           styles: ui::style(width: ui::percent(100.0), height: ui::cells(5), flex_shrink: 0.0),
@@ -94,9 +91,9 @@ impl cui::Component for InboxView {
   }
 }
 
-private fn inbox_screen(ctx: mut cooper::Runtime) shell_controller::Screen {
+private fn inbox_screen(ctx: mut cooper::Runtime) tab_shell::Screen {
   let state = mut InboxState{value: "", editor: cui::text_area_ref()}
-  shell_controller::declarative_screen(
+  tab_shell::screen(
     view: cui::child(inbox_view, InboxProps{state: state}, key: "pty-inbox"),
     focus: fn() {
       match state.editor.current {
@@ -118,34 +115,38 @@ fn main() {
   defer application.destroy()
   let ctx = application.context
   let palette = theme::new()
-  let shell_host = application_shell::new(ctx, application.root, palette, fn(milliseconds: Int, action: fn()) fn() {
-    fn() {}
-  })
+  let shell_host = application_shell::new(
+    ctx,
+    application.root,
+    palette,
+    fn(milliseconds: Int, action: fn()) fn() {
+      fn() {}
+    },
+  )
   let restored = tabs::doc_tab("restored", "Restored doc")
   cache::save_logged_in(
     cache::LoggedInCache{tab_index: 2, tabs: [restored]},
   ).expect("seed shell cache")
   let restored_model = shell_model::restore(cache::load_logged_in())
-  let controller = shell_controller::new(
-    ctx,
-    palette,
-    restored_model,
-    inbox_screen(ctx),
-    basic_screen(ctx, "BOARD BODY"),
-    fn(reference: tabs::TabRef) shell_controller::Screen {
-      basic_screen(ctx, "RESTORED DETAIL {reference.title}")
-    },
-    fn(value: cache::LoggedInCache) {},
-    fn() {},
-    fn() {},
-    fn() {},
-  )
-  shell_host.set_view(
-    shell_controller::view(controller),
-    dispose: fn() {
-      controller.dispose()
+  let shell_commands = tab_shell::commands()
+  let shell_view = tab_shell::view(
+    tab_shell::Props{
+      context: ctx,
+      palette: palette,
+      initial_model: restored_model,
+      inbox: inbox_screen(ctx),
+      board: basic_screen(ctx, "BOARD BODY"),
+      make_dynamic: fn(reference: tabs::TabRef) tab_shell::Screen {
+        basic_screen(ctx, "RESTORED DETAIL {reference.title}")
+      },
+      persist: fn(value: cache::LoggedInCache) {},
+      on_dispose: fn() {},
+      on_search: fn() {},
+      on_create: fn() {},
+      commands: shell_commands,
     },
   )
+  shell_host.set_view(shell_view)
 
   let _ = application.on_key(fn(received: mut cooper::KeyEvent) {
     if received.event_type != cooper::KeyEventType::release and received.matches("c", ctrl: true) {
@@ -156,7 +157,7 @@ fn main() {
     } else {
       let handled = shell_host.handle_key(received, application.selection())
       if (not handled) and not shell_host.modal.is_open() {
-        let _ = controller.handle_key(received)
+        let _ = shell_commands.handle_key(received)
       }
     }
   })
