@@ -2,17 +2,13 @@ use cooper
 use cooper/cui
 use cooper/cui/renderer
 use cooper/ui
-use tinear/tui/cui_bridge
 use tinear/tui/modal_host
 use tinear/tui/scheduler
 use tinear/tui/theme as tinear_theme
 use tinear/tui/toast_host
 
-// Shared shell state owned by the facade and described by the Shell component.
+// Shared shell state, mutated by the host and described by the Shell component.
 struct Model {
-  screen: (mut ui::Box)?,
-  screen_dispose: fn(),
-  screen_attached: fn(),
   screen_view: cui::View?,
   screen_view_dispose: fn(),
   generation: Int,
@@ -34,19 +30,6 @@ impl cui::Component for Shell {
   fn mut render() cui::View {
     let model = self.props.model
     let children = mut List::new<cui::View>()
-    match model.screen {
-      screen => {
-        children.push(
-          cui_bridge::view(
-            screen,
-            model.screen_dispose,
-            model.screen_attached,
-            key: "screen-{model.generation}",
-          ),
-        )
-      },
-      _ => (),
-    }
     match model.screen_view {
       screen_view => children.push(screen_view),
       _ => (),
@@ -80,9 +63,6 @@ fn new(
   let toasts = toast_host::new(ctx, application_root, palette, schedule)
   let modal = modal_host::new(ctx, application_root, palette)
   let model = mut Model{
-    screen: Maybe::new<mut ui::Box>(),
-    screen_dispose: fn() {},
-    screen_attached: fn() {},
     screen_view: Maybe::new<cui::View>(),
     screen_view_dispose: fn() {},
     generation: 0,
@@ -99,22 +79,8 @@ fn new(
 }
 
 impl ApplicationShell {
-  fn mut set_screen(screen: mut ui::Box, dispose: fn(), on_attached: fn()?) {
-    if self.disposed {
-      panic("cannot set the screen on a disposed application shell")
-    }
-    let attached = on_attached.or(fn() {})
-    self.cui.update(fn() {
-      self.model.generation =+ 1
-      self.model.screen = Maybe::new<mut ui::Box>(screen)
-      self.model.screen_dispose = dispose
-      self.model.screen_attached = attached
-      self.model.screen_view = Maybe::new<cui::View>()
-    })
-  }
-
-  // Host a declarative screen. `dispose` runs before retirement so facades
-  // can release resources while their controls are still alive.
+  // Host a declarative screen. `dispose` runs before retirement so a screen
+  // can release resources while its controls are still alive.
   fn mut set_view(view: cui::View, dispose: fn()?) {
     if self.disposed {
       panic("cannot set the screen on a disposed application shell")
@@ -123,9 +89,6 @@ impl ApplicationShell {
     previous_dispose()
     self.cui.update(fn() {
       self.model.generation =+ 1
-      self.model.screen = Maybe::new<mut ui::Box>()
-      self.model.screen_dispose = fn() {}
-      self.model.screen_attached = fn() {}
       self.model.screen_view = Maybe::new(view)
       self.model.screen_view_dispose = dispose.or(fn() {})
     })

@@ -1,6 +1,7 @@
 use ard/testing as assertions
 
 use cooper
+use cooper/cui
 use cooper/event
 use cooper/testing
 use cooper/ui
@@ -20,6 +21,17 @@ private fn screen(ctx: mut cooper::Runtime, label: Str) mut ui::Box {
   root
 }
 
+private fn screen_view(label: Str) cui::View {
+  cui::box(
+    [cui::text(label)],
+    styles: ui::style(
+      width: ui::percent(100.0),
+      height: ui::percent(100.0),
+      flex_direction: ui::FlexDirection::column,
+    ),
+  )
+}
+
 private fn modifiers(super_key: Bool) cooper::Modifiers {
   cooper::Modifiers{
     shift: false,
@@ -34,14 +46,14 @@ test fn application_shell_replaces_screen_with_explicit_disposal() Void!Str {
   defer application.destroy()
   let shell = application_shell::new(application.context, application.root, theme::new(), no_schedule)
   mut disposals = 0
-  shell.set_screen(screen(application.context, "Welcome"), fn() {
+  shell.set_view(screen_view("Welcome"), dispose: fn() {
     disposals =+ 1
   })
   let _ = application.flush()
   application.render()
   try testing::assert_contains(application.frame().text(), "Welcome")
 
-  shell.set_screen(screen(application.context, "Inbox"), fn() {})
+  shell.set_view(screen_view("Inbox"), dispose: fn() {})
   let _ = application.flush()
   application.render()
   try assertions::assert(disposals == 1, "replaced screen should dispose once")
@@ -58,7 +70,7 @@ test fn application_shell_disposes_owned_screen_and_overlays_once() Void!Str {
   let shell = application_shell::new(application.context, application.root, theme::new(), no_schedule)
   mut screen_disposals = 0
   mut modal_disposals = 0
-  shell.set_screen(screen(application.context, "Inbox"), fn() {
+  shell.set_view(screen_view("Inbox"), dispose: fn() {
     screen_disposals =+ 1
   })
   let _ = application.flush()
