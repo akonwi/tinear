@@ -659,7 +659,7 @@ impl cui::Lifecycle for Inbox {
   fn mut mounted(ctx: cui::Context) {
     self.invalidate = ctx.invalidate_root
     self.props.route.focus = fn() {
-      let _ = self.list_scroll.focus(ctx)
+      self.list_scroll.focus(ctx)
     }
     self.props.route.handle_key = fn(received: mut cooper::KeyEvent) Bool {
       self.handle_key(received)
@@ -669,7 +669,7 @@ impl cui::Lifecycle for Inbox {
     })
     // Children mount before their parent. Defer startup until the entire
     // tree has bound its commands, including synchronous service fakes.
-    let _ = ctx.dispatch(fn() {
+    ctx.dispatch(fn() {
       self.start()
     })
   }
