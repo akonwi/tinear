@@ -164,7 +164,7 @@ impl cui::Lifecycle for Tabs {
     }
     self.invalidate = ctx.invalidate_root
     self.focus_after_mount = fn() {
-      let _ = ctx.dispatch(fn() {
+      ctx.dispatch(fn() {
         self.focus_active()
       })
     }

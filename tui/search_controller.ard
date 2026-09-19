@@ -187,7 +187,7 @@ impl Search {
               self.stop.receiver(),
               query,
               fn(result: search_service::Outcome!Str) {
-                let _ = dispatch(fn() {
+                dispatch(fn() {
                   if self.request == request {
                     match result {
                       ok(outcome) => self.show_outcome(outcome),

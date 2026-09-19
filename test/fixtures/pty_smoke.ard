@@ -27,7 +27,7 @@ private fn basic(props: mut BasicProps) mut Basic {
 impl cui::Lifecycle for Basic {
   fn mut mounted(ctx: cui::Context) {
     self.props.route.focus = fn() {
-      let _ = self.panel.focus(ctx)
+      self.panel.focus(ctx)
     }
   }
 
@@ -87,7 +87,7 @@ private fn inbox_view(props: mut InboxProps) mut InboxView {
 impl cui::Lifecycle for InboxView {
   fn mut mounted(ctx: cui::Context) {
     self.props.state.route.focus = fn() {
-      let _ = self.props.state.editor.focus(ctx)
+      self.props.state.editor.focus(ctx)
     }
   }
 

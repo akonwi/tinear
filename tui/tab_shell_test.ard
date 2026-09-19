@@ -78,9 +78,9 @@ private fn fake_component(props: mut FakeProps) mut FakeScreen {
 impl cui::Lifecycle for FakeScreen {
   fn mut mounted(ctx: cui::Context) {
     self.props.route.focus = fn() {
-      let _ = self.panel.focus(ctx)
+      self.panel.focus(ctx)
     }
-    let _ = self.panel.current.expect(
+    self.panel.current.expect(
       "mounted panel",
     ).node().on_focus(fn() {
       self.props.state.focuses =+ 1

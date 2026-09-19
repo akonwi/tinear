@@ -65,7 +65,7 @@ impl Welcome {
           api_key,
           self.stop.receiver(),
           fn(result: Void!Str) {
-            let _ = dispatch(fn() {
+            dispatch(fn() {
               if self.request == request {
                 self.loading = false
                 match result {

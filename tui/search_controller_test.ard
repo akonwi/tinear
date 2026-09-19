@@ -128,18 +128,18 @@ test fn search_completion_does_not_retake_focus() Void!Str {
   let opened = mut Opened{issue_id: "", document_slug: ""}
   let search = controller(application, modal, fake, scheduled, opened)
   search.open(application.context)
-  let _ = application.flush()
+  application.flush()
   application.render()
   application.paste(event::paste("query"))
   (scheduled.actions.at(0).expect("debounce"))()
-  let _ = application.flush()
+  application.flush()
   let other = ui::input(application.context, placeholder: "New focus owner")
   application.root.add(other)
-  let _ = other.focus()
+  other.focus()
   fake.requests.at(
     0,
   ).expect("search").completion(Result::ok(search_service::Outcome{hits: [issue()], warning: ""}))
-  let _ = application.flush()
+  application.flush()
   application.render()
   try testing::assert_contains(application.frame().text(), "Issue result")
   assertions::assert(other.is_focused(), "results must not repeat initial focus")

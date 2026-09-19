@@ -171,9 +171,9 @@ test fn welcome_button_focus_survives_authentication_error() Void!Str {
     welcome_controller::view(theme::new(), fake_auth(attempts), fn(api_key: Str) {}),
   )
   defer mounted.destroy()
-  let _ = application.flush()
+  application.flush()
   application.paste(event::paste("test-key"))
-  let _ = application.flush()
+  application.flush()
   application.render()
   mut row = 0
   while row < application.frame().height() {
@@ -188,7 +188,7 @@ test fn welcome_button_focus_survives_authentication_error() Void!Str {
   }
   try assertions::assert(attempts.size() == 1, "click should focus and activate Login")
   attempts.at(0).expect("attempt").completion(Result::err("Try again"))
-  let _ = application.flush()
+  application.flush()
   application.render()
   press(application, "space", " ")
   assertions::assert(attempts.size() == 2, "error rerender must leave focus on Login")
