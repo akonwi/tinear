@@ -89,6 +89,7 @@ struct IssueDetail {
   stop: Chan<Bool>,
   disposed: Bool,
   invalidate: fn(),
+  request_comment_focus: fn(mut cui::BoxRef),
   cancel_refresh: fn(),
 }
 
@@ -194,6 +195,7 @@ fn create(props: mut Props) mut IssueDetail {
     stop: Chan::new<Bool>(),
     disposed: false,
     invalidate: fn() {},
+    request_comment_focus: fn(ref: mut cui::BoxRef) {},
     cancel_refresh: fn() {},
   })
 }
@@ -247,8 +249,11 @@ fn new(
 impl cui::Lifecycle for IssueDetail {
   fn mut mounted(ctx: cui::Context) {
     self.invalidate = ctx.invalidate_root
+    self.request_comment_focus = fn(ref: mut cui::BoxRef) {
+      ref.focus(ctx)
+    }
     self.props.commands.route.focus = fn() {
-      self.focus()
+      self.body_scroll.focus(ctx)
     }
     self.props.commands.route.handle_key = fn(received: mut cooper::KeyEvent) Bool {
       self.handle_key(received)
@@ -273,7 +278,7 @@ impl cui::Lifecycle for IssueDetail {
     })
     // Children mount before their parent. Defer startup until the entire
     // tree has bound its commands, including synchronous service fakes.
-    let _ = ctx.dispatch(fn() {
+    ctx.dispatch(fn() {
       self.start()
     })
   }
@@ -282,6 +287,7 @@ impl cui::Lifecycle for IssueDetail {
     self.props.commands.clear()
     self.dispose()
     self.invalidate = fn() {}
+    self.request_comment_focus = fn(ref: mut cui::BoxRef) {}
   }
 }
 
@@ -400,24 +406,13 @@ impl IssueDetail {
       self.pending_comment_id = ""
       let should_focus = self.focus_pending_comment
       self.focus_pending_comment = false
-      if should_focus {
-        // A newly posted comment has no mounted control yet: its ref is only
-        // populated at commit. reconcile_comments has already requested a
-        // render, so queue the focus behind it.
-        let generation = self.comments_generation
-        let _ = self.props.context.dispatch(fn() {
-          if (not self.disposed) and generation == self.comments_generation and self.owns_focus() {
-            // The row may still be uncommitted on the first pass; retry once
-            // more behind the render that mounts it.
-            if not self.focus_selected_comment() {
-              let _ = self.props.context.dispatch(fn() {
-                if (not self.disposed) and generation == self.comments_generation and self.owns_focus() {
-                  let _ = self.focus_selected_comment()
-                }
-              })
-            }
-          }
-        })
+      if should_focus and self.owns_focus() {
+        // Resolve this row after the commit that mounts it. Focus also reveals
+        // the target through its scroll ancestors; no dispatch or retry needed.
+        match self.comment_records.at(self.comment_cursor) {
+          record => (self.request_comment_focus)(record.panel),
+          _ => (),
+        }
       }
     }
   }
@@ -485,21 +480,6 @@ impl IssueDetail {
       },
       _ => (),
     }
-  }
-
-  private fn mut focus_selected_comment() Bool {
-    mut focused = false
-    match self.comment_records.at(self.comment_cursor) {
-      record => {
-        match record.panel.current {
-          panel => { focused = panel.focus() },
-          _ => (),
-        }
-      },
-      _ => (),
-    }
-    self.reveal_selected_comment()
-    focused
   }
 
   fn mut select_comment(id: Str) {
@@ -702,15 +682,6 @@ impl IssueDetail {
     match self.body_scroll.current {
       body => focus::within(body.node()),
       _ => false,
-    }
-  }
-
-  fn mut focus() {
-    match self.body_scroll.current {
-      panel => {
-        let _ = panel.focus()
-      },
-      _ => (),
     }
   }
 

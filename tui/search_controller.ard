@@ -179,28 +179,31 @@ impl Search {
     } else {
       self.show_status("Searching…", false)
       let dispatch = ctx.dispatch
-      self.cancel_debounce = (self.props.schedule)(300, fn() {
-        if self.request == request {
-          (self.props.service.search)(
-            self.stop.receiver(),
-            query,
-            fn(result: search_service::Outcome!Str) {
-              let _ = dispatch(fn() {
-                if self.request == request {
-                  match result {
-                    ok(outcome) => self.show_outcome(outcome),
-                    err(message) => {
-                      self.loading = false
-                      self.hits = []
-                      self.show_status("Unable to search: {message}", true)
-                    },
+      self.cancel_debounce = (self.props.schedule)(
+        300,
+        fn() {
+          if self.request == request {
+            (self.props.service.search)(
+              self.stop.receiver(),
+              query,
+              fn(result: search_service::Outcome!Str) {
+                dispatch(fn() {
+                  if self.request == request {
+                    match result {
+                      ok(outcome) => self.show_outcome(outcome),
+                      err(message) => {
+                        self.loading = false
+                        self.hits = []
+                        self.show_status("Unable to search: {message}", true)
+                      },
+                    }
                   }
-                }
-              })
-            },
-          )
-        }
-      })
+                })
+              },
+            )
+          }
+        },
+      )
     }
   }
 
@@ -334,7 +337,7 @@ impl cui::Component for Search {
           self.query,
           placeholder: "Search issues and docs…",
           styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
-          focused: true,
+          autofocus: true,
           on_input: fn(value: Str, ctx: cui::Context) {
             self.query_changed(value, ctx)
           },

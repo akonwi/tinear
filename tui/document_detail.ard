@@ -120,14 +120,14 @@ impl cui::Lifecycle for DocumentDetail {
   fn mut mounted(ctx: cui::Context) {
     self.invalidate = ctx.invalidate_root
     self.props.route.focus = fn() {
-      self.focus()
+      self.body.focus(ctx)
     }
     self.props.route.handle_key = fn(received: mut cooper::KeyEvent) Bool {
       self.handle_key(received)
     }
     // Children mount before their parent. Defer startup until the entire
     // tree has bound its commands, including synchronous service fakes.
-    let _ = ctx.dispatch(fn() {
+    ctx.dispatch(fn() {
       self.start()
     })
   }
@@ -217,15 +217,6 @@ impl DocumentDetail {
         if not loaded.meta.url.is_empty() {
           (self.props.on_open_url)(loaded.meta.url)
         }
-      },
-      _ => (),
-    }
-  }
-
-  fn mut focus() {
-    match self.body.current {
-      panel => {
-        let _ = panel.focus()
       },
       _ => (),
     }

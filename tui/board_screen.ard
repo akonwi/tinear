@@ -76,6 +76,7 @@ struct Board {
   stop: Chan<Bool>,
   disposed: Bool,
   invalidate: fn(),
+  request_focus: fn(),
   cancel_refresh: fn(),
   cancel_failed_move: fn(),
 }
@@ -447,6 +448,7 @@ fn create(props: mut Props) mut Board {
     stop: Chan::new<Bool>(),
     disposed: false,
     invalidate: fn() {},
+    request_focus: fn() {},
     cancel_refresh: fn() {},
     cancel_failed_move: fn() {},
   }
@@ -1156,12 +1158,7 @@ impl Board {
       self.clear_drag_visuals()
       self.run_pending_refresh()
     }
-    match self.outer_scroll.current {
-      panel => {
-        let _ = panel.focus()
-      },
-      _ => (),
-    }
+    (self.request_focus)()
   }
 
   fn mut handle_key(received: mut cooper::KeyEvent) Bool {
@@ -1224,6 +1221,9 @@ impl Board {
 impl cui::Lifecycle for Board {
   fn mut mounted(ctx: cui::Context) {
     self.invalidate = ctx.invalidate_root
+    self.request_focus = fn() {
+      self.outer_scroll.focus(ctx)
+    }
     self.props.route.focus = fn() {
       self.focus()
     }
@@ -1243,7 +1243,7 @@ impl cui::Lifecycle for Board {
     })
     // Children mount before their parent. Defer startup until the entire
     // tree has bound its commands, including synchronous service fakes.
-    let _ = ctx.dispatch(fn() {
+    ctx.dispatch(fn() {
       self.start()
     })
     // Blur has no declarative counterpart; attach to the retained scroll box
@@ -1265,6 +1265,7 @@ impl cui::Lifecycle for Board {
     self.props.route.clear()
     self.dispose()
     self.invalidate = fn() {}
+    self.request_focus = fn() {}
     (self.remove_blur)()
     self.remove_blur = fn() {}
   }

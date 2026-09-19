@@ -308,6 +308,8 @@ test fn loading_document_keeps_its_focus_target_when_content_arrives() Void!Str 
 
   // Loading and loaded content share one stable focus target.
   detail.route.focus()
+  application.flush()
+  application.render()
   try assertions::assert(
     detail.component.body.current.expect("loading body").node().is_focused(),
     "a loading document should already have a focus target",
@@ -333,6 +335,8 @@ test fn document_completion_does_not_override_newer_focus() Void!Str {
   application.render()
 
   detail.route.focus()
+  application.flush()
+  application.render()
   try assertions::assert(
     detail.component.body.current.expect("loading body").node().is_focused(),
     "a loading document should already have a focus target",

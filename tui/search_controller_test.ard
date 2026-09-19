@@ -3,6 +3,7 @@ use ard/testing as assertions
 use cooper
 use cooper/event
 use cooper/testing
+use cooper/ui
 use tinear/models/documents
 use tinear/models/issues
 use tinear/services/search_service
@@ -116,6 +117,32 @@ private fn controller(
       opened.document_slug = found.slug_id
     },
   )
+}
+
+test fn search_completion_does_not_retake_focus() Void!Str {
+  let application = testing::new(90, 28)
+  defer application.destroy()
+  let modal = modal_host::new(application.context, application.root, theme::new())
+  let fake = mut FakeState{requests: []}
+  let scheduled = mut Scheduled{actions: [], cancellations: 0}
+  let opened = mut Opened{issue_id: "", document_slug: ""}
+  let search = controller(application, modal, fake, scheduled, opened)
+  search.open(application.context)
+  application.flush()
+  application.render()
+  application.paste(event::paste("query"))
+  (scheduled.actions.at(0).expect("debounce"))()
+  application.flush()
+  let other = ui::input(application.context, placeholder: "New focus owner")
+  application.root.add(other)
+  other.focus()
+  fake.requests.at(
+    0,
+  ).expect("search").completion(Result::ok(search_service::Outcome{hits: [issue()], warning: ""}))
+  application.flush()
+  application.render()
+  try testing::assert_contains(application.frame().text(), "Issue result")
+  assertions::assert(other.is_focused(), "results must not repeat initial focus")
 }
 
 test fn search_debounces_rejects_stale_results_and_opens_document() Void!Str {

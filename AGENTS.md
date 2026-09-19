@@ -51,18 +51,18 @@ The Ard dependency is pinned to a remote Cooper commit; `../cooper` remains the 
   application/modal/toast hosts remain the imperative boundary to root renderers.
 - `render` must be deterministic and effect-free. Mutate state in event
   callbacks and lifecycle hooks only.
-- Describe focus with state (see the issue creation form's `FormFocus`).
-  Reconciliation re-asserts a described `focused: true` on every commit, so a
-  one-shot focus must either be cleared after its first commit or performed
-  imperatively through a ref.
+- Use `autofocus: true` for one-shot mount focus, including async form arrivals.
+  Preserve controlled `focused` state for deliberate navigation (see the issue
+  creation form's `FormFocus`); it is reasserted on every commit. Never combine
+  `autofocus: true` with an explicit `focused` value.
 - Use refs for geometry, scrolling, and imperative capabilities the declarative
   API does not cover; guard `ref.current` since not-yet-committed and unmounted views
-  have none. A ref is only populated by a commit, so anything imperative that
-  targets a freshly described view must run behind `ctx.dispatch` rather than
-  immediately after the mutation that describes it.
-- A declarative view becomes visible only at the next commit, and a control
-  inside a `display: none` subtree cannot take focus. The shell therefore
-  defers its focus claim through `focus_later` after changing the active tab.
+  have none. For explicit focus jumps, call `ref.focus(ctx)` on the UI thread;
+  it resolves the ref once after pending commits and is cancelled on unmount.
+  It does not wait for a missing or hidden target to appear later.
+- Screen focus routes use `ref.focus(ctx)`, so tab selection needs no dispatch
+  to wait for visibility. Opening a new screen still defers route invocation
+  until its component has mounted and bound that capability.
 - Loading, error, and loaded screens keep the same keyed scroll target mounted.
   Do not retry screen focus from data completions: a newer modal or user focus
   choice supersedes the original request.
@@ -71,7 +71,8 @@ The Ard dependency is pinned to a remote Cooper commit; `../cooper` remains the 
 - Modal presentations, root-screen replacements, and dynamic tab instances use
   lifetime keys so replacement resets component state even when close/open
   coalesce into one commit. Selecting an existing tab preserves its identity.
-- `cui::box` is focusable only when it describes `on_key` or `focused`. Attach
+- `cui::box` is focusable when it describes `on_key`, `focused`, or
+  `autofocus: true`; a ref alone does not make it focusable. Attach
   a no-op `on_key` to make a panel focusable; describing `focused` instead
   re-asserts focus on every commit.
 - Every shell screen is declarative: build one with

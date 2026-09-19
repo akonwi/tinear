@@ -577,6 +577,8 @@ test fn created_comment_does_not_override_newer_focus() Void!Str {
   application.render()
   (detail.commands.route.focus)()
   detail.component.comments_changed("new", true)
+  application.flush()
+  application.render()
   let other = ui::input(application.context, placeholder: "New focus owner")
   application.root.add(other)
   let _ = other.focus()

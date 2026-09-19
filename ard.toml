@@ -3,5 +3,5 @@ ard = ">= 0.42.0"
 target = "go"
 
 [dependencies]
-cooper = { git = "https://github.com/akonwi/cooper.git", commit = "ce03ed0e11d9242c1b88de0c3babcfe1eb3d608b" }
+cooper = { git = "https://github.com/akonwi/cooper.git", commit = "a5b891219a9af60722397ce9e4508ee6d1d2c4bb" }
 decode = { git = "https://github.com/akonwi/ard-decode.git", commit = "c590f42ec43c5d362844925a8a978d64a1846c5c" }

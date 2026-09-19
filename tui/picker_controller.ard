@@ -28,7 +28,6 @@ struct Picker {
   filtered: [Option],
   cursor: Int,
   hovered_id: Str,
-  initial_focus_pending: Bool,
   results: mut cui::ScrollBoxRef,
 }
 
@@ -76,12 +75,7 @@ private fn root_style(options: [Option], has_filter: Bool) ui::Style {
 }
 
 private fn filter_control_style(display: ui::Display) ui::Style {
-  ui::style(
-    display: display,
-    width: ui::percent(100.0),
-    height: ui::cells(1),
-    flex_shrink: 0.0,
-  )
+  ui::style(display: display, width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0)
 }
 
 private fn filter_options(options: [Option], query: Str) [Option] {
@@ -110,7 +104,6 @@ private fn picker(props: mut PickerProps) mut Picker {
     filtered: filtered,
     cursor: cursor,
     hovered_id: "",
-    initial_focus_pending: true,
     results: cui::scroll_box_ref(),
   })
 }
@@ -199,9 +192,9 @@ impl Picker {
     if received.event_type != cooper::KeyEventType::release {
       mut handled = true
       match {
-        received.matches("down") or (vim_keys and received.matches("j")) => self.move_cursor(1),
-        received.matches("up") or (vim_keys and received.matches("k")) => self.move_cursor(-1),
-        received.matches("return") or (vim_keys and received.matches("space")) => self.activate(),
+        received.matches("down") or vim_keys and received.matches("j") => self.move_cursor(1),
+        received.matches("up") or vim_keys and received.matches("k") => self.move_cursor(-1),
+        received.matches("return") or vim_keys and received.matches("space") => self.activate(),
         _ => { handled = false },
       }
       if handled {
@@ -294,11 +287,6 @@ impl Picker {
 
 impl cui::Lifecycle for Picker {
   fn mut mounted(ctx: cui::Context) {
-    // Focus is described for the first commit only; afterwards it stays
-    // imperative so rerenders cannot steal it.
-    let _ = ctx.dispatch(fn() {
-      self.initial_focus_pending = false
-    })
     match self.results.current {
       panel => {
         let _ = panel.scroll_to(self.selected_offset())
@@ -317,8 +305,6 @@ impl cui::Component for Picker {
       true => ui::Display::flex,
       false => ui::Display::none,
     }
-    let focus_filter = self.initial_focus_pending and has_filter
-    let focus_results = self.initial_focus_pending and not has_filter
 
     let rows = mut List::new<cui::View>()
     if self.filtered.size() == 0 {
@@ -341,10 +327,7 @@ impl cui::Component for Picker {
           self.query,
           placeholder: self.props.placeholder,
           styles: filter_control_style(filter_display),
-          focused: match focus_filter {
-            true => Maybe::new(true),
-            false => Maybe::new<Bool>(),
-          },
+          autofocus: has_filter,
           on_input: fn(value: Str, ctx: cui::Context) {
             self.apply_filter(value)
           },
@@ -371,10 +354,7 @@ impl cui::Component for Picker {
           self.handle_navigation(received, true)
         }
       },
-      focused: match focus_results {
-        true => Maybe::new(true),
-        false => Maybe::new<Bool>(),
-      },
+      autofocus: not has_filter,
       styles: root_style(self.filtered, has_filter),
     )
   }
