@@ -12,12 +12,22 @@ test fn url_launcher_accepts_only_web_targets() Void!Str {
   testing::assert(not url::is_supported("file:///tmp/secret"), "non-web scheme should be rejected")
 }
 
-test fn url_launcher_rejects_unsupported_target_before_fallback() Void!Str {
-  mut fallbacks = 0
-  let result = url::open_with_fallback("javascript:alert(1)", fn(target: Str) Void!Error {
-    fallbacks =+ 1
+test fn url_launcher_rejects_unsupported_target_before_opening() Void!Str {
+  mut opened = 0
+  let result = url::open_with("javascript:alert(1)", fn(target: Str) Void!Error {
+    opened =+ 1
     Result::ok(())
   })
   try testing::assert(result.is_err(), "unsupported scheme should fail")
-  testing::assert(fallbacks == 0, "unsupported target should not reach platform fallback")
+  testing::assert(opened == 0, "unsupported target should not reach the platform opener")
+}
+
+test fn url_launcher_passes_web_targets_to_the_platform_opener() Void!Str {
+  mut received = ""
+  let result = url::open_with("https://linear.app/issue/AKO-1", fn(target: Str) Void!Error {
+    received = target
+    Result::ok(())
+  })
+  try testing::assert(result.is_ok(), "web target should open")
+  testing::assert(received == "https://linear.app/issue/AKO-1", "opener should receive the target")
 }
