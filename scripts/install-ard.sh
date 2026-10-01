@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${1:-v0.42.0}"
+VERSION="${1:-v0.43.1}"
 DESTINATION="${2:-${HOME}/.local/bin}"
 
 case "$(uname -s)" in

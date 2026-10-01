@@ -3,28 +3,28 @@
   "root": "root",
   "packages": [
     {
-      "id": "git:383a36ce72376853:a5b891219a9af60722397ce9e4508ee6d1d2c4bb",
+      "id": "git:383a36ce72376853:bf9b26225be1d77c21327414e4cb6d5603c2f7a9",
       "name": "cooper",
       "git": "https://github.com/akonwi/cooper.git",
-      "commit": "a5b891219a9af60722397ce9e4508ee6d1d2c4bb",
-      "requested": "a5b891219a9af60722397ce9e4508ee6d1d2c4bb",
-      "integrity": "sha256:8df152af6555d0ae481c5079be76a9292c06a45c9f0294df35ce15ac36f2a502"
+      "commit": "bf9b26225be1d77c21327414e4cb6d5603c2f7a9",
+      "requested": "bf9b26225be1d77c21327414e4cb6d5603c2f7a9",
+      "integrity": "sha256:8673a2b6331a34924bb868cdeb703c88d30262fdb7b0d0c61fb54a8795bd8bb3"
     },
     {
-      "id": "git:c5125d0dd6cd13cc:c590f42ec43c5d362844925a8a978d64a1846c5c",
+      "id": "git:c5125d0dd6cd13cc:36c8ce8b5c7ad667d5f75df4aa3d676abaf53ffe",
       "name": "decode",
       "git": "https://github.com/akonwi/ard-decode.git",
-      "commit": "c590f42ec43c5d362844925a8a978d64a1846c5c",
-      "requested": "c590f42ec43c5d362844925a8a978d64a1846c5c",
-      "integrity": "sha256:34ecc89cd4acaf0dc056d26f00ec7e570b294708e267f3b4042ab0f2d09fbbc1"
+      "commit": "36c8ce8b5c7ad667d5f75df4aa3d676abaf53ffe",
+      "requested": "36c8ce8b5c7ad667d5f75df4aa3d676abaf53ffe",
+      "integrity": "sha256:5570ef62686d3fb43a42f07aabb5b1c92758cfa3ef4e34ef8571273a55db2fa1"
     },
     {
       "id": "root",
       "name": "tinear",
       "path": ".",
       "dependencies": {
-        "cooper": "git:383a36ce72376853:a5b891219a9af60722397ce9e4508ee6d1d2c4bb",
-        "decode": "git:c5125d0dd6cd13cc:c590f42ec43c5d362844925a8a978d64a1846c5c"
+        "cooper": "git:383a36ce72376853:bf9b26225be1d77c21327414e4cb6d5603c2f7a9",
+        "decode": "git:c5125d0dd6cd13cc:36c8ce8b5c7ad667d5f75df4aa3d676abaf53ffe"
       }
     }
   ]
