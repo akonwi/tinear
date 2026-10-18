@@ -132,11 +132,7 @@ impl cui::Component for Toast {
         entry.title,
         wrap: ui::TextWrap::none,
         overflow: ui::TextOverflow::ellipsis,
-        styles: ui::style(
-          width: ui::fit_content(),
-          max_width: ui::cells(46),
-          height: ui::cells(1),
-        ),
+        styles: ui::style(width: ui::fit_content(), max_width: ui::cells(46), height: ui::cells(1)),
         text_style: ui::text_style(bold: true),
       ),
     )

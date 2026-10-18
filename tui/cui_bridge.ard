@@ -61,13 +61,7 @@ impl cui::Lifecycle for Bridge {
 
 // Describe a bridged legacy control. Each distinct key is a distinct bridge
 // identity: changing the key retires the old control and attaches the new one.
-fn view(
-  control: mut ui::Box,
-  dispose: fn(),
-  on_attached: fn(),
-  key: Str,
-  destroy_on_unmount: Bool?,
-) cui::View {
+fn view(control: mut ui::Box, dispose: fn(), on_attached: fn(), key: Str, destroy_on_unmount: Bool?) cui::View {
   cui::child(
     bridge,
     BridgeProps{

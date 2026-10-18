@@ -44,10 +44,7 @@ private struct DismissGuard {
 }
 
 private fn body(ctx: mut cooper::Runtime, label: Str) mut ui::Box {
-  let root = ui::box(
-    ctx,
-    styles: ui::style(width: ui::percent(100.0), height: ui::cells(2)),
-  )
+  let root = ui::box(ctx, styles: ui::style(width: ui::percent(100.0), height: ui::cells(2)))
   root.add(ui::text(ctx, content: label))
   root
 }
@@ -206,10 +203,7 @@ test fn non_focusable_modal_uses_frame_as_keyboard_barrier() Void!Str {
   })
   let _ = application.flush()
   application.key(event::key("x", "x", cooper::KeyEventType::press, modifiers()))
-  try assertions::assert(
-    background.value().is_empty(),
-    "background input should not receive modal keys",
-  )
+  try assertions::assert(background.value().is_empty(), "background input should not receive modal keys")
   assertions::assert(host.is_open(), "undismissable modal should stay open")
 }
 
@@ -261,9 +255,6 @@ test fn declarative_modal_uses_keyboard_barrier() Void!Str {
   })
   let _ = application.flush()
   application.key(event::key("x", "x", cooper::KeyEventType::press, modifiers()))
-  try assertions::assert(
-    background.value().is_empty(),
-    "background input should not receive modal keys",
-  )
+  try assertions::assert(background.value().is_empty(), "background input should not receive modal keys")
   assertions::assert(host.is_open(), "undismissable modal should stay open")
 }

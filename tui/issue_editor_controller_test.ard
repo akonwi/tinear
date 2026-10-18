@@ -364,10 +364,7 @@ test fn aborted_submission_releases_the_shared_operation_guard() Void!Str {
 
   editor.open_description(issue())
   let _ = application.flush()
-  assertions::assert(
-    modal.is_open(),
-    "an aborted submission must not lock out later editors",
-  )
+  assertions::assert(modal.is_open(), "an aborted submission must not lock out later editors")
 }
 
 test fn late_completion_cannot_close_or_unlock_a_newer_session() Void!Str {

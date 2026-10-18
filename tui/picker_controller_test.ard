@@ -1,8 +1,8 @@
 use ard/testing as assertions
 
 use cooper
-use cooper/event
 use cooper/cui/renderer
+use cooper/event
 use cooper/testing
 use tinear/tui/picker_controller
 use tinear/tui/theme
@@ -220,10 +220,7 @@ test fn small_picker_hides_filter_and_supports_direct_navigation() Void!Str {
   application.key(key("k", "k"))
   let _ = application.flush()
   application.render()
-  try assertions::assert(
-    row_background(application, 0) == Uint8::from(4),
-    "k should move back",
-  )
+  try assertions::assert(row_background(application, 0) == Uint8::from(4), "k should move back")
   application.key(key("down", ""))
   application.key(key("space", " "))
   let _ = application.flush()

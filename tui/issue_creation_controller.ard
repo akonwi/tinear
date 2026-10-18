@@ -213,23 +213,26 @@ impl cui::Lifecycle for Creation {
     self.request =+ 1
     let request = self.request
     let dispatch = ctx.dispatch
-    (self.props.service.load_teams)(self.stop.receiver(), fn(result: [issues::Team]!Str) {
-      let _ = dispatch(fn() {
-        if self.request == request {
-          match result {
-            ok(teams) => {
-              match teams.size() {
-                0 => (self.props.close_with_error)("No teams found in this workspace"),
-                1 => self.show_form(teams.at(0).expect("one team"), ctx),
-                _ => self.show_team_picker(teams),
-              }
-            },
-            err(message) => (self.props.close_with_error)(message),
+    (self.props.service.load_teams)(
+      self.stop.receiver(),
+      fn(result: [issues::Team]!Str) {
+        let _ = dispatch(fn() {
+          if self.request == request {
+            match result {
+              ok(teams) => {
+                match teams.size() {
+                  0 => (self.props.close_with_error)("No teams found in this workspace"),
+                  1 => self.show_form(teams.at(0).expect("one team"), ctx),
+                  _ => self.show_team_picker(teams),
+                }
+              },
+              err(message) => (self.props.close_with_error)(message),
+            }
+            ctx.invalidate_root()
           }
-          ctx.invalidate_root()
-        }
-      })
-    })
+        })
+      },
+    )
   }
 
   fn mut unmounting(ctx: cui::Context) {
@@ -291,12 +294,7 @@ impl Creation {
     let row_style = ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0)
     cui::box(
       [
-        cui::text(
-          "Title",
-          selectable: false,
-          styles: row_style,
-          text_style: ui::text_style(dim: true),
-        ),
+        cui::text("Title", selectable: false, styles: row_style, text_style: ui::text_style(dim: true)),
         cui::input(
           self.title_value,
           ref: self.title_field,

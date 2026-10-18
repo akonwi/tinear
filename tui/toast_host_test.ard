@@ -41,13 +41,18 @@ test fn toast_host_stacks_and_expires_entries() Void!Str {
   let actions = mut List::new<fn()>()
   let delays = mut List::new<Int>()
   mut cancellations = 0
-  let host = toast_host::new(application.context, application.root, theme::new(), fn(delay: Int, action: fn()) fn() {
-    delays.push(delay)
-    actions.push(action)
-    fn() {
-      cancellations =+ 1
-    }
-  })
+  let host = toast_host::new(
+    application.context,
+    application.root,
+    theme::new(),
+    fn(delay: Int, action: fn()) fn() {
+      delays.push(delay)
+      actions.push(action)
+      fn() {
+        cancellations =+ 1
+      }
+    },
+  )
 
   let first = host.show("Saved", "Issue updated", toast_host::Variant::success, 5000)
   let second = host.show("Warning", "Partial results", toast_host::Variant::info, 2500)
@@ -100,12 +105,17 @@ test fn toast_host_disposal_suppresses_late_expiry() Void!Str {
   defer application.destroy()
   let actions = mut List::new<fn()>()
   mut cancellations = 0
-  let host = toast_host::new(application.context, application.root, theme::new(), fn(delay: Int, action: fn()) fn() {
-    actions.push(action)
-    fn() {
-      cancellations =+ 1
-    }
-  })
+  let host = toast_host::new(
+    application.context,
+    application.root,
+    theme::new(),
+    fn(delay: Int, action: fn()) fn() {
+      actions.push(action)
+      fn() {
+        cancellations =+ 1
+      }
+    },
+  )
   let _ = host.show("Error", "Network failed", toast_host::Variant::error, 5000)
   let _ = application.flush()
   application.advance_time(0)
@@ -131,9 +141,14 @@ test fn toast_host_disposal_suppresses_late_expiry() Void!Str {
 test fn toast_host_omits_the_description_row_when_empty() Void!Str {
   let application = testing::new(60, 10)
   defer application.destroy()
-  let host = toast_host::new(application.context, application.root, theme::new(), fn(delay: Int, action: fn()) fn() {
-    fn() {}
-  })
+  let host = toast_host::new(
+    application.context,
+    application.root,
+    theme::new(),
+    fn(delay: Int, action: fn()) fn() {
+      fn() {}
+    },
+  )
   defer host.dispose()
   let _ = host.show("Title only", variant: toast_host::Variant::info, ttl_ms: 5000)
   let _ = application.flush()
@@ -152,9 +167,14 @@ test fn toast_host_omits_the_description_row_when_empty() Void!Str {
 test fn toast_host_clips_overflow_while_keeping_newest_entries_visible() Void!Str {
   let application = testing::new(60, 10)
   defer application.destroy()
-  let host = toast_host::new(application.context, application.root, theme::new(), fn(delay: Int, action: fn()) fn() {
-    fn() {}
-  })
+  let host = toast_host::new(
+    application.context,
+    application.root,
+    theme::new(),
+    fn(delay: Int, action: fn()) fn() {
+      fn() {}
+    },
+  )
   defer host.dispose()
   mut index = 1
   while index <= 10 {

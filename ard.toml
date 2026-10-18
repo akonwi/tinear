@@ -1,7 +1,7 @@
 name = "tinear"
-ard = ">= 0.43.0"
+ard = ">= 0.44.0"
 target = "go"
 
 [dependencies]
-cooper = { git = "https://github.com/akonwi/cooper.git", commit = "bf9b26225be1d77c21327414e4cb6d5603c2f7a9" }
-decode = { git = "https://github.com/akonwi/ard-decode.git", commit = "36c8ce8b5c7ad667d5f75df4aa3d676abaf53ffe" }
+cooper = { git = "https://github.com/akonwi/cooper.git", commit = "00b935a223c9cd54dbbc5fd6a30641979fc663d1" }
+decode = { git = "https://github.com/akonwi/ard-decode.git", commit = "87c17cf2858ebf034f1c62a039a1c927cabf3bb0" }

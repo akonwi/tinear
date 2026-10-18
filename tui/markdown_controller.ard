@@ -239,11 +239,7 @@ impl MarkdownController {
           selectable: false,
           wrap: ui::TextWrap::none,
           overflow: ui::TextOverflow::clip,
-          styles: ui::style(
-            width: ui::percent(100.0),
-            height: ui::cells(1),
-            flex_shrink: 0.0,
-          ),
+          styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0),
           text_style: ui::text_style(
             foreground: match self.active or self.hovered {
               true => interaction_foreground(self.active, self.hovered, self.palette),

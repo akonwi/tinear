@@ -479,24 +479,14 @@ impl Controller {
       let ticket = self.present_loading("Updating {issue.identifier}", true, fn() {})
       match field {
         Field::state => {
-          self.service.update_state(
-            self.stop.receiver(),
-            issue.id,
-            value,
-            fn(result: Void!Str) {
-              self.finish_update(ticket, generation, "Update state", issue, result)
-            },
-          )
+          self.service.update_state(self.stop.receiver(), issue.id, value, fn(result: Void!Str) {
+            self.finish_update(ticket, generation, "Update state", issue, result)
+          })
         },
         Field::cycle => {
-          self.service.update_cycle(
-            self.stop.receiver(),
-            issue.id,
-            value,
-            fn(result: Void!Str) {
-              self.finish_update(ticket, generation, "Update cycle", issue, result)
-            },
-          )
+          self.service.update_cycle(self.stop.receiver(), issue.id, value, fn(result: Void!Str) {
+            self.finish_update(ticket, generation, "Update cycle", issue, result)
+          })
         },
         Field::priority => {
           mut priority = 0
@@ -515,24 +505,14 @@ impl Controller {
           )
         },
         Field::assignee => {
-          self.service.update_assignee(
-            self.stop.receiver(),
-            issue.id,
-            value,
-            fn(result: Void!Str) {
-              self.finish_update(ticket, generation, "Assign", issue, result)
-            },
-          )
+          self.service.update_assignee(self.stop.receiver(), issue.id, value, fn(result: Void!Str) {
+            self.finish_update(ticket, generation, "Assign", issue, result)
+          })
         },
         Field::project => {
-          self.service.update_project(
-            self.stop.receiver(),
-            issue.id,
-            value,
-            fn(result: Void!Str) {
-              self.finish_update(ticket, generation, "Update project", issue, result)
-            },
-          )
+          self.service.update_project(self.stop.receiver(), issue.id, value, fn(result: Void!Str) {
+            self.finish_update(ticket, generation, "Update project", issue, result)
+          })
         },
       }
     }
