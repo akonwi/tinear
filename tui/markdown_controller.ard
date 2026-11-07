@@ -7,18 +7,18 @@ use tinear/tui/theme as tinear_theme
 use go:unicode
 
 struct BlockRecord {
-  root: mut ui::Box,
+  root: &mut ui::Box,
   remove_links: [fn()],
 }
 
 private struct LinkedText {
-  control: mut ui::Text,
+  control: &mut ui::Text,
   remove: fn(),
 }
 
 struct MarkdownController {
-  root: mut ui::Box,
-  context: mut cooper::Runtime,
+  root: &mut ui::Box,
+  context: &mut cooper::Runtime,
   records: [BlockRecord],
   source: Str,
   rendered: Bool,
@@ -99,7 +99,7 @@ private fn spans_for(
   active: Bool,
   hovered: Bool,
 ) [ui::Span] {
-  let spans = mut List::new<ui::Span>()
+  let spans = &mut List::new<ui::Span>()
   for run in block.Runs {
     let base = run_style(run, palette, active, hovered)
     spans.push(
@@ -124,7 +124,7 @@ private fn spans_for(
       ),
     )
   }
-  spans.@
+  spans.*
 }
 
 private fn block_style(spaced: Bool, background: tinear_theme::Theme?, active: Bool, hovered: Bool) ui::Style {
@@ -157,12 +157,12 @@ private fn block_style(spaced: Bool, background: tinear_theme::Theme?, active: B
 }
 
 fn new(
-  ctx: mut cooper::Runtime,
+  ctx: &mut cooper::Runtime,
   palette: tinear_theme::Theme,
   source: Str,
   on_open_link: fn(Str),
   empty_label: Str?,
-) mut MarkdownController {
+) &mut MarkdownController {
   let root = ui::box(
     ctx,
     styles: ui::style(
@@ -172,7 +172,7 @@ fn new(
       background: interaction_background(false, false, palette),
     ),
   )
-  let controller = mut MarkdownController{
+  let controller = &mut MarkdownController{
     root: root,
     context: ctx,
     records: [],
@@ -200,7 +200,7 @@ impl MarkdownController {
       styles: ui::style(width: ui::percent(100.0), flex_shrink: 0.0),
       text_style: base_style.or(ui::text_style()),
     )
-    let remove = control.on_link(fn(received: mut ui::LinkEvent) {
+    let remove = control.on_link(fn(received: &mut ui::LinkEvent) {
       received.prevent_default()
       self.on_open_link(received.url)
     })
@@ -213,7 +213,7 @@ impl MarkdownController {
       self.context,
       styles: match code {
         true => {
-          let configured = mut block_style(
+          let configured = &mut block_style(
             spaced,
             Maybe::new(self.palette),
             self.active,
@@ -225,12 +225,12 @@ impl MarkdownController {
             bottom: ui::cells(0),
             left: ui::cells(1),
           }
-          configured.@
+          configured.*
         },
         false => block_style(spaced, Maybe::new<tinear_theme::Theme>(), self.active, self.hovered),
       },
     )
-    let removers = mut List::new<fn()>()
+    let removers = &mut List::new<fn()>()
     match block.Kind {
       "rule" => {
         let rule = ui::text(
@@ -291,7 +291,7 @@ impl MarkdownController {
         root.add(code_text)
       },
       "heading" => {
-        let heading_spans = mut List::new<ui::Span>()
+        let heading_spans = &mut List::new<ui::Span>()
         for run in block.Runs {
           let base = run_style(run, self.palette, self.active, self.hovered)
           heading_spans.push(
@@ -318,7 +318,7 @@ impl MarkdownController {
           )
         }
         let heading = self.text_control(
-          ui::styled_text(heading_spans.@),
+          ui::styled_text(heading_spans.*),
           Maybe::new(
             ui::text_style(
               foreground: match {
@@ -334,7 +334,7 @@ impl MarkdownController {
         removers.push(heading.remove)
       },
       "quote" => {
-        let content = mut List::new<ui::Span>()
+        let content = &mut List::new<ui::Span>()
         content.push(
           ui::span(
             "{indent(block.Indent - 1)}│ ",
@@ -357,14 +357,14 @@ impl MarkdownController {
           content.push(span)
         }
         let quote = self.text_control(
-          ui::styled_text(content.@),
+          ui::styled_text(content.*),
           Maybe::new(ui::text_style(dim: not self.active and not self.hovered)),
         )
         root.add(quote.control)
         removers.push(quote.remove)
       },
       "list_item" => {
-        let content = mut List::new<ui::Span>()
+        let content = &mut List::new<ui::Span>()
         let marker = match block.Marker.is_empty() {
           true => "  ",
           false => "{block.Marker} ",
@@ -384,7 +384,7 @@ impl MarkdownController {
         for span in spans_for(block, self.palette, false, false, self.active, self.hovered) {
           content.push(span)
         }
-        let item = self.text_control(ui::styled_text(content.@), Maybe::new(ui::text_style()))
+        let item = self.text_control(ui::styled_text(content.*), Maybe::new(ui::text_style()))
         root.add(item.control)
         removers.push(item.remove)
       },
@@ -399,7 +399,7 @@ impl MarkdownController {
         removers.push(content.remove)
       },
     }
-    BlockRecord{root: root, remove_links: removers.@}
+    BlockRecord{root: root, remove_links: removers.*}
   }
 
   fn mut set_source(source: Str) {
@@ -416,7 +416,7 @@ impl MarkdownController {
         record.root.destroy(recursive: true)
       }
       let parsed = markdown::Parse(source)
-      let records = mut List::new<BlockRecord>()
+      let records = &mut List::new<BlockRecord>()
       mut previous_kind = ""
       for block, index in parsed {
         let record = self.build_block(block, index > 0 and not tight(previous_kind, block.Kind))
@@ -440,7 +440,7 @@ impl MarkdownController {
         self.root.add(empty)
         records.push(BlockRecord{root: empty, remove_links: []})
       }
-      self.records = records.@
+      self.records = records.*
     }
   }
 
@@ -448,9 +448,9 @@ impl MarkdownController {
     if (not self.disposed) and (active != self.active or hovered != self.hovered) {
       self.active = active
       self.hovered = hovered
-      let updated = mut self.root.style()
+      let updated = &mut self.root.style()
       updated.background = Maybe::new(interaction_background(active, hovered, self.palette))
-      self.root.set_style(updated.@)
+      self.root.set_style(updated.*)
       self.rendered = false
       self.set_source(self.source)
     }

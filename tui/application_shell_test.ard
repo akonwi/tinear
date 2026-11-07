@@ -12,7 +12,7 @@ private fn no_schedule(delay: Int, action: fn()) fn() {
   fn() {}
 }
 
-private fn screen(ctx: mut cooper::Runtime, label: Str) mut ui::Box {
+private fn screen(ctx: &mut cooper::Runtime, label: Str) &mut ui::Box {
   let root = ui::box(ctx, styles: ui::style(width: ui::percent(100.0), height: ui::percent(100.0)))
   root.add(ui::text(ctx, content: label))
   root
@@ -197,16 +197,16 @@ private struct ScreenLifetime {
 
 private struct StatefulProps {
   initial_label: Str,
-  lifetime: mut ScreenLifetime,
+  lifetime: &mut ScreenLifetime,
 }
 
 private struct StatefulScreen {
-  props: mut StatefulProps,
+  props: &mut StatefulProps,
   label: Str,
 }
 
-private fn stateful_screen(props: mut StatefulProps) mut StatefulScreen {
-  (mut StatefulScreen{props: props, label: props.initial_label})
+private fn stateful_screen(props: &mut StatefulProps) &mut StatefulScreen {
+  &mut StatefulScreen{props: props, label: props.initial_label}
 }
 
 impl cui::Component for StatefulScreen {
@@ -235,7 +235,7 @@ test fn replacing_root_screen_restarts_component_lifetime_even_for_same_key() Vo
     no_schedule,
   )
   defer shell.dispose()
-  let lifetime = mut ScreenLifetime{mounts: 0, unmounts: 0}
+  let lifetime = &mut ScreenLifetime{mounts: 0, unmounts: 0}
   shell.set_view(
     cui::child(
       stateful_screen,

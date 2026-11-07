@@ -47,22 +47,22 @@ private fn disambiguate_target(target: StateTarget, candidates: [issues::Workflo
 }
 
 fn resolve_target_state(target: StateTarget, states: [issues::WorkflowState]) issues::WorkflowState!Str {
-  let exact = mut List::new<issues::WorkflowState>()
+  let exact = &mut List::new<issues::WorkflowState>()
   for state in states {
     if state.raw_name == target.raw_name {
       exact.push(state)
     }
   }
   if exact.size() > 0 {
-    disambiguate_target(target, exact.@)
+    disambiguate_target(target, exact.*)
   } else {
-    let normalized = mut List::new<issues::WorkflowState>()
+    let normalized = &mut List::new<issues::WorkflowState>()
     for state in states {
       if state.name == target.name {
         normalized.push(state)
       }
     }
-    disambiguate_target(target, normalized.@)
+    disambiguate_target(target, normalized.*)
   }
 }
 
@@ -73,7 +73,7 @@ private fn move_issue(api_key: Str, request: MoveRequest) MoveResult!Str {
   Result::ok(MoveResult{state: state})
 }
 
-fn live(ctx: mut cooper::Runtime, api_key: Str) Service {
+fn live(ctx: &mut cooper::Runtime, api_key: Str) Service {
   let app_cancellation = ctx.cancellation
   let dispatch = ctx.dispatch
   Service{

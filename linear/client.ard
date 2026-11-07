@@ -24,7 +24,7 @@ private fn post(api_key: Str, body: Str) Str!Str {
   req.Header.Set("Content-Type", "application/json")
   req.Header.Set("Authorization", api_key)
 
-  let client = mut http::Client{Timeout: 30 * time::Second}
+  let client = &mut http::Client{Timeout: 30 * time::Second}
   let res = try client.Do(req).map_err(error_message)
   defer res.Body.Close()
 

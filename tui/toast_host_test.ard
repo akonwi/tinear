@@ -38,8 +38,8 @@ private fn border_height(application: testing::TestApp, top_glyph: Str, bottom_g
 test fn toast_host_stacks_and_expires_entries() Void!Str {
   let application = testing::new(80, 24)
   defer application.destroy()
-  let actions = mut List::new<fn()>()
-  let delays = mut List::new<Int>()
+  let actions = &mut List::new<fn()>()
+  let delays = &mut List::new<Int>()
   mut cancellations = 0
   let host = toast_host::new(
     application.context,
@@ -103,7 +103,7 @@ test fn toast_host_stacks_and_expires_entries() Void!Str {
 test fn toast_host_disposal_suppresses_late_expiry() Void!Str {
   let application = testing::new(60, 16)
   defer application.destroy()
-  let actions = mut List::new<fn()>()
+  let actions = &mut List::new<fn()>()
   mut cancellations = 0
   let host = toast_host::new(
     application.context,

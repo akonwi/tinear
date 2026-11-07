@@ -30,16 +30,16 @@ struct Actions {
 // Captures the component the renderer constructs so tests can assert against
 // real component state instead of a production-only state handle.
 struct Probe {
-  components: [mut document_detail::DocumentDetail],
+  components: [&mut document_detail::DocumentDetail],
 }
 
 struct Fixture {
-  component: mut document_detail::DocumentDetail,
+  component: &mut document_detail::DocumentDetail,
   mounted: renderer::Renderer,
-  route: mut screen_route::Route,
+  route: &mut screen_route::Route,
 }
 
-private fn service(state: mut FakeState) document_detail_service::Service {
+private fn service(state: &mut FakeState) document_detail_service::Service {
   document_detail_service::Service{
     load: fn(cancellation: Receiver<Bool>, slug_id: Str, completion: fn(documents::Doc!Str)) {
       state.loads.push(completion)
@@ -47,7 +47,7 @@ private fn service(state: mut FakeState) document_detail_service::Service {
   }
 }
 
-private fn schedule(state: mut Scheduled) fn(Int, fn()) fn() {
+private fn schedule(state: &mut Scheduled) fn(Int, fn()) fn() {
   fn(milliseconds: Int, action: fn()) fn() {
     state.actions.push(action)
     fn() {
@@ -71,7 +71,7 @@ private fn document(title: Str, content: Str) documents::Doc {
   }
 }
 
-private fn key(name: Str) mut cooper::KeyEvent {
+private fn key(name: Str) &mut cooper::KeyEvent {
   event::key(
     name,
     "",
@@ -85,8 +85,8 @@ private fn key(name: Str) mut cooper::KeyEvent {
   )
 }
 
-private fn probing(found: mut Probe) fn(mut document_detail::Props) mut document_detail::DocumentDetail {
-  fn(props: mut document_detail::Props) mut document_detail::DocumentDetail {
+private fn probing(found: &mut Probe) fn(&mut document_detail::Props) &mut document_detail::DocumentDetail {
+  fn(props: &mut document_detail::Props) &mut document_detail::DocumentDetail {
     let component = document_detail::create(props)
     found.components.push(component)
     component
@@ -97,11 +97,11 @@ private fn probing(found: mut Probe) fn(mut document_detail::Props) mut document
 // binds invalidate, and starts the initial load.
 private fn mount_detail(
   application: testing::TestApp,
-  fake: mut FakeState,
-  scheduled: mut Scheduled,
-  actions: mut Actions,
-) mut Fixture {
-  let found = mut Probe{components: []}
+  fake: &mut FakeState,
+  scheduled: &mut Scheduled,
+  actions: &mut Actions,
+) &mut Fixture {
+  let found = &mut Probe{components: []}
   let route = screen_route::new()
   let mounted = renderer::mount(
     application.context,
@@ -130,27 +130,27 @@ private fn mount_detail(
     ),
   )
   let _ = application.flush()
-  (mut Fixture{
+  &mut Fixture{
     component: found.components.at(0).expect("mounted document detail"),
     mounted: mounted,
     route: route,
-  })
+  }
 }
 
-private fn fake() mut FakeState {
-  (mut FakeState{loads: []})
+private fn fake() &mut FakeState {
+  &mut FakeState{loads: []}
 }
 
-private fn scheduled() mut Scheduled {
-  (mut Scheduled{actions: [], cancellations: 0})
+private fn scheduled() &mut Scheduled {
+  &mut Scheduled{actions: [], cancellations: 0}
 }
 
-private fn actions() mut Actions {
-  (mut Actions{
+private fn actions() &mut Actions {
+  &mut Actions{
     titles: [],
     opened_url: "",
     errors: 0,
-  })
+  }
 }
 
 test fn document_detail_loads_retitles_renders_and_routes_commands() Void!Str {
@@ -225,9 +225,9 @@ test fn document_detail_initial_error_retries_to_empty_content() Void!Str {
     "initial document errors should be visible",
   )
   detail.component.refresh(false)
-  let empty = mut document("Empty document", "ignored")
+  let empty = &mut document("Empty document", "ignored")
   empty.content = Maybe::new<Str>()
-  (loads.loads.at(1).expect("retry"))(Result::ok(empty.@))
+  (loads.loads.at(1).expect("retry"))(Result::ok(empty.*))
   try assertions::assert(
     detail.component.document.is_some(),
     "successful retry should retain document metadata",
@@ -359,15 +359,15 @@ private struct ParentState {
 
 private struct ParentProps {
   child: cui::View,
-  state: mut ParentState,
+  state: &mut ParentState,
 }
 
 private struct Parent {
-  props: mut ParentProps,
+  props: &mut ParentProps,
 }
 
-private fn parent(props: mut ParentProps) mut Parent {
-  (mut Parent{props: props})
+private fn parent(props: &mut ParentProps) &mut Parent {
+  &mut Parent{props: props}
 }
 
 impl cui::Component for Parent {
@@ -387,7 +387,7 @@ impl cui::Lifecycle for Parent {
 test fn synchronous_initial_load_waits_for_parent_command_binding() Void!Str {
   let application = testing::new(80, 24)
   defer application.destroy()
-  let state = mut ParentState{
+  let state = &mut ParentState{
     mounted: false,
     title: "",
     completed_before_parent_mount: false,

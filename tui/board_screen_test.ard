@@ -38,7 +38,7 @@ struct Picked {
   names: [Str],
 }
 
-private fn fake_service(state: mut FakeState) board_service::Service {
+private fn fake_service(state: &mut FakeState) board_service::Service {
   board_service::Service{
     load: fn(cancellation: Receiver<Bool>, completion: fn([issues::BoardColumn]!Str)) {
       state.loads.push(completion)
@@ -55,7 +55,7 @@ private fn fake_service(state: mut FakeState) board_service::Service {
   }
 }
 
-private fn fake_schedule(state: mut ScheduledState) fn(Int, fn()) fn() {
+private fn fake_schedule(state: &mut ScheduledState) fn(Int, fn()) fn() {
   fn(milliseconds: Int, action: fn()) fn() {
     state.actions.push(action)
     fn() {
@@ -124,7 +124,7 @@ private fn shift_modifiers() cooper::Modifiers {
   }
 }
 
-private fn shifted_key(name: Str) mut cooper::KeyEvent {
+private fn shifted_key(name: Str) &mut cooper::KeyEvent {
   event::key(
     name,
     "",
@@ -138,7 +138,7 @@ private fn shifted_key(name: Str) mut cooper::KeyEvent {
   )
 }
 
-private fn key(name: Str) mut cooper::KeyEvent {
+private fn key(name: Str) &mut cooper::KeyEvent {
   event::key(
     name,
     "",
@@ -155,9 +155,9 @@ private fn key(name: Str) mut cooper::KeyEvent {
 test fn board_builds_nested_retained_columns_and_navigates_cards() Void!Str {
   let application = testing::new(100, 18)
   defer application.destroy()
-  let fake = mut FakeState{loads: [], moves: []}
-  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
-  let opened = mut Opened{identifier: "", count: 0}
+  let fake = &mut FakeState{loads: [], moves: []}
+  let scheduled = &mut ScheduledState{actions: [], cancellations: 0}
+  let opened = &mut Opened{identifier: "", count: 0}
   let fixture = mount_board(
     application,
     theme::new(),
@@ -254,9 +254,9 @@ test fn board_builds_nested_retained_columns_and_navigates_cards() Void!Str {
 test fn board_drag_moves_issue_optimistically_and_confirms_team_state() Void!Str {
   let application = testing::new(100, 18)
   defer application.destroy()
-  let fake = mut FakeState{loads: [], moves: []}
-  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
-  let opened = mut Opened{identifier: "", count: 0}
+  let fake = &mut FakeState{loads: [], moves: []}
+  let scheduled = &mut ScheduledState{actions: [], cancellations: 0}
+  let opened = &mut Opened{identifier: "", count: 0}
   let fixture = mount_board(
     application,
     theme::new(),
@@ -440,9 +440,9 @@ test fn board_drag_moves_issue_optimistically_and_confirms_team_state() Void!Str
 test fn board_drag_rolls_back_failure_and_never_reuses_another_teams_state() Void!Str {
   let application = testing::new(100, 18)
   defer application.destroy()
-  let fake = mut FakeState{loads: [], moves: []}
-  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
-  let errors = mut Opened{identifier: "", count: 0}
+  let fake = &mut FakeState{loads: [], moves: []}
+  let scheduled = &mut ScheduledState{actions: [], cancellations: 0}
+  let errors = &mut Opened{identifier: "", count: 0}
   let fixture = mount_board(
     application,
     theme::new(),
@@ -522,9 +522,9 @@ test fn board_drag_rolls_back_failure_and_never_reuses_another_teams_state() Voi
 test fn board_drag_threshold_same_column_and_interrupted_drops_are_safe() Void!Str {
   let application = testing::new(100, 18)
   defer application.destroy()
-  let fake = mut FakeState{loads: [], moves: []}
-  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
-  let opened = mut Opened{identifier: "", count: 0}
+  let fake = &mut FakeState{loads: [], moves: []}
+  let scheduled = &mut ScheduledState{actions: [], cancellations: 0}
+  let opened = &mut Opened{identifier: "", count: 0}
   let fixture = mount_board(
     application,
     theme::new(),
@@ -629,9 +629,9 @@ test fn board_drag_threshold_same_column_and_interrupted_drops_are_safe() Void!S
 test fn board_refresh_completion_waits_for_pointer_gesture() Void!Str {
   let application = testing::new(80, 18)
   defer application.destroy()
-  let fake = mut FakeState{loads: [], moves: []}
-  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
-  let opened = mut Opened{identifier: "", count: 0}
+  let fake = &mut FakeState{loads: [], moves: []}
+  let scheduled = &mut ScheduledState{actions: [], cancellations: 0}
+  let opened = &mut Opened{identifier: "", count: 0}
   let fixture = mount_board(
     application,
     theme::new(),
@@ -678,8 +678,8 @@ test fn board_refresh_completion_waits_for_pointer_gesture() Void!Str {
 test fn board_drag_layer_forwards_horizontal_wheel_to_reach_offscreen_column() Void!Str {
   let application = testing::new(60, 18)
   defer application.destroy()
-  let fake = mut FakeState{loads: [], moves: []}
-  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
+  let fake = &mut FakeState{loads: [], moves: []}
+  let scheduled = &mut ScheduledState{actions: [], cancellations: 0}
   let fixture = mount_board(
     application,
     theme::new(),
@@ -757,9 +757,9 @@ test fn board_drag_layer_forwards_horizontal_wheel_to_reach_offscreen_column() V
 test fn board_drag_into_full_completed_column_keeps_moved_issue_visible_with_cap() Void!Str {
   let application = testing::new(100, 60)
   defer application.destroy()
-  let fake = mut FakeState{loads: [], moves: []}
-  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
-  let completed = mut List::new<issues::Issue>()
+  let fake = &mut FakeState{loads: [], moves: []}
+  let scheduled = &mut ScheduledState{actions: [], cancellations: 0}
+  let completed = &mut List::new<issues::Issue>()
   for index in 0..9 {
     completed.push(issue("done-{index}", "AKO-{index}", "Done {index}", "Done"))
   }
@@ -782,7 +782,7 @@ test fn board_drag_into_full_completed_column_keeps_moved_issue_visible_with_cap
     name: "Done",
     state_type: "completed",
     position: 2.0,
-    issues: completed.@,
+    issues: completed.*,
   }
   (fake.loads.at(0).expect("load"))(
     Result::ok([column("Todo", 1.0, [issue("i1", "AKO-100", "Move me", "Todo")]), done]),
@@ -812,8 +812,8 @@ test fn board_drag_into_full_completed_column_keeps_moved_issue_visible_with_cap
 test fn board_refresh_preserves_selected_issue_across_column_move() Void!Str {
   let application = testing::new(80, 16)
   defer application.destroy()
-  let fake = mut FakeState{loads: [], moves: []}
-  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
+  let fake = &mut FakeState{loads: [], moves: []}
+  let scheduled = &mut ScheduledState{actions: [], cancellations: 0}
   let fixture = mount_board(
     application,
     theme::new(),
@@ -863,8 +863,8 @@ test fn board_refresh_preserves_selected_issue_across_column_move() Void!Str {
 test fn board_ignores_stale_load_and_handles_narrow_horizontal_navigation() Void!Str {
   let application = testing::new(40, 12)
   defer application.destroy()
-  let fake = mut FakeState{loads: [], moves: []}
-  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
+  let fake = &mut FakeState{loads: [], moves: []}
+  let scheduled = &mut ScheduledState{actions: [], cancellations: 0}
   let fixture = mount_board(
     application,
     theme::new(),
@@ -905,9 +905,9 @@ test fn board_ignores_stale_load_and_handles_narrow_horizontal_navigation() Void
 test fn board_routes_field_picker_commands_for_selected_issue() Void!Str {
   let application = testing::new(60, 12)
   defer application.destroy()
-  let fake = mut FakeState{loads: [], moves: []}
-  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
-  let picked = mut Picked{names: []}
+  let fake = &mut FakeState{loads: [], moves: []}
+  let scheduled = &mut ScheduledState{actions: [], cancellations: 0}
+  let picked = &mut Picked{names: []}
   let fixture = mount_board(
     application,
     theme::new(),
@@ -950,8 +950,8 @@ test fn board_routes_field_picker_commands_for_selected_issue() Void!Str {
 test fn board_initial_error_retries_to_empty_state() Void!Str {
   let application = testing::new(80, 16)
   defer application.destroy()
-  let fake = mut FakeState{loads: [], moves: []}
-  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
+  let fake = &mut FakeState{loads: [], moves: []}
+  let scheduled = &mut ScheduledState{actions: [], cancellations: 0}
   let fixture = mount_board(
     application,
     theme::new(),
@@ -979,9 +979,9 @@ test fn board_initial_error_retries_to_empty_state() Void!Str {
 test fn board_failed_manual_refresh_restores_existing_columns() Void!Str {
   let application = testing::new(60, 12)
   defer application.destroy()
-  let fake = mut FakeState{loads: [], moves: []}
-  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
-  let errors = mut Opened{identifier: "", count: 0}
+  let fake = &mut FakeState{loads: [], moves: []}
+  let scheduled = &mut ScheduledState{actions: [], cancellations: 0}
+  let errors = &mut Opened{identifier: "", count: 0}
   let fixture = mount_board(
     application,
     theme::new(),
@@ -1026,9 +1026,9 @@ test fn board_failed_manual_refresh_restores_existing_columns() Void!Str {
 test fn board_disposal_suppresses_late_move_completion() Void!Str {
   let application = testing::new(100, 18)
   defer application.destroy()
-  let fake = mut FakeState{loads: [], moves: []}
-  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
-  let errors = mut Opened{identifier: "", count: 0}
+  let fake = &mut FakeState{loads: [], moves: []}
+  let scheduled = &mut ScheduledState{actions: [], cancellations: 0}
+  let errors = &mut Opened{identifier: "", count: 0}
   let fixture = mount_board(
     application,
     theme::new(),
@@ -1077,8 +1077,8 @@ test fn board_disposal_suppresses_late_move_completion() Void!Str {
 test fn board_disposal_cancels_refresh_and_late_completion() Void!Str {
   let application = testing::new(60, 12)
   defer application.destroy()
-  let fake = mut FakeState{loads: [], moves: []}
-  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
+  let fake = &mut FakeState{loads: [], moves: []}
+  let scheduled = &mut ScheduledState{actions: [], cancellations: 0}
   let fixture = mount_board(
     application,
     theme::new(),
@@ -1103,7 +1103,7 @@ test fn board_disposal_cancels_refresh_and_late_completion() Void!Str {
 
 private struct Fixture {
   mounted: renderer::Renderer,
-  component: mut board_screen::Board,
+  component: &mut board_screen::Board,
 }
 
 private fn mount_board(
@@ -1116,12 +1116,12 @@ private fn mount_board(
   on_issue_moved: fn(issues::Issue),
   notify_error: fn(Str, Str),
 ) Fixture {
-  let instances = mut List::new<mut board_screen::Board>()
+  let instances = &mut List::new<&mut board_screen::Board>()
   let mounted = renderer::mount(
     application.context,
     application.root,
     cui::child(
-      fn(props: mut board_screen::Props) mut board_screen::Board {
+      fn(props: &mut board_screen::Props) &mut board_screen::Board {
         let component = board_screen::create(props)
         instances.push(component)
         component

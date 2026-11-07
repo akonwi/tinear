@@ -42,8 +42,8 @@ struct Outcome {
   error_title: Str,
 }
 
-private fn fake_state() mut FakeState {
-  (mut FakeState{
+private fn fake_state() &mut FakeState {
+  &mut FakeState{
     state_loads: [],
     state_cancellations: [],
     cycle_loads: [],
@@ -54,10 +54,10 @@ private fn fake_state() mut FakeState {
     priority_updates: [],
     assignee_updates: [],
     project_updates: [],
-  })
+  }
 }
 
-private fn fake_service(state: mut FakeState) issue_fields_service::Service {
+private fn fake_service(state: &mut FakeState) issue_fields_service::Service {
   issue_fields_service::Service{
     load_states: fn(cancellation: Receiver<Bool>, team_id: Str, completion: fn([issues::WorkflowState]!Str)) {
       state.state_loads.push(completion)
@@ -144,7 +144,7 @@ private fn issue() issues::Issue {
   }
 }
 
-private fn key(name: Str) mut cooper::KeyEvent {
+private fn key(name: Str) &mut cooper::KeyEvent {
   event::key(
     name,
     "",
@@ -160,10 +160,10 @@ private fn key(name: Str) mut cooper::KeyEvent {
 
 private fn controller(
   application: testing::TestApp,
-  modal: mut modal_host::ModalHost,
-  state: mut FakeState,
-  outcome: mut Outcome,
-) mut issue_field_picker_controller::Controller {
+  modal: &mut modal_host::ModalHost,
+  state: &mut FakeState,
+  outcome: &mut Outcome,
+) &mut issue_field_picker_controller::Controller {
   issue_field_picker_controller::new(
     application.context,
     modal,
@@ -269,7 +269,7 @@ test fn state_picker_ignores_dismissed_load_and_reports_mutation_failure() Void!
   defer application.destroy()
   let modal = modal_host::new(application.context, application.root, theme::new())
   let state = fake_state()
-  let outcome = mut Outcome{
+  let outcome = &mut Outcome{
     changed: 0,
     changed_identifier: "",
     errors: 0,
@@ -352,7 +352,7 @@ test fn field_picker_load_failure_closes_and_reports() Void!Str {
   defer application.destroy()
   let modal = modal_host::new(application.context, application.root, theme::new())
   let state = fake_state()
-  let outcome = mut Outcome{
+  let outcome = &mut Outcome{
     changed: 0,
     changed_identifier: "",
     errors: 0,
@@ -373,7 +373,7 @@ test fn priority_cycle_assignee_and_project_pickers_apply_and_refresh() Void!Str
   defer application.destroy()
   let modal = modal_host::new(application.context, application.root, theme::new())
   let state = fake_state()
-  let outcome = mut Outcome{
+  let outcome = &mut Outcome{
     changed: 0,
     changed_identifier: "",
     errors: 0,
@@ -505,7 +505,7 @@ test fn field_picker_disposal_closes_owned_modal_and_ignores_late_load() Void!St
   defer application.destroy()
   let modal = modal_host::new(application.context, application.root, theme::new())
   let state = fake_state()
-  let outcome = mut Outcome{
+  let outcome = &mut Outcome{
     changed: 0,
     changed_identifier: "",
     errors: 0,

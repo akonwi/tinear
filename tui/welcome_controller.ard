@@ -14,18 +14,18 @@ struct WelcomeProps {
 }
 
 struct Welcome {
-  props: mut WelcomeProps,
+  props: &mut WelcomeProps,
   draft: Str,
   loading: Bool,
   error: Str,
   request: Int,
   button_focused: Bool,
-  button: mut cui::BoxRef,
+  button: &mut cui::BoxRef,
   stop: Chan<Bool>,
 }
 
-private fn welcome(props: mut WelcomeProps) mut Welcome {
-  (mut Welcome{
+private fn welcome(props: &mut WelcomeProps) &mut Welcome {
+  &mut Welcome{
     props: props,
     draft: "",
     loading: false,
@@ -34,7 +34,7 @@ private fn welcome(props: mut WelcomeProps) mut Welcome {
     button_focused: false,
     button: cui::box_ref(),
     stop: Chan::new<Bool>(),
-  })
+  }
 }
 
 fn view(palette: tinear_theme::Theme, authenticate: auth::Authenticate, on_success: fn(Str)) cui::View {
@@ -153,14 +153,14 @@ impl cui::Component for Welcome {
                 align_items: ui::Align::center,
                 justify_content: ui::Justify::center,
               ),
-              on_key: fn(received: mut cooper::KeyEvent, ctx: cui::Context) {
+              on_key: fn(received: &mut cooper::KeyEvent, ctx: cui::Context) {
                 if received.event_type != cooper::KeyEventType::release and (received.matches("return") or received.matches("space")) {
                   self.submit(ctx)
                   received.prevent_default()
                   received.stop_propagation()
                 }
               },
-              on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
+              on_mouse: fn(received: &mut cooper::MouseEvent, ctx: cui::Context) {
                 if received.event_type == cooper::MouseEventType::down and received.button == cooper::MouseButton::left {
                   self.submit(ctx)
                   received.stop_propagation()

@@ -16,13 +16,13 @@ use tinear/tui/timestamp
 // capabilities on. Props are read-only input; every piece of mutable state
 // lives on the component.
 struct Props {
-  context: mut cooper::Runtime,
+  context: &mut cooper::Runtime,
   palette: tinear_theme::Theme,
   slug_id: Str,
   cached_title: Str,
   service: document_detail_service::Service,
   schedule: scheduler::Schedule,
-  route: mut screen_route::Route,
+  route: &mut screen_route::Route,
   on_title: fn(Str),
   on_open_url: fn(Str),
   notify_error: fn(Str, Str),
@@ -31,13 +31,13 @@ struct Props {
 // Component identity owns every resource this screen holds: the markdown
 // controller, the cancellation channel, and the periodic refresh timer.
 struct DocumentDetail {
-  props: mut Props,
+  props: &mut Props,
   cached_title: Str,
   document: documents::Doc?,
   status: Str,
   status_danger: Bool,
-  body: mut cui::ScrollBoxRef,
-  markdown: mut markdown_controller::MarkdownController,
+  body: &mut cui::ScrollBoxRef,
+  markdown: &mut markdown_controller::MarkdownController,
   generation: Int,
   request: Int,
   disposed: Bool,
@@ -46,12 +46,12 @@ struct DocumentDetail {
   invalidate: fn(),
 }
 
-fn create(props: mut Props) mut DocumentDetail {
+fn create(props: &mut Props) &mut DocumentDetail {
   let loading_title = match props.cached_title.is_empty() {
     true => "document",
     false => props.cached_title,
   }
-  (mut DocumentDetail{
+  &mut DocumentDetail{
     props: props,
     cached_title: props.cached_title,
     document: Maybe::new<documents::Doc>(),
@@ -71,14 +71,14 @@ fn create(props: mut Props) mut DocumentDetail {
     stop: Chan::new<Bool>(),
     cancel_refresh: fn() {},
     invalidate: fn() {},
-  })
+  }
 }
 
 // The shell needs a focus and key target before this component mounts, so the
 // route is a stable handle the component fills in at mount and clears at
 // unmount. Disposal belongs to the lifecycle, not to the shell.
 fn new(
-  ctx: mut cooper::Runtime,
+  ctx: &mut cooper::Runtime,
   palette: tinear_theme::Theme,
   slug_id: Str,
   cached_title: Str,
@@ -109,7 +109,7 @@ fn new(
     focus: fn() {
       route.focus()
     },
-    handle_key: fn(received: mut cooper::KeyEvent) Bool {
+    handle_key: fn(received: &mut cooper::KeyEvent) Bool {
       route.handle_key(received)
     },
     dispose: fn() {},
@@ -122,7 +122,7 @@ impl cui::Lifecycle for DocumentDetail {
     self.props.route.focus = fn() {
       self.body.focus(ctx)
     }
-    self.props.route.handle_key = fn(received: mut cooper::KeyEvent) Bool {
+    self.props.route.handle_key = fn(received: &mut cooper::KeyEvent) Bool {
       self.handle_key(received)
     }
     // Children mount before their parent. Defer startup until the entire
@@ -231,7 +231,7 @@ impl DocumentDetail {
     }
   }
 
-  fn mut handle_key(received: mut cooper::KeyEvent) Bool {
+  fn mut handle_key(received: &mut cooper::KeyEvent) Bool {
     if self.disposed or received.event_type == cooper::KeyEventType::release {
       false
     } else {
@@ -289,7 +289,7 @@ impl cui::Component for DocumentDetail {
     let palette = self.props.palette
     let loaded = self.document.is_some()
     let row = ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0)
-    let children = mut List::new<cui::View>()
+    let children = &mut List::new<cui::View>()
     if loaded {
       let document = self.document.expect("loaded document")
       children.push(
@@ -361,7 +361,7 @@ impl cui::Component for DocumentDetail {
       ),
     )
     cui::box(
-      children.@,
+      children.*,
       styles: ui::style(
         width: ui::percent(100.0),
         height: ui::percent(100.0),

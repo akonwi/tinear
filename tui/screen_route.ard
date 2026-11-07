@@ -5,19 +5,19 @@ use cooper
 // on unmount. Calls before mount or after unmount are harmless.
 struct Route {
   focus: fn(),
-  handle_key: fn(mut cooper::KeyEvent) Bool,
+  handle_key: fn(&mut cooper::KeyEvent) Bool,
 }
 
-fn new() mut Route {
-  (mut Route{focus: fn() {}, handle_key: fn(received: mut cooper::KeyEvent) Bool {
+fn new() &mut Route {
+  &mut Route{focus: fn() {}, handle_key: fn(received: &mut cooper::KeyEvent) Bool {
     false
-  }})
+  }}
 }
 
 impl Route {
   fn mut clear() {
     self.focus = fn() {}
-    self.handle_key = fn(received: mut cooper::KeyEvent) Bool {
+    self.handle_key = fn(received: &mut cooper::KeyEvent) Bool {
       false
     }
   }

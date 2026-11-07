@@ -14,7 +14,7 @@ private struct CompletionState {
   success: Bool,
 }
 
-private fn flush_until(application: cooper_testing::TestApp, completion: mut CompletionState) Bool {
+private fn flush_until(application: cooper_testing::TestApp, completion: &mut CompletionState) Bool {
   mut attempts = 0
   while attempts < 100 and not completion.done {
     let _ = application.flush()
@@ -61,8 +61,8 @@ test fn auth_validation_maps_raw_failures_to_user_facing_messages() Void!Str {
 test fn auth_service_dispatches_validation_and_persistence_result() Void!Str {
   let application = cooper_testing::new(20, 5)
   defer application.destroy()
-  let saved = mut SavedState{api_key: ""}
-  let completion = mut CompletionState{done: false, success: false}
+  let saved = &mut SavedState{api_key: ""}
+  let completion = &mut CompletionState{done: false, success: false}
   let authenticate = auth::with_services(
     application.context,
     fn(api_key: Str) Void!Str {
@@ -91,7 +91,7 @@ test fn auth_service_cancellation_prevents_persistence_and_completion() Void!Str
   let validation_started = Chan::new<Bool>()
   let release_validation = Chan::new<Bool>()
   let saved = Chan::new<Bool>()
-  let completion = mut CompletionState{done: false, success: false}
+  let completion = &mut CompletionState{done: false, success: false}
   let authenticate = auth::with_services(
     application.context,
     fn(api_key: Str) Void!Str {

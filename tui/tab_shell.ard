@@ -12,11 +12,11 @@ use tinear/tui/theme as tinear_theme
 struct Screen {
   view: cui::View,
   focus: fn(),
-  handle_key: fn(mut cooper::KeyEvent) Bool,
+  handle_key: fn(&mut cooper::KeyEvent) Bool,
   dispose: fn(),
 }
 
-fn screen(view: cui::View, focus: fn(), handle_key: fn(mut cooper::KeyEvent) Bool, dispose: fn()) Screen {
+fn screen(view: cui::View, focus: fn(), handle_key: fn(&mut cooper::KeyEvent) Bool, dispose: fn()) Screen {
   Screen{
     view: view,
     focus: focus,
@@ -33,7 +33,7 @@ struct DynamicScreen {
 }
 
 struct Tabs {
-  props: mut Props,
+  props: &mut Props,
   model: shell_model::Model,
   dynamic_screens: [DynamicScreen],
   next_screen_id: Int,
@@ -135,7 +135,7 @@ private fn hints_for(model: shell_model::Model) [hints_bar::Hint] {
 }
 
 private fn hints_content(hints: [hints_bar::Hint], palette: tinear_theme::Theme) ui::StyledText {
-  let spans = mut List::new<ui::Span>()
+  let spans = &mut List::new<ui::Span>()
   for hint, index in hints {
     if index > 0 {
       spans.push(ui::span("   "))
@@ -145,7 +145,7 @@ private fn hints_content(hints: [hints_bar::Hint], palette: tinear_theme::Theme)
       spans.push(ui::span(" {hint.label}", style: ui::span_style(dim: true)))
     }
   }
-  ui::styled_text(spans.@)
+  ui::styled_text(spans.*)
 }
 
 impl cui::Lifecycle for Tabs {
@@ -159,7 +159,7 @@ impl cui::Lifecycle for Tabs {
     self.props.commands.focus_active = fn() {
       self.focus_active()
     }
-    self.props.commands.handle_key = fn(received: mut cooper::KeyEvent) Bool {
+    self.props.commands.handle_key = fn(received: &mut cooper::KeyEvent) Bool {
       self.handle_key(received)
     }
     self.invalidate = ctx.invalidate_root
@@ -188,7 +188,7 @@ impl Tabs {
       true => width - 2,
       false => width,
     }
-    let children = mut List::new<cui::View>()
+    let children = &mut List::new<cui::View>()
     children.push(
       cui::text(
         ui::styled_text(
@@ -224,7 +224,7 @@ impl Tabs {
             ),
           ],
           styles: ui::style(width: ui::cells(2), height: ui::cells(1), flex_shrink: 0.0),
-          on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
+          on_mouse: fn(received: &mut cooper::MouseEvent, ctx: cui::Context) {
             if received.event_type == cooper::MouseEventType::down and received.button == cooper::MouseButton::left {
               match self.model.tabs.at(dynamic_index) {
                 reference => {
@@ -239,7 +239,7 @@ impl Tabs {
       )
     }
     cui::box(
-      children.@,
+      children.*,
       key: "chip-{index}",
       styles: ui::style(
         width: ui::cells(width),
@@ -248,7 +248,7 @@ impl Tabs {
         flex_direction: ui::FlexDirection::row,
         overflow: ui::Overflow::hidden,
       ),
-      on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
+      on_mouse: fn(received: &mut cooper::MouseEvent, ctx: cui::Context) {
         if received.event_type == cooper::MouseEventType::down and received.button == cooper::MouseButton::left {
           self.select_tab(index)
           received.stop_propagation()
@@ -271,7 +271,7 @@ impl Tabs {
 
 impl cui::Component for Tabs {
   fn mut render() cui::View {
-    let chips = mut List::new<cui::View>()
+    let chips = &mut List::new<cui::View>()
     chips.push(self.chip(0, "Inbox", false))
     chips.push(self.chip(1, "My Issues", false))
     for reference, index in self.model.tabs {
@@ -279,7 +279,7 @@ impl cui::Component for Tabs {
     }
 
     // Hidden pages remain mounted, retaining component state and requests.
-    let bodies = mut List::new<cui::View>()
+    let bodies = &mut List::new<cui::View>()
     bodies.push(page(self.props.inbox, "screen-inbox", self.model.tab_index == 0))
     bodies.push(page(self.props.board, "screen-board", self.model.tab_index == 1))
     for dynamic, index in self.dynamic_screens {
@@ -295,7 +295,7 @@ impl cui::Component for Tabs {
     cui::box(
       [
         cui::box(
-          chips.@,
+          chips.*,
           styles: ui::style(
             width: ui::percent(100.0),
             height: ui::cells(1),
@@ -306,7 +306,7 @@ impl cui::Component for Tabs {
         ),
         self.rule(),
         cui::box(
-          bodies.@,
+          bodies.*,
           styles: ui::style(
             width: ui::percent(100.0),
             height: ui::cells(1),
@@ -351,18 +351,18 @@ struct Commands {
   open: fn(tabs::TabRef),
   retitle: fn(tabs::TabRef, Str),
   focus_active: fn(),
-  handle_key: fn(mut cooper::KeyEvent) Bool,
+  handle_key: fn(&mut cooper::KeyEvent) Bool,
 }
 
-fn commands() mut Commands {
-  (mut Commands{
+fn commands() &mut Commands {
+  &mut Commands{
     open: fn(reference: tabs::TabRef) {},
     retitle: fn(reference: tabs::TabRef, title: Str) {},
     focus_active: fn() {},
-    handle_key: fn(received: mut cooper::KeyEvent) Bool {
+    handle_key: fn(received: &mut cooper::KeyEvent) Bool {
       false
     },
-  })
+  }
 }
 
 impl Commands {
@@ -370,14 +370,14 @@ impl Commands {
     self.open = fn(reference: tabs::TabRef) {}
     self.retitle = fn(reference: tabs::TabRef, title: Str) {}
     self.focus_active = fn() {}
-    self.handle_key = fn(received: mut cooper::KeyEvent) Bool {
+    self.handle_key = fn(received: &mut cooper::KeyEvent) Bool {
       false
     }
   }
 }
 
 struct Props {
-  context: mut cooper::Runtime,
+  context: &mut cooper::Runtime,
   palette: tinear_theme::Theme,
   initial_model: shell_model::Model,
   inbox: Screen,
@@ -387,15 +387,15 @@ struct Props {
   on_dispose: fn(),
   on_search: fn(),
   on_create: fn(),
-  commands: mut Commands,
+  commands: &mut Commands,
 }
 
 fn view(props: Props) cui::View {
   cui::child(create, props, key: "shell")
 }
 
-fn create(props: mut Props) mut Tabs {
-  let component = mut Tabs{
+fn create(props: &mut Props) &mut Tabs {
+  let component = &mut Tabs{
     props: props,
     model: props.initial_model,
     dynamic_screens: [],
@@ -498,7 +498,7 @@ impl Tabs {
           _ => false,
         }
         self.model = shell_model::close(self.model, reference)
-        let remaining = mut List::new<DynamicScreen>()
+        let remaining = &mut List::new<DynamicScreen>()
         for dynamic in self.dynamic_screens {
           if tabs::same(dynamic.reference, reference) {
             // Close external presenters now. Dropping the key retires the
@@ -508,7 +508,7 @@ impl Tabs {
             remaining.push(dynamic)
           }
         }
-        self.dynamic_screens = remaining.@
+        self.dynamic_screens = remaining.*
         self.apply_selection(true)
         if was_selected {
           self.focus_active()
@@ -525,7 +525,7 @@ impl Tabs {
     }
   }
 
-  private fn mut handle_active(received: mut cooper::KeyEvent) Bool {
+  private fn mut handle_active(received: &mut cooper::KeyEvent) Bool {
     match self.model.tab_index {
       0 => self.props.inbox.handle_key(received),
       1 => self.props.board.handle_key(received),
@@ -539,7 +539,7 @@ impl Tabs {
     }
   }
 
-  fn mut handle_key(received: mut cooper::KeyEvent) Bool {
+  fn mut handle_key(received: &mut cooper::KeyEvent) Bool {
     if self.disposed or received.event_type == cooper::KeyEventType::release {
       false
     } else {

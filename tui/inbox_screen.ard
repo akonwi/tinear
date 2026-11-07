@@ -18,10 +18,10 @@ struct CachedDetail {
 }
 
 struct Inbox {
-  props: mut Props,
+  props: &mut Props,
   unsubscribe: fn(),
-  list_scroll: mut cui::ScrollBoxRef,
-  detail_scroll: mut cui::ScrollBoxRef,
+  list_scroll: &mut cui::ScrollBoxRef,
+  detail_scroll: &mut cui::ScrollBoxRef,
   list_status: Str,
   list_status_error: Bool,
   detail_text: ui::TextContent,
@@ -46,7 +46,7 @@ private fn status_style(display: ui::Display) ui::Style {
 }
 
 private fn detail_content(item: inbox::Item, detail: inbox::Detail, palette: tinear_theme::Theme) ui::StyledText {
-  let spans = mut List::new<ui::Span>()
+  let spans = &mut List::new<ui::Span>()
   spans.push(
     ui::span(
       "{item.actor_name} {item.type_label}",
@@ -141,7 +141,7 @@ private fn detail_content(item: inbox::Item, detail: inbox::Detail, palette: tin
       )
     }
   }
-  ui::styled_text(spans.@)
+  ui::styled_text(spans.*)
 }
 
 private fn detail_preview(item: inbox::Item, palette: tinear_theme::Theme) ui::StyledText {
@@ -177,26 +177,26 @@ private fn detail_error(item: inbox::Item, message: Str, palette: tinear_theme::
 }
 
 struct Props {
-  context: mut cooper::Runtime,
+  context: &mut cooper::Runtime,
   palette: tinear_theme::Theme,
   service: inbox_service::Service,
   schedule: scheduler::Schedule,
   on_open_issue: fn(Str),
   open_url: fn(Str),
   notify_error: fn(Str, Str),
-  route: mut screen_route::Route,
-  hub: mut events::Bus<events::Event>,
+  route: &mut screen_route::Route,
+  hub: &mut events::Bus<events::Event>,
 }
 
 fn new(
-  ctx: mut cooper::Runtime,
+  ctx: &mut cooper::Runtime,
   palette: tinear_theme::Theme,
   service: inbox_service::Service,
   schedule: scheduler::Schedule,
   on_open_issue: fn(Str),
   open_url: fn(Str),
   notify_error: fn(Str, Str),
-  hub: mut events::Bus<events::Event>,
+  hub: &mut events::Bus<events::Event>,
 ) tab_shell::Screen {
   let route = screen_route::new()
   tab_shell::screen(
@@ -218,15 +218,15 @@ fn new(
     fn() {
       route.focus()
     },
-    fn(received: mut cooper::KeyEvent) Bool {
+    fn(received: &mut cooper::KeyEvent) Bool {
       route.handle_key(received)
     },
     fn() {},
   )
 }
 
-fn create(props: mut Props) mut Inbox {
-  (mut Inbox{
+fn create(props: &mut Props) &mut Inbox {
+  &mut Inbox{
     props: props,
     unsubscribe: fn() {},
     list_scroll: cui::scroll_box_ref(),
@@ -248,7 +248,7 @@ fn create(props: mut Props) mut Inbox {
     disposed: false,
     invalidate: fn() {},
     cancel_refresh: fn() {},
-  })
+  }
 }
 
 impl Inbox {
@@ -393,14 +393,14 @@ impl Inbox {
   }
 
   private fn mut cache_detail(notification_id: Str, detail: inbox::Detail) {
-    let next = mut List::new<CachedDetail>()
+    let next = &mut List::new<CachedDetail>()
     for cached in self.cached_details {
       if not cached.notification_id == notification_id {
         next.push(cached)
       }
     }
     next.push(CachedDetail{notification_id: notification_id, detail: detail})
-    self.cached_details = next.@
+    self.cached_details = next.*
   }
 
   private fn mut load_selected_detail() {
@@ -503,13 +503,13 @@ impl Inbox {
   private fn mut archive_selected() {
     match self.items.at(self.cursor) {
       item => {
-        let remaining = mut List::new<inbox::Item>()
+        let remaining = &mut List::new<inbox::Item>()
         for candidate in self.items {
           if not candidate.notification_id == item.notification_id {
             remaining.push(candidate)
           }
         }
-        self.items = remaining.@
+        self.items = remaining.*
         self.update_terminal_title()
         if self.cursor >= self.items.size() and self.cursor > 0 {
           self.cursor =- 1
@@ -541,7 +541,7 @@ impl Inbox {
     }
   }
 
-  fn mut handle_key(received: mut cooper::KeyEvent) Bool {
+  fn mut handle_key(received: &mut cooper::KeyEvent) Bool {
     if self.disposed or received.event_type == cooper::KeyEventType::release {
       false
     } else {
@@ -628,7 +628,7 @@ impl Inbox {
               left: ui::cells(1),
             },
           ),
-          on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
+          on_mouse: fn(received: &mut cooper::MouseEvent, ctx: cui::Context) {
             if received.event_type == cooper::MouseEventType::move {
               self.hovered_id = notification_id
             } else if received.event_type == cooper::MouseEventType::out {
@@ -661,7 +661,7 @@ impl cui::Lifecycle for Inbox {
     self.props.route.focus = fn() {
       self.list_scroll.focus(ctx)
     }
-    self.props.route.handle_key = fn(received: mut cooper::KeyEvent) Bool {
+    self.props.route.handle_key = fn(received: &mut cooper::KeyEvent) Bool {
       self.handle_key(received)
     }
     self.unsubscribe = self.props.hub.subscribe(fn(event: events::Event) {
@@ -684,7 +684,7 @@ impl cui::Lifecycle for Inbox {
 impl cui::Component for Inbox {
   fn mut render() cui::View {
     let palette = self.props.palette
-    let list = mut List::new<cui::View>()
+    let list = &mut List::new<cui::View>()
     if not self.list_status.is_empty() {
       list.push(
         cui::text(
@@ -704,7 +704,7 @@ impl cui::Component for Inbox {
     cui::box(
       [
         cui::scroll_box(
-          list.@,
+          list.*,
           ref: self.list_scroll,
           styles: ui::style(
             width: ui::percent(35.0),

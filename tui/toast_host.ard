@@ -35,14 +35,14 @@ struct Timer {
 }
 
 struct ToastHost {
-  model: mut Model,
+  model: &mut Model,
   cui: renderer::Renderer,
   timers: [Timer],
   next_id: Int,
   disposed: Bool,
   palette: tinear_theme::Theme,
   schedule: scheduler::Schedule,
-  context: mut cooper::Runtime,
+  context: &mut cooper::Runtime,
 }
 
 private fn root_style(display: ui::Display) ui::Style {
@@ -62,7 +62,7 @@ private fn root_style(display: ui::Display) ui::Style {
   )
 }
 
-private fn toast_width(ctx: mut cooper::Runtime, title: Str, description: Str) Int {
+private fn toast_width(ctx: &mut cooper::Runtime, title: Str, description: Str) Int {
   mut content_width = ctx.measure_text(title)
   if not description.is_empty() {
     let description_width = ctx.measure_text(description)
@@ -95,12 +95,12 @@ private struct ToastProps {
 }
 
 private struct Toast {
-  props: mut ToastProps,
+  props: &mut ToastProps,
   offset: Int,
 }
 
-private fn toast(props: mut ToastProps) mut Toast {
-  (mut Toast{props: props, offset: props.entry.width})
+private fn toast(props: &mut ToastProps) &mut Toast {
+  &mut Toast{props: props, offset: props.entry.width}
 }
 
 impl cui::Lifecycle for Toast {
@@ -126,7 +126,7 @@ impl cui::Component for Toast {
       true => 1,
       false => 2,
     }
-    let children = mut List::new<cui::View>()
+    let children = &mut List::new<cui::View>()
     children.push(
       cui::text(
         entry.title,
@@ -160,7 +160,7 @@ impl cui::Component for Toast {
           text_style: ui::text_style(foreground: entry.color, bold: true),
         ),
         cui::box(
-          children.@,
+          children.*,
           styles: ui::style(
             width: ui::fit_content(),
             max_width: ui::cells(46),
@@ -195,21 +195,21 @@ impl cui::Component for Toast {
 // The overlay stack. Data lives in the shared Model owned by the facade;
 // this component only describes it.
 private struct HostProps {
-  model: mut Model,
+  model: &mut Model,
 }
 
 private struct Host {
-  props: mut HostProps,
+  props: &mut HostProps,
 }
 
-private fn host(props: mut HostProps) mut Host {
-  (mut Host{props: props})
+private fn host(props: &mut HostProps) &mut Host {
+  &mut Host{props: props}
 }
 
 impl cui::Component for Host {
   fn mut render() cui::View {
     let entries = self.props.model.entries
-    let children = mut List::new<cui::View>()
+    let children = &mut List::new<cui::View>()
     for entry in entries {
       children.push(cui::child(toast, ToastProps{entry: entry}, key: "toast-{entry.id}"))
     }
@@ -217,19 +217,19 @@ impl cui::Component for Host {
       true => ui::Display::none,
       false => ui::Display::flex,
     }
-    cui::box(children.@, styles: root_style(display))
+    cui::box(children.*, styles: root_style(display))
   }
 }
 
 fn new(
-  ctx: mut cooper::Runtime,
-  root: mut cooper::Root,
+  ctx: &mut cooper::Runtime,
+  root: &mut cooper::Root,
   palette: tinear_theme::Theme,
   schedule: scheduler::Schedule,
-) mut ToastHost {
-  let model = mut Model{entries: []}
+) &mut ToastHost {
+  let model = &mut Model{entries: []}
   let mounted = renderer::mount(ctx, root, cui::child(host, HostProps{model: model}))
-  (mut ToastHost{
+  &mut ToastHost{
     model: model,
     cui: mounted,
     timers: [],
@@ -238,7 +238,7 @@ fn new(
     palette: palette,
     schedule: schedule,
     context: ctx,
-  })
+  }
 }
 
 impl ToastHost {
@@ -246,7 +246,7 @@ impl ToastHost {
     if self.disposed {
       false
     } else {
-      let remaining = mut List::new<Entry>()
+      let remaining = &mut List::new<Entry>()
       mut removed = false
       for entry in self.model.entries {
         if entry.id == id {
@@ -256,7 +256,7 @@ impl ToastHost {
         }
       }
       if removed {
-        let timers = mut List::new<Timer>()
+        let timers = &mut List::new<Timer>()
         for timer in self.timers {
           if timer.id == id {
             (timer.cancel)()
@@ -264,9 +264,9 @@ impl ToastHost {
             timers.push(timer)
           }
         }
-        self.timers = timers.@
+        self.timers = timers.*
         self.cui.update(fn() {
-          self.model.entries = remaining.@
+          self.model.entries = remaining.*
         })
       }
       removed

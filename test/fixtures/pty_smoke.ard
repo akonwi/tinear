@@ -12,16 +12,16 @@ use tinear/tui/theme
 
 private struct BasicProps {
   label: Str,
-  route: mut screen_route::Route,
+  route: &mut screen_route::Route,
 }
 
 private struct Basic {
-  props: mut BasicProps,
-  panel: mut cui::BoxRef,
+  props: &mut BasicProps,
+  panel: &mut cui::BoxRef,
 }
 
-private fn basic(props: mut BasicProps) mut Basic {
-  (mut Basic{props: props, panel: cui::box_ref()})
+private fn basic(props: &mut BasicProps) &mut Basic {
+  &mut Basic{props: props, panel: cui::box_ref()}
 }
 
 impl cui::Lifecycle for Basic {
@@ -40,7 +40,7 @@ impl cui::Component for Basic {
   fn mut render() cui::View {
     cui::box(
       [cui::text(self.props.label, selectable: true)],
-      on_key: fn(received: mut cooper::KeyEvent, context: cui::Context) {},
+      on_key: fn(received: &mut cooper::KeyEvent, context: cui::Context) {},
       ref: self.panel,
       styles: ui::style(
         width: ui::percent(100.0),
@@ -51,14 +51,14 @@ impl cui::Component for Basic {
   }
 }
 
-private fn basic_screen(ctx: mut cooper::Runtime, label: Str) tab_shell::Screen {
+private fn basic_screen(ctx: &mut cooper::Runtime, label: Str) tab_shell::Screen {
   let route = screen_route::new()
   tab_shell::screen(
     view: cui::child(basic, BasicProps{label: label, route: route}),
     focus: fn() {
       route.focus()
     },
-    handle_key: fn(received: mut cooper::KeyEvent) Bool {
+    handle_key: fn(received: &mut cooper::KeyEvent) Bool {
       false
     },
     dispose: fn() {},
@@ -68,20 +68,20 @@ private fn basic_screen(ctx: mut cooper::Runtime, label: Str) tab_shell::Screen 
 // Controlled state for the PTY fixture's editable row.
 private struct InboxState {
   value: Str,
-  editor: mut cui::TextAreaRef,
-  route: mut screen_route::Route,
+  editor: &mut cui::TextAreaRef,
+  route: &mut screen_route::Route,
 }
 
 private struct InboxProps {
-  state: mut InboxState,
+  state: &mut InboxState,
 }
 
 private struct InboxView {
-  props: mut InboxProps,
+  props: &mut InboxProps,
 }
 
-private fn inbox_view(props: mut InboxProps) mut InboxView {
-  (mut InboxView{props: props})
+private fn inbox_view(props: &mut InboxProps) &mut InboxView {
+  &mut InboxView{props: props}
 }
 
 impl cui::Lifecycle for InboxView {
@@ -99,7 +99,7 @@ impl cui::Lifecycle for InboxView {
 impl cui::Component for InboxView {
   fn mut render() cui::View {
     let state = self.props.state
-    let rows = mut List::new<cui::View>()
+    let rows = &mut List::new<cui::View>()
     mut index = 0
     while index < 20 {
       rows.push(cui::text("scroll row {index}", selectable: true))
@@ -119,7 +119,7 @@ impl cui::Component for InboxView {
         ),
         cui::text("value: {strings::ReplaceAll(state.value, "\n", "↵")}", selectable: false),
         cui::scroll_box(
-          rows.@,
+          rows.*,
           styles: ui::style(width: ui::percent(100.0), height: ui::cells(5), flex_shrink: 0.0),
         ),
       ],
@@ -132,8 +132,8 @@ impl cui::Component for InboxView {
   }
 }
 
-private fn inbox_screen(ctx: mut cooper::Runtime) tab_shell::Screen {
-  let state = mut InboxState{
+private fn inbox_screen(ctx: &mut cooper::Runtime) tab_shell::Screen {
+  let state = &mut InboxState{
     value: "",
     editor: cui::text_area_ref(),
     route: screen_route::new(),
@@ -143,7 +143,7 @@ private fn inbox_screen(ctx: mut cooper::Runtime) tab_shell::Screen {
     focus: fn() {
       state.route.focus()
     },
-    handle_key: fn(received: mut cooper::KeyEvent) Bool {
+    handle_key: fn(received: &mut cooper::KeyEvent) Bool {
       false
     },
     dispose: fn() {},
@@ -188,7 +188,7 @@ fn main() {
   )
   shell_host.set_view(shell_view)
 
-  let _ = application.on_key(fn(received: mut cooper::KeyEvent) {
+  let _ = application.on_key(fn(received: &mut cooper::KeyEvent) {
     if received.event_type != cooper::KeyEventType::release and received.matches("c", ctrl: true) {
       shell_host.dispose()
       application.destroy()

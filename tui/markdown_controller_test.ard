@@ -12,7 +12,7 @@ private struct Opened {
 test fn markdown_maps_semantic_blocks_runs_and_links_to_retained_controls() Void!Str {
   let application = testing::new(60, 24)
   defer application.destroy()
-  let opened = mut Opened{url: "", count: 0}
+  let opened = &mut Opened{url: "", count: 0}
   let view = markdown_controller::new(
     application.context,
     theme::new(),
@@ -116,7 +116,7 @@ test fn markdown_interaction_style_uses_readable_active_and_hover_surfaces() Voi
 test fn markdown_rejects_unsafe_link_metadata() Void!Str {
   let application = testing::new(60, 10)
   defer application.destroy()
-  let opened = mut Opened{url: "", count: 0}
+  let opened = &mut Opened{url: "", count: 0}
   let view = markdown_controller::new(
     application.context,
     theme::new(),

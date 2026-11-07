@@ -33,7 +33,7 @@ use tinear/tui/toast_host
 use tinear/tui/welcome_controller
 
 private struct ActiveRoute {
-  handle: fn(mut cooper::KeyEvent) Bool,
+  handle: fn(&mut cooper::KeyEvent) Bool,
 }
 
 private struct PickerAction {
@@ -41,11 +41,11 @@ private struct PickerAction {
 }
 
 private fn document_detail_screen(
-  ctx: mut cooper::Runtime,
+  ctx: &mut cooper::Runtime,
   palette: theme::Theme,
   api_key: Str,
   reference: tabs::TabRef,
-  application_shell: mut application_shell::ApplicationShell,
+  application_shell: &mut application_shell::ApplicationShell,
   on_title: fn(Str),
 ) tab_shell::Screen {
   let detail = document_detail::new(
@@ -77,12 +77,12 @@ private fn document_detail_screen(
 }
 
 private fn issue_detail_screen(
-  ctx: mut cooper::Runtime,
+  ctx: &mut cooper::Runtime,
   palette: theme::Theme,
   api_key: Str,
   identifier: Str,
-  application_shell: mut application_shell::ApplicationShell,
-  hub: mut events::Bus<events::Event>,
+  application_shell: &mut application_shell::ApplicationShell,
+  hub: &mut events::Bus<events::Event>,
 ) tab_shell::Screen {
   let commands = issue_detail::commands()
   let field_pickers = issue_field_picker_controller::new(
@@ -160,17 +160,17 @@ private fn issue_detail_screen(
 }
 
 private fn show_logged_in(
-  ctx: mut cooper::Runtime,
+  ctx: &mut cooper::Runtime,
   palette: theme::Theme,
   api_key: Str,
-  application_shell: mut application_shell::ApplicationShell,
-  active_route: mut ActiveRoute,
+  application_shell: &mut application_shell::ApplicationShell,
+  active_route: &mut ActiveRoute,
 ) {
   let writer = cache_writer::live(ctx)
   let hub = events::new<events::Event>()
   let model = shell_model::restore(cache::load_logged_in())
   let shell_commands = tab_shell::commands()
-  let picker_action = mut PickerAction{open: fn(field: issue_field_picker_controller::Field, issue: issues::Issue) {}}
+  let picker_action = &mut PickerAction{open: fn(field: issue_field_picker_controller::Field, issue: issues::Issue) {}}
   let inbox = inbox_screen::new(
     ctx,
     palette,
@@ -307,7 +307,7 @@ private fn show_logged_in(
     },
   )
   application_shell.set_view(shell_view)
-  active_route.handle = fn(received: mut cooper::KeyEvent) Bool {
+  active_route.handle = fn(received: &mut cooper::KeyEvent) Bool {
     shell_commands.handle_key(received)
   }
 }
@@ -323,7 +323,7 @@ fn main() {
     palette,
     scheduler::for_context(ctx),
   )
-  let active_route = mut ActiveRoute{handle: fn(received: mut cooper::KeyEvent) Bool {
+  let active_route = &mut ActiveRoute{handle: fn(received: &mut cooper::KeyEvent) Bool {
     false
   }}
 
@@ -342,7 +342,7 @@ fn main() {
     },
   }
 
-  let _ = application.on_key(fn(received: mut cooper::KeyEvent) {
+  let _ = application.on_key(fn(received: &mut cooper::KeyEvent) {
     if received.event_type != cooper::KeyEventType::release and received.matches("c", ctrl: true) {
       application_shell.dispose()
       application.destroy()

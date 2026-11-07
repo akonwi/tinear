@@ -36,7 +36,7 @@ struct Outcome {
   errors: Int,
 }
 
-private fn fake_service(state: mut FakeState) issue_edit_service::Service {
+private fn fake_service(state: &mut FakeState) issue_edit_service::Service {
   issue_edit_service::Service{
     create_comment: fn(cancellation: Receiver<Bool>, issue_id: Str, body: Str, parent_id: Str, completion: fn(Str!Str)) {
       state.comments.push(
@@ -84,7 +84,7 @@ private fn issue() issues::Issue {
   }
 }
 
-private fn select_all() mut cooper::KeyEvent {
+private fn select_all() &mut cooper::KeyEvent {
   event::key(
     "a",
     "",
@@ -98,7 +98,7 @@ private fn select_all() mut cooper::KeyEvent {
   )
 }
 
-private fn key(name: Str, ctrl: Bool?) mut cooper::KeyEvent {
+private fn key(name: Str, ctrl: Bool?) &mut cooper::KeyEvent {
   event::key(
     name,
     "",
@@ -114,10 +114,10 @@ private fn key(name: Str, ctrl: Bool?) mut cooper::KeyEvent {
 
 private fn controller(
   application: testing::TestApp,
-  modal: mut modal_host::ModalHost,
-  state: mut FakeState,
-  outcome: mut Outcome,
-) mut issue_editor_controller::Controller {
+  modal: &mut modal_host::ModalHost,
+  state: &mut FakeState,
+  outcome: &mut Outcome,
+) &mut issue_editor_controller::Controller {
   issue_editor_controller::new(
     application.context,
     modal,
@@ -142,8 +142,8 @@ test fn comment_editor_validates_submits_once_and_refreshes_comments() Void!Str 
   let application = testing::new(80, 24)
   defer application.destroy()
   let modal = modal_host::new(application.context, application.root, theme::new())
-  let state = mut FakeState{comments: [], descriptions: []}
-  let outcome = mut Outcome{
+  let state = &mut FakeState{comments: [], descriptions: []}
+  let outcome = &mut Outcome{
     comments_changed: 0,
     comment_id: "",
     focus_comment: false,
@@ -210,8 +210,8 @@ test fn description_editor_saves_draft_and_recovers_from_failure() Void!Str {
   let application = testing::new(80, 24)
   defer application.destroy()
   let modal = modal_host::new(application.context, application.root, theme::new())
-  let state = mut FakeState{comments: [], descriptions: []}
-  let outcome = mut Outcome{
+  let state = &mut FakeState{comments: [], descriptions: []}
+  let outcome = &mut Outcome{
     comments_changed: 0,
     comment_id: "",
     focus_comment: false,
@@ -270,8 +270,8 @@ test fn replaced_comment_editor_refreshes_without_stealing_modal_focus() Void!St
   let application = testing::new(70, 20)
   defer application.destroy()
   let modal = modal_host::new(application.context, application.root, theme::new())
-  let state = mut FakeState{comments: [], descriptions: []}
-  let outcome = mut Outcome{
+  let state = &mut FakeState{comments: [], descriptions: []}
+  let outcome = &mut Outcome{
     comments_changed: 0,
     comment_id: "",
     focus_comment: false,
@@ -310,8 +310,8 @@ test fn editor_disposal_closes_owned_modal_and_ignores_late_completion() Void!St
   let application = testing::new(60, 20)
   defer application.destroy()
   let modal = modal_host::new(application.context, application.root, theme::new())
-  let state = mut FakeState{comments: [], descriptions: []}
-  let outcome = mut Outcome{
+  let state = &mut FakeState{comments: [], descriptions: []}
+  let outcome = &mut Outcome{
     comments_changed: 0,
     comment_id: "",
     focus_comment: false,
@@ -335,8 +335,8 @@ test fn aborted_submission_releases_the_shared_operation_guard() Void!Str {
   let application = testing::new(60, 20)
   defer application.destroy()
   let modal = modal_host::new(application.context, application.root, theme::new())
-  let state = mut FakeState{comments: [], descriptions: []}
-  let outcome = mut Outcome{
+  let state = &mut FakeState{comments: [], descriptions: []}
+  let outcome = &mut Outcome{
     comments_changed: 0,
     comment_id: "",
     focus_comment: false,
@@ -371,8 +371,8 @@ test fn late_completion_cannot_close_or_unlock_a_newer_session() Void!Str {
   let application = testing::new(70, 20)
   defer application.destroy()
   let modal = modal_host::new(application.context, application.root, theme::new())
-  let state = mut FakeState{comments: [], descriptions: []}
-  let outcome = mut Outcome{
+  let state = &mut FakeState{comments: [], descriptions: []}
+  let outcome = &mut Outcome{
     comments_changed: 0,
     comment_id: "",
     focus_comment: false,
@@ -445,8 +445,8 @@ test fn replacing_an_editor_resets_the_draft() Void!Str {
   let application = testing::new(70, 20)
   defer application.destroy()
   let modal = modal_host::new(application.context, application.root, theme::new())
-  let state = mut FakeState{comments: [], descriptions: []}
-  let outcome = mut Outcome{
+  let state = &mut FakeState{comments: [], descriptions: []}
+  let outcome = &mut Outcome{
     comments_changed: 0,
     comment_id: "",
     focus_comment: false,

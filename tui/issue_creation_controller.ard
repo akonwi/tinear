@@ -33,7 +33,7 @@ fn submission_active(guard: Chan<Bool>) Bool {
   active
 }
 
-private fn submit_chord(received: mut cooper::KeyEvent) Bool {
+private fn submit_chord(received: &mut cooper::KeyEvent) Bool {
   received.matches("return", ctrl: true) or received.matches("m", ctrl: true) or received.matches("j", ctrl: true)
 }
 
@@ -62,7 +62,7 @@ struct CreationProps {
 }
 
 struct Creation {
-  props: mut CreationProps,
+  props: &mut CreationProps,
   stage: Stage,
   teams: [issues::Team],
   selected_team: issues::Team?,
@@ -74,12 +74,12 @@ struct Creation {
   request: Int,
   stop: Chan<Bool>,
   context_handle: cui::Context?,
-  title_field: mut cui::InputRef,
-  description_field: mut cui::TextAreaRef,
+  title_field: &mut cui::InputRef,
+  description_field: &mut cui::TextAreaRef,
 }
 
-private fn creation(props: mut CreationProps) mut Creation {
-  (mut Creation{
+private fn creation(props: &mut CreationProps) &mut Creation {
+  &mut Creation{
     props: props,
     stage: Stage::loading,
     teams: [],
@@ -94,7 +94,7 @@ private fn creation(props: mut CreationProps) mut Creation {
     context_handle: Maybe::new<cui::Context>(),
     title_field: cui::input_ref(),
     description_field: cui::text_area_ref(),
-  })
+  }
 }
 
 impl Creation {
@@ -171,7 +171,7 @@ impl Creation {
     }
   }
 
-  private fn mut handle_form_key(received: mut cooper::KeyEvent, ctx: cui::Context) {
+  private fn mut handle_form_key(received: &mut cooper::KeyEvent, ctx: cui::Context) {
     if received.event_type != cooper::KeyEventType::release {
       if submission_active(self.props.submit_guard) {
         received.prevent_default()
@@ -192,7 +192,7 @@ impl Creation {
   }
 
   private fn mut handle_field_key(
-    received: mut cooper::KeyEvent,
+    received: &mut cooper::KeyEvent,
     ctx: cui::Context,
     to_description: Bool,
   ) {
@@ -255,7 +255,7 @@ impl cui::Component for Creation {
         )
       },
       Stage::picker => {
-        let options = mut List::new<picker_controller::Option>()
+        let options = &mut List::new<picker_controller::Option>()
         for team in self.teams {
           options.push(
             picker_controller::Option{
@@ -269,7 +269,7 @@ impl cui::Component for Creation {
         picker_controller::view(
           self.props.palette,
           "Filter teams",
-          options.@,
+          options.*,
           "",
           fn(option: picker_controller::Option) {
             for team in teams {
@@ -307,7 +307,7 @@ impl Creation {
               self.set_status("", false)
             }
           },
-          on_key: fn(received: mut cooper::KeyEvent, ctx: cui::Context) {
+          on_key: fn(received: &mut cooper::KeyEvent, ctx: cui::Context) {
             self.handle_field_key(received, ctx, true)
           },
         ),
@@ -329,7 +329,7 @@ impl Creation {
               self.description_value = value
             }
           },
-          on_key: fn(received: mut cooper::KeyEvent, ctx: cui::Context) {
+          on_key: fn(received: &mut cooper::KeyEvent, ctx: cui::Context) {
             self.handle_field_key(received, ctx, false)
           },
         ),
@@ -353,8 +353,8 @@ impl Creation {
 }
 
 struct Controller {
-  context: mut cooper::Runtime,
-  modal: mut modal_host::ModalHost,
+  context: &mut cooper::Runtime,
+  modal: &mut modal_host::ModalHost,
   palette: tinear_theme::Theme,
   service: issue_creation_service::Service,
   restore_focus: fn(),
@@ -365,15 +365,15 @@ struct Controller {
 }
 
 fn new(
-  ctx: mut cooper::Runtime,
-  modal: mut modal_host::ModalHost,
+  ctx: &mut cooper::Runtime,
+  modal: &mut modal_host::ModalHost,
   palette: tinear_theme::Theme,
   service: issue_creation_service::Service,
   restore_focus: fn(),
   notify: fn(Str, Str, Bool),
   on_created: fn(Str),
-) mut Controller {
-  (mut Controller{
+) &mut Controller {
+  &mut Controller{
     context: ctx,
     modal: modal,
     palette: palette,
@@ -383,7 +383,7 @@ fn new(
     on_created: on_created,
     current_ticket: Maybe::new<modal_host::Ticket>(),
     disposed: false,
-  })
+  }
 }
 
 impl Controller {

@@ -21,7 +21,7 @@ private fn cancelled(app: Receiver<Void>, view: Receiver<Bool>) Bool {
   }
 }
 
-fn live(ctx: mut cooper::Runtime, api_key: Str) Service {
+fn live(ctx: &mut cooper::Runtime, api_key: Str) Service {
   let app_cancellation = ctx.cancellation
   let dispatch = ctx.dispatch
   Service{

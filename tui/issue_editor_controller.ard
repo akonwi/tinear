@@ -43,7 +43,7 @@ fn submission_active(guard: Chan<Bool>) Bool {
   active
 }
 
-private fn submit_chord(received: mut cooper::KeyEvent) Bool {
+private fn submit_chord(received: &mut cooper::KeyEvent) Bool {
   received.matches("return", ctrl: true) or received.matches("m", ctrl: true) or received.matches("j", ctrl: true)
 }
 
@@ -65,21 +65,21 @@ struct EditorProps {
 }
 
 struct Editor {
-  props: mut EditorProps,
+  props: &mut EditorProps,
   value: Str,
   status: Str,
   status_danger: Bool,
   stop: Chan<Bool>,
 }
 
-private fn editor(props: mut EditorProps) mut Editor {
-  (mut Editor{
+private fn editor(props: &mut EditorProps) &mut Editor {
+  &mut Editor{
     props: props,
     value: props.initial_value,
     status: "",
     status_danger: false,
     stop: Chan::new<Bool>(),
-  })
+  }
 }
 
 impl Editor {
@@ -165,7 +165,7 @@ impl cui::Component for Editor {
               self.value = value
             }
           },
-          on_key: fn(received: mut cooper::KeyEvent, ctx: cui::Context) {
+          on_key: fn(received: &mut cooper::KeyEvent, ctx: cui::Context) {
             if received.event_type != cooper::KeyEventType::release {
               if submission_active(self.props.submit_guard) {
                 received.prevent_default()
@@ -199,8 +199,8 @@ impl cui::Component for Editor {
 }
 
 struct Controller {
-  context: mut cooper::Runtime,
-  modal: mut modal_host::ModalHost,
+  context: &mut cooper::Runtime,
+  modal: &mut modal_host::ModalHost,
   palette: tinear_theme::Theme,
   service: issue_edit_service::Service,
   current_ticket: modal_host::Ticket?,
@@ -223,25 +223,25 @@ private struct Session {
   holding: Bool,
 }
 
-private fn session() mut Session {
-  (mut Session{
+private fn session() &mut Session {
+  &mut Session{
     submit_guard: Chan::new<Bool>(1),
     ticket: Maybe::new<modal_host::Ticket>(),
     holding: false,
-  })
+  }
 }
 
 fn new(
-  ctx: mut cooper::Runtime,
-  modal: mut modal_host::ModalHost,
+  ctx: &mut cooper::Runtime,
+  modal: &mut modal_host::ModalHost,
   palette: tinear_theme::Theme,
   service: issue_edit_service::Service,
   restore_focus: fn(),
   on_comments_changed: fn(Str, Bool),
   on_description_changed: fn(Str),
   notify_error: fn(Str, Str),
-) mut Controller {
-  (mut Controller{
+) &mut Controller {
+  &mut Controller{
     context: ctx,
     modal: modal,
     palette: palette,
@@ -253,12 +253,12 @@ fn new(
     on_description_changed: on_description_changed,
     notify_error: notify_error,
     disposed: false,
-  })
+  }
 }
 
 impl Controller {
   // Acquire both guards for one session and record the acquisition.
-  private fn mut begin_session(active: mut Session) Bool {
+  private fn mut begin_session(active: &mut Session) Bool {
     if active.holding {
       false
     } else if begin_editor_submission(active.submit_guard, self.operation_guard) {
@@ -272,7 +272,7 @@ impl Controller {
   // Idempotent: releases only the tokens this session acquired. Unmount
   // cleanup followed by a late completion therefore pops the shared operation
   // guard exactly once, and never the token a newer session is holding.
-  private fn mut release_session(active: mut Session) {
+  private fn mut release_session(active: &mut Session) {
     if active.holding {
       active.holding = false
       clear_submission(active.submit_guard)

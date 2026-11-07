@@ -31,7 +31,7 @@ struct Actions {
   errors: Int,
 }
 
-private fn fake_service(state: mut FakeState) issue_detail_service::Service {
+private fn fake_service(state: &mut FakeState) issue_detail_service::Service {
   issue_detail_service::Service{
     load_issue: fn(cancellation: Receiver<Bool>, identifier: Str, completion: fn(issues::Issue!Str)) {
       state.issue_loads.push(completion)
@@ -42,7 +42,7 @@ private fn fake_service(state: mut FakeState) issue_detail_service::Service {
   }
 }
 
-private fn fake_schedule(state: mut Scheduled) fn(Int, fn()) fn() {
+private fn fake_schedule(state: &mut Scheduled) fn(Int, fn()) fn() {
   fn(milliseconds: Int, action: fn()) fn() {
     state.actions.push(action)
     fn() {
@@ -89,7 +89,7 @@ private fn comment(id: Str, author: Str, body: Str, depth: Int) issues::Comment 
   }
 }
 
-private fn key(name: Str, shift: Bool?) mut cooper::KeyEvent {
+private fn key(name: Str, shift: Bool?) &mut cooper::KeyEvent {
   event::key(
     name,
     "",
@@ -113,27 +113,27 @@ private fn comment_focused(record: issue_detail::CommentRecord) Bool {
 
 private struct Fixture {
   mounted: renderer::Renderer,
-  component: mut issue_detail::IssueDetail,
-  commands: mut issue_detail::Commands,
-  hub: mut events::Bus<events::Event>,
+  component: &mut issue_detail::IssueDetail,
+  commands: &mut issue_detail::Commands,
+  hub: &mut events::Bus<events::Event>,
 }
 
 // Mounting is the whole wiring: `mounted` binds the commands, subscribes to
 // the bus for this identifier, and starts the initial loads.
 private fn mount_detail(
   application: testing::TestApp,
-  fake: mut FakeState,
-  scheduled: mut Scheduled,
-  actions: mut Actions,
-) mut Fixture {
-  let instances = mut List::new<mut issue_detail::IssueDetail>()
+  fake: &mut FakeState,
+  scheduled: &mut Scheduled,
+  actions: &mut Actions,
+) &mut Fixture {
+  let instances = &mut List::new<&mut issue_detail::IssueDetail>()
   let commands = issue_detail::commands()
   let hub = events::new<events::Event>()
   let mounted = renderer::mount(
     application.context,
     application.root,
     cui::child(
-      fn(props: mut issue_detail::Props) mut issue_detail::IssueDetail {
+      fn(props: &mut issue_detail::Props) &mut issue_detail::IssueDetail {
         let component = issue_detail::create(props)
         instances.push(component)
         component
@@ -173,20 +173,20 @@ private fn mount_detail(
     ),
   )
   let _ = application.flush()
-  (mut Fixture{
+  &mut Fixture{
     mounted: mounted,
     component: instances.at(0).expect("mounted issue detail"),
     commands: commands,
     hub: hub,
-  })
+  }
 }
 
 test fn issue_detail_loads_issue_and_comments_independently_and_routes_commands() Void!Str {
   let application = testing::new(90, 28)
   defer application.destroy()
-  let fake = mut FakeState{issue_loads: [], comment_loads: []}
-  let scheduled = mut Scheduled{actions: [], cancellations: 0}
-  let actions = mut Actions{
+  let fake = &mut FakeState{issue_loads: [], comment_loads: []}
+  let scheduled = &mut Scheduled{actions: [], cancellations: 0}
+  let actions = &mut Actions{
     opened_url: "",
     picked: [],
     comments: [],
@@ -326,9 +326,9 @@ test fn issue_detail_loads_issue_and_comments_independently_and_routes_commands(
 test fn issue_detail_independent_errors_retry_to_issue_and_empty_comments() Void!Str {
   let application = testing::new(80, 24)
   defer application.destroy()
-  let fake = mut FakeState{issue_loads: [], comment_loads: []}
-  let scheduled = mut Scheduled{actions: [], cancellations: 0}
-  let actions = mut Actions{
+  let fake = &mut FakeState{issue_loads: [], comment_loads: []}
+  let scheduled = &mut Scheduled{actions: [], cancellations: 0}
+  let actions = &mut Actions{
     opened_url: "",
     picked: [],
     comments: [],
@@ -375,9 +375,9 @@ test fn issue_detail_independent_errors_retry_to_issue_and_empty_comments() Void
 test fn issue_detail_rejects_stale_issue_and_comment_results() Void!Str {
   let application = testing::new(70, 20)
   defer application.destroy()
-  let fake = mut FakeState{issue_loads: [], comment_loads: []}
-  let scheduled = mut Scheduled{actions: [], cancellations: 0}
-  let actions = mut Actions{
+  let fake = &mut FakeState{issue_loads: [], comment_loads: []}
+  let scheduled = &mut Scheduled{actions: [], cancellations: 0}
+  let actions = &mut Actions{
     opened_url: "",
     picked: [],
     comments: [],
@@ -416,9 +416,9 @@ test fn issue_detail_rejects_stale_issue_and_comment_results() Void!Str {
 test fn created_comment_selection_survives_eventually_consistent_refresh() Void!Str {
   let application = testing::new(70, 20)
   defer application.destroy()
-  let fake = mut FakeState{issue_loads: [], comment_loads: []}
-  let scheduled = mut Scheduled{actions: [], cancellations: 0}
-  let actions = mut Actions{
+  let fake = &mut FakeState{issue_loads: [], comment_loads: []}
+  let scheduled = &mut Scheduled{actions: [], cancellations: 0}
+  let actions = &mut Actions{
     opened_url: "",
     picked: [],
     comments: [],
@@ -481,9 +481,9 @@ test fn created_comment_selection_survives_eventually_consistent_refresh() Void!
 test fn saved_description_invalidates_older_refresh_snapshot() Void!Str {
   let application = testing::new(70, 20)
   defer application.destroy()
-  let fake = mut FakeState{issue_loads: [], comment_loads: []}
-  let scheduled = mut Scheduled{actions: [], cancellations: 0}
-  let actions = mut Actions{
+  let fake = &mut FakeState{issue_loads: [], comment_loads: []}
+  let scheduled = &mut Scheduled{actions: [], cancellations: 0}
+  let actions = &mut Actions{
     opened_url: "",
     picked: [],
     comments: [],
@@ -522,9 +522,9 @@ test fn saved_description_invalidates_older_refresh_snapshot() Void!Str {
 test fn issue_detail_disposal_cancels_periodic_refresh_and_late_results() Void!Str {
   let application = testing::new(60, 18)
   defer application.destroy()
-  let fake = mut FakeState{issue_loads: [], comment_loads: []}
-  let scheduled = mut Scheduled{actions: [], cancellations: 0}
-  let actions = mut Actions{
+  let fake = &mut FakeState{issue_loads: [], comment_loads: []}
+  let scheduled = &mut Scheduled{actions: [], cancellations: 0}
+  let actions = &mut Actions{
     opened_url: "",
     picked: [],
     comments: [],
@@ -555,9 +555,9 @@ test fn issue_detail_disposal_cancels_periodic_refresh_and_late_results() Void!S
 test fn created_comment_does_not_override_newer_focus() Void!Str {
   let application = testing::new(70, 20)
   defer application.destroy()
-  let fake = mut FakeState{issue_loads: [], comment_loads: []}
-  let scheduled = mut Scheduled{actions: [], cancellations: 0}
-  let actions = mut Actions{
+  let fake = &mut FakeState{issue_loads: [], comment_loads: []}
+  let scheduled = &mut Scheduled{actions: [], cancellations: 0}
+  let actions = &mut Actions{
     opened_url: "",
     picked: [],
     comments: [],
@@ -593,9 +593,9 @@ test fn created_comment_does_not_override_newer_focus() Void!Str {
 test fn bus_events_refresh_only_this_issue_and_stop_at_retirement() Void!Str {
   let application = testing::new(70, 20)
   defer application.destroy()
-  let fake = mut FakeState{issue_loads: [], comment_loads: []}
-  let scheduled = mut Scheduled{actions: [], cancellations: 0}
-  let actions = mut Actions{
+  let fake = &mut FakeState{issue_loads: [], comment_loads: []}
+  let scheduled = &mut Scheduled{actions: [], cancellations: 0}
+  let actions = &mut Actions{
     opened_url: "",
     picked: [],
     comments: [],

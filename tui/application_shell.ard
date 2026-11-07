@@ -15,21 +15,21 @@ struct Model {
 }
 
 private struct ShellProps {
-  model: mut Model,
+  model: &mut Model,
 }
 
 private struct Shell {
-  props: mut ShellProps,
+  props: &mut ShellProps,
 }
 
-private fn shell(props: mut ShellProps) mut Shell {
-  (mut Shell{props: props})
+private fn shell(props: &mut ShellProps) &mut Shell {
+  &mut Shell{props: props}
 }
 
 impl cui::Component for Shell {
   fn mut render() cui::View {
     let model = self.props.model
-    let children = mut List::new<cui::View>()
+    let children = &mut List::new<cui::View>()
     match model.screen_view {
       screen_view => {
         children.push(
@@ -43,7 +43,7 @@ impl cui::Component for Shell {
       _ => (),
     }
     cui::box(
-      children.@,
+      children.*,
       styles: ui::style(
         position: ui::Position::relative,
         width: ui::percent(100.0),
@@ -54,36 +54,36 @@ impl cui::Component for Shell {
 }
 
 struct ApplicationShell {
-  model: mut Model,
+  model: &mut Model,
   cui: renderer::Renderer,
-  modal: mut modal_host::ModalHost,
-  toasts: mut toast_host::ToastHost,
-  context: mut cooper::Runtime,
+  modal: &mut modal_host::ModalHost,
+  toasts: &mut toast_host::ToastHost,
+  context: &mut cooper::Runtime,
   disposed: Bool,
 }
 
 fn new(
-  ctx: mut cooper::Runtime,
-  application_root: mut cooper::Root,
+  ctx: &mut cooper::Runtime,
+  application_root: &mut cooper::Root,
   palette: tinear_theme::Theme,
   schedule: scheduler::Schedule,
-) mut ApplicationShell {
+) &mut ApplicationShell {
   let toasts = toast_host::new(ctx, application_root, palette, schedule)
   let modal = modal_host::new(ctx, application_root, palette)
-  let model = mut Model{
+  let model = &mut Model{
     generation: 0,
     screen_view: Maybe::new<cui::View>(),
     screen_view_dispose: fn() {},
   }
   let mounted = renderer::mount(ctx, application_root, cui::child(shell, ShellProps{model: model}))
-  (mut ApplicationShell{
+  &mut ApplicationShell{
     model: model,
     cui: mounted,
     modal: modal,
     toasts: toasts,
     context: ctx,
     disposed: false,
-  })
+  }
 }
 
 impl ApplicationShell {
@@ -102,7 +102,7 @@ impl ApplicationShell {
     })
   }
 
-  fn mut handle_key(received: mut cooper::KeyEvent, current_selection: ui::Selection?) Bool {
+  fn mut handle_key(received: &mut cooper::KeyEvent, current_selection: ui::Selection?) Bool {
     if self.disposed or received.event_type == cooper::KeyEventType::release {
       false
     } else if self.modal.is_open() and received.matches("escape") {

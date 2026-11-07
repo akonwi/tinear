@@ -23,12 +23,12 @@ struct PickerProps {
 }
 
 struct Picker {
-  props: mut PickerProps,
+  props: &mut PickerProps,
   query: Str,
   filtered: [Option],
   cursor: Int,
   hovered_id: Str,
-  results: mut cui::ScrollBoxRef,
+  results: &mut cui::ScrollBoxRef,
 }
 
 private fn matches(option: Option, query: Str) Bool {
@@ -79,16 +79,16 @@ private fn filter_control_style(display: ui::Display) ui::Style {
 }
 
 private fn filter_options(options: [Option], query: Str) [Option] {
-  let filtered = mut List::new<Option>()
+  let filtered = &mut List::new<Option>()
   for option in options {
     if matches(option, query) {
       filtered.push(option)
     }
   }
-  filtered.@
+  filtered.*
 }
 
-private fn picker(props: mut PickerProps) mut Picker {
+private fn picker(props: &mut PickerProps) &mut Picker {
   let filtered = filter_options(props.options, "")
   mut cursor = 0
   if not props.selected_id.is_empty() {
@@ -98,14 +98,14 @@ private fn picker(props: mut PickerProps) mut Picker {
       }
     }
   }
-  (mut Picker{
+  &mut Picker{
     props: props,
     query: "",
     filtered: filtered,
     cursor: cursor,
     hovered_id: "",
     results: cui::scroll_box_ref(),
-  })
+  }
 }
 
 fn view(
@@ -188,7 +188,7 @@ impl Picker {
     }
   }
 
-  private fn mut handle_navigation(received: mut cooper::KeyEvent, vim_keys: Bool) {
+  private fn mut handle_navigation(received: &mut cooper::KeyEvent, vim_keys: Bool) {
     if received.event_type != cooper::KeyEventType::release {
       mut handled = true
       match {
@@ -219,7 +219,7 @@ impl Picker {
       _ => palette.background,
     }
     let option_id = option.id
-    let content = mut List::new<cui::View>()
+    let content = &mut List::new<cui::View>()
     content.push(
       cui::text(
         option.label,
@@ -245,7 +245,7 @@ impl Picker {
     cui::box(
       [
         cui::box(
-          content.@,
+          content.*,
           styles: ui::style(
             width: ui::cells(1),
             height: ui::cells(row_height(option)),
@@ -258,7 +258,7 @@ impl Picker {
               left: ui::cells(1),
             },
           ),
-          on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
+          on_mouse: fn(received: &mut cooper::MouseEvent, ctx: cui::Context) {
             if received.event_type == cooper::MouseEventType::move {
               self.hovered_id = option_id
             } else if received.event_type == cooper::MouseEventType::out {
@@ -306,7 +306,7 @@ impl cui::Component for Picker {
       false => ui::Display::none,
     }
 
-    let rows = mut List::new<cui::View>()
+    let rows = &mut List::new<cui::View>()
     if self.filtered.size() == 0 {
       rows.push(
         cui::text(
@@ -331,7 +331,7 @@ impl cui::Component for Picker {
           on_input: fn(value: Str, ctx: cui::Context) {
             self.apply_filter(value)
           },
-          on_key: fn(received: mut cooper::KeyEvent, ctx: cui::Context) {
+          on_key: fn(received: &mut cooper::KeyEvent, ctx: cui::Context) {
             self.handle_navigation(received, false)
           },
         ),
@@ -344,12 +344,12 @@ impl cui::Component for Picker {
           text_style: ui::text_style(dim: true),
         ),
         cui::scroll_box(
-          rows.@,
+          rows.*,
           ref: self.results,
           styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_grow: 1.0),
         ),
       ],
-      on_key: fn(received: mut cooper::KeyEvent, ctx: cui::Context) {
+      on_key: fn(received: &mut cooper::KeyEvent, ctx: cui::Context) {
         if not has_filter {
           self.handle_navigation(received, true)
         }

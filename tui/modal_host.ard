@@ -15,7 +15,7 @@ struct Model {
   open: Bool,
   title: Str,
   footer: Str,
-  body: (mut ui::Box)?,
+  body: (&mut ui::Box)?,
   body_view: cui::View?,
   body_dispose: fn(),
   body_attached: fn(),
@@ -26,7 +26,7 @@ struct Model {
 // replaced or closed bodies that never mounted must dispose eagerly because
 // CUI never owned them.
 struct Current {
-  body: mut ui::Box,
+  body: &mut ui::Box,
   dispose: fn(),
   restore_focus: fn(),
   can_dismiss: fn() Bool,
@@ -34,12 +34,12 @@ struct Current {
 }
 
 private struct HostProps {
-  model: mut Model,
+  model: &mut Model,
 }
 
 private struct Host {
-  props: mut HostProps,
-  frame: mut cui::BoxRef,
+  props: &mut HostProps,
+  frame: &mut cui::BoxRef,
   palette: tinear_theme::Theme,
 }
 
@@ -49,12 +49,12 @@ private struct PresentationProps {
 }
 
 private struct Presentation {
-  props: mut PresentationProps,
-  frame: mut cui::BoxRef,
+  props: &mut PresentationProps,
+  frame: &mut cui::BoxRef,
 }
 
-private fn presentation(props: mut PresentationProps) mut Presentation {
-  (mut Presentation{props: props, frame: cui::box_ref()})
+private fn presentation(props: &mut PresentationProps) &mut Presentation {
+  &mut Presentation{props: props, frame: cui::box_ref()}
 }
 
 impl cui::Component for Presentation {
@@ -62,7 +62,7 @@ impl cui::Component for Presentation {
     cui::box(
       [self.props.body],
       ref: self.frame,
-      on_key: fn(received: mut cooper::KeyEvent, ctx: cui::Context) {},
+      on_key: fn(received: &mut cooper::KeyEvent, ctx: cui::Context) {},
       styles: ui::style(width: ui::percent(100.0), flex_direction: ui::FlexDirection::column),
     )
   }
@@ -103,9 +103,9 @@ private fn root_style(display: ui::Display) ui::Style {
 }
 
 struct ModalHost {
-  model: mut Model,
+  model: &mut Model,
   cui: renderer::Renderer,
-  current: (mut Current)?,
+  current: (&mut Current)?,
   generation: Int,
   presented: Bool,
   disposed: Bool,
@@ -115,22 +115,22 @@ struct ModalHost {
   palette: tinear_theme::Theme,
 }
 
-private fn host_factory(palette: tinear_theme::Theme) fn(mut HostProps) mut Host {
-  fn(props: mut HostProps) mut Host {
-    (mut Host{
+private fn host_factory(palette: tinear_theme::Theme) fn(&mut HostProps) &mut Host {
+  fn(props: &mut HostProps) &mut Host {
+    &mut Host{
       props: props,
       frame: cui::box_ref(),
       palette: palette,
-    })
+    }
   }
 }
 
 impl cui::Component for Host {
   fn mut render() cui::View {
     let model = self.props.model
-    let children = mut List::new<cui::View>()
+    let children = &mut List::new<cui::View>()
     if model.open {
-      let frame_children = mut List::new<cui::View>()
+      let frame_children = &mut List::new<cui::View>()
       frame_children.push(cui::text(model.title, text_style: ui::text_style(bold: true)))
       match model.body {
         body => {
@@ -172,10 +172,10 @@ impl cui::Component for Host {
       frame_children.push(cui::text(model.footer, text_style: ui::text_style(dim: true)))
       children.push(
         cui::box(
-          frame_children.@,
+          frame_children.*,
           ref: self.frame,
           // A described key handler keeps the frame focusable across commits.
-          on_key: fn(received: mut cooper::KeyEvent, ctx: cui::Context) {},
+          on_key: fn(received: &mut cooper::KeyEvent, ctx: cui::Context) {},
           styles: ui::style(
             width: ui::percent(70.0),
             max_width: ui::cells(72),
@@ -200,21 +200,21 @@ impl cui::Component for Host {
       false => ui::Display::none,
     }
     cui::box(
-      children.@,
+      children.*,
       styles: root_style(display),
-      on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
+      on_mouse: fn(received: &mut cooper::MouseEvent, ctx: cui::Context) {
         received.stop_propagation()
       },
     )
   }
 }
 
-fn new(ctx: mut cooper::Runtime, root: mut cooper::Root, palette: tinear_theme::Theme) mut ModalHost {
-  let model = mut Model{
+fn new(ctx: &mut cooper::Runtime, root: &mut cooper::Root, palette: tinear_theme::Theme) &mut ModalHost {
+  let model = &mut Model{
     open: false,
     title: "",
     footer: "",
-    body: Maybe::new<mut ui::Box>(),
+    body: Maybe::new<&mut ui::Box>(),
     body_view: Maybe::new<cui::View>(),
     body_dispose: fn() {},
     body_attached: fn() {},
@@ -225,10 +225,10 @@ fn new(ctx: mut cooper::Runtime, root: mut cooper::Root, palette: tinear_theme::
     root,
     cui::child(host_factory(palette), HostProps{model: model}),
   )
-  (mut ModalHost{
+  &mut ModalHost{
     model: model,
     cui: mounted,
-    current: Maybe::new<mut Current>(),
+    current: Maybe::new<&mut Current>(),
     generation: 0,
     presented: false,
     disposed: false,
@@ -238,7 +238,7 @@ fn new(ctx: mut cooper::Runtime, root: mut cooper::Root, palette: tinear_theme::
     },
     view_on_close: fn() {},
     palette: palette,
-  })
+  }
 }
 
 impl ModalHost {
@@ -259,11 +259,11 @@ impl ModalHost {
     let on_close = self.view_on_close
     let old = self.current
     self.view_on_close = fn() {}
-    self.current = Maybe::new<mut Current>()
+    self.current = Maybe::new<&mut Current>()
     self.presented = false
     self.cui.update(fn() {
       self.model.open = false
-      self.model.body = Maybe::new<mut ui::Box>()
+      self.model.body = Maybe::new<&mut ui::Box>()
       self.model.body_view = Maybe::new<cui::View>()
       self.model.body_dispose = fn() {}
       self.model.body_attached = fn() {}
@@ -282,7 +282,7 @@ impl ModalHost {
 
   fn mut present(
     title: Str,
-    body: mut ui::Box,
+    body: &mut ui::Box,
     footer: Str,
     dispose: fn(),
     initial_focus: fn(),
@@ -294,7 +294,7 @@ impl ModalHost {
     }
     self.generation =+ 1
     let generation = self.generation
-    let current = mut Current{
+    let current = &mut Current{
       body: body,
       dispose: dispose,
       restore_focus: restore_focus,
@@ -334,7 +334,7 @@ impl ModalHost {
     }
     self.generation =+ 1
     let generation = self.generation
-    self.current = Maybe::new<mut Current>()
+    self.current = Maybe::new<&mut Current>()
     self.presented = true
     self.view_restore_focus = restore_focus
     self.view_can_dismiss = can_dismiss
@@ -343,7 +343,7 @@ impl ModalHost {
       self.model.open = true
       self.model.title = title
       self.model.footer = footer
-      self.model.body = Maybe::new<mut ui::Box>()
+      self.model.body = Maybe::new<&mut ui::Box>()
       self.model.body_dispose = fn() {}
       self.model.body_attached = fn() {}
       self.model.body_view = Maybe::new(body)
@@ -417,7 +417,7 @@ impl ModalHost {
         },
         _ => (),
       }
-      self.current = Maybe::new<mut Current>()
+      self.current = Maybe::new<&mut Current>()
       self.presented = false
       // Retires the committed body bridge, running its dispose path.
       self.cui.destroy()

@@ -44,7 +44,7 @@ struct SearchProps {
 }
 
 struct Search {
-  props: mut SearchProps,
+  props: &mut SearchProps,
   query: Str,
   hits: [search_service::Hit],
   cursor: Int,
@@ -56,11 +56,11 @@ struct Search {
   request: Int,
   cancel_debounce: fn(),
   stop: Chan<Bool>,
-  results: mut cui::ScrollBoxRef,
+  results: &mut cui::ScrollBoxRef,
 }
 
-private fn search(props: mut SearchProps) mut Search {
-  (mut Search{
+private fn search(props: &mut SearchProps) &mut Search {
+  &mut Search{
     props: props,
     query: "",
     hits: [],
@@ -74,7 +74,7 @@ private fn search(props: mut SearchProps) mut Search {
     cancel_debounce: fn() {},
     stop: Chan::new<Bool>(),
     results: cui::scroll_box_ref(),
-  })
+  }
 }
 
 fn view(
@@ -207,7 +207,7 @@ impl Search {
     }
   }
 
-  private fn mut handle_key(received: mut cooper::KeyEvent) {
+  private fn mut handle_key(received: &mut cooper::KeyEvent) {
     if received.event_type != cooper::KeyEventType::release {
       mut handled = true
       match {
@@ -275,7 +275,7 @@ impl Search {
           left: ui::cells(1),
         },
       ),
-      on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
+      on_mouse: fn(received: &mut cooper::MouseEvent, ctx: cui::Context) {
         if received.event_type == cooper::MouseEventType::move {
           self.hovered = index
         } else if received.event_type == cooper::MouseEventType::out and self.hovered == index {
@@ -310,7 +310,7 @@ impl cui::Component for Search {
       true => ui::Display::none,
       false => ui::Display::flex,
     }
-    let rows = mut List::new<cui::View>()
+    let rows = &mut List::new<cui::View>()
     rows.push(
       cui::text(
         self.status,
@@ -341,7 +341,7 @@ impl cui::Component for Search {
           on_input: fn(value: Str, ctx: cui::Context) {
             self.query_changed(value, ctx)
           },
-          on_key: fn(received: mut cooper::KeyEvent, ctx: cui::Context) {
+          on_key: fn(received: &mut cooper::KeyEvent, ctx: cui::Context) {
             self.handle_key(received)
           },
         ),
@@ -354,7 +354,7 @@ impl cui::Component for Search {
           text_style: ui::text_style(dim: true),
         ),
         cui::scroll_box(
-          rows.@,
+          rows.*,
           ref: self.results,
           styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_grow: 1.0),
         ),
@@ -381,7 +381,7 @@ impl cui::Component for Search {
 }
 
 struct Controller {
-  modal: mut modal_host::ModalHost,
+  modal: &mut modal_host::ModalHost,
   palette: tinear_theme::Theme,
   service: search_service::Service,
   schedule: scheduler::Schedule,
@@ -393,15 +393,15 @@ struct Controller {
 }
 
 fn new(
-  modal: mut modal_host::ModalHost,
+  modal: &mut modal_host::ModalHost,
   palette: tinear_theme::Theme,
   service: search_service::Service,
   schedule: scheduler::Schedule,
   restore_focus: fn(),
   on_open_issue: fn(issues::Issue),
   on_open_document: fn(documents::DocMeta),
-) mut Controller {
-  (mut Controller{
+) &mut Controller {
+  &mut Controller{
     modal: modal,
     palette: palette,
     service: service,
@@ -411,7 +411,7 @@ fn new(
     on_open_document: on_open_document,
     current_ticket: Maybe::new<modal_host::Ticket>(),
     disposed: false,
-  })
+  }
 }
 
 impl Controller {
@@ -432,7 +432,7 @@ impl Controller {
     }
   }
 
-  fn mut open(context: mut cooper::Runtime) {
+  fn mut open(context: &mut cooper::Runtime) {
     if not self.disposed {
       let ticket = self.modal.present_view(
         "Search",

@@ -11,7 +11,7 @@ private struct Counter {
 test fn scheduler_cancellation_suppresses_queued_action() Void!Str {
   let application = cooper_testing::new(20, 5)
   defer application.destroy()
-  let count = mut Counter{value: 0}
+  let count = &mut Counter{value: 0}
   let schedule = scheduler::for_context(application.context)
   let cancel = schedule(0, fn() {
     count.value =+ 1
@@ -28,7 +28,7 @@ test fn scheduler_cancellation_suppresses_queued_action() Void!Str {
 test fn scheduler_dispatches_uncancelled_action() Void!Str {
   let application = cooper_testing::new(20, 5)
   defer application.destroy()
-  let count = mut Counter{value: 0}
+  let count = &mut Counter{value: 0}
   let schedule = scheduler::for_context(application.context)
   let _ = schedule(0, fn() {
     count.value =+ 1

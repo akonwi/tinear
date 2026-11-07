@@ -38,7 +38,7 @@ private struct ScheduledState {
   cancellations: Int,
 }
 
-private fn fake_service(state: mut FakeState) inbox_service::Service {
+private fn fake_service(state: &mut FakeState) inbox_service::Service {
   inbox_service::Service{
     load: fn(cancellation: Receiver<Bool>, completion: fn([inbox::Item]!Str)) {
       state.loads.push(completion)
@@ -131,7 +131,7 @@ private fn no_schedule(milliseconds: Int, action: fn()) fn() {
   fn() {}
 }
 
-private fn fake_schedule(state: mut ScheduledState) fn(Int, fn()) fn() {
+private fn fake_schedule(state: &mut ScheduledState) fn(Int, fn()) fn() {
   fn(milliseconds: Int, action: fn()) fn() {
     state.actions.push(action)
     fn() {
@@ -140,7 +140,7 @@ private fn fake_schedule(state: mut ScheduledState) fn(Int, fn()) fn() {
   }
 }
 
-private fn key(name: Str, text: Str) mut cooper::KeyEvent {
+private fn key(name: Str, text: Str) &mut cooper::KeyEvent {
   event::key(
     name,
     text,
@@ -157,12 +157,12 @@ private fn key(name: Str, text: Str) mut cooper::KeyEvent {
 test fn inbox_loads_rows_and_discards_stale_detail_completion() Void!Str {
   let application = testing::new(170, 20)
   defer application.destroy()
-  let fake = mut FakeState{
+  let fake = &mut FakeState{
     loads: [],
     details: [],
     archives: [],
   }
-  let opened = mut Calls{value: "", count: 0}
+  let opened = &mut Calls{value: "", count: 0}
   let fixture = mount_inbox(
     application,
     theme::new(),
@@ -289,13 +289,13 @@ test fn inbox_loads_rows_and_discards_stale_detail_completion() Void!Str {
 test fn inbox_opens_pr_in_browser_and_archives_optimistically() Void!Str {
   let application = testing::new(90, 18)
   defer application.destroy()
-  let fake = mut FakeState{
+  let fake = &mut FakeState{
     loads: [],
     details: [],
     archives: [],
   }
-  let browser = mut Calls{value: "", count: 0}
-  let errors = mut Calls{value: "", count: 0}
+  let browser = &mut Calls{value: "", count: 0}
+  let errors = &mut Calls{value: "", count: 0}
   let fixture = mount_inbox(
     application,
     theme::new(),
@@ -358,12 +358,12 @@ test fn inbox_opens_pr_in_browser_and_archives_optimistically() Void!Str {
 test fn inbox_refresh_preserves_selection_by_notification_id() Void!Str {
   let application = testing::new(80, 16)
   defer application.destroy()
-  let fake = mut FakeState{
+  let fake = &mut FakeState{
     loads: [],
     details: [],
     archives: [],
   }
-  let scheduled = mut ScheduledState{actions: [], cancellations: 0}
+  let scheduled = &mut ScheduledState{actions: [], cancellations: 0}
   let fixture = mount_inbox(
     application,
     theme::new(),
@@ -401,7 +401,7 @@ test fn inbox_refresh_preserves_selection_by_notification_id() Void!Str {
 test fn inbox_initial_error_retries_to_empty_and_detail_errors_render() Void!Str {
   let application = testing::new(80, 16)
   defer application.destroy()
-  let fake = mut FakeState{
+  let fake = &mut FakeState{
     loads: [],
     details: [],
     archives: [],
@@ -445,12 +445,12 @@ test fn inbox_initial_error_retries_to_empty_and_detail_errors_render() Void!Str
 test fn inbox_disposal_suppresses_late_detail_and_archive_completions() Void!Str {
   let application = testing::new(60, 12)
   defer application.destroy()
-  let fake = mut FakeState{
+  let fake = &mut FakeState{
     loads: [],
     details: [],
     archives: [],
   }
-  let errors = mut Calls{value: "", count: 0}
+  let errors = &mut Calls{value: "", count: 0}
   let fixture = mount_inbox(
     application,
     theme::new(),
@@ -482,7 +482,7 @@ test fn inbox_disposal_suppresses_late_detail_and_archive_completions() Void!Str
 test fn inbox_disposal_suppresses_late_list_completion() Void!Str {
   let application = testing::new(60, 12)
   defer application.destroy()
-  let fake = mut FakeState{
+  let fake = &mut FakeState{
     loads: [],
     details: [],
     archives: [],
@@ -507,7 +507,7 @@ test fn inbox_disposal_suppresses_late_list_completion() Void!Str {
 
 private struct Fixture {
   mounted: renderer::Renderer,
-  component: mut inbox_screen::Inbox,
+  component: &mut inbox_screen::Inbox,
 }
 
 private fn mount_inbox(
@@ -519,12 +519,12 @@ private fn mount_inbox(
   open_url: fn(Str),
   notify_error: fn(Str, Str),
 ) Fixture {
-  let instances = mut List::new<mut inbox_screen::Inbox>()
+  let instances = &mut List::new<&mut inbox_screen::Inbox>()
   let mounted = renderer::mount(
     application.context,
     application.root,
     cui::child(
-      fn(props: mut inbox_screen::Props) mut inbox_screen::Inbox {
+      fn(props: &mut inbox_screen::Props) &mut inbox_screen::Inbox {
         let component = inbox_screen::create(props)
         instances.push(component)
         component
@@ -549,7 +549,7 @@ private fn mount_inbox(
 test fn inbox_resources_follow_component_mount_not_screen_description() Void!Str {
   let application = testing::new(60, 12)
   defer application.destroy()
-  let fake = mut FakeState{
+  let fake = &mut FakeState{
     loads: [],
     details: [],
     archives: [],

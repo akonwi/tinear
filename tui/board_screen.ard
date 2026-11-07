@@ -22,26 +22,26 @@ let DROP_COLUMN_RULE: Str = "━━━━━━━━━━━━━━━━━
 // columns, so each keeps a ref into the described tree.
 struct CardRecord {
   issue_id: Str,
-  root: mut cui::BoxRef,
-  surface: mut cui::BoxRef,
+  root: &mut cui::BoxRef,
+  surface: &mut cui::BoxRef,
 }
 
 struct ColumnRecord {
   key: Str,
-  root: mut cui::BoxRef,
-  scroll: mut cui::ScrollBoxRef,
+  root: &mut cui::BoxRef,
+  scroll: &mut cui::ScrollBoxRef,
   cards: [CardRecord],
 }
 
 struct Board {
-  props: mut Props,
+  props: &mut Props,
   // Per-registration cleanup closures returned by subscribe/on_blur.
   unsubscribe: fn(),
   remove_blur: fn(),
-  root: mut cui::BoxRef,
+  root: &mut cui::BoxRef,
   status: Str,
   status_error: Bool,
-  outer_scroll: mut cui::ScrollBoxRef,
+  outer_scroll: &mut cui::ScrollBoxRef,
   drag_ghost_id: ui::TextContent,
   drag_ghost_title: Str,
   drag_ghost_metadata: Str,
@@ -278,7 +278,7 @@ private fn apply_confirmed_state(
   issue_id: Str,
   state: issues::WorkflowState,
 ) [issues::BoardColumn] {
-  let updated = mut List::new<issues::BoardColumn>()
+  let updated = &mut List::new<issues::BoardColumn>()
   let target = board_service::StateTarget{
     raw_name: state.raw_name,
     name: state.name,
@@ -286,7 +286,7 @@ private fn apply_confirmed_state(
     position: state.position,
   }
   for column in columns {
-    let cards = mut List::new<issues::Issue>()
+    let cards = &mut List::new<issues::Issue>()
     for issue in column.issues {
       match issue.id == issue_id {
         true => cards.push(issue_with_state(issue, state.id, target)),
@@ -299,11 +299,11 @@ private fn apply_confirmed_state(
         name: column.name,
         state_type: column.state_type,
         position: column.position,
-        issues: cards.@,
+        issues: cards.*,
       },
     )
   }
-  updated.@
+  updated.*
 }
 
 private fn move_between_columns(
@@ -327,9 +327,9 @@ private fn move_between_columns(
   let selected = try moving -> _ { Result::err("The dragged issue is no longer on the board") }
   let destination = try target -> _ { Result::err("The target status is no longer on the board") }
   let moved = issue_with_state(selected, target_state_id, target_for(destination))
-  let updated = mut List::new<issues::BoardColumn>()
+  let updated = &mut List::new<issues::BoardColumn>()
   for column in columns {
-    let cards = mut List::new<issues::Issue>()
+    let cards = &mut List::new<issues::Issue>()
     let is_target = column_key(column) == target_key
     let reserves_completed_slot = is_target and column.state_type == "completed"
     for issue in column.issues {
@@ -346,15 +346,15 @@ private fn move_between_columns(
         name: column.name,
         state_type: column.state_type,
         position: column.position,
-        issues: cards.@,
+        issues: cards.*,
       },
     )
   }
-  Result::ok(updated.@)
+  Result::ok(updated.*)
 }
 
 struct Props {
-  context: mut cooper::Runtime,
+  context: &mut cooper::Runtime,
   palette: tinear_theme::Theme,
   service: board_service::Service,
   schedule: scheduler::Schedule,
@@ -362,12 +362,12 @@ struct Props {
   on_pick_field: fn(issue_field_picker_controller::Field, issues::Issue),
   on_issue_moved: fn(issues::Issue),
   notify_error: fn(Str, Str),
-  route: mut screen_route::Route,
-  hub: mut events::Bus<events::Event>,
+  route: &mut screen_route::Route,
+  hub: &mut events::Bus<events::Event>,
 }
 
 fn new(
-  ctx: mut cooper::Runtime,
+  ctx: &mut cooper::Runtime,
   palette: tinear_theme::Theme,
   service: board_service::Service,
   schedule: scheduler::Schedule,
@@ -375,7 +375,7 @@ fn new(
   on_pick_field: fn(issue_field_picker_controller::Field, issues::Issue),
   on_issue_moved: fn(issues::Issue),
   notify_error: fn(Str, Str),
-  hub: mut events::Bus<events::Event>,
+  hub: &mut events::Bus<events::Event>,
 ) tab_shell::Screen {
   let route = screen_route::new()
   tab_shell::screen(
@@ -398,15 +398,15 @@ fn new(
     fn() {
       route.focus()
     },
-    fn(received: mut cooper::KeyEvent) Bool {
+    fn(received: &mut cooper::KeyEvent) Bool {
       route.handle_key(received)
     },
     fn() {},
   )
 }
 
-fn create(props: mut Props) mut Board {
-  let component = mut Board{
+fn create(props: &mut Props) &mut Board {
+  let component = &mut Board{
     props: props,
     unsubscribe: fn() {},
     remove_blur: fn() {},
@@ -537,7 +537,7 @@ impl Board {
 
   // Pointer, drag, and click-to-open handling for one card. The view supplies
   // the record so bounds can be read from its surface ref.
-  fn mut handle_card_mouse(received: mut cooper::MouseEvent, issue_id: Str, record: CardRecord) {
+  fn mut handle_card_mouse(received: &mut cooper::MouseEvent, issue_id: Str, record: CardRecord) {
     if received.event_type == cooper::MouseEventType::move {
       self.set_hovered(issue_id)
     } else if received.event_type == cooper::MouseEventType::out {
@@ -621,7 +621,7 @@ impl Board {
   }
 
   private fn mut reconcile_cards(previous: [CardRecord], values: [issues::Issue]) [CardRecord] {
-    let next = mut List::new<CardRecord>()
+    let next = &mut List::new<CardRecord>()
     for issue in values {
       mut found: CardRecord? = Maybe::new()
       for card in previous {
@@ -636,7 +636,7 @@ impl Board {
         },
       )
     }
-    next.@
+    next.*
   }
 
   private fn mut create_column(column: issues::BoardColumn) ColumnRecord {
@@ -652,7 +652,7 @@ impl Board {
   private fn mut reconcile_columns() {
     self.hovered_issue_id = ""
     let previous = self.column_records
-    let next = mut List::new<ColumnRecord>()
+    let next = &mut List::new<ColumnRecord>()
     for column in self.columns {
       let key = column_key(column)
       mut found: ColumnRecord? = Maybe::new()
@@ -674,7 +674,7 @@ impl Board {
         },
       )
     }
-    self.column_records = next.@
+    self.column_records = next.*
     (self.invalidate)()
   }
 
@@ -741,7 +741,7 @@ impl Board {
     }
   }
 
-  private fn mut scroll_during_drag(received: mut cooper::MouseEvent) {
+  private fn mut scroll_during_drag(received: &mut cooper::MouseEvent) {
     mut changed = false
     if received.scroll_x != 0 {
       changed = self.scroll_board_x(wheel_step(received.scroll_x)) or changed
@@ -1161,7 +1161,7 @@ impl Board {
     (self.request_focus)()
   }
 
-  fn mut handle_key(received: mut cooper::KeyEvent) Bool {
+  fn mut handle_key(received: &mut cooper::KeyEvent) Bool {
     if self.disposed or received.event_type == cooper::KeyEventType::release {
       false
     } else if not self.dragging_issue_id.is_empty() {
@@ -1227,7 +1227,7 @@ impl cui::Lifecycle for Board {
     self.props.route.focus = fn() {
       self.focus()
     }
-    self.props.route.handle_key = fn(received: mut cooper::KeyEvent) Bool {
+    self.props.route.handle_key = fn(received: &mut cooper::KeyEvent) Bool {
       self.handle_key(received)
     }
     self.unsubscribe = self.props.hub.subscribe(fn(event: events::Event) {
@@ -1358,7 +1358,7 @@ impl Board {
               left: ui::cells(1),
             },
           ),
-          on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
+          on_mouse: fn(received: &mut cooper::MouseEvent, ctx: cui::Context) {
             self.handle_card_mouse(received, issue_id, record)
           },
         ),
@@ -1380,7 +1380,7 @@ impl Board {
     let key = record.key
     let drop_target = key == self.drag_target_key
     let selected_column = index == self.column_index and self.dragging_issue_id.is_empty()
-    let cards = mut List::new<cui::View>()
+    let cards = &mut List::new<cui::View>()
     for issue in value.issues {
       for card in record.cards {
         if card.issue_id == issue.id {
@@ -1412,7 +1412,7 @@ impl Board {
           },
         ),
         cui::scroll_box(
-          cards.@,
+          cards.*,
           ref: record.scroll,
           styles: ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_grow: 1.0),
         ),
@@ -1425,7 +1425,7 @@ impl Board {
         flex_shrink: 0.0,
         overflow: ui::Overflow::hidden,
       ),
-      on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
+      on_mouse: fn(received: &mut cooper::MouseEvent, ctx: cui::Context) {
         if received.event_type == cooper::MouseEventType::drop and received.button == cooper::MouseButton::left {
           self.drop_on_column(key)
           received.stop_propagation()
@@ -1440,7 +1440,7 @@ impl cui::Component for Board {
     let palette = self.props.palette
     // Hide cards while loading, but retain the visible scroll/focus target.
     let loaded = self.status.is_empty()
-    let columns = mut List::new<cui::View>()
+    let columns = &mut List::new<cui::View>()
     let visible_columns: [issues::BoardColumn] = match loaded {
       true => self.columns,
       false => [],
@@ -1472,10 +1472,10 @@ impl cui::Component for Board {
           },
         ),
         cui::scroll_box(
-          [cui::box(columns.@, styles: columns_row_style(visible_columns.size()))],
+          [cui::box(columns.*, styles: columns_row_style(visible_columns.size()))],
           ref: self.outer_scroll,
           styles: board_style(ui::Display::flex),
-          on_key: fn(received: mut cooper::KeyEvent, ctx: cui::Context) {},
+          on_key: fn(received: &mut cooper::KeyEvent, ctx: cui::Context) {},
         ),
         cui::box(
           [
@@ -1520,7 +1520,7 @@ impl cui::Component for Board {
               false => ui::Display::none,
             },
           ),
-          on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
+          on_mouse: fn(received: &mut cooper::MouseEvent, ctx: cui::Context) {
             if received.event_type == cooper::MouseEventType::drop and received.button == cooper::MouseButton::left {
               self.drop_on_column(self.column_key_at(received.x, received.y))
               received.stop_propagation()

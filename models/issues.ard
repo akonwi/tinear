@@ -296,25 +296,26 @@ fn decode_comment(raw: Any) Comment!Str {
 // with depth set for indentation. Replies whose parent isn't present
 // (deleted, or beyond the fetch page) degrade to top-level.
 fn thread_comments(comments: [Comment]) [Comment] {
-  let present: mut [Str: Bool] = mut [:]
+  let present: &mut [Str: Bool] = &mut [:]
   for comment in comments {
     present.set(comment.id, true)
   }
-  let ordered: mut [Comment] = mut []
+  let ordered: &mut [Comment] = &mut []
   for comment in comments {
     let is_reply = (not comment.parent_id.is_empty()) and present.get(comment.parent_id).or(false)
     if not is_reply {
       ordered.push(comment)
       for candidate in comments {
+        mut candidate = candidate
         if candidate.parent_id == comment.id {
-          let reply = mut candidate
+          let reply = &mut candidate
           reply.depth = 1
-          ordered.push(reply.@)
+          ordered.push(reply.*)
         }
       }
     }
   }
-  ordered.@
+  ordered.*
 }
 
 fn decode_workflow_state(raw: Any) WorkflowState!Str {
@@ -451,11 +452,11 @@ fn fetch_team_cycles(api_key: Str, team_id: Str) TeamCyclesResult!Str {
     err(_) => Maybe::new(),
   }
 
-  let cycles: mut [Cycle] = mut []
+  let cycles: &mut [Cycle] = &mut []
   for raw in nodes {
     cycles.push(try decode_cycle(raw))
   }
-  Result::ok(TeamCyclesResult{active_cycle_number: active_number, cycles: cycles.@})
+  Result::ok(TeamCyclesResult{active_cycle_number: active_number, cycles: cycles.*})
 }
 
 fn issue_fields() Str {
@@ -479,11 +480,12 @@ fn fetch_issue_search(api_key: Str, term: Str) [Any]!Str {
 }
 
 fn sort_columns_by_position(cols: [BoardColumn]) [BoardColumn] {
+  mut cols = cols
   let n = cols.size()
   if n < 2 {
     cols
   } else {
-    let result = mut cols
+    let result = &mut cols
     for i in 0..n - 2 {
       for j in 0..n - 2 - i {
         let a = result.at(j).expect("bounds checked")
@@ -500,7 +502,7 @@ fn sort_columns_by_position(cols: [BoardColumn]) [BoardColumn] {
         }
       }
     }
-    result.@
+    result.*
   }
 }
 
@@ -529,7 +531,7 @@ fn decode_board(data: Any) [BoardColumn]!Str {
   let raw_issues = try decode::run(data, decode::path(["issues", "nodes"], decode::list(decode::any))) -> error {
     Result::err(error.to_str())
   }
-  let decoded_issues = mut List::new<DecodedBoardIssue>()
+  let decoded_issues = &mut List::new<DecodedBoardIssue>()
   for raw in raw_issues {
     let raw_state_name = try decode::run(raw, decode::path(["state", "name"], decode::string)) -> error {
       Result::err(error.to_str())
@@ -538,11 +540,11 @@ fn decode_board(data: Any) [BoardColumn]!Str {
       DecodedBoardIssue{issue: try decode_issue(raw), raw_state_name: raw_state_name},
     )
   }
-  let all_issues = decoded_issues.@
+  let all_issues = decoded_issues.*
 
-  let state_names: mut [Str] = mut []
-  let state_types: mut [Str] = mut []
-  let state_positions: mut [Float64] = mut []
+  let state_names: &mut [Str] = &mut []
+  let state_types: &mut [Str] = &mut []
+  let state_positions: &mut [Float64] = &mut []
   for decoded in all_issues {
     if not state::is_hidden_state(decoded.raw_state_name) {
       mut seen = false
@@ -559,14 +561,14 @@ fn decode_board(data: Any) [BoardColumn]!Str {
     }
   }
 
-  let columns: mut [BoardColumn] = mut []
+  let columns: &mut [BoardColumn] = &mut []
   for sname, idx in state_names {
     let is_completed = state_types.at(idx).expect("parallel list") == "completed"
     let cap = match is_completed {
       true => 10,
       false => 200,
     }
-    let col_issues: mut [Issue] = mut []
+    let col_issues: &mut [Issue] = &mut []
     mut count = 0
     for decoded in all_issues {
       if decoded.raw_state_name == sname and count < cap {
@@ -580,30 +582,30 @@ fn decode_board(data: Any) [BoardColumn]!Str {
         name: normalize_text(sname),
         state_type: state_types.at(idx).expect("parallel list"),
         position: state_positions.at(idx).expect("parallel list"),
-        issues: col_issues.@,
+        issues: col_issues.*,
       },
     )
   }
 
-  Result::ok(sort_columns_by_position(columns.@))
+  Result::ok(sort_columns_by_position(columns.*))
 }
 
 fn load_comments(api_key: Str, issue_id: Str) [Comment]!Str {
   let raw_comments = try fetch_issue_comments(api_key, issue_id)
-  let comments: mut [Comment] = mut []
+  let comments: &mut [Comment] = &mut []
   for raw in raw_comments {
     comments.push(try decode_comment(raw))
   }
-  Result::ok(thread_comments(comments.@))
+  Result::ok(thread_comments(comments.*))
 }
 
 fn load_team_states(api_key: Str, team_id: Str) [WorkflowState]!Str {
   let raw_states = try fetch_team_states(api_key, team_id)
-  let states: mut [WorkflowState] = mut []
+  let states: &mut [WorkflowState] = &mut []
   for raw in raw_states {
     states.push(try decode_workflow_state(raw))
   }
-  Result::ok(states.@)
+  Result::ok(states.*)
 }
 
 fn load_team_cycles(api_key: Str, team_id: Str) TeamCyclesResult!Str {
@@ -617,11 +619,11 @@ fn load_issue(api_key: Str, issue_id: Str) Issue!Str {
 
 fn search(api_key: Str, term: Str) [Issue]!Str {
   let raw_issues = try fetch_issue_search(api_key, term)
-  let results: mut [Issue] = mut []
+  let results: &mut [Issue] = &mut []
   for raw in raw_issues {
     results.push(try decode_issue(raw))
   }
-  Result::ok(results.@)
+  Result::ok(results.*)
 }
 
 fn load(api_key: Str) [BoardColumn]!Str {
@@ -681,7 +683,7 @@ fn fetch_team_members(api_key: Str, team_id: Str) [Member]!Str {
   let nodes = try decode::run(data, decode::path(["team", "members", "nodes"], decode::list(decode::any))) -> e {
     Result::err(e.to_str())
   }
-  let members: mut [Member] = mut []
+  let members: &mut [Member] = &mut []
   for node in nodes {
     let active = decode::run(node, decode::field("active", decode::boolean)).or(true)
     if active {
@@ -689,7 +691,7 @@ fn fetch_team_members(api_key: Str, team_id: Str) [Member]!Str {
       members.push(Member{id: id, name: normalize_text(user_display_name_opt_self(node))})
     }
   }
-  Result::ok(members.@)
+  Result::ok(members.*)
 }
 
 // displayName with name fallback for a user node itself (not nested).
@@ -717,7 +719,7 @@ fn fetch_team_projects(api_key: Str, team_id: Str) [Project]!Str {
   let nodes = try decode::run(data, decode::path(["team", "projects", "nodes"], decode::list(decode::any))) -> e {
     Result::err(e.to_str())
   }
-  let projects: mut [Project] = mut []
+  let projects: &mut [Project] = &mut []
   for node in nodes {
     // Hide finished projects; issues shouldn't be filed into them.
     let project_state = decode::run(node, decode::field("state", decode::string)).or("")
@@ -727,7 +729,7 @@ fn fetch_team_projects(api_key: Str, team_id: Str) [Project]!Str {
       projects.push(Project{id: id, name: normalize_text(name)})
     }
   }
-  Result::ok(projects.@)
+  Result::ok(projects.*)
 }
 
 fn update_description(api_key: Str, issue_id: Str, description: Str) Void!Str {
@@ -779,11 +781,11 @@ fn fetch_teams(api_key: Str) [Team]!Str {
   let nodes = try decode::run(data, decode::path(["teams", "nodes"], decode::list(decode::any))) -> e {
     Result::err(e.to_str())
   }
-  let teams: mut [Team] = mut []
+  let teams: &mut [Team] = &mut []
   for node in nodes {
     teams.push(try try_decode_team(node))
   }
-  Result::ok(teams.@)
+  Result::ok(teams.*)
 }
 
 // Create an issue and report the new identifier (e.g. "CCA-123") so the

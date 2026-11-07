@@ -21,8 +21,8 @@ private struct RequestCancellation {
   cancelled: Bool,
 }
 
-private fn request_cancellation() mut RequestCancellation {
-  (mut RequestCancellation{stop: Chan::new<Bool>(), cancelled: false})
+private fn request_cancellation() &mut RequestCancellation {
+  &mut RequestCancellation{stop: Chan::new<Bool>(), cancelled: false}
 }
 
 impl RequestCancellation {
@@ -35,8 +35,8 @@ impl RequestCancellation {
 }
 
 struct Controller {
-  context: mut cooper::Runtime,
-  modal: mut modal_host::ModalHost,
+  context: &mut cooper::Runtime,
+  modal: &mut modal_host::ModalHost,
   palette: tinear_theme::Theme,
   service: issue_fields_service::Service,
   pending_cancel: fn(),
@@ -77,10 +77,11 @@ private fn cycle_label(cycle: issues::Cycle) Str {
 }
 
 fn sort_states(states: [issues::WorkflowState]) [issues::WorkflowState] {
+  mut states = states
   if states.size() < 2 {
     states
   } else {
-    let result = mut states
+    let result = &mut states
     for i in 0..states.size() - 2 {
       for j in 0..states.size() - 2 - i {
         let a = result.at(j).expect("bounds checked")
@@ -97,12 +98,12 @@ fn sort_states(states: [issues::WorkflowState]) [issues::WorkflowState] {
         }
       }
     }
-    result.@
+    result.*
   }
 }
 
 fn cycles_for_issue(result: issues::TeamCyclesResult, current_cycle_id: Str) [issues::Cycle] {
-  let filtered = mut List::new<issues::Cycle>()
+  let filtered = &mut List::new<issues::Cycle>()
   for cycle in result.cycles {
     let include = match result.active_cycle_number {
       active => cycle.number <= active + 1 or cycle.id == current_cycle_id,
@@ -124,19 +125,19 @@ fn cycles_for_issue(result: issues::TeamCyclesResult, current_cycle_id: Str) [is
       }
     }
   }
-  filtered.@
+  filtered.*
 }
 
 fn new(
-  ctx: mut cooper::Runtime,
-  modal: mut modal_host::ModalHost,
+  ctx: &mut cooper::Runtime,
+  modal: &mut modal_host::ModalHost,
   palette: tinear_theme::Theme,
   service: issue_fields_service::Service,
   restore_focus: fn(),
   on_changed: fn(issues::Issue),
   notify_error: fn(Str, Str),
-) mut Controller {
-  (mut Controller{
+) &mut Controller {
+  &mut Controller{
     context: ctx,
     modal: modal,
     palette: palette,
@@ -149,7 +150,7 @@ fn new(
     restore_focus: restore_focus,
     on_changed: on_changed,
     notify_error: notify_error,
-  })
+  }
 }
 
 // Transient loading/updating body.
@@ -253,7 +254,7 @@ impl Controller {
         if (not self.disposed) and generation == self.generation and self.modal.is_current(ticket) {
           match result {
             ok(states) => {
-              let options = mut List::new<picker_controller::Option>()
+              let options = &mut List::new<picker_controller::Option>()
               for value in sort_states(states) {
                 options.push(
                   picker_controller::Option{
@@ -266,7 +267,7 @@ impl Controller {
               self.present_picker(
                 state_title(issue),
                 "Filter states",
-                options.@,
+                options.*,
                 issue.state_id,
                 issue,
                 Field::state,
@@ -291,7 +292,7 @@ impl Controller {
         if (not self.disposed) and generation == self.generation and self.modal.is_current(ticket) {
           match result {
             ok(value) => {
-              let options = mut List::new<picker_controller::Option>()
+              let options = &mut List::new<picker_controller::Option>()
               options.push(
                 picker_controller::Option{
                   id: "",
@@ -311,7 +312,7 @@ impl Controller {
               self.present_picker(
                 cycle_title(issue),
                 "Filter cycles",
-                options.@,
+                options.*,
                 issue.cycle_id,
                 issue,
                 Field::cycle,
@@ -325,7 +326,7 @@ impl Controller {
   }
 
   private fn mut open_priority(issue: issues::Issue) {
-    let options = mut List::new<picker_controller::Option>()
+    let options = &mut List::new<picker_controller::Option>()
     for value in [0, 1, 2, 3, 4] {
       let label = match value {
         0 => "No priority",
@@ -344,7 +345,7 @@ impl Controller {
     self.present_picker(
       priority_title(issue),
       "Filter priorities",
-      options.@,
+      options.*,
       "{issue.priority.or(0)}",
       issue,
       Field::priority,
@@ -363,7 +364,7 @@ impl Controller {
         if (not self.disposed) and generation == self.generation and self.modal.is_current(ticket) {
           match result {
             ok(members) => {
-              let options = mut List::new<picker_controller::Option>()
+              let options = &mut List::new<picker_controller::Option>()
               options.push(
                 picker_controller::Option{
                   id: "",
@@ -383,7 +384,7 @@ impl Controller {
               self.present_picker(
                 assignee_title(issue),
                 "Filter members",
-                options.@,
+                options.*,
                 issue.assignee_id,
                 issue,
                 Field::assignee,
@@ -408,7 +409,7 @@ impl Controller {
         if (not self.disposed) and generation == self.generation and self.modal.is_current(ticket) {
           match result {
             ok(projects) => {
-              let options = mut List::new<picker_controller::Option>()
+              let options = &mut List::new<picker_controller::Option>()
               options.push(
                 picker_controller::Option{
                   id: "",
@@ -428,7 +429,7 @@ impl Controller {
               self.present_picker(
                 project_title(issue),
                 "Filter projects",
-                options.@,
+                options.*,
                 issue.project_id,
                 issue,
                 Field::project,

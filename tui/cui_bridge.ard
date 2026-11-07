@@ -8,7 +8,7 @@ use cooper/ui
 // destroys the slot box non-recursively (orphaning the bridged control), then
 // `unmounting` runs the legacy dispose path and destroys the orphaned subtree.
 struct BridgeProps {
-  control: mut ui::Box,
+  control: &mut ui::Box,
   dispose: fn(),
   on_attached: fn(),
   // Controls that outlive this bridge (for example a markdown body reattached
@@ -17,12 +17,12 @@ struct BridgeProps {
 }
 
 struct Bridge {
-  props: mut BridgeProps,
-  slot: mut cui::BoxRef,
+  props: &mut BridgeProps,
+  slot: &mut cui::BoxRef,
 }
 
-private fn bridge(props: mut BridgeProps) mut Bridge {
-  (mut Bridge{props: props, slot: cui::box_ref()})
+private fn bridge(props: &mut BridgeProps) &mut Bridge {
+  &mut Bridge{props: props, slot: cui::box_ref()}
 }
 
 impl cui::Component for Bridge {
@@ -61,7 +61,13 @@ impl cui::Lifecycle for Bridge {
 
 // Describe a bridged legacy control. Each distinct key is a distinct bridge
 // identity: changing the key retires the old control and attaches the new one.
-fn view(control: mut ui::Box, dispose: fn(), on_attached: fn(), key: Str, destroy_on_unmount: Bool?) cui::View {
+fn view(
+  control: &mut ui::Box,
+  dispose: fn(),
+  on_attached: fn(),
+  key: Str,
+  destroy_on_unmount: Bool?,
+) cui::View {
   cui::child(
     bridge,
     BridgeProps{

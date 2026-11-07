@@ -33,7 +33,7 @@ private fn options() [picker_controller::Option] {
 }
 
 private fn filter_options() [picker_controller::Option] {
-  let values = mut options()
+  let values = &mut options()
   values.push(
     picker_controller::Option{
       id: "canceled",
@@ -55,7 +55,7 @@ private fn filter_options() [picker_controller::Option] {
       description: "Backlog",
     },
   )
-  values.@
+  values.*
 }
 
 private fn five_options() [picker_controller::Option] {
@@ -69,7 +69,7 @@ private fn five_options() [picker_controller::Option] {
   ]
 }
 
-private fn key(name: Str, text: Str) mut cooper::KeyEvent {
+private fn key(name: Str, text: Str) &mut cooper::KeyEvent {
   event::key(
     name,
     text,
@@ -88,7 +88,7 @@ private fn mount(
   placeholder: Str,
   values: [picker_controller::Option],
   selected_id: Str,
-  selection: mut Selection,
+  selection: &mut Selection,
 ) renderer::Renderer {
   let mounted = renderer::mount(
     application.context,
@@ -125,7 +125,7 @@ private fn row_background(application: testing::TestApp, y: Int) Uint8 {
 test fn picker_filters_navigates_and_selects() Void!Str {
   let application = testing::new(50, 16)
   defer application.destroy()
-  let selection = mut Selection{id: "", count: 0}
+  let selection = &mut Selection{id: "", count: 0}
   let mounted = mount(application, "Filter states", filter_options(), "doing", selection)
   defer mounted.destroy()
 
@@ -178,7 +178,7 @@ test fn picker_filters_navigates_and_selects() Void!Str {
 test fn picker_filter_matches_descriptions_and_resets_cursor() Void!Str {
   let application = testing::new(50, 16)
   defer application.destroy()
-  let selection = mut Selection{id: "", count: 0}
+  let selection = &mut Selection{id: "", count: 0}
   let mounted = mount(application, "Filter states", filter_options(), "doing", selection)
   defer mounted.destroy()
 
@@ -198,7 +198,7 @@ test fn picker_filter_matches_descriptions_and_resets_cursor() Void!Str {
 test fn small_picker_hides_filter_and_supports_direct_navigation() Void!Str {
   let application = testing::new(50, 14)
   defer application.destroy()
-  let selection = mut Selection{id: "", count: 0}
+  let selection = &mut Selection{id: "", count: 0}
   let mounted = mount(application, "Filter states", options(), "", selection)
   defer mounted.destroy()
 
@@ -230,7 +230,7 @@ test fn small_picker_hides_filter_and_supports_direct_navigation() Void!Str {
 test fn five_options_stay_unfiltered() Void!Str {
   let application = testing::new(50, 16)
   defer application.destroy()
-  let selection = mut Selection{id: "", count: 0}
+  let selection = &mut Selection{id: "", count: 0}
   let mounted = mount(application, "Filter states", five_options(), "", selection)
   defer mounted.destroy()
   assertions::assert(
@@ -242,7 +242,7 @@ test fn five_options_stay_unfiltered() Void!Str {
 test fn picker_renders_empty_state_and_ignores_empty_activation() Void!Str {
   let application = testing::new(50, 14)
   defer application.destroy()
-  let selection = mut Selection{id: "", count: 0}
+  let selection = &mut Selection{id: "", count: 0}
   let mounted = mount(application, "Filter states", filter_options(), "", selection)
   defer mounted.destroy()
 
@@ -258,7 +258,7 @@ test fn picker_renders_empty_state_and_ignores_empty_activation() Void!Str {
 test fn picker_mouse_selects_visible_row() Void!Str {
   let application = testing::new(50, 14)
   defer application.destroy()
-  let selection = mut Selection{id: "", count: 0}
+  let selection = &mut Selection{id: "", count: 0}
   let mounted = mount(application, "Filter states", options(), "", selection)
   defer mounted.destroy()
 
@@ -271,7 +271,7 @@ test fn picker_mouse_selects_visible_row() Void!Str {
 test fn unmounted_picker_stops_reporting_selections() Void!Str {
   let application = testing::new(50, 14)
   defer application.destroy()
-  let selection = mut Selection{id: "", count: 0}
+  let selection = &mut Selection{id: "", count: 0}
   let mounted = mount(application, "Filter states", options(), "", selection)
   mounted.destroy()
   mounted.destroy()

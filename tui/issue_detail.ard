@@ -23,25 +23,25 @@ let COMMENTS_SECTION: Int = 1
 // for focus and scroll-into-view.
 struct CommentRecord {
   id: Str,
-  body: mut markdown_controller::MarkdownController,
-  panel: mut cui::BoxRef,
+  body: &mut markdown_controller::MarkdownController,
+  panel: &mut cui::BoxRef,
 }
 
 // Capabilities the shell and the external editor/picker controllers need
 // before this component exists. The component binds them at mount and clears
 // them at unmount, so calls outside that window are harmless no-ops.
 struct Commands {
-  route: mut screen_route::Route,
+  route: &mut screen_route::Route,
   comments_changed: fn(Str, Bool),
   description_changed: fn(Str),
 }
 
-fn commands() mut Commands {
-  (mut Commands{
+fn commands() &mut Commands {
+  &mut Commands{
     route: screen_route::new(),
     comments_changed: fn(comment_id: Str, should_focus: Bool) {},
     description_changed: fn(description: Str) {},
-  })
+  }
 }
 
 impl Commands {
@@ -53,7 +53,7 @@ impl Commands {
 }
 
 struct Props {
-  context: mut cooper::Runtime,
+  context: &mut cooper::Runtime,
   palette: tinear_theme::Theme,
   identifier: Str,
   service: issue_detail_service::Service,
@@ -63,19 +63,19 @@ struct Props {
   on_comment: fn(issues::Issue, Str, Str),
   on_edit_description: fn(issues::Issue),
   notify_error: fn(Str, Str),
-  commands: mut Commands,
-  hub: mut events::Bus<events::Event>,
+  commands: &mut Commands,
+  hub: &mut events::Bus<events::Event>,
 }
 
 struct IssueDetail {
-  props: mut Props,
+  props: &mut Props,
   unsubscribe: fn(),
   status: Str,
   status_danger: Bool,
   comments_status: Str,
   comments_status_danger: Bool,
-  body_scroll: mut cui::ScrollBoxRef,
-  description: mut markdown_controller::MarkdownController,
+  body_scroll: &mut cui::ScrollBoxRef,
+  description: &mut markdown_controller::MarkdownController,
   comment_records: [CommentRecord],
   issue: issues::Issue?,
   comments: [issues::Comment],
@@ -89,7 +89,7 @@ struct IssueDetail {
   stop: Chan<Bool>,
   disposed: Bool,
   invalidate: fn(),
-  request_comment_focus: fn(mut cui::BoxRef),
+  request_comment_focus: fn(&mut cui::BoxRef),
   cancel_refresh: fn(),
 }
 
@@ -172,8 +172,8 @@ private fn comment_style(
   )
 }
 
-fn create(props: mut Props) mut IssueDetail {
-  (mut IssueDetail{
+fn create(props: &mut Props) &mut IssueDetail {
+  &mut IssueDetail{
     props: props,
     unsubscribe: fn() {},
     status: "Loading {props.identifier}…",
@@ -195,15 +195,15 @@ fn create(props: mut Props) mut IssueDetail {
     stop: Chan::new<Bool>(),
     disposed: false,
     invalidate: fn() {},
-    request_comment_focus: fn(ref: mut cui::BoxRef) {},
+    request_comment_focus: fn(ref: &mut cui::BoxRef) {},
     cancel_refresh: fn() {},
-  })
+  }
 }
 
 // External editor/picker cleanup is the host's concern: wrap the returned
 // Screen's dispose if the host owns resources beyond this component.
 fn new(
-  ctx: mut cooper::Runtime,
+  ctx: &mut cooper::Runtime,
   palette: tinear_theme::Theme,
   identifier: Str,
   service: issue_detail_service::Service,
@@ -213,8 +213,8 @@ fn new(
   on_comment: fn(issues::Issue, Str, Str),
   on_edit_description: fn(issues::Issue),
   notify_error: fn(Str, Str),
-  commands: mut Commands,
-  hub: mut events::Bus<events::Event>,
+  commands: &mut Commands,
+  hub: &mut events::Bus<events::Event>,
 ) tab_shell::Screen {
   let route = commands.route
   tab_shell::screen(
@@ -239,7 +239,7 @@ fn new(
     fn() {
       route.focus()
     },
-    fn(received: mut cooper::KeyEvent) Bool {
+    fn(received: &mut cooper::KeyEvent) Bool {
       route.handle_key(received)
     },
     fn() {},
@@ -249,13 +249,13 @@ fn new(
 impl cui::Lifecycle for IssueDetail {
   fn mut mounted(ctx: cui::Context) {
     self.invalidate = ctx.invalidate_root
-    self.request_comment_focus = fn(ref: mut cui::BoxRef) {
+    self.request_comment_focus = fn(ref: &mut cui::BoxRef) {
       ref.focus(ctx)
     }
     self.props.commands.route.focus = fn() {
       self.body_scroll.focus(ctx)
     }
-    self.props.commands.route.handle_key = fn(received: mut cooper::KeyEvent) Bool {
+    self.props.commands.route.handle_key = fn(received: &mut cooper::KeyEvent) Bool {
       self.handle_key(received)
     }
     self.props.commands.comments_changed = fn(comment_id: Str, should_focus: Bool) {
@@ -287,7 +287,7 @@ impl cui::Lifecycle for IssueDetail {
     self.props.commands.clear()
     self.dispose()
     self.invalidate = fn() {}
-    self.request_comment_focus = fn(ref: mut cui::BoxRef) {}
+    self.request_comment_focus = fn(ref: &mut cui::BoxRef) {}
   }
 }
 
@@ -327,7 +327,7 @@ impl IssueDetail {
   private fn mut reconcile_comments() {
     self.hovered_comment_id = ""
     let previous = self.comment_records
-    let next = mut List::new<CommentRecord>()
+    let next = &mut List::new<CommentRecord>()
     for comment in self.comments {
       mut found: CommentRecord? = Maybe::new()
       for record in previous {
@@ -354,7 +354,7 @@ impl IssueDetail {
         old.body.root.destroy(recursive: true)
       }
     }
-    self.comment_records = next.@
+    self.comment_records = next.*
     self.refresh_comment_selection()
   }
 
@@ -667,10 +667,11 @@ impl IssueDetail {
       self.issue_generation =+ 1
       match self.issue {
         loaded => {
-          let updated = mut loaded
+          mut loaded = loaded
+          let updated = &mut loaded
           updated.description = Maybe::new(description)
-          self.issue = Maybe::new(updated.@)
-          self.show_issue(updated.@)
+          self.issue = Maybe::new(updated.*)
+          self.show_issue(updated.*)
         },
         _ => (),
       }
@@ -685,7 +686,7 @@ impl IssueDetail {
     }
   }
 
-  fn mut handle_key(received: mut cooper::KeyEvent) Bool {
+  fn mut handle_key(received: &mut cooper::KeyEvent) Bool {
     if self.disposed or received.event_type == cooper::KeyEventType::release {
       false
     } else {
@@ -756,7 +757,7 @@ impl IssueDetail {
       ],
       key: "tab-{section}",
       styles: ui::style(width: ui::cells(width), height: ui::cells(1), flex_shrink: 0.0),
-      on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
+      on_mouse: fn(received: &mut cooper::MouseEvent, ctx: cui::Context) {
         if received.event_type == cooper::MouseEventType::down and received.button == cooper::MouseButton::left {
           self.switch_section(section)
           received.stop_propagation()
@@ -803,8 +804,8 @@ impl IssueDetail {
       key: "comment-{id}",
       ref: record.panel,
       styles: comment_style(comment, active, hovered, palette),
-      on_key: fn(received: mut cooper::KeyEvent, ctx: cui::Context) {},
-      on_mouse: fn(received: mut cooper::MouseEvent, ctx: cui::Context) {
+      on_key: fn(received: &mut cooper::KeyEvent, ctx: cui::Context) {},
+      on_mouse: fn(received: &mut cooper::MouseEvent, ctx: cui::Context) {
         if received.event_type == cooper::MouseEventType::move {
           self.hovered_comment_id = id
           self.refresh_comment_selection()
@@ -824,7 +825,7 @@ impl IssueDetail {
   private fn mut body() cui::View {
     match self.active_section == COMMENTS_SECTION {
       true => {
-        let children = mut List::new<cui::View>()
+        let children = &mut List::new<cui::View>()
         if not self.comments_status.is_empty() {
           children.push(
             cui::text(
@@ -845,7 +846,7 @@ impl IssueDetail {
           }
         }
         cui::box(
-          children.@,
+          children.*,
           key: "comments",
           styles: ui::style(
             width: ui::percent(100.0),
@@ -871,7 +872,7 @@ impl cui::Component for IssueDetail {
   fn mut render() cui::View {
     let palette = self.props.palette
     let row = ui::style(width: ui::percent(100.0), height: ui::cells(1), flex_shrink: 0.0)
-    let children = mut List::new<cui::View>()
+    let children = &mut List::new<cui::View>()
     match self.issue {
       issue => {
         let header = [
@@ -943,7 +944,7 @@ impl cui::Component for IssueDetail {
       ),
     )
     cui::box(
-      children.@,
+      children.*,
       styles: ui::style(
         width: ui::percent(100.0),
         height: ui::percent(100.0),

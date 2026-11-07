@@ -60,8 +60,8 @@ struct Bus {
   next_id: Int,
 }
 
-fn new() mut Bus<$E> {
-  (mut Bus<$E>{subscribers: [], next_id: 0})
+fn new() &mut Bus<$E> {
+  &mut Bus<$E>{subscribers: [], next_id: 0}
 }
 
 impl Bus {
@@ -70,13 +70,13 @@ impl Bus {
   // that call instance methods declared later in the impl block
   // ("unsupported AIR instance method ... on mut Bus").
   private fn mut unsubscribe(id: Int) {
-    let remaining = mut List::new<Subscriber<$E>>()
+    let remaining = &mut List::new<Subscriber<$E>>()
     for existing in self.subscribers {
       if existing.id != id {
         remaining.push(existing)
       }
     }
-    self.subscribers = remaining.@
+    self.subscribers = remaining.*
   }
 
   // Registers a subscriber and returns its unsubscribe fn.
@@ -85,12 +85,12 @@ impl Bus {
   fn mut subscribe(notify: fn($E)) fn() {
     self.next_id =+ 1
     let id = self.next_id
-    let next = mut List::new<Subscriber<$E>>()
+    let next = &mut List::new<Subscriber<$E>>()
     for existing in self.subscribers {
       next.push(existing)
     }
     next.push(Subscriber<$E>{id: id, notify: notify})
-    self.subscribers = next.@
+    self.subscribers = next.*
     fn() {
       self.unsubscribe(id)
     }
@@ -105,7 +105,7 @@ impl Bus {
 
 test fn bus_delivers_events_to_all_subscribers_in_order() Void!Str {
   let hub = new<Str>()
-  let seen = mut List::new<Str>()
+  let seen = &mut List::new<Str>()
   let _ = hub.subscribe(fn(event: Str) {
     seen.push("first:{event}")
   })
@@ -123,8 +123,8 @@ test fn bus_delivers_events_to_all_subscribers_in_order() Void!Str {
 
 test fn bus_unsubscribe_stops_delivery_without_affecting_others() Void!Str {
   let hub = new<Int>()
-  let first = mut List::new<Int>()
-  let second = mut List::new<Int>()
+  let first = &mut List::new<Int>()
+  let second = &mut List::new<Int>()
   let unsubscribe_first = hub.subscribe(fn(event: Int) {
     first.push(event)
   })
@@ -145,7 +145,7 @@ test fn bus_unsubscribe_stops_delivery_without_affecting_others() Void!Str {
 test fn bus_publish_with_no_subscribers_is_a_no_op() Void!Str {
   let hub = new<Bool>()
   hub.publish(true)
-  let heard = mut List::new<Bool>()
+  let heard = &mut List::new<Bool>()
   let unsubscribe = hub.subscribe(fn(event: Bool) {
     heard.push(event)
   })

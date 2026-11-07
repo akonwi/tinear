@@ -32,7 +32,7 @@ private fn modifiers() cooper::Modifiers {
   }
 }
 
-private fn key(value: Str) mut cooper::KeyEvent {
+private fn key(value: Str) &mut cooper::KeyEvent {
   event::key(value, value, cooper::KeyEventType::press, modifiers())
 }
 
@@ -62,17 +62,17 @@ test fn tab_chips_use_intrinsic_cell_width_with_a_document_cap() Void!Str {
 
 private struct FakeProps {
   label: Str,
-  state: mut ScreenState,
-  route: mut screen_route::Route,
+  state: &mut ScreenState,
+  route: &mut screen_route::Route,
 }
 
 private struct FakeScreen {
-  props: mut FakeProps,
-  panel: mut cui::BoxRef,
+  props: &mut FakeProps,
+  panel: &mut cui::BoxRef,
 }
 
-private fn fake_component(props: mut FakeProps) mut FakeScreen {
-  (mut FakeScreen{props: props, panel: cui::box_ref()})
+private fn fake_component(props: &mut FakeProps) &mut FakeScreen {
+  &mut FakeScreen{props: props, panel: cui::box_ref()}
 }
 
 impl cui::Lifecycle for FakeScreen {
@@ -97,7 +97,7 @@ impl cui::Component for FakeScreen {
     cui::box(
       // A no-op key handler is what makes the panel focusable.
       [cui::text(self.props.label)],
-      on_key: fn(received: mut cooper::KeyEvent, context: cui::Context) {},
+      on_key: fn(received: &mut cooper::KeyEvent, context: cui::Context) {},
       ref: self.panel,
       styles: ui::style(
         width: ui::percent(100.0),
@@ -108,7 +108,7 @@ impl cui::Component for FakeScreen {
   }
 }
 
-private fn fake_screen(ctx: mut cooper::Runtime, label: Str, state: mut ScreenState) tab_shell::Screen {
+private fn fake_screen(ctx: &mut cooper::Runtime, label: Str, state: &mut ScreenState) tab_shell::Screen {
   let route = screen_route::new()
   tab_shell::screen(
     view: cui::child(
@@ -122,7 +122,7 @@ private fn fake_screen(ctx: mut cooper::Runtime, label: Str, state: mut ScreenSt
     focus: fn() {
       route.focus()
     },
-    handle_key: fn(received: mut cooper::KeyEvent) Bool {
+    handle_key: fn(received: &mut cooper::KeyEvent) Bool {
       if received.matches("x") {
         state.handled =+ 1
         true
@@ -136,10 +136,10 @@ private fn fake_screen(ctx: mut cooper::Runtime, label: Str, state: mut ScreenSt
   )
 }
 
-private fn dynamic_factory(ctx: mut cooper::Runtime, created: mut Counter, disposed: mut Counter) fn(tabs::TabRef) tab_shell::Screen {
+private fn dynamic_factory(ctx: &mut cooper::Runtime, created: &mut Counter, disposed: &mut Counter) fn(tabs::TabRef) tab_shell::Screen {
   fn(reference: tabs::TabRef) tab_shell::Screen {
     created.value =+ 1
-    let state = mut ScreenState{
+    let state = &mut ScreenState{
       focuses: 0,
       handled: 0,
       disposals: 0,
@@ -158,14 +158,14 @@ private fn dynamic_factory(ctx: mut cooper::Runtime, created: mut Counter, dispo
 }
 
 private fn tracked_dynamic_factory(
-  ctx: mut cooper::Runtime,
-  created: mut Counter,
-  disposed: mut Counter,
-  handled: mut Counter,
+  ctx: &mut cooper::Runtime,
+  created: &mut Counter,
+  disposed: &mut Counter,
+  handled: &mut Counter,
 ) fn(tabs::TabRef) tab_shell::Screen {
   fn(reference: tabs::TabRef) tab_shell::Screen {
     created.value =+ 1
-    let state = mut ScreenState{
+    let state = &mut ScreenState{
       focuses: 0,
       handled: 0,
       disposals: 0,
@@ -174,7 +174,7 @@ private fn tracked_dynamic_factory(
     tab_shell::screen(
       view: base.view,
       focus: base.focus,
-      handle_key: fn(received: mut cooper::KeyEvent) Bool {
+      handle_key: fn(received: &mut cooper::KeyEvent) Bool {
         if received.matches("x") {
           handled.value =+ 1
           true
@@ -193,19 +193,19 @@ private fn tracked_dynamic_factory(
 test fn shell_switches_persistent_tabs_and_persists_selection() Void!Str {
   let application = testing::new(80, 16)
   defer application.destroy()
-  let inbox_state = mut ScreenState{
+  let inbox_state = &mut ScreenState{
     focuses: 0,
     handled: 0,
     disposals: 0,
   }
-  let board_state = mut ScreenState{
+  let board_state = &mut ScreenState{
     focuses: 0,
     handled: 0,
     disposals: 0,
   }
-  let created = mut Counter{value: 0}
-  let disposed = mut Counter{value: 0}
-  let snapshots = mut List::new<cache::LoggedInCache>()
+  let created = &mut Counter{value: 0}
+  let disposed = &mut Counter{value: 0}
+  let snapshots = &mut List::new<cache::LoggedInCache>()
   let fixture = mount_shell(
     application,
     theme::new(),
@@ -302,9 +302,9 @@ test fn shell_switches_persistent_tabs_and_persists_selection() Void!Str {
 test fn shell_restores_opens_reuses_retitles_and_closes_dynamic_tabs() Void!Str {
   let application = testing::new(100, 18)
   defer application.destroy()
-  let created = mut Counter{value: 0}
-  let disposed = mut Counter{value: 0}
-  let fixed = mut ScreenState{
+  let created = &mut Counter{value: 0}
+  let disposed = &mut Counter{value: 0}
+  let fixed = &mut ScreenState{
     focuses: 0,
     handled: 0,
     disposals: 0,
@@ -358,21 +358,21 @@ test fn shell_restores_opens_reuses_retitles_and_closes_dynamic_tabs() Void!Str 
 test fn shell_routes_mouse_global_and_active_commands() Void!Str {
   let application = testing::new(80, 14)
   defer application.destroy()
-  let inbox_state = mut ScreenState{
+  let inbox_state = &mut ScreenState{
     focuses: 0,
     handled: 0,
     disposals: 0,
   }
-  let board_state = mut ScreenState{
+  let board_state = &mut ScreenState{
     focuses: 0,
     handled: 0,
     disposals: 0,
   }
-  let created = mut Counter{value: 0}
-  let disposed = mut Counter{value: 0}
-  let searches = mut Counter{value: 0}
-  let creations = mut Counter{value: 0}
-  let dynamic_handled = mut Counter{value: 0}
+  let created = &mut Counter{value: 0}
+  let disposed = &mut Counter{value: 0}
+  let searches = &mut Counter{value: 0}
+  let creations = &mut Counter{value: 0}
+  let dynamic_handled = &mut Counter{value: 0}
   let fixture = mount_shell(
     application,
     theme::new(),
@@ -468,19 +468,19 @@ test fn shell_routes_mouse_global_and_active_commands() Void!Str {
 test fn shell_disposal_cleans_screens_and_persistence_once() Void!Str {
   let application = testing::new(60, 12)
   defer application.destroy()
-  let inbox_state = mut ScreenState{
+  let inbox_state = &mut ScreenState{
     focuses: 0,
     handled: 0,
     disposals: 0,
   }
-  let board_state = mut ScreenState{
+  let board_state = &mut ScreenState{
     focuses: 0,
     handled: 0,
     disposals: 0,
   }
-  let created = mut Counter{value: 0}
-  let disposed = mut Counter{value: 0}
-  let persistence_disposals = mut Counter{value: 0}
+  let created = &mut Counter{value: 0}
+  let disposed = &mut Counter{value: 0}
+  let persistence_disposals = &mut Counter{value: 0}
   let fixture = mount_shell(
     application,
     theme::new(),
@@ -510,18 +510,18 @@ test fn shell_disposal_cleans_screens_and_persistence_once() Void!Str {
 test fn shell_focuses_the_active_screen_after_its_first_commit() Void!Str {
   let application = testing::new(80, 20)
   defer application.destroy()
-  let inbox_state = mut ScreenState{
+  let inbox_state = &mut ScreenState{
     focuses: 0,
     handled: 0,
     disposals: 0,
   }
-  let board_state = mut ScreenState{
+  let board_state = &mut ScreenState{
     focuses: 0,
     handled: 0,
     disposals: 0,
   }
-  let created = mut Counter{value: 0}
-  let disposed = mut Counter{value: 0}
+  let created = &mut Counter{value: 0}
+  let disposed = &mut Counter{value: 0}
   let fixture = mount_shell(
     application,
     theme::new(),
@@ -550,7 +550,7 @@ test fn shell_focuses_the_active_screen_after_its_first_commit() Void!Str {
 
 private struct Fixture {
   mounted: renderer::Renderer,
-  component: mut tab_shell::Tabs,
+  component: &mut tab_shell::Tabs,
 }
 
 private fn mount_shell(
@@ -566,12 +566,12 @@ private fn mount_shell(
   on_create: fn(),
   flush: Bool?,
 ) Fixture {
-  let instances = mut List::new<mut tab_shell::Tabs>()
+  let instances = &mut List::new<&mut tab_shell::Tabs>()
   let mounted = renderer::mount(
     application.context,
     application.root,
     cui::child(
-      fn(props: mut tab_shell::Props) mut tab_shell::Tabs {
+      fn(props: &mut tab_shell::Props) &mut tab_shell::Tabs {
         let component = tab_shell::create(props)
         instances.push(component)
         component
@@ -605,8 +605,8 @@ private struct GenerationScreen {
   generation: Int,
 }
 
-private fn generation_screen(props: mut GenerationProps) mut GenerationScreen {
-  (mut GenerationScreen{generation: props.initial})
+private fn generation_screen(props: &mut GenerationProps) &mut GenerationScreen {
+  &mut GenerationScreen{generation: props.initial}
 }
 
 impl cui::Component for GenerationScreen {
@@ -618,12 +618,12 @@ impl cui::Component for GenerationScreen {
 test fn reopening_a_tab_before_commit_creates_a_new_component_lifetime() Void!Str {
   let application = testing::new(70, 18)
   defer application.destroy()
-  let state = mut ScreenState{
+  let state = &mut ScreenState{
     focuses: 0,
     handled: 0,
     disposals: 0,
   }
-  let created = mut Counter{value: 0}
+  let created = &mut Counter{value: 0}
   let fixture = mount_shell(
     application,
     theme::new(),
@@ -635,7 +635,7 @@ test fn reopening_a_tab_before_commit_creates_a_new_component_lifetime() Void!St
       tab_shell::screen(
         cui::child(generation_screen, GenerationProps{initial: created.value}, key: "same-child"),
         fn() {},
-        fn(received: mut cooper::KeyEvent) Bool {
+        fn(received: &mut cooper::KeyEvent) Bool {
           false
         },
         fn() {},

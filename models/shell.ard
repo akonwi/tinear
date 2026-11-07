@@ -25,7 +25,7 @@ fn clamp_tab_index(index: Int, total: Int) Int {
 }
 
 private fn normalize_tabs(values: [tabs::TabRef]) [tabs::TabRef] {
-  let normalized = mut List::new<tabs::TabRef>()
+  let normalized = &mut List::new<tabs::TabRef>()
   for candidate in values {
     if not candidate.id.is_empty() {
       mut duplicate = false
@@ -39,7 +39,7 @@ private fn normalize_tabs(values: [tabs::TabRef]) [tabs::TabRef] {
       }
     }
   }
-  normalized.@
+  normalized.*
 }
 
 fn restore(saved: cache::LoggedInCache?) Model {
@@ -105,7 +105,7 @@ fn select_tab(model: Model, index: Int) Model {
 
 fn close(model: Model, reference: tabs::TabRef) Model {
   mut closed_index = -1
-  let remaining = mut List::new<tabs::TabRef>()
+  let remaining = &mut List::new<tabs::TabRef>()
   for tab, index in model.tabs {
     if tabs::same(tab, reference) {
       closed_index = index
@@ -122,7 +122,7 @@ fn close(model: Model, reference: tabs::TabRef) Model {
       model.tab_index > closed_tab_index => model.tab_index - 1,
       _ => model.tab_index,
     }
-    Model{tab_index: selected_index, tabs: remaining.@}
+    Model{tab_index: selected_index, tabs: remaining.*}
   }
 }
 
@@ -143,12 +143,12 @@ fn open(model: Model, reference: tabs::TabRef) Model {
   if existing_index >= 0 {
     Model{tab_index: 2 + existing_index, tabs: model.tabs}
   } else {
-    let next_tabs = mut List::new<tabs::TabRef>()
+    let next_tabs = &mut List::new<tabs::TabRef>()
     for tab in model.tabs {
       next_tabs.push(tab)
     }
     next_tabs.push(reference)
-    Model{tab_index: 2 + next_tabs.size() - 1, tabs: next_tabs.@}
+    Model{tab_index: 2 + next_tabs.size() - 1, tabs: next_tabs.*}
   }
 }
 
@@ -163,7 +163,7 @@ fn title(model: Model, reference: tabs::TabRef) Str? {
 }
 
 fn retitle(model: Model, reference: tabs::TabRef, title: Str) Model {
-  let next_tabs = mut List::new<tabs::TabRef>()
+  let next_tabs = &mut List::new<tabs::TabRef>()
   for tab in model.tabs {
     if tabs::same(tab, reference) {
       next_tabs.push(
@@ -177,5 +177,5 @@ fn retitle(model: Model, reference: tabs::TabRef, title: Str) Model {
       next_tabs.push(tab)
     }
   }
-  Model{tab_index: model.tab_index, tabs: next_tabs.@}
+  Model{tab_index: model.tab_index, tabs: next_tabs.*}
 }

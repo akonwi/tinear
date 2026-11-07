@@ -27,7 +27,7 @@ struct Outcome {
   created: [Str],
 }
 
-private fn service(state: mut FakeState) issue_creation_service::Service {
+private fn service(state: &mut FakeState) issue_creation_service::Service {
   issue_creation_service::Service{
     load_teams: fn(cancellation: Receiver<Bool>, completion: fn([issues::Team]!Str)) {
       state.team_loads.push(completion)
@@ -61,10 +61,10 @@ private fn team(id: Str, name: Str) issues::Team {
 
 private fn controller(
   application: testing::TestApp,
-  modal: mut modal_host::ModalHost,
-  state: mut FakeState,
-  outcome: mut Outcome,
-) mut issue_creation_controller::Controller {
+  modal: &mut modal_host::ModalHost,
+  state: &mut FakeState,
+  outcome: &mut Outcome,
+) &mut issue_creation_controller::Controller {
   issue_creation_controller::new(
     application.context,
     modal,
@@ -83,7 +83,7 @@ private fn controller(
   )
 }
 
-private fn key(name: Str, ctrl: Bool?) mut cooper::KeyEvent {
+private fn key(name: Str, ctrl: Bool?) &mut cooper::KeyEvent {
   event::key(
     name,
     "",
@@ -101,8 +101,8 @@ test fn creation_with_one_team_validates_retries_and_opens_issue() Void!Str {
   let application = testing::new(90, 30)
   defer application.destroy()
   let modal = modal_host::new(application.context, application.root, theme::new())
-  let state = mut FakeState{team_loads: [], creates: []}
-  let outcome = mut Outcome{
+  let state = &mut FakeState{team_loads: [], creates: []}
+  let outcome = &mut Outcome{
     errors: [],
     successes: [],
     created: [],
@@ -168,8 +168,8 @@ test fn creation_handles_zero_and_many_team_flows() Void!Str {
   let application = testing::new(80, 26)
   defer application.destroy()
   let modal = modal_host::new(application.context, application.root, theme::new())
-  let state = mut FakeState{team_loads: [], creates: []}
-  let outcome = mut Outcome{
+  let state = &mut FakeState{team_loads: [], creates: []}
+  let outcome = &mut Outcome{
     errors: [],
     successes: [],
     created: [],
@@ -217,8 +217,8 @@ test fn creation_team_load_error_closes_and_reports() Void!Str {
   let application = testing::new(70, 22)
   defer application.destroy()
   let modal = modal_host::new(application.context, application.root, theme::new())
-  let state = mut FakeState{team_loads: [], creates: []}
-  let outcome = mut Outcome{
+  let state = &mut FakeState{team_loads: [], creates: []}
+  let outcome = &mut Outcome{
     errors: [],
     successes: [],
     created: [],
@@ -240,8 +240,8 @@ test fn creation_disposal_suppresses_late_team_and_create_completions() Void!Str
   let application = testing::new(70, 22)
   defer application.destroy()
   let modal = modal_host::new(application.context, application.root, theme::new())
-  let state = mut FakeState{team_loads: [], creates: []}
-  let outcome = mut Outcome{
+  let state = &mut FakeState{team_loads: [], creates: []}
+  let outcome = &mut Outcome{
     errors: [],
     successes: [],
     created: [],
@@ -254,7 +254,7 @@ test fn creation_disposal_suppresses_late_team_and_create_completions() Void!Str
   (state.team_loads.at(0).expect("late teams"))(Result::err("late"))
   try assertions::assert(outcome.errors.size() == 0, "disposed team load should be ignored")
 
-  let second_state = mut FakeState{team_loads: [], creates: []}
+  let second_state = &mut FakeState{team_loads: [], creates: []}
   let second = controller(application, modal, second_state, outcome)
   second.open()
   let _ = application.flush()

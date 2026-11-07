@@ -10,7 +10,7 @@ private struct TimerState {
   cancelled: Bool,
 }
 
-fn for_context(ctx: mut cooper::Runtime) Schedule {
+fn for_context(ctx: &mut cooper::Runtime) Schedule {
   let app_cancellation = ctx.cancellation
   let dispatch = ctx.dispatch
   fn(milliseconds: Int, action: fn()) fn() {
@@ -18,7 +18,7 @@ fn for_context(ctx: mut cooper::Runtime) Schedule {
       panic("scheduled delay must be non-negative")
     }
     let timer_cancellation = Chan::new<Bool>()
-    let state = mut TimerState{cancelled: false}
+    let state = &mut TimerState{cancelled: false}
     async::start(fn() {
       let stopped = select {
         app_cancellation.recv() => true,

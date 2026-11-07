@@ -4,7 +4,7 @@ use cooper/core/node
 // nodes. Keep that pinned-framework dependency isolated here; replace it with
 // a public focus-within API when one is available.
 // Whether this retained subtree currently owns keyboard focus.
-fn within(target: mut node::Node) Bool {
+fn within(target: &mut node::Node) Bool {
   mut found = target.is_focused()
   for child in target.children {
     if within(child) {

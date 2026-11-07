@@ -30,7 +30,7 @@ struct Opened {
   document_slug: Str,
 }
 
-private fn service(state: mut FakeState) search_service::Service {
+private fn service(state: &mut FakeState) search_service::Service {
   search_service::Service{
     search: fn(cancellation: Receiver<Bool>, term: Str, completion: fn(search_service::Outcome!Str)) {
       state.requests.push(Request{term: term, completion: completion})
@@ -38,7 +38,7 @@ private fn service(state: mut FakeState) search_service::Service {
   }
 }
 
-private fn schedule(state: mut Scheduled) fn(Int, fn()) fn() {
+private fn schedule(state: &mut Scheduled) fn(Int, fn()) fn() {
   fn(milliseconds: Int, action: fn()) fn() {
     state.actions.push(action)
     fn() {
@@ -83,7 +83,7 @@ private fn document() documents::DocMeta {
   }
 }
 
-private fn key(name: Str) mut cooper::KeyEvent {
+private fn key(name: Str) &mut cooper::KeyEvent {
   event::key(
     name,
     "",
@@ -99,11 +99,11 @@ private fn key(name: Str) mut cooper::KeyEvent {
 
 private fn controller(
   application: testing::TestApp,
-  modal: mut modal_host::ModalHost,
-  fake: mut FakeState,
-  scheduled: mut Scheduled,
-  opened: mut Opened,
-) mut search_controller::Controller {
+  modal: &mut modal_host::ModalHost,
+  fake: &mut FakeState,
+  scheduled: &mut Scheduled,
+  opened: &mut Opened,
+) &mut search_controller::Controller {
   search_controller::new(
     modal,
     theme::new(),
@@ -123,9 +123,9 @@ test fn search_completion_does_not_retake_focus() Void!Str {
   let application = testing::new(90, 28)
   defer application.destroy()
   let modal = modal_host::new(application.context, application.root, theme::new())
-  let fake = mut FakeState{requests: []}
-  let scheduled = mut Scheduled{actions: [], cancellations: 0}
-  let opened = mut Opened{issue_id: "", document_slug: ""}
+  let fake = &mut FakeState{requests: []}
+  let scheduled = &mut Scheduled{actions: [], cancellations: 0}
+  let opened = &mut Opened{issue_id: "", document_slug: ""}
   let search = controller(application, modal, fake, scheduled, opened)
   search.open(application.context)
   application.flush()
@@ -149,9 +149,9 @@ test fn search_debounces_rejects_stale_results_and_opens_document() Void!Str {
   let application = testing::new(90, 28)
   defer application.destroy()
   let modal = modal_host::new(application.context, application.root, theme::new())
-  let fake = mut FakeState{requests: []}
-  let scheduled = mut Scheduled{actions: [], cancellations: 0}
-  let opened = mut Opened{issue_id: "", document_slug: ""}
+  let fake = &mut FakeState{requests: []}
+  let scheduled = &mut Scheduled{actions: [], cancellations: 0}
+  let opened = &mut Opened{issue_id: "", document_slug: ""}
   let search = controller(application, modal, fake, scheduled, opened)
   search.open(application.context)
   let _ = application.flush()
@@ -209,9 +209,9 @@ test fn search_renders_loading_empty_and_error_states() Void!Str {
   let application = testing::new(70, 22)
   defer application.destroy()
   let modal = modal_host::new(application.context, application.root, theme::new())
-  let fake = mut FakeState{requests: []}
-  let scheduled = mut Scheduled{actions: [], cancellations: 0}
-  let opened = mut Opened{issue_id: "", document_slug: ""}
+  let fake = &mut FakeState{requests: []}
+  let scheduled = &mut Scheduled{actions: [], cancellations: 0}
+  let opened = &mut Opened{issue_id: "", document_slug: ""}
   let search = controller(application, modal, fake, scheduled, opened)
   search.open(application.context)
   let _ = application.flush()
@@ -248,9 +248,9 @@ test fn search_disposal_cancels_debounce_and_ignores_late_response() Void!Str {
   let application = testing::new(70, 22)
   defer application.destroy()
   let modal = modal_host::new(application.context, application.root, theme::new())
-  let fake = mut FakeState{requests: []}
-  let scheduled = mut Scheduled{actions: [], cancellations: 0}
-  let opened = mut Opened{issue_id: "", document_slug: ""}
+  let fake = &mut FakeState{requests: []}
+  let scheduled = &mut Scheduled{actions: [], cancellations: 0}
+  let opened = &mut Opened{issue_id: "", document_slug: ""}
   let search = controller(application, modal, fake, scheduled, opened)
   search.open(application.context)
   let _ = application.flush()

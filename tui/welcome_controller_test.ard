@@ -14,7 +14,7 @@ struct Attempt {
   completion: fn(Void!Str),
 }
 
-private fn fake_auth(attempts: mut [Attempt]) auth::Authenticate {
+private fn fake_auth(attempts: &mut [Attempt]) auth::Authenticate {
   fn(api_key: Str, view_cancellation: Receiver<Bool>, completion: fn(Void!Str)) {
     attempts.push(Attempt{api_key: api_key, completion: completion})
     ()
@@ -65,7 +65,7 @@ private fn error_foreground(application: testing::TestApp) ui::Color? {
 test fn welcome_requires_an_api_key() Void!Str {
   let application = testing::new(60, 18)
   defer application.destroy()
-  let attempts = mut List::new<Attempt>()
+  let attempts = &mut List::new<Attempt>()
   let mounted = renderer::mount(
     application.context,
     application.root,
@@ -83,7 +83,7 @@ test fn welcome_requires_an_api_key() Void!Str {
 test fn welcome_surfaces_authentication_failure_and_allows_retry() Void!Str {
   let application = testing::new(60, 18)
   defer application.destroy()
-  let attempts = mut List::new<Attempt>()
+  let attempts = &mut List::new<Attempt>()
   let mounted = renderer::mount(
     application.context,
     application.root,
@@ -115,7 +115,7 @@ test fn welcome_surfaces_authentication_failure_and_allows_retry() Void!Str {
 test fn welcome_reports_success_once() Void!Str {
   let application = testing::new(60, 18)
   defer application.destroy()
-  let attempts = mut List::new<Attempt>()
+  let attempts = &mut List::new<Attempt>()
   mut authenticated = ""
   let mounted = renderer::mount(
     application.context,
@@ -142,7 +142,7 @@ test fn welcome_reports_success_once() Void!Str {
 test fn welcome_disposal_rejects_late_authentication() Void!Str {
   let application = testing::new(60, 18)
   defer application.destroy()
-  let attempts = mut List::new<Attempt>()
+  let attempts = &mut List::new<Attempt>()
   mut successes = 0
   let mounted = renderer::mount(
     application.context,
@@ -164,7 +164,7 @@ test fn welcome_disposal_rejects_late_authentication() Void!Str {
 test fn welcome_button_focus_survives_authentication_error() Void!Str {
   let application = testing::new(60, 18)
   defer application.destroy()
-  let attempts = mut List::new<Attempt>()
+  let attempts = &mut List::new<Attempt>()
   let mounted = renderer::mount(
     application.context,
     application.root,
