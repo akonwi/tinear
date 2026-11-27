@@ -128,14 +128,9 @@ private fn metadata_line(
 }
 
 private fn priority(issue: issues::Issue) Str {
-  match issue.priority {
-    number => {
-      match number {
-        0 => "—",
-        _ => "{issue_state::priority_glyph(issue.priority)} {issue_state::priority_label(issue.priority)}",
-      }
-    },
-    _ => "—",
+  match issue.priority.or(0) {
+    0 => "—",
+    _ => "{issue_state::priority_glyph(issue.priority)} {issue_state::priority_label(issue.priority)}",
   }
 }
 
@@ -466,14 +461,9 @@ impl IssueDetail {
   private fn mut reveal_selected_comment() {
     match self.comment_records.at(self.comment_cursor) {
       record => {
-        match record.panel.current {
-          panel => {
-            match self.body_scroll.current {
-              scroll => {
-                let _ = scroll.scroll_child_into_view(panel)
-              },
-              _ => (),
-            }
+        match (record.panel.current, self.body_scroll.current) {
+          (some(panel), some(scroll)) => {
+            let _ = scroll.scroll_child_into_view(panel)
           },
           _ => (),
         }
@@ -625,18 +615,13 @@ impl IssueDetail {
 
   private fn mut reply_to_selected() {
     if self.active_section == COMMENTS_SECTION {
-      match self.issue {
-        loaded => {
-          match self.comments.at(self.comment_cursor) {
-            target => {
-              let parent_id = match target.parent_id.is_empty() {
-                true => target.id,
-                false => target.parent_id,
-              }
-              self.props.on_comment(loaded, parent_id, target.author)
-            },
-            _ => (),
+      match (self.issue, self.comments.at(self.comment_cursor)) {
+        (some(loaded), some(target)) => {
+          let parent_id = match target.parent_id.is_empty() {
+            true => target.id,
+            false => target.parent_id,
           }
+          self.props.on_comment(loaded, parent_id, target.author)
         },
         _ => (),
       }
