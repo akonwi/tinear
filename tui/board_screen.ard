@@ -175,14 +175,9 @@ private fn columns_row_style(count: Int) ui::Style {
 
 private fn priority_style(priority: Int?, palette: tinear_theme::Theme) ui::SpanStyle {
   match priority {
-    value => {
-      match value {
-        1 => ui::span_style(foreground: palette.danger, bold: true),
-        2 => ui::span_style(foreground: palette.warning, bold: true),
-        4 => ui::span_style(dim: true),
-        _ => ui::span_style(),
-      }
-    },
+    some(1) => ui::span_style(foreground: palette.danger, bold: true),
+    some(2) => ui::span_style(foreground: palette.warning, bold: true),
+    some(4) => ui::span_style(dim: true),
     _ => ui::span_style(),
   }
 }
@@ -457,13 +452,8 @@ fn create(props: &mut Props) &mut Board {
 
 impl Board {
   fn selected_issue_id() Str {
-    match self.columns.at(self.column_index) {
-      column => {
-        match column.issues.at(self.card_index) {
-          issue => issue.id,
-          _ => "",
-        }
-      },
+    match self.selected_issue() {
+      issue => issue.id,
       _ => "",
     }
   }
@@ -905,27 +895,17 @@ impl Board {
   private fn mut reveal_selection() {
     match self.column_records.at(self.column_index) {
       column => {
-        match column.root.current {
-          panel => {
-            match self.outer_scroll.current {
-              scroll => {
-                let _ = scroll.scroll_child_into_view(panel)
-              },
-              _ => (),
-            }
+        match (column.root.current, self.outer_scroll.current) {
+          (some(panel), some(scroll)) => {
+            let _ = scroll.scroll_child_into_view(panel)
           },
           _ => (),
         }
         match column.cards.at(self.card_index) {
           card => {
-            match card.root.current {
-              panel => {
-                match column.scroll.current {
-                  scroll => {
-                    let _ = scroll.scroll_child_into_view(panel)
-                  },
-                  _ => (),
-                }
+            match (card.root.current, column.scroll.current) {
+              (some(panel), some(scroll)) => {
+                let _ = scroll.scroll_child_into_view(panel)
               },
               _ => (),
             }

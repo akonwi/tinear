@@ -23,15 +23,10 @@ fn is_hidden_state(name: Str) Bool {
 // Linear priority code (1=Urgent..4=Low, 0/None=no priority) to label.
 fn priority_label(p: Int?) Str {
   match p {
-    n => {
-      match n {
-        1 => "Urgent",
-        2 => "High",
-        3 => "Medium",
-        4 => "Low",
-        _ => "—",
-      }
-    },
+    some(1) => "Urgent",
+    some(2) => "High",
+    some(3) => "Medium",
+    some(4) => "Low",
     _ => "—",
   }
 }
@@ -40,15 +35,10 @@ fn priority_label(p: Int?) Str {
 // when priority is None or 0 so all glyphs occupy the same visual column.
 fn priority_glyph(p: Int?) Str {
   match p {
-    n => {
-      match n {
-        1 => "!",
-        2 => "↑",
-        3 => "~",
-        4 => "↓",
-        _ => " ",
-      }
-    },
+    some(1) => "!",
+    some(2) => "↑",
+    some(3) => "~",
+    some(4) => "↓",
     _ => " ",
   }
 }
