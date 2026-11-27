@@ -44,7 +44,7 @@ the footer.
 
 ## Build and test
 
-Building requires Ard at the minimum version declared in `ard.toml`. Dependencies are pinned to exact remote revisions in `ard.toml` and `ard.lock`.
+The Cooper dependency is pinned to an exact remote revision in `ard.toml` and `ard.lock`.
 
 ```bash
 ard check main.ard
